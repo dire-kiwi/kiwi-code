@@ -70,7 +70,7 @@ func TestThreadEventStreamPushesMutationsAndReconcilesExternalChanges(t *testing
 	if initial.GitBranches == nil || initial.GitBranches.Current != initialBranch {
 		t.Fatalf("initial Git status = %#v, want branch %q", initial.GitBranches, initialBranch)
 	}
-	if initial.ContextStatuses == nil || initial.Processes == nil || initial.ShellWindows == nil {
+	if initial.ContextStatuses == nil || initial.Processes == nil || initial.ShellWindows == nil || initial.Plans == nil {
 		t.Fatalf("initial status collections must be present: %#v", initial)
 	}
 

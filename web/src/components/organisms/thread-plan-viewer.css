@@ -1,0 +1,25 @@
+.plan-markdown .agent-markdown h1 {
+  margin-top: 0;
+  margin-bottom: 18px;
+  font-size: 1.65em;
+  line-height: 1.25;
+}
+
+.plan-markdown .agent-markdown h2 {
+  margin-top: 28px;
+  margin-bottom: 12px;
+  font-size: 1.3em;
+  line-height: 1.35;
+}
+
+.plan-markdown .agent-markdown h3 {
+  margin-top: 23px;
+  margin-bottom: 10px;
+  font-size: 1.12em;
+}
+
+.plan-markdown .agent-markdown h4 {
+  margin-top: 20px;
+  margin-bottom: 8px;
+  font-size: 1em;
+}

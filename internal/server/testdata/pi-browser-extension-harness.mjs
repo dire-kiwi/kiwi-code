@@ -112,12 +112,19 @@ Handle this normally.
 ]);
 
 const browserSkillFile = join(process.env.PI_BROWSER_SKILL, "SKILL.md");
+const plannerSkillFile = join(process.env.PI_PLANNER_SKILL, "SKILL.md");
 const skillCommands = [
   {
     name: "skill:dire-mux-in-app-browser",
     description: "Control the in-app browser from a forked agent context",
     source: "skill",
     sourceInfo: { path: browserSkillFile, baseDir: process.env.PI_BROWSER_SKILL },
+  },
+  {
+    name: "skill:kiwi-code-planner",
+    description: "Plan work and publish it to the parent thread",
+    source: "skill",
+    sourceInfo: { path: plannerSkillFile, baseDir: process.env.PI_PLANNER_SKILL },
   },
   {
     name: "skill:deep-research",
@@ -149,9 +156,14 @@ skillForkModule.default({
   },
   registerTool(tool) { skillForkTools.push(tool); },
 });
-assert.deepEqual(skillForkTools.map((tool) => tool.name), ["run_forked_skill"]);
+assert.deepEqual(
+  skillForkTools.map((tool) => tool.name),
+  ["run_forked_skill", "publish_thread_plan", "list_thread_plans", "download_thread_plan"],
+);
 assert.match(skillForkTools[0].description, /does not start or require activation of a Dire Mux workflow/);
-assert.deepEqual([...skillForkHandlers.keys()], ["input", "before_agent_start"]);
+assert.match(skillForkTools[3].description, /then carry out the returned plan in the parent thread/);
+assert.deepEqual([...skillForkHandlers.keys()], ["input", "before_agent_start", "resources_discover"]);
+assert.deepEqual(skillForkHandlers.get("resources_discover")[0](), { skillPaths: [process.env.PI_PLANNER_SKILL] });
 
 const beforeAgentStart = skillForkHandlers.get("before_agent_start")[0];
 const piSkillBlock = `Base prompt
@@ -166,6 +178,7 @@ assert.match(guidance.systemPrompt, /does not start or require activation of a D
 assert.doesNotMatch(guidance.systemPrompt, new RegExp(`<location>${forkedSkillPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
 assert.match(guidance.systemPrompt, /<name>deep-research<\/name>/);
 assert.match(guidance.systemPrompt, /<name>dire-mux-in-app-browser<\/name>/);
+assert.match(guidance.systemPrompt, /<name>kiwi-code-planner<\/name>/);
 assert.doesNotMatch(guidance.systemPrompt, /<name>manual-fork<\/name>/);
 assert.doesNotMatch(guidance.systemPrompt, /<name>regular-skill<\/name>/);
 const childGuidance = beforeAgentStart({
@@ -187,10 +200,42 @@ assert.deepEqual(inputHandler({ text: "/skill:regular-skill request" }, {}), { a
 assert.equal(inputHandler({ text: "/skill:manual-fork request" }, {}).action, "transform");
 
 const skillForkRequests = [];
+const planRequests = [];
 let skillForkResponseResult = "Child research result";
 let skillForkCreateState = "starting";
-globalThis.fetch = async (url, init) => {
+globalThis.fetch = async (url, init = {}) => {
   const request = { url: String(url), init };
+  if (request.url.endsWith("/plans/plan-1")) {
+    planRequests.push(request);
+    return new Response("# Saved plan\n\n1. Implement it.\n", {
+      status: 200,
+      headers: { "Content-Type": "text/markdown; charset=utf-8" },
+    });
+  }
+  if (request.url.endsWith("/plans")) {
+    planRequests.push(request);
+    if (request.init.method === "POST") {
+      const input = JSON.parse(request.init.body);
+      return Response.json({
+        id: "plan-1",
+        projectId: "project",
+        threadId: "thread",
+        sourceThreadId: "skill-child",
+        title: input.title,
+        createdAt: "2026-01-01T00:00:00Z",
+        sizeBytes: Buffer.byteLength(input.content),
+      }, { status: 201 });
+    }
+    return Response.json([{
+      id: "plan-1",
+      projectId: "project",
+      threadId: "thread",
+      sourceThreadId: "skill-child",
+      title: "Saved plan",
+      createdAt: "2026-01-01T00:00:00Z",
+      sizeBytes: 31,
+    }]);
+  }
   skillForkRequests.push(request);
   if (request.url.endsWith("/skill-forks")) {
     return Response.json({
@@ -221,6 +266,28 @@ globalThis.fetch = async (url, init) => {
   }
   throw new Error(`unexpected skill fork request: ${request.url}`);
 };
+
+const publishResult = await skillForkTools[1].execute(
+  "publish-plan",
+  { title: "Implementation plan", content: "# Plan\n\n1. Make the change.\n" },
+  undefined,
+);
+assert.match(publishResult.content[0].text, /plan-1/);
+assert.equal(publishResult.details.plan.threadId, "thread");
+assert.equal(planRequests[0].url, `${process.env.DIRE_MUX_THREAD_ENDPOINT}/plans`);
+assert.equal(planRequests[0].init.method, "POST");
+assert.equal(JSON.parse(planRequests[0].init.body).title, "Implementation plan");
+assert.equal(new Headers(planRequests[0].init.headers).get("x-dire-mux-agent-token"), process.env.DIRE_MUX_AGENT_TOKEN);
+
+const listedPlans = await skillForkTools[2].execute("list-plans", {}, undefined);
+assert.match(listedPlans.content[0].text, /Saved plan — plan-1/);
+assert.equal(listedPlans.details.plans.length, 1);
+
+const downloadedPlan = await skillForkTools[3].execute("download-plan", {}, undefined);
+assert.equal(downloadedPlan.content[0].text, "# Saved plan\n\n1. Implement it.\n");
+assert.equal(downloadedPlan.details.plan.id, "plan-1");
+assert.equal(planRequests.at(-1).url, `${process.env.DIRE_MUX_THREAD_ENDPOINT}/plans/plan-1`);
+
 const skillUpdates = [];
 const skillResult = await skillForkTools[0].execute(
   "fork-skill",

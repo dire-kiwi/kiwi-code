@@ -17,12 +17,13 @@ import {
 } from 'lucide-react'
 import { updateProjectProfile, updateProjectSubAgentNestingDepth, updateThreadTitle } from '../../api'
 import { MAX_SUB_AGENT_NESTING_DEPTH } from '../../lib/validation'
-import type { Profile, Project, Thread, ThreadUsageSnapshot, WorkflowRun } from '../../types'
+import type { Profile, Project, Thread, ThreadPlan, ThreadUsageSnapshot, WorkflowRun } from '../../types'
 import { Button, GhostButton, PrimaryButton } from '../atoms/Button'
 import { IconButton } from '../atoms/IconButton'
 import { TextInput } from '../atoms/Input'
 import { Select } from '../atoms/Select'
 import { ThreadUsageLimits } from '../molecules/ThreadUsageLimits'
+import { ThreadPlansPanel } from './ThreadPlansPanel'
 import { WorkflowRunsPanel } from './WorkflowRunsPanel'
 
 type ThreadProjectSidebarProps = {
@@ -32,6 +33,9 @@ type ThreadProjectSidebarProps = {
   usage?: ThreadUsageSnapshot
   workflowRuns: WorkflowRun[]
   workflowsError: string
+  plans: ThreadPlan[]
+  plansError: string
+  onViewPlan: (plan: ThreadPlan) => void
   onWorkflowUpdated: (run: WorkflowRun) => void
   expanded: boolean
   onExpandedChange: (expanded: boolean) => void
@@ -47,6 +51,9 @@ export function ThreadProjectSidebar({
   usage,
   workflowRuns,
   workflowsError,
+  plans,
+  plansError,
+  onViewPlan,
   onWorkflowUpdated,
   expanded,
   onExpandedChange,
@@ -315,6 +322,18 @@ export function ThreadProjectSidebar({
             showAllThreads={project.threads.some((candidate) => candidate.parentThreadId === thread.id)}
             onThreadUpdated={onThreadUpdated}
           />
+
+          {(!thread.parentThreadId || plans.length > 0 || plansError) && (
+            <>
+              <div className="my-5 h-px bg-ghost-border/55" />
+              <ThreadPlansPanel
+                projectId={project.id}
+                plans={plans}
+                error={plansError}
+                onViewPlan={onViewPlan}
+              />
+            </>
+          )}
 
           {!thread.parentThreadId && (
             <>

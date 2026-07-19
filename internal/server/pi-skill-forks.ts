@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	parseFrontmatter,
 	type ExtensionAPI,
@@ -9,8 +10,10 @@ import { Type } from "typebox";
 
 const pollIntervalMs = 750;
 const maxVisibleResultBytes = 50 * 1024;
+const maxThreadPlanContentBytes = 256 * 1024;
 const threadEndpoint = process.env.DIRE_MUX_THREAD_ENDPOINT?.replace(/\/+$/, "") ?? "";
 const agentToken = process.env.DIRE_MUX_AGENT_TOKEN ?? "";
+const plannerSkillPath = fileURLToPath(new URL("../skills/kiwi-code-planner", import.meta.url));
 
 type ChildRun = {
 	id: number;
@@ -30,6 +33,16 @@ type CreatedChild = {
 	thread: ChildThread;
 	run: ChildRun;
 	agent: "pi";
+};
+
+type ThreadPlan = {
+	id: string;
+	projectId: string;
+	threadId: string;
+	sourceThreadId: string;
+	title: string;
+	createdAt: string;
+	sizeBytes: number;
 };
 
 type ForkedSkill = {
@@ -59,7 +72,7 @@ function ensureAvailable(): void {
 	}
 }
 
-async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
+async function requestResponse(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<Response> {
 	ensureAvailable();
 	let response: Response;
 	try {
@@ -73,7 +86,7 @@ async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSi
 			signal,
 		});
 	} catch (reason) {
-		if (signal?.aborted) throw new Error("Forked skill execution was cancelled.");
+		if (signal?.aborted) throw new Error("The Dire Mux request was cancelled.");
 		throw new Error(`Could not reach Dire Mux: ${reason instanceof Error ? reason.message : String(reason)}`);
 	}
 	if (!response.ok) {
@@ -86,8 +99,19 @@ async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSi
 		}
 		throw new Error(message);
 	}
+	return response;
+}
+
+async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
+	const response = await requestResponse(path, init, signal);
 	if (response.status === 204) return undefined as T;
 	return response.json() as Promise<T>;
+}
+
+async function requestText(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<string> {
+	const response = await requestResponse(path, init, signal);
+	if (response.status === 204) return "";
+	return response.text();
 }
 
 function sleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
@@ -453,6 +477,95 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	pi.registerTool({
+		name: "publish_thread_plan",
+		label: "Publish Thread Plan",
+		description: "Publish a completed Markdown implementation plan from a context: fork planning child to its parent Dire Mux thread. The backend retains the plan and shows it in Thread details. This endpoint is only valid from a forked child; use it exactly once after the kiwi-code-planner skill has finished planning.",
+		promptSnippet: "Publish a forked planning result to its parent thread",
+		promptGuidelines: [
+			"Call publish_thread_plan only while executing the kiwi-code-planner skill in its child thread.",
+			"Publish the complete standalone plan, not a summary, and do not claim success unless the tool returns a plan ID.",
+		],
+		parameters: Type.Object({
+			title: Type.String({
+				description: "Concise plan title shown in Thread details",
+				minLength: 1,
+				maxLength: 120,
+			}),
+			content: Type.String({
+				description: "Complete standalone implementation plan in Markdown",
+				minLength: 1,
+				maxLength: maxThreadPlanContentBytes,
+			}),
+		}),
+		async execute(_toolCallID, params, signal) {
+			const plan = await request<ThreadPlan>("/plans", {
+				method: "POST",
+				body: JSON.stringify({ title: params.title.trim(), content: params.content }),
+			}, signal);
+			return {
+				content: [{
+					type: "text",
+					text: `Published plan ${JSON.stringify(plan.title)} with ID ${plan.id} to parent thread ${plan.threadId}.`,
+				}],
+				details: { plan },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "list_thread_plans",
+		label: "List Thread Plans",
+		description: "List Markdown implementation plans retained for the current Dire Mux thread. Use this when the user refers to a saved plan ambiguously or wants to see which plans are available before execution.",
+		promptSnippet: "List retained implementation plans for this thread",
+		parameters: Type.Object({}),
+		async execute(_toolCallID, _params, signal) {
+			const plans = await request<ThreadPlan[]>("/plans", {}, signal);
+			const text = plans.length === 0
+				? "No saved plans are available for this thread."
+				: plans.map((plan, index) =>
+					`${index + 1}. ${plan.title} — ${plan.id} — ${plan.createdAt} — ${plan.sizeBytes} bytes`,
+				).join("\n");
+			return {
+				content: [{ type: "text", text }],
+				details: { plans },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "download_thread_plan",
+		label: "Download Thread Plan",
+		description: "Download a retained Markdown implementation plan into the current agent context. Omit planId to get the newest plan. When the user asks to execute a saved plan, call this tool first and then carry out the returned plan in the parent thread; do not rerun the planning skill unless the user asks for a new or revised plan.",
+		promptSnippet: "Download a retained plan so the parent agent can execute it",
+		promptGuidelines: [
+			"When asked to execute a saved plan, download it before editing files and follow the returned Markdown as the execution brief.",
+			"If multiple plans could match the request, call list_thread_plans and resolve the target instead of guessing.",
+		],
+		parameters: Type.Object({
+			planId: Type.Optional(Type.String({
+				description: "Exact retained plan ID; omit to download the newest plan",
+				minLength: 1,
+			})),
+		}),
+		async execute(_toolCallID, params, signal) {
+			const plans = await request<ThreadPlan[]>("/plans", {}, signal);
+			const requestedID = params.planId?.trim() ?? "";
+			const plan = requestedID
+				? plans.find((candidate) => candidate.id === requestedID)
+				: plans[0];
+			if (!plan) {
+				if (requestedID) throw new Error(`Plan ${JSON.stringify(requestedID)} is not available in this thread.`);
+				throw new Error("No saved plans are available for this thread.");
+			}
+			const content = await requestText(`/plans/${encodeURIComponent(plan.id)}`, {}, signal);
+			return {
+				content: [{ type: "text", text: content }],
+				details: { plan },
+			};
+		},
+	});
+
 	pi.on("input", (event) => {
 		const invocation = parseSkillInvocation(event.text);
 		if (!invocation) return { action: "continue" as const };
@@ -480,4 +593,6 @@ export default function (pi: ExtensionAPI) {
 		}
 		if (systemPrompt !== event.systemPrompt) return { systemPrompt };
 	});
+
+	pi.on("resources_discover", () => ({ skillPaths: [plannerSkillPath] }));
 }

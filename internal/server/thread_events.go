@@ -29,6 +29,7 @@ type threadStatusErrors struct {
 	Processes    string `json:"processes,omitempty"`
 	ShellWindows string `json:"shellWindows,omitempty"`
 	Workflows    string `json:"workflows,omitempty"`
+	Plans        string `json:"plans,omitempty"`
 }
 
 type threadStatusSnapshot struct {
@@ -37,6 +38,7 @@ type threadStatusSnapshot struct {
 	Processes       []processWindow               `json:"processes"`
 	ShellWindows    []tmuxWindow                  `json:"shellWindows"`
 	Workflows       []workflowRunSnapshot         `json:"workflows"`
+	Plans           []threadPlanSnapshot          `json:"plans"`
 	Errors          threadStatusErrors            `json:"errors"`
 }
 
@@ -174,6 +176,7 @@ func (s *Server) readThreadStatusSnapshot(ctx context.Context, item project.Proj
 		Processes:       []processWindow{},
 		ShellWindows:    []tmuxWindow{},
 		Workflows:       []workflowRunSnapshot{},
+		Plans:           []threadPlanSnapshot{},
 	}
 	snapshot.GitBranches, snapshot.Errors.GitBranches = readThreadGitStatus(ctx, thread)
 	if s.workflows != nil {
@@ -184,6 +187,16 @@ func (s *Server) readThreadStatusSnapshot(ctx context.Context, item project.Proj
 			for _, record := range records {
 				snapshot.Workflows = append(snapshot.Workflows, workflowSummarySnapshot(record))
 			}
+		}
+	}
+	if s.plans != nil {
+		owner, err := threadPlanOwner(item, thread)
+		if err != nil {
+			snapshot.Errors.Plans = "Could not resolve the thread's plans."
+		} else if plans, err := s.plans.list(item.ID, owner.ID); err != nil {
+			snapshot.Errors.Plans = "Could not load the thread's plans."
+		} else {
+			snapshot.Plans = plans
 		}
 	}
 

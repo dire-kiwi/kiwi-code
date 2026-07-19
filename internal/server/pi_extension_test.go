@@ -66,6 +66,25 @@ func TestMaterializePiExtensions(t *testing.T) {
 	if !bytes.Contains(skillContents, []byte("\ncontext: fork\n")) {
 		t.Fatal("Pi browser skill does not run in a forked agent context")
 	}
+
+	plannerPath := filepath.Join(directory, "skills", "kiwi-code-planner", "SKILL.md")
+	plannerContents, err := os.ReadFile(plannerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(plannerContents, piPlannerSkill) {
+		t.Fatal("materialized planner skill differs from the embedded source")
+	}
+	for _, expected := range [][]byte{
+		[]byte("\ncontext: fork\n"),
+		[]byte("\nagent: Plan\n"),
+		[]byte("publish_thread_plan"),
+		[]byte("$ARGUMENTS"),
+	} {
+		if !bytes.Contains(plannerContents, expected) {
+			t.Fatalf("Pi planner skill does not contain %q", expected)
+		}
+	}
 }
 
 func TestPiBrowserExtensionHarness(t *testing.T) {
@@ -126,6 +145,7 @@ if (major < 22 || (major === 22 && minor < 19)) process.exit(1);
 		t.Fatalf("materialized skill-forks extension path is missing: %v", err)
 	}
 	browserSkillPath := filepath.Join(directory, "skills", "dire-mux-in-app-browser")
+	plannerSkillPath := filepath.Join(directory, "skills", "kiwi-code-planner")
 
 	nodeModules := filepath.Join(directory, "node_modules")
 	scopeDirectory := filepath.Join(nodeModules, "@earendil-works")
@@ -156,6 +176,7 @@ if (major < 22 || (major === 22 && minor < 19)) process.exit(1);
 		"DIRE_MUX_AGENT_TOKEN=browser-agent-capability",
 		"PI_BROWSER_EXTENSION="+browserExtensionPath,
 		"PI_BROWSER_SKILL="+browserSkillPath,
+		"PI_PLANNER_SKILL="+plannerSkillPath,
 		"PI_CHILD_THREADS_EXTENSION="+childThreadsExtensionPath,
 		"PI_WORKFLOWS_EXTENSION="+workflowsExtensionPath,
 		"PI_SKILL_FORKS_EXTENSION="+skillForksExtensionPath,

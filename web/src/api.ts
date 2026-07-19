@@ -281,6 +281,34 @@ export function threadEventsPath(projectId: string, threadId: string) {
   return apiUrl(`${threadPath(projectId, threadId)}/events`)
 }
 
+export function threadPlanDownloadUrl(projectId: string, threadId: string, planId: string) {
+  return apiUrl(`${threadPath(projectId, threadId)}/plans/${encodeURIComponent(planId)}`)
+}
+
+export async function getThreadPlanMarkdown(
+  projectId: string,
+  threadId: string,
+  planId: string,
+  signal?: AbortSignal,
+) {
+  const response = await fetch(threadPlanDownloadUrl(projectId, threadId, planId), {
+    headers: { Accept: 'text/markdown' },
+    cache: 'no-store',
+    signal,
+  })
+  if (!response.ok) {
+    let message = `Could not load the plan (${response.status})`
+    try {
+      const body = (await response.json()) as ErrorResponse
+      if (body.error) message = body.error
+    } catch {
+      // Keep the status-bearing fallback when the response is not JSON.
+    }
+    throw new Error(message)
+  }
+  return response.text()
+}
+
 function browserPath(projectId: string, threadId: string) {
   return `${threadPath(projectId, threadId)}/browser`
 }
