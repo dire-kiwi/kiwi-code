@@ -9,7 +9,7 @@ import {
   usageDescription,
 } from '../../lib/formatUsage'
 import type { Thread, ThreadUsageSnapshot, ThreadUsageTotals } from '../../types'
-import { PrimaryButton } from '../atoms/Button'
+import { Button, GhostButton, PrimaryButton } from '../atoms/Button'
 import { TextInput } from '../atoms/Input'
 
 type ThreadUsageLimitsProps = {
@@ -52,6 +52,7 @@ export function ThreadUsageLimits({
   showAllThreads,
   onThreadUpdated,
 }: ThreadUsageLimitsProps) {
+  const [editing, setEditing] = useState(false)
   const [tokenLimit, setTokenLimit] = useState(thread.tokenLimit?.toString() ?? '')
   const [costLimit, setCostLimit] = useState(thread.costLimitUsd?.toString() ?? '')
   const [saving, setSaving] = useState(false)
@@ -60,7 +61,24 @@ export function ThreadUsageLimits({
   useEffect(() => {
     setTokenLimit(thread.tokenLimit?.toString() ?? '')
     setCostLimit(thread.costLimitUsd?.toString() ?? '')
+    setEditing(false)
+    setError('')
   }, [thread.costLimitUsd, thread.id, thread.tokenLimit])
+
+  function beginEditing() {
+    setTokenLimit(thread.tokenLimit?.toString() ?? '')
+    setCostLimit(thread.costLimitUsd?.toString() ?? '')
+    setError('')
+    setEditing(true)
+  }
+
+  function cancelEditing() {
+    if (saving) return
+    setTokenLimit(thread.tokenLimit?.toString() ?? '')
+    setCostLimit(thread.costLimitUsd?.toString() ?? '')
+    setError('')
+    setEditing(false)
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -85,6 +103,7 @@ export function ThreadUsageLimits({
         costLimitUsd: costValue ? Number(costValue) : null,
       })
       onThreadUpdated(updated)
+      setEditing(false)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not save usage limits.')
     } finally {
@@ -134,64 +153,103 @@ export function ThreadUsageLimits({
         </div>
       )}
 
-      <form onSubmit={(event) => void handleSubmit(event)} className="mt-3 rounded-xl border border-ghost-border/55 bg-ghost-black/25 p-3">
-        <p className="text-[9px] leading-4 text-ghost-dim">Leave either field blank for no limit.</p>
-        <div className="mt-2.5 grid grid-cols-2 gap-2">
-          <label className="min-w-0">
-            <span className="block font-mono text-[8px] font-semibold uppercase tracking-[0.08em] text-ghost-faint">
-              Token limit
-            </span>
-            <TextInput
-              type="number"
-              inputMode="numeric"
-              min="1"
-              step="1"
-              value={tokenLimit}
-              onChange={(event) => {
-                setTokenLimit(event.target.value)
-                setError('')
-              }}
+      {editing ? (
+        <form onSubmit={(event) => void handleSubmit(event)} className="mt-3 rounded-xl border border-ghost-border/55 bg-ghost-black/25 p-3">
+          <p className="text-[9px] leading-4 text-ghost-dim">Leave either field blank for no limit.</p>
+          <div className="mt-2.5 grid grid-cols-2 gap-2">
+            <label className="min-w-0">
+              <span className="block font-mono text-[8px] font-semibold uppercase tracking-[0.08em] text-ghost-faint">
+                Token limit
+              </span>
+              <TextInput
+                type="number"
+                inputMode="numeric"
+                min="1"
+                step="1"
+                value={tokenLimit}
+                onChange={(event) => {
+                  setTokenLimit(event.target.value)
+                  setError('')
+                }}
+                disabled={saving}
+                placeholder="No limit"
+                aria-label="Token limit"
+                autoFocus
+                className="mt-1.5 h-8 px-2 font-mono text-[9px]"
+              />
+            </label>
+            <label className="min-w-0">
+              <span className="block font-mono text-[8px] font-semibold uppercase tracking-[0.08em] text-ghost-faint">
+                Cost limit (USD)
+              </span>
+              <TextInput
+                type="number"
+                inputMode="decimal"
+                step="any"
+                value={costLimit}
+                onChange={(event) => {
+                  setCostLimit(event.target.value)
+                  setError('')
+                }}
+                disabled={saving}
+                placeholder="No limit"
+                aria-label="Cost limit in USD"
+                className="mt-1.5 h-8 px-2 font-mono text-[9px]"
+              />
+            </label>
+          </div>
+          {usage && (thread.tokenLimit || thread.costLimitUsd) && (
+            <p className="mt-2 font-mono text-[8px] leading-4 text-ghost-faint">
+              Current total: {formatTokenCount(usage.total.totalTokens)} tokens · {formatUsd(usage.total.costUsd)}
+            </p>
+          )}
+          {error && <p role="alert" className="mt-2 text-[9px] leading-4 text-ghost-bright-red">{error}</p>}
+          <div className="mt-2.5 flex items-center gap-1.5">
+            <PrimaryButton
+              type="submit"
               disabled={saving}
-              placeholder="No limit"
-              aria-label="Token limit"
-              className="mt-1.5 h-8 px-2 font-mono text-[9px]"
-            />
-          </label>
-          <label className="min-w-0">
-            <span className="block font-mono text-[8px] font-semibold uppercase tracking-[0.08em] text-ghost-faint">
-              Cost limit (USD)
-            </span>
-            <TextInput
-              type="number"
-              inputMode="decimal"
-              step="any"
-              value={costLimit}
-              onChange={(event) => {
-                setCostLimit(event.target.value)
-                setError('')
-              }}
-              disabled={saving}
-              placeholder="No limit"
-              aria-label="Cost limit in USD"
-              className="mt-1.5 h-8 px-2 font-mono text-[9px]"
-            />
-          </label>
-        </div>
-        {usage && (thread.tokenLimit || thread.costLimitUsd) && (
-          <p className="mt-2 font-mono text-[8px] leading-4 text-ghost-faint">
-            Current total: {formatTokenCount(usage.total.totalTokens)} tokens · {formatUsd(usage.total.costUsd)}
+              className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg text-[10px]"
+            >
+              {saving ? <LoaderCircle size={12} className="animate-spin" /> : <Check size={12} />}
+              Save limits
+            </PrimaryButton>
+            <GhostButton type="button" size="sm" onClick={cancelEditing} disabled={saving}>
+              Cancel
+            </GhostButton>
+          </div>
+        </form>
+      ) : (
+        <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-dashed border-ghost-border/60 px-3 py-2">
+          <p className="min-w-0 font-mono text-[9px] leading-4 text-ghost-dim">
+            {thread.costLimitUsd ? (
+              <>
+                <span className="font-semibold text-ghost-white">{formatUsd(thread.costLimitUsd)}</span> cost limit
+              </>
+            ) : (
+              'No cost limit'
+            )}
+            <span className="text-ghost-faint"> · </span>
+            {thread.tokenLimit ? (
+              <>
+                <span className="font-semibold text-ghost-white" title={`${formatTokenCount(thread.tokenLimit)} tokens`}>
+                  {formatCompactTokens(thread.tokenLimit)}
+                </span>{' '}
+                token limit
+              </>
+            ) : (
+              'no token limit'
+            )}
           </p>
-        )}
-        {error && <p role="alert" className="mt-2 text-[9px] leading-4 text-ghost-bright-red">{error}</p>}
-        <PrimaryButton
-          type="submit"
-          disabled={saving}
-          className="mt-2.5 flex h-8 w-full items-center justify-center gap-1.5 rounded-lg text-[10px]"
-        >
-          {saving ? <LoaderCircle size={12} className="animate-spin" /> : <Check size={12} />}
-          Save limits
-        </PrimaryButton>
-      </form>
+          <Button
+            type="button"
+            onClick={beginEditing}
+            className="shrink-0 font-mono text-[9px] font-semibold text-ghost-cyan transition hover:text-ghost-bright-white"
+            aria-label="Edit usage limits"
+          >
+            Edit
+          </Button>
+        </div>
+      )}
     </section>
   )
 }
