@@ -13,6 +13,11 @@ const {
 } = require('./browser-helpers.cjs')
 
 const CODE_SERVER_PARTITION = 'dire-mux-code-server'
+const THEME_EXTENSION_ROOT = path.join(__dirname, 'code-server-extension')
+const THEME_EXTENSION_MANIFEST = require('./code-server-extension/package.json')
+const THEME_EXTENSION_DIRECTORY = `${THEME_EXTENSION_MANIFEST.publisher}.${THEME_EXTENSION_MANIFEST.name}-${THEME_EXTENSION_MANIFEST.version}`
+const THEME_EXTENSION_FILES = ['package.json', path.join('themes', 'kiwi-code-color-theme.json')]
+const USER_SETTINGS_SEED = path.join(__dirname, 'code-server-user-settings.json')
 const CODE_SERVER_COOKIE_NAME = 'code-server-session-dire-mux'
 const DEFAULT_START_TIMEOUT_MS = 30_000
 const DEFAULT_STOP_TIMEOUT_MS = 3_000
@@ -209,6 +214,33 @@ class CodeServerWorkspaceManager {
     await this.fileSystem.unlink(this.paths.runtimeSocket).catch((error) => {
       if (error?.code !== 'ENOENT') throw error
     })
+    try {
+      await Promise.all([this.installThemeExtension(), this.seedUserSettings()])
+    } catch (error) {
+      // The Kiwi Code theme is cosmetic; never block the editor on it.
+      this.logger.warn('Could not install the Kiwi Code theme for code-server:', error)
+    }
+  }
+
+  async installThemeExtension() {
+    const target = path.join(this.paths.extensions, THEME_EXTENSION_DIRECTORY)
+    await this.fileSystem.mkdir(path.join(target, 'themes'), { recursive: true, mode: 0o700 })
+    await Promise.all(THEME_EXTENSION_FILES.map(async (file) => {
+      const content = await this.fileSystem.readFile(path.join(THEME_EXTENSION_ROOT, file))
+      await this.fileSystem.writeFile(path.join(target, file), content, { mode: 0o600 })
+    }))
+  }
+
+  async seedUserSettings() {
+    const userDirectory = path.join(this.paths.userData, 'User')
+    await this.fileSystem.mkdir(userDirectory, { recursive: true, mode: 0o700 })
+    const settings = await this.fileSystem.readFile(USER_SETTINGS_SEED)
+    await this.fileSystem
+      .writeFile(path.join(userDirectory, 'settings.json'), settings, { flag: 'wx', mode: 0o600 })
+      .catch((error) => {
+        // An existing settings.json belongs to the user; leave their choices alone.
+        if (error?.code !== 'EEXIST') throw error
+      })
   }
 
   async authenticate(origin, password) {
