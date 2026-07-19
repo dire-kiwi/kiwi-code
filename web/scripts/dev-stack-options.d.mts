@@ -2,6 +2,7 @@ export const defaultVitePort: number
 export const defaultGoPort: number
 export const reservedProductionPort: number
 export const productionTmuxSocket: string
+export const legacyProductionTmuxSocket: string
 
 export function defaultDevelopmentTmuxSocket(rootDirectory: string): string
 export function assertDevelopmentPort(port: number, option: string): void

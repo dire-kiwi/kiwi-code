@@ -1555,6 +1555,120 @@ func TestCodingAgentSignalExitIsLoggedBeforePaneRemoval(t *testing.T) {
 	}
 }
 
+func TestPreviousCanonicalTerminalSessionIsGroupedWithoutRestartingProcesses(t *testing.T) {
+	handler, item := newIsolatedTmuxHandler(t)
+	thread := item.Threads[0]
+	previousSession := previousTmuxSessionName(item.ID, thread.ID, "terminal")
+	first, err := handler.createTmuxSession(previousSession, thread.Cwd, "shell", "/bin/sleep", []string{"30"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := handler.createTmuxWindow(thread.Cwd, previousSession, "shell", "/bin/sleep", []string{"30"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPIDs := map[string]string{
+		first.ID:  tmuxPanePID(t, handler, first.ID),
+		second.ID: tmuxPanePID(t, handler, second.ID),
+	}
+
+	canonicalSession, _, created, err := handler.ensureTmuxSession(item, thread, "terminal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created || canonicalSession != tmuxSessionName(item.ID, thread.ID, "terminal") {
+		t.Fatalf("previous canonical adoption = (%q, created=%t)", canonicalSession, created)
+	}
+	for _, sessionName := range []string{canonicalSession, previousSession} {
+		if exists, err := handler.tmuxExactSessionExists(sessionName); err != nil || !exists {
+			t.Fatalf("compatibility session %q: exists=%t err=%v", sessionName, exists, err)
+		}
+		windows, err := handler.tmuxDetailedWindows(sessionName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for windowID, wantPID := range wantPIDs {
+			found := false
+			for _, window := range windows {
+				if window.Target.ID == windowID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("compatibility session %q windows %#v omit %q", sessionName, windows, windowID)
+			}
+			if gotPID := tmuxPanePID(t, handler, windowID); gotPID != wantPID {
+				t.Fatalf("adopted window %q pid = %q, want %q", windowID, gotPID, wantPID)
+			}
+		}
+	}
+	if owner, err := handler.tmuxWindowSession(first.ID); err != nil || owner != canonicalSession {
+		t.Fatalf("preferred session for grouped window = %q, %v; want %q", owner, err, canonicalSession)
+	}
+
+	before, err := handler.tmuxDetailedWindows(canonicalSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handler.newShellWindow(item, thread); err != nil {
+		t.Fatal(err)
+	}
+	afterPrevious, err := handler.tmuxDetailedWindows(previousSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(afterPrevious) != len(before)+1 {
+		t.Fatalf("grouped previous session has %d windows after canonical creation, want %d", len(afterPrevious), len(before)+1)
+	}
+
+	if err := handler.stopThreadSessionsLocked(item, thread.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, sessionName := range []string{canonicalSession, previousSession} {
+		if exists, err := handler.tmuxExactSessionExists(sessionName); err != nil || exists {
+			t.Fatalf("compatibility cleanup for %q: exists=%t err=%v", sessionName, exists, err)
+		}
+	}
+}
+
+func TestPreviousCanonicalToolsSessionIsGroupedWithoutRestartingProcesses(t *testing.T) {
+	handler, item := newIsolatedTmuxHandler(t)
+	thread := item.Threads[0]
+	previousSession := previousTmuxSessionName(item.ID, thread.ID, "process")
+	window, err := handler.createTmuxSession(previousSession, thread.Cwd, "legacy-process", "/bin/sleep", []string{"30"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforePID := tmuxPanePID(t, handler, window.ID)
+
+	if err := handler.reconcileThreadTmuxState(item, thread); err != nil {
+		t.Fatal(err)
+	}
+	canonicalSession := tmuxSessionName(item.ID, thread.ID, "process")
+	for _, sessionName := range []string{canonicalSession, previousSession} {
+		windows, err := handler.tmuxDetailedWindows(sessionName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(windows) != 1 || windows[0].Target.ID != window.ID {
+			t.Fatalf("grouped tools session %q windows = %#v", sessionName, windows)
+		}
+	}
+	if afterPID := tmuxPanePID(t, handler, window.ID); afterPID != beforePID {
+		t.Fatalf("tools migration restarted pid %q as %q", beforePID, afterPID)
+	}
+
+	if err := handler.stopThreadSessionsLocked(item, thread.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, sessionName := range []string{canonicalSession, previousSession} {
+		if exists, err := handler.tmuxExactSessionExists(sessionName); err != nil || exists {
+			t.Fatalf("tools compatibility cleanup for %q: exists=%t err=%v", sessionName, exists, err)
+		}
+	}
+}
+
 func TestProjectLegacyTerminalSessionIsAdoptedWithAllWindows(t *testing.T) {
 	handler, item := newIsolatedTmuxHandler(t)
 	thread := item.Threads[0]

@@ -315,6 +315,10 @@ func (h *terminalHandler) newProcessWindow(item project.Project, thread project.
 		cleanup()
 		return processWindow{}, errors.New("created process window was not found")
 	}
+	if err := h.ensurePreviousTmuxCompatibilityAliasLocked(item.ID, thread.ID, "process", sessionName); err != nil {
+		cleanup()
+		return processWindow{}, err
+	}
 	return window, nil
 }
 

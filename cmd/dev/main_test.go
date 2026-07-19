@@ -80,8 +80,8 @@ func TestRunBackendRelaunchesAfterCleanRestartRequest(t *testing.T) {
 	}
 
 	tmuxSocket := fmt.Sprintf("dmv-%d-%x", port, time.Now().UnixNano()&0xffffff)
-	if tmuxSocket == "" || tmuxSocket == "dire-mux" {
-		t.Fatal("refusing to use the production tmux socket")
+	if tmuxSocket == "" || tmuxSocket == "kiwi-code" || tmuxSocket == "dire-mux" {
+		t.Fatal("refusing to use a production tmux socket")
 	}
 	defer func() {
 		if tmuxPath, lookErr := exec.LookPath("tmux"); lookErr == nil {

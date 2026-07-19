@@ -12,6 +12,9 @@ func TestProductionHTTPAddressUsesReservedPortOnAllInterfaces(t *testing.T) {
 	if productionHTTPAddress != "0.0.0.0:4000" {
 		t.Fatalf("production HTTP address = %q, want all interfaces on reserved port %d", productionHTTPAddress, productionHTTPPort)
 	}
+	if productionTmuxSocket != "kiwi-code" || legacyProductionTmuxSocket != "dire-mux" {
+		t.Fatalf("production tmux sockets = canonical %q legacy %q", productionTmuxSocket, legacyProductionTmuxSocket)
+	}
 }
 
 func TestValidateRuntimeConfigurationRejectsProductionResourcesInDevelopment(t *testing.T) {
@@ -38,6 +41,13 @@ func TestValidateRuntimeConfigurationRejectsProductionResourcesInDevelopment(t *
 			name: "explicit production tmux socket",
 			change: func(configuration *runtimeConfiguration) {
 				configuration.TmuxSocket = productionTmuxSocket
+			},
+			want: "production tmux socket",
+		},
+		{
+			name: "legacy production tmux socket",
+			change: func(configuration *runtimeConfiguration) {
+				configuration.TmuxSocket = legacyProductionTmuxSocket
 			},
 			want: "production tmux socket",
 		},
