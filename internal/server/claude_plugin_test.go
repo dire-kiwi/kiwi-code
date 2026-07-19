@@ -20,9 +20,20 @@ import (
 )
 
 func TestMaterializeClaudePlugin(t *testing.T) {
-	root, err := materializeClaudePlugin(t.TempDir())
+	dataDirectory := t.TempDir()
+	legacyProcessSkill := filepath.Join(dataDirectory, "claude-plugin", "skills", legacyProcessAgentSkillName)
+	if err := os.MkdirAll(legacyProcessSkill, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyProcessSkill, "SKILL.md"), []byte("legacy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := materializeClaudePlugin(dataDirectory)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(legacyProcessSkill); !os.IsNotExist(err) {
+		t.Fatalf("legacy Claude process skill still exists: %v", err)
 	}
 
 	files, err := claudePluginFiles()
@@ -86,6 +97,12 @@ func TestMaterializeClaudePlugin(t *testing.T) {
 	if !bytes.Contains(claudePluginBrowserSkill, []byte("\ncontext: fork\n")) {
 		t.Fatal("Claude browser skill does not run in a forked agent context")
 	}
+	if !bytes.Contains(claudePluginProcessSkill, []byte("\nname: kiwi-code-processes\n")) {
+		t.Fatal("Claude process skill does not use its Kiwi Code name")
+	}
+	if !bytes.Contains(claudePluginProcessSkill, []byte("\ncontext: fork\n")) {
+		t.Fatal("Claude process skill does not run in a forked agent context")
+	}
 	if !bytes.Contains(claudePluginProcessSkill, []byte("${CLAUDE_PLUGIN_ROOT}")) {
 		t.Fatal("Claude process skill does not use its materialized plugin path")
 	}
@@ -99,7 +116,7 @@ func TestMaterializeClaudePlugin(t *testing.T) {
 		"common.mjs", "interrupt-process.mjs", "list-processes.mjs", "read-logs.mjs",
 		"send-input.mjs", "start-process.mjs", "stop-process.mjs",
 	} {
-		if _, err := os.Stat(filepath.Join(root, "skills", "dire-mux-processes", "scripts", name)); err != nil {
+		if _, err := os.Stat(filepath.Join(root, "skills", "kiwi-code-processes", "scripts", name)); err != nil {
 			t.Fatalf("materialized Claude process helper %q: %v", name, err)
 		}
 	}
