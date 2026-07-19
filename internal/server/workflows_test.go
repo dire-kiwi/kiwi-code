@@ -356,6 +356,16 @@ return { ok: true }
 	if unrelatedResponse.Code != http.StatusForbidden {
 		t.Fatalf("workflow token reached unrelated managed-agent API: status=%d body=%s", unrelatedResponse.Code, unrelatedResponse.Body.String())
 	}
+	skillFork := httptest.NewRequest(http.MethodPost,
+		"/api/projects/"+item.ID+"/threads/"+thread.ID+"/skill-forks",
+		bytes.NewBufferString(`{"title":"forbidden skill","prompt":"do not create","agent":"pi","worktree":false}`),
+	)
+	skillFork.Header.Set(agentTokenHeader, record.Token)
+	skillForkResponse := httptest.NewRecorder()
+	handler.ServeHTTP(skillForkResponse, skillFork)
+	if skillForkResponse.Code != http.StatusForbidden {
+		t.Fatalf("workflow token reached skill-fork API: status=%d body=%s", skillForkResponse.Code, skillForkResponse.Body.String())
+	}
 	eventPath := path + "/" + started.ID + "/events"
 	wrong := httptest.NewRequest(http.MethodPost, eventPath, bytes.NewBufferString(`{"eventId":"event-wrong","type":"started","meta":{"name":"api-test","description":"API lifecycle"}}`))
 	wrong.Header.Set(workflowTokenHeader, "wrong")

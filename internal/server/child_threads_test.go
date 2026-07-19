@@ -62,6 +62,165 @@ func TestChildThreadCreationIsTemporarilyDisabled(t *testing.T) {
 	}
 }
 
+func TestForkedSkillChildStartsWithoutWorkflowActivation(t *testing.T) {
+	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	disableWorkflows := true
+	if _, err := store.UpdateSettingsValues(project.SettingsUpdate{DisableWorkflows: &disableWorkflows}); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := newIsolatedServerHandler(t, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := handler.(*Server)
+	fakePi := filepath.Join(t.TempDir(), "fake-pi")
+	fakeScript := `#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *'"type":"get_available_models"'*)
+      printf '%s\n' '{"type":"response","command":"get_available_models","success":true,"data":{"models":[{"provider":"custom","id":"model-a","name":"Model A","reasoning":true}]}}'
+      ;;
+    *'Keep running'*)
+      printf '%s\n' '{"type":"response","command":"prompt","success":true}'
+      printf '%s\n' '{"type":"agent_start"}'
+      ;;
+    *'"type":"prompt"'*)
+      printf '%s\n' '{"type":"response","command":"prompt","success":true}'
+      printf '%s\n' '{"type":"agent_start"}'
+      printf '%s\n' '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Forked skill finished"}],"timestamp":2}}'
+      printf '%s\n' '{"type":"agent_settled"}'
+      ;;
+    *'"type":"get_state"'*)
+      printf '%s\n' '{"type":"response","command":"get_state","success":true,"data":{"isStreaming":false}}'
+      ;;
+    *'"type":"get_messages"'*)
+      printf '%s\n' '{"type":"response","command":"get_messages","success":true,"data":{"messages":[]}}'
+      ;;
+    *'"type":"get_session_stats"'*)
+      printf '%s\n' '{"type":"response","command":"get_session_stats","success":true,"data":{}}'
+      ;;
+  esac
+done
+`
+	if err := os.WriteFile(fakePi, []byte(fakeScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	server.terminal.nativePi.piPath = fakePi
+
+	parent := item.Threads[0]
+	path := "/api/projects/" + item.ID + "/threads/" + parent.ID + "/skill-forks"
+	body := `{"title":"deep-research","prompt":"Run the loaded skill.","agent":"pi","model":"custom/model-a","worktree":false}`
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body)))
+	if unauthorized.Code != http.StatusForbidden {
+		t.Fatalf("unauthorized skill fork status = %d, body = %s", unauthorized.Code, unauthorized.Body.String())
+	}
+	isolatedRequest := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(
+		`{"title":"isolated","prompt":"Do not run.","agent":"pi","model":"custom/model-a","worktree":true}`,
+	))
+	isolatedRequest.Header.Set(agentTokenHeader, server.terminal.agentToken)
+	isolatedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(isolatedResponse, isolatedRequest)
+	if isolatedResponse.Code != http.StatusBadRequest || !strings.Contains(isolatedResponse.Body.String(), "share the parent workspace") {
+		t.Fatalf("isolated skill fork status = %d, body = %s", isolatedResponse.Code, isolatedResponse.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
+	request.Header.Set(agentTokenHeader, server.terminal.agentToken)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("skill fork status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var created childThreadRunResponse
+	if err := json.NewDecoder(response.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Thread.ParentThreadID != parent.ID || created.Thread.Worktree ||
+		created.Thread.WorkflowRunID != "" || created.Thread.WorkflowAgentID != "" || created.Run.ID == 0 {
+		t.Fatalf("created skill fork = %#v", created)
+	}
+	runs, err := server.workflows.list(item.ID, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("skill fork created workflow records: %#v", runs)
+	}
+
+	runPath := "/api/projects/" + item.ID + "/threads/" + parent.ID + "/children/" + created.Thread.ID + "/runs/" + strconv.FormatUint(created.Run.ID, 10)
+	var run piNativeRunSnapshot
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		runRequest := httptest.NewRequest(http.MethodGet, runPath, nil)
+		runRequest.Header.Set(agentTokenHeader, server.terminal.agentToken)
+		runResponse := httptest.NewRecorder()
+		handler.ServeHTTP(runResponse, runRequest)
+		if runResponse.Code != http.StatusOK {
+			t.Fatalf("skill fork run status = %d, body = %s", runResponse.Code, runResponse.Body.String())
+		}
+		if err := json.NewDecoder(runResponse.Body).Decode(&run); err != nil {
+			t.Fatal(err)
+		}
+		if run.State == "finished" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("skill fork run did not finish: %#v", run)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if run.Output != "Forked skill finished" {
+		t.Fatalf("skill fork output = %q", run.Output)
+	}
+
+	closeRequest := httptest.NewRequest(http.MethodPost,
+		"/api/projects/"+item.ID+"/threads/"+parent.ID+"/children/"+created.Thread.ID+"/close",
+		bytes.NewBufferString(`{}`),
+	)
+	closeRequest.Header.Set(agentTokenHeader, server.terminal.agentToken)
+	closeResponse := httptest.NewRecorder()
+	handler.ServeHTTP(closeResponse, closeRequest)
+	if closeResponse.Code != http.StatusOK {
+		t.Fatalf("close skill fork status = %d, body = %s", closeResponse.Code, closeResponse.Body.String())
+	}
+
+	cancelRequest := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(
+		`{"title":"cancel-me","prompt":"Keep running","agent":"pi","model":"custom/model-a","worktree":false}`,
+	))
+	cancelRequest.Header.Set(agentTokenHeader, server.terminal.agentToken)
+	cancelResponse := httptest.NewRecorder()
+	handler.ServeHTTP(cancelResponse, cancelRequest)
+	if cancelResponse.Code != http.StatusCreated {
+		t.Fatalf("cancellable skill fork status = %d, body = %s", cancelResponse.Code, cancelResponse.Body.String())
+	}
+	var cancellable childThreadRunResponse
+	if err := json.NewDecoder(cancelResponse.Body).Decode(&cancellable); err != nil {
+		t.Fatal(err)
+	}
+	stopRequest := httptest.NewRequest(http.MethodPost,
+		path+"/"+cancellable.Thread.ID+"/stop",
+		bytes.NewBufferString(`{}`),
+	)
+	stopRequest.Header.Set(agentTokenHeader, server.terminal.agentToken)
+	stopResponse := httptest.NewRecorder()
+	handler.ServeHTTP(stopResponse, stopRequest)
+	if stopResponse.Code != http.StatusOK {
+		t.Fatalf("stop skill fork status = %d, body = %s", stopResponse.Code, stopResponse.Body.String())
+	}
+	_, stopped, err := store.GetThread(item.ID, cancellable.Thread.ID)
+	if err != nil || stopped.ClosedAt == nil {
+		t.Fatalf("stopped skill fork = %#v, error = %v", stopped, err)
+	}
+}
+
 func TestEnabledChildThreadStartFailureRollsBackTransientWorktree(t *testing.T) {
 	repository := t.TempDir()
 	serverGit(t, repository, "init", "-q")

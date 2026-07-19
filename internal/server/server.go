@@ -44,8 +44,9 @@ type Server struct {
 	handler                   http.Handler
 }
 
-// Direct child creation remains disabled. Scoped server-side workflow runners
-// enter the hardened child transaction through a separate authorization path.
+// General direct child creation remains disabled. Scoped server-side workflow
+// runners and context: fork skills enter the hardened child transaction through
+// separate authorization paths.
 const childThreadCreationEnabled = false
 
 const (
@@ -172,6 +173,8 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/workflows/{runId}/agents/{agentId}", server.createWorkflowAgent)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/workflows/{runId}/agents/{agentId}", server.getWorkflowAgentRun)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/workflows/{runId}/agents/{agentId}/close", server.closeWorkflowAgent)
+	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/skill-forks", server.createSkillForkChild)
+	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/skill-forks/{childId}/stop", server.stopSkillForkChild)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/children", server.createChildThread)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/children", server.listChildThreads)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/children/{childId}/close", server.closeChildThread)

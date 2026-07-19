@@ -30,6 +30,14 @@ const (
 	childProbeCleanupTimeout    = 15 * time.Second
 )
 
+type childThreadCreationSource uint8
+
+const (
+	childThreadCreationDirect childThreadCreationSource = iota
+	childThreadCreationWorkflow
+	childThreadCreationSkillFork
+)
+
 type workflowChildIdentityContextKey struct{}
 
 type workflowChildIdentity struct {
@@ -341,16 +349,67 @@ func (s *Server) createChildThread(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAgentCapability(w, r) {
 		return
 	}
-	s.createChildThreadAuthorized(w, r, false)
+	s.createChildThreadAuthorized(w, r, childThreadCreationDirect)
 }
 
-// createChildThreadAuthorized keeps direct child creation disabled while
-// allowing a scoped, server-owned workflow process to use the same hardened
-// child creation transaction. Workflow callers are authenticated before this
-// method and never receive the general managed-agent capability.
-func (s *Server) createChildThreadAuthorized(w http.ResponseWriter, r *http.Request, workflow bool) {
-	if !workflow && !s.allowChildThreadCreation {
-		writeError(w, http.StatusServiceUnavailable, "Direct sub-agent creation is temporarily disabled; use a Dire Mux workflow.")
+func (s *Server) createSkillForkChild(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAgentCapability(w, r) {
+		return
+	}
+	s.createChildThreadAuthorized(w, r, childThreadCreationSkillFork)
+}
+
+func (s *Server) stopSkillForkChild(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAgentCapability(w, r) {
+		return
+	}
+	projectID := r.PathValue("id")
+	parentID := r.PathValue("threadId")
+	childID := r.PathValue("childId")
+	_, child, err := s.projects.GetThread(projectID, childID)
+	if errors.Is(err, project.ErrNotFound) || errors.Is(err, project.ErrThreadNotFound) {
+		writeError(w, http.StatusNotFound, "Skill fork child not found.")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not load the skill fork child.")
+		return
+	}
+	if child.ParentThreadID != parentID || child.WorkflowRunID != "" || child.WorkflowAgentID != "" {
+		writeError(w, http.StatusNotFound, "Skill fork child not found.")
+		return
+	}
+	if child.RollbackPending {
+		writeError(w, http.StatusConflict, "The skill fork child is being rolled back.")
+		return
+	}
+	if child.ClosedAt != nil {
+		writeJSON(w, http.StatusOK, child)
+		return
+	}
+	if s.terminal == nil || s.terminal.nativePi == nil {
+		writeError(w, http.StatusServiceUnavailable, "Pi child management is unavailable.")
+		return
+	}
+	if err := s.terminal.nativePi.stopThread(projectID, childID); err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not stop the skill fork child.")
+		return
+	}
+	s.closeChildThreadAuthorized(w, r)
+}
+
+// createChildThreadAuthorized keeps general direct child creation disabled
+// while letting the scoped workflow runner and the context: fork skill tool
+// share the same hardened child creation transaction. The workflow caller has
+// its own per-run capability; skill forks use the managed Pi capability and do
+// not enter the workflow control plane.
+func (s *Server) createChildThreadAuthorized(w http.ResponseWriter, r *http.Request, source childThreadCreationSource) {
+	if source == childThreadCreationDirect && !s.allowChildThreadCreation {
+		writeError(w, http.StatusServiceUnavailable, "Direct sub-agent creation is temporarily disabled; use a context: fork skill or a Dire Mux workflow.")
+		return
+	}
+	if source != childThreadCreationDirect && source != childThreadCreationWorkflow && source != childThreadCreationSkillFork {
+		writeError(w, http.StatusInternalServerError, "Invalid child creation source.")
 		return
 	}
 	projectID := r.PathValue("id")
@@ -442,10 +501,18 @@ func (s *Server) createChildThreadAuthorized(w http.ResponseWriter, r *http.Requ
 		writeChildThreadModelValidationError(w, http.StatusBadRequest, err.Error()+"; no child thread was created.", nil)
 		return
 	}
-	resolved := s.projects.ResolveSnapshot([]project.Project{item})
-	worktree := len(resolved) == 1 && resolved[0].IsGitRepo
-	if input.Worktree != nil {
-		worktree = *input.Worktree
+	worktree := false
+	if source == childThreadCreationSkillFork {
+		if input.Worktree != nil && *input.Worktree {
+			writeError(w, http.StatusBadRequest, "A context: fork skill must share the parent workspace.")
+			return
+		}
+	} else {
+		resolved := s.projects.ResolveSnapshot([]project.Project{item})
+		worktree = len(resolved) == 1 && resolved[0].IsGitRepo
+		if input.Worktree != nil {
+			worktree = *input.Worktree
+		}
 	}
 	baseBranch := strings.TrimSpace(input.BaseBranch)
 	if worktree && baseBranch == "" && parent.Worktree {

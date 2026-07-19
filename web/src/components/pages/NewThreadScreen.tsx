@@ -507,7 +507,7 @@ export function NewThreadScreen({
             <p id="thread-sub-agent-depth-help" className="mt-2 text-[9px] leading-4 text-ghost-faint">
               {settingsError && effectiveNestingDepth === null
                 ? 'Could not load the project limit. This thread can still inherit the project setting.'
-                : 'Controls how deeply workflow agents from this thread may delegate. It can reduce, but not exceed, the project limit.'}
+                : 'Controls how deeply child agents from this thread may delegate. It can reduce, but not exceed, the project limit.'}
             </p>
           </fieldset>
 

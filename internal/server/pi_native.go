@@ -630,7 +630,7 @@ func (h *terminalHandler) withSubAgentNestingPrompt(
 		return codingAgentLaunchOptions{}, err
 	}
 	nestingPrompt := fmt.Sprintf(
-		"You are a sub-agent at nesting depth %d. The effective maximum sub-agent nesting depth for this thread tree is %d after applying project and ancestor limits. Root agents are at depth 0. Delegate further work only through a Dire Mux workflow, and only while your current depth is below the effective maximum.",
+		"You are a sub-agent at nesting depth %d. The effective maximum sub-agent nesting depth for this thread tree is %d after applying project and ancestor limits. Root agents are at depth 0. Delegate further work only through an available context: fork skill or an explicitly activated Dire Mux workflow, and only while your current depth is below the effective maximum.",
 		context.CurrentDepth,
 		context.MaxDepth,
 	)

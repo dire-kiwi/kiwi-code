@@ -489,7 +489,7 @@ export function ThreadProjectSidebar({
                 />
               </div>
               <p id="project-sub-agent-depth-help" className="mt-2 text-[9px] leading-4 text-ghost-faint">
-                Limits workflow-agent generations for this project; overrides the global setting.
+                Limits child-agent generations for this project; overrides the global setting.
               </p>
               {nestingError && (
                 <p id="project-sub-agent-depth-error" role="alert" className="mt-2 text-[10px] leading-4 text-ghost-bright-red">
