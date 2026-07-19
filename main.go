@@ -20,7 +20,7 @@ const restartShutdownTimeout = 5 * time.Second
 func main() {
 	addr := flag.String("addr", envOr("DIRE_MUX_ADDR", productionHTTPAddress), "HTTP listen address")
 	dataDir := flag.String("data-dir", envOr("DIRE_MUX_DATA_DIR", defaultDataDir()), "directory used for application data")
-	tmuxSocket := flag.String("tmux-socket", envOr("DIRE_MUX_TMUX_SOCKET", ""), "tmux socket name (default: dire-mux; use a unique name for development and tests)")
+	tmuxSocket := flag.String("tmux-socket", envOr("DIRE_MUX_TMUX_SOCKET", ""), "tmux socket name (default: kiwi-code; use a unique name for development and tests)")
 	allowedOriginPort := flag.Int("allowed-origin-port", 0, "allow API access from a same-host browser origin on this port")
 	mode := flag.String("mode", envOr("DIRE_MUX_MODE", runtimeModeProduction), "runtime mode: production or development")
 	addCurrentDirectory := flag.Bool("add-current-directory", false, "ensure the server working directory is a project (for isolated development and agent tests)")

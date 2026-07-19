@@ -328,7 +328,7 @@ Retain and extend the current `dire-pi-ext` tests. Add coverage for:
 - server restart behavior;
 - Chrome web UI and desktop runtime smoke tests.
 
-All application validation must use fresh loopback ports, a temporary data directory, and a unique non-production tmux socket. It must never inspect, connect to, create sessions in, or kill the canonical `dire-mux` tmux server.
+All application validation must use fresh loopback ports, a temporary data directory, and a unique non-production tmux socket. It must never inspect, connect to, create sessions in, or kill the canonical `kiwi-code` or legacy `dire-mux` production tmux server.
 
 ## Open questions for the next research phase
 

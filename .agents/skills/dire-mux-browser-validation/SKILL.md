@@ -15,8 +15,8 @@ Validate completed changes in a real browser against a fresh instance from the c
 - Allocate a fresh loopback port for every listener in every run. A split Vite/Go stack requires two different fresh ports. Never use production port `4000`, never assume `8080` or `5173` is available, and never stop an unrelated port owner.
 - Bind every validation listener to `127.0.0.1` and use a fresh temporary data directory.
 - Allocate a unique, short tmux socket name for every run and pass it to the application with `-tmux-socket` or `--tmux-socket`.
-- The canonical `dire-mux` tmux server is reserved for the user's production environment. Never connect to it, list it, create sessions in it, or kill it during validation.
-- Before startup, explicitly check that the generated tmux socket is non-empty and is not `dire-mux`. If that check fails, stop and generate another name.
+- The canonical `kiwi-code` tmux server and legacy `dire-mux` server are reserved for the user's production environment. Never connect to either one, list it, create sessions in it, or kill it during validation.
+- Before startup, explicitly check that the generated tmux socket is non-empty and is neither `kiwi-code` nor `dire-mux`. If that check fails, stop and generate another name.
 - Use the `dire-mux-processes` skill for the validation process. Do not use `&`, `nohup`, or an unmanaged tmux session.
 - Use the Chrome DevTools browser capability to open and interact with the rendered application. A successful `curl` or health request alone is not browser validation.
 - Exercise the user-visible behavior changed by the task, including meaningful interactions and resulting state. Do not stop at confirming that the landing page renders.
@@ -69,8 +69,10 @@ done
 VALIDATION_DATA_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dire-mux-browser-validation.XXXXXX")"
 VALIDATION_SUFFIX="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(4).toString("hex"))')"
 VALIDATION_TMUX_SOCKET="dmv-${VALIDATION_GO_PORT}-${VALIDATION_SUFFIX}"
-if [ -z "$VALIDATION_TMUX_SOCKET" ] || [ "$VALIDATION_TMUX_SOCKET" = "dire-mux" ]; then
-  echo "Refusing to use the main Dire Mux tmux server" >&2
+if [ -z "$VALIDATION_TMUX_SOCKET" ] || \
+   [ "$VALIDATION_TMUX_SOCKET" = "kiwi-code" ] || \
+   [ "$VALIDATION_TMUX_SOCKET" = "dire-mux" ]; then
+  echo "Refusing to use a production Dire Mux tmux server" >&2
   exit 1
 fi
 printf 'Go URL: %s\nVite URL: %s\nData: %s\ntmux socket: %s\n' \
@@ -80,7 +82,7 @@ printf 'Go URL: %s\nVite URL: %s\nData: %s\ntmux socket: %s\n' \
   "$VALIDATION_TMUX_SOCKET"
 ```
 
-Keep all four literal values in context. Shell variables do not persist between agent tool calls. If a selected port is taken before startup, allocate a replacement rather than killing its owner. Never substitute `dire-mux` for the generated socket.
+Keep all four literal values in context. Shell variables do not persist between agent tool calls. If a selected port is taken before startup, allocate a replacement rather than killing its owner. Never substitute `kiwi-code` or `dire-mux` for the generated socket.
 
 ## 4. Start the validation application
 
@@ -110,7 +112,7 @@ Record the returned process ID and read bounded logs:
 node "$HOME/.agents/skills/dire-mux-processes/scripts/read-logs.mjs" <process-id> 200
 ```
 
-For the embedded app, require the expected Go URL and the `Added current directory project` startup message. For the split stack, require both expected URLs, the generated tmux socket, and the current worktree's `Project:` line in the launcher output. If logs show `tmux: dire-mux`, stop immediately and fix the launch command before opening the browser. If startup reports an address collision, stop this validation process, allocate a new port, and retry. Do not continue with another server that happens to answer the URL.
+For the embedded app, require the expected Go URL and the `Added current directory project` startup message. For the split stack, require both expected URLs, the generated tmux socket, and the current worktree's `Project:` line in the launcher output. If logs show `tmux: kiwi-code` or `tmux: dire-mux`, stop immediately and fix the launch command before opening the browser. If startup reports an address collision, stop this validation process, allocate a new port, and retry. Do not continue with another server that happens to answer the URL.
 
 ## 5. Validate in Chrome
 
@@ -148,7 +150,7 @@ After the application has stopped, kill only the literal isolated tmux server ge
 tmux -L '<tmux-socket>' kill-server 2>/dev/null || true
 ```
 
-The socket argument must be the recorded `dmv-...` value and must never be `dire-mux`. Finally, remove the exact temporary data and fixture directories created for this run. Never use a broad wildcard or remove a path that was not printed by this workflow.
+The socket argument must be the recorded `dmv-...` value and must never be `kiwi-code` or `dire-mux`. Finally, remove the exact temporary data and fixture directories created for this run. Never use a broad wildcard or remove a path that was not printed by this workflow.
 
 ## 7. Report evidence
 

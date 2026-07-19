@@ -143,7 +143,7 @@ func TestSharedToolCommandExposesTmuxTargets(t *testing.T) {
 		project.Thread{ID: "thread"},
 		"nvim",
 		"",
-		"dire-mux-project-thread-tools",
+		"kiwi-code-project-thread-tools",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +153,7 @@ func TestSharedToolCommandExposesTmuxTargets(t *testing.T) {
 	}
 	joined := strings.Join(args, "\n")
 	for _, expected := range []string{
-		"DIRE_MUX_TMUX_SESSION=dire-mux-project-thread-tools",
+		"DIRE_MUX_TMUX_SESSION=kiwi-code-project-thread-tools",
 		"DIRE_MUX_TMUX_WINDOW=nvim",
 		"/bin/test-shell",
 	} {
@@ -180,7 +180,7 @@ func TestPiCommandReceivesChildThreadCapability(t *testing.T) {
 		project.Thread{ID: "child", ParentThreadID: "parent"},
 		codingAgentPi,
 		"http://127.0.0.1:8080/api/projects/project/threads/child",
-		"dire-mux-project-child-tools",
+		"kiwi-code-project-child-tools",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -218,7 +218,7 @@ func TestClaudeCommandUsesTheFixedPiWindow(t *testing.T) {
 		project.Thread{ID: "thread", ParentThreadID: "parent"},
 		codingAgentClaude,
 		"http://127.0.0.1:8080/api/projects/project/threads/thread",
-		"dire-mux-project-thread-tools",
+		"kiwi-code-project-thread-tools",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -233,7 +233,7 @@ func TestClaudeCommandUsesTheFixedPiWindow(t *testing.T) {
 		"--dangerously-skip-permissions",
 		"--settings",
 		`{"skipDangerousModePermissionPrompt":true}`,
-		"DIRE_MUX_TMUX_SESSION=dire-mux-project-thread-tools",
+		"DIRE_MUX_TMUX_SESSION=kiwi-code-project-thread-tools",
 		"DIRE_MUX_TMUX_WINDOW=pi",
 		"DIRE_MUX_THREAD_ENDPOINT=http://127.0.0.1:8080/api/projects/project/threads/thread",
 		"DIRE_MUX_PROJECT_ID=project",
@@ -292,16 +292,25 @@ func TestCodingAgentExitDedupeStateIsPrunedSafely(t *testing.T) {
 }
 
 func TestTmuxSessionNameAndShellCommand(t *testing.T) {
-	if tmuxSocketName != "dire-mux" {
-		t.Fatalf("tmuxSocketName = %q, want dire-mux", tmuxSocketName)
+	if tmuxSocketName != "kiwi-code" {
+		t.Fatalf("tmuxSocketName = %q, want kiwi-code", tmuxSocketName)
 	}
-	if got := tmuxSessionName("abc123", "thread456", "terminal"); got != "dire-mux-abc123-thread456-terminal" {
+	if legacyTmuxSocketName != "dire-mux" {
+		t.Fatalf("legacyTmuxSocketName = %q, want dire-mux", legacyTmuxSocketName)
+	}
+	if got := tmuxSessionName("abc123", "thread456", "terminal"); got != "kiwi-code-abc123-thread456-terminal" {
 		t.Fatalf("shell tmuxSessionName() = %q", got)
 	}
 	for _, tool := range []string{"nvim", "lazygit", "pi", "process"} {
-		if got := tmuxSessionName("abc123", "thread456", tool); got != "dire-mux-abc123-thread456-tools" {
+		if got := tmuxSessionName("abc123", "thread456", tool); got != "kiwi-code-abc123-thread456-tools" {
 			t.Fatalf("%s tmuxSessionName() = %q", tool, got)
 		}
+	}
+	if got := previousTmuxSessionName("abc123", "thread456", "terminal"); got != "dire-mux-abc123-thread456-terminal" {
+		t.Fatalf("previous shell tmuxSessionName() = %q", got)
+	}
+	if got := previousTmuxSessionName("abc123", "thread456", "process"); got != "dire-mux-abc123-thread456-tools" {
+		t.Fatalf("previous tools tmuxSessionName() = %q", got)
 	}
 
 	command := shellCommand("/path with spaces/shell", []string{"-l", "quote'check"})
@@ -325,6 +334,28 @@ func TestTmuxSessionNameAndShellCommand(t *testing.T) {
 	for _, expected := range []string{"DIRE_MUX_PORT=9090", "DIRE_MUX_PROJECT_ID=project", "DIRE_MUX_THREAD_ID=thread"} {
 		if !strings.Contains(environment, expected) {
 			t.Fatalf("thread environment %q does not contain %q", environment, expected)
+		}
+	}
+}
+
+func TestTmuxCleanupNamesIncludeCurrentAndPreviousSchemas(t *testing.T) {
+	item := project.Project{
+		ID: "project",
+		Threads: []project.Thread{
+			{ID: "thread"},
+		},
+	}
+	names := threadTmuxSessionNameSet(item, "thread")
+	for _, name := range []string{
+		"kiwi-code-project-thread-terminal",
+		"kiwi-code-project-thread-tools",
+		"dire-mux-project-thread-terminal",
+		"dire-mux-project-thread-tools",
+		"dire-mux-project-thread-pi",
+		"dire-mux-project-terminal",
+	} {
+		if _, found := names[name]; !found {
+			t.Fatalf("cleanup names %#v omit %q", names, name)
 		}
 	}
 }
