@@ -16,6 +16,9 @@ import (
 const (
 	defaultCLIProxyAPIBaseURL     = "http://127.0.0.1:8317"
 	defaultCLIProxyAPIKey         = "sk-dummy"
+	defaultClaudeGPTOpusModel     = "gpt-5.6-sol"
+	defaultClaudeGPTSonnetModel   = "gpt-5.6-terra"
+	defaultClaudeGPTHaikuModel    = "gpt-5.6-luna"
 	claudeGPTProfileDirectoryName = "claude-code-gpt-profile"
 	claudeSandboxPluginID         = "sandbox-exec@dire-agent-extensions"
 	maxCLIProxyAPIModelsResponse  = 1 << 20
@@ -293,9 +296,9 @@ func claudeGPTProxyEnvironment(profilePath, baseURL, apiKey, model string) []str
 		"ANTHROPIC_BASE_URL=" + baseURL,
 		"ANTHROPIC_AUTH_TOKEN=" + apiKey,
 		"ANTHROPIC_MODEL=" + model,
-		"ANTHROPIC_SMALL_FAST_MODEL=" + model,
-		"ANTHROPIC_DEFAULT_OPUS_MODEL=" + model,
-		"ANTHROPIC_DEFAULT_SONNET_MODEL=" + model,
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL=" + model,
+		"ANTHROPIC_SMALL_FAST_MODEL=" + defaultClaudeGPTHaikuModel,
+		"ANTHROPIC_DEFAULT_OPUS_MODEL=" + defaultClaudeGPTOpusModel,
+		"ANTHROPIC_DEFAULT_SONNET_MODEL=" + defaultClaudeGPTSonnetModel,
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL=" + defaultClaudeGPTHaikuModel,
 	}
 }
