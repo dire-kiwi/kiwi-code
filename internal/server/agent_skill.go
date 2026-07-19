@@ -13,16 +13,15 @@ import (
 )
 
 const (
-	// Keep the original process skill as the top-level status identity for API
-	// compatibility. The Skills field reports every skill in the bundle.
-	agentSkillName         = "dire-mux-processes"
-	embeddedAgentSkillRoot = "agent-skill"
+	agentSkillName              = "kiwi-code-processes"
+	legacyProcessAgentSkillName = "dire-mux-processes"
+	embeddedAgentSkillRoot      = "agent-skill"
 )
 
-var bundledAgentSkillNames = [...]string{"dire-mux-processes", "dire-mux-threads", "dire-mux-mermaid"}
+var bundledAgentSkillNames = [...]string{"kiwi-code-processes", "dire-mux-threads", "dire-mux-mermaid"}
 
 //go:generate node agent-skill/generate-common.mjs
-//go:embed agent-skill/dire-mux-processes agent-skill/dire-mux-threads agent-skill/dire-mux-mermaid
+//go:embed agent-skill/kiwi-code-processes agent-skill/dire-mux-threads agent-skill/dire-mux-mermaid
 var embeddedAgentSkill embed.FS
 
 type agentSkillItemStatus struct {
@@ -85,6 +84,17 @@ func (i *agentSkillInstaller) skillStatus(name string) (agentSkillItemStatus, er
 		return agentSkillItemStatus{}, fmt.Errorf("inspect installed agent skill %q: %w", name, err)
 	}
 
+	legacyInstalled := false
+	if name == agentSkillName {
+		legacyManifest := filepath.Join(i.skillsDirectory, legacyProcessAgentSkillName, "SKILL.md")
+		if info, err := os.Stat(legacyManifest); err == nil && !info.IsDir() {
+			legacyInstalled = true
+			status.Installed = true
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return agentSkillItemStatus{}, fmt.Errorf("inspect legacy agent skill %q: %w", legacyProcessAgentSkillName, err)
+		}
+	}
+
 	upToDate := true
 	root := filepath.Join(embeddedAgentSkillRoot, name)
 	err := fs.WalkDir(embeddedAgentSkill, root, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -118,7 +128,7 @@ func (i *agentSkillInstaller) skillStatus(name string) (agentSkillItemStatus, er
 	if err != nil {
 		return agentSkillItemStatus{}, fmt.Errorf("inspect bundled agent skill %q: %w", name, err)
 	}
-	status.UpToDate = status.Installed && upToDate
+	status.UpToDate = status.Installed && upToDate && !legacyInstalled
 	return status, nil
 }
 
@@ -126,17 +136,15 @@ func (i *agentSkillInstaller) install() (agentSkillStatus, error) {
 	// Validate every root before writing any skill so a symlink or file at one
 	// destination cannot leave a partially updated bundle.
 	for _, name := range bundledAgentSkillNames {
-		target := filepath.Join(i.skillsDirectory, name)
-		info, err := os.Lstat(target)
-		if err == nil && info.Mode()&os.ModeSymlink != 0 {
-			return agentSkillStatus{}, fmt.Errorf("agent skill destination %q cannot be a symbolic link", name)
+		if err := i.validateSkillDestination(name); err != nil {
+			return agentSkillStatus{}, err
 		}
-		if err == nil && !info.IsDir() {
-			return agentSkillStatus{}, fmt.Errorf("agent skill destination %q must be a directory", name)
-		}
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return agentSkillStatus{}, fmt.Errorf("inspect agent skill destination %q: %w", name, err)
-		}
+	}
+	if err := i.validateSkillDestination(legacyProcessAgentSkillName); err != nil {
+		return agentSkillStatus{}, err
+	}
+	if err := i.migrateLegacyProcessSkill(); err != nil {
+		return agentSkillStatus{}, err
 	}
 
 	for _, name := range bundledAgentSkillNames {
@@ -144,7 +152,45 @@ func (i *agentSkillInstaller) install() (agentSkillStatus, error) {
 			return agentSkillStatus{}, err
 		}
 	}
+	if err := os.RemoveAll(filepath.Join(i.skillsDirectory, legacyProcessAgentSkillName)); err != nil {
+		return agentSkillStatus{}, fmt.Errorf("remove legacy agent skill %q: %w", legacyProcessAgentSkillName, err)
+	}
 	return i.status()
+}
+
+func (i *agentSkillInstaller) validateSkillDestination(name string) error {
+	target := filepath.Join(i.skillsDirectory, name)
+	info, err := os.Lstat(target)
+	if err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("agent skill destination %q cannot be a symbolic link", name)
+	}
+	if err == nil && !info.IsDir() {
+		return fmt.Errorf("agent skill destination %q must be a directory", name)
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect agent skill destination %q: %w", name, err)
+	}
+	return nil
+}
+
+func (i *agentSkillInstaller) migrateLegacyProcessSkill() error {
+	legacyTarget := filepath.Join(i.skillsDirectory, legacyProcessAgentSkillName)
+	if _, err := os.Lstat(legacyTarget); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect legacy agent skill %q: %w", legacyProcessAgentSkillName, err)
+	}
+
+	target := filepath.Join(i.skillsDirectory, agentSkillName)
+	if _, err := os.Lstat(target); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect agent skill destination %q: %w", agentSkillName, err)
+	}
+	if err := os.Rename(legacyTarget, target); err != nil {
+		return fmt.Errorf("rename agent skill %q to %q: %w", legacyProcessAgentSkillName, agentSkillName, err)
+	}
+	return nil
 }
 
 func (i *agentSkillInstaller) installSkill(name string) error {

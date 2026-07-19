@@ -21,7 +21,7 @@ Use the dependency-free scripts in `scripts/` to manage threads through the Dire
 - Read a bounded amount of tmux output. Avoid tight polling loops and increase the line count only when needed.
 - Reading is observational: it does not create a missing tmux session or start an agent. A newly-created thread has no Pi output until its coding-agent workspace has been opened.
 - Do not construct tmux session names, kill sessions directly, or mutate Dire Mux's project data files. Use these helpers so the API can persist changes, publish events, and perform cleanup.
-- Use the separate `dire-mux-processes` skill to start, interrupt, send input to, or stop processes in the current thread.
+- Use the separate `kiwi-code-processes` skill to start, interrupt, send input to, or stop processes in the current thread.
 
 Set the helper directory once when convenient:
 

@@ -42,7 +42,8 @@ func TestAgentSkillInstallerInstallsAndUpdatesBundle(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"name: dire-mux-processes",
+		"name: kiwi-code-processes",
+		"context: fork",
 		"scripts/start-process.mjs",
 		"scripts/read-logs.mjs",
 	} {
@@ -102,6 +103,54 @@ func TestAgentSkillInstallerInstallsAndUpdatesBundle(t *testing.T) {
 	}
 }
 
+func TestAgentSkillInstallerMigratesLegacyProcessSkill(t *testing.T) {
+	skillsDirectory := filepath.Join(t.TempDir(), ".agents", "skills")
+	legacyDirectory := filepath.Join(skillsDirectory, legacyProcessAgentSkillName)
+	if err := os.MkdirAll(filepath.Join(legacyDirectory, "notes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDirectory, "SKILL.md"), []byte("---\nname: dire-mux-processes\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDirectory, "notes", "keep.txt"), []byte("preserve me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	installer := newAgentSkillInstaller(skillsDirectory)
+	status, err := installer.status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Skills) == 0 || status.Skills[0].Name != agentSkillName || !status.Skills[0].Installed || status.Skills[0].UpToDate {
+		t.Fatalf("legacy process skill status = %#v", status)
+	}
+
+	status, err = installer.install()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Installed || !status.UpToDate {
+		t.Fatalf("migrated skill status = %#v", status)
+	}
+	if _, err := os.Stat(legacyDirectory); !os.IsNotExist(err) {
+		t.Fatalf("legacy skill directory still exists: %v", err)
+	}
+	contents, err := os.ReadFile(filepath.Join(skillsDirectory, agentSkillName, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(contents), "name: kiwi-code-processes") || !strings.Contains(string(contents), "context: fork") {
+		t.Fatalf("migrated process skill has unexpected contents: %s", contents)
+	}
+	preserved, err := os.ReadFile(filepath.Join(skillsDirectory, agentSkillName, "notes", "keep.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(preserved) != "preserve me\n" {
+		t.Fatalf("preserved legacy file = %q", preserved)
+	}
+}
+
 func TestBundledSkillCommonHelpersAreGenerated(t *testing.T) {
 	root := "agent-skill"
 	shared, err := os.ReadFile(filepath.Join(root, "common.shared.mjs"))
@@ -112,7 +161,7 @@ func TestBundledSkillCommonHelpersAreGenerated(t *testing.T) {
 		template string
 		target   string
 	}{
-		{template: "common.processes.mjs.tmpl", target: "dire-mux-processes/scripts/common.mjs"},
+		{template: "common.processes.mjs.tmpl", target: "kiwi-code-processes/scripts/common.mjs"},
 		{template: "common.threads.mjs.tmpl", target: "dire-mux-threads/scripts/common.mjs"},
 	} {
 		t.Run(item.target, func(t *testing.T) {
@@ -257,7 +306,9 @@ func TestAgentSkillSettingsHandlers(t *testing.T) {
 }
 
 func TestAgentSkillInstallerRejectsSymlinkDestination(t *testing.T) {
-	for _, name := range bundledAgentSkillNames {
+	names := append([]string{}, bundledAgentSkillNames[:]...)
+	names = append(names, legacyProcessAgentSkillName)
+	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
 			skillsDirectory := filepath.Join(root, "skills")
