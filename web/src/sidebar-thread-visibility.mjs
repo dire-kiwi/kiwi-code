@@ -52,8 +52,31 @@ export function defaultVisibleRootThreadIds(
     const rootId = rootThreadId(threadsById, activity.threadId)
     if (rootId && activeRootIds.has(rootId)) attentionRootIds.add(rootId)
   }
+  for (const thread of threads) {
+    if (!thread.bookmarked) continue
+    const rootId = rootThreadId(threadsById, thread.id)
+    if (rootId && activeRootIds.has(rootId)) attentionRootIds.add(rootId)
+  }
 
   return activeRoots
     .filter((thread) => recentIds.has(thread.id) || attentionRootIds.has(thread.id))
     .map((thread) => thread.id)
+}
+
+export function bookmarkedThreadPathIds(threads) {
+  const threadsById = new Map(threads.map((thread) => [thread.id, thread]))
+  const visibleIds = new Set()
+
+  for (const thread of threads) {
+    if (!thread.bookmarked) continue
+    let current = thread
+    const visited = new Set()
+    while (current && !visited.has(current.id)) {
+      visibleIds.add(current.id)
+      visited.add(current.id)
+      current = current.parentThreadId ? threadsById.get(current.parentThreadId) : null
+    }
+  }
+
+  return threads.filter((thread) => visibleIds.has(thread.id)).map((thread) => thread.id)
 }
