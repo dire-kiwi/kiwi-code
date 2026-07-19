@@ -33,7 +33,7 @@ var claudePluginBrowserSkill []byte
 //go:embed claude-plugin/LICENSE
 var claudePluginBrowserLicense []byte
 
-//go:embed claude-plugin/skills/dire-mux-processes/SKILL.md
+//go:embed claude-plugin/skills/kiwi-code-processes/SKILL.md
 var claudePluginProcessSkill []byte
 
 //go:embed claude-plugin/skills/dire-mux-workflows/SKILL.md
@@ -55,6 +55,10 @@ func materializeClaudePlugin(dataDirectory string) (string, error) {
 			return "", err
 		}
 	}
+	legacyProcessSkill := filepath.Join(root, "skills", legacyProcessAgentSkillName)
+	if err := os.RemoveAll(legacyProcessSkill); err != nil {
+		return "", fmt.Errorf("remove legacy Claude process skill: %w", err)
+	}
 	return root, nil
 }
 
@@ -68,11 +72,11 @@ func claudePluginFiles() ([]claudePluginFile, error) {
 		{path: filepath.Join("servers", "dire-mux-workflows.mjs"), contents: claudePluginWorkflowServer},
 		{path: filepath.Join("skills", "dire-mux-in-app-browser", "SKILL.md"), contents: claudePluginBrowserSkill},
 		{path: "LICENSE", contents: claudePluginBrowserLicense},
-		{path: filepath.Join("skills", "dire-mux-processes", "SKILL.md"), contents: claudePluginProcessSkill},
+		{path: filepath.Join("skills", agentSkillName, "SKILL.md"), contents: claudePluginProcessSkill},
 		{path: filepath.Join("skills", "dire-mux-workflows", "SKILL.md"), contents: claudePluginWorkflowSkill},
 	}
 
-	const scriptsRoot = embeddedAgentSkillRoot + "/dire-mux-processes/scripts"
+	const scriptsRoot = embeddedAgentSkillRoot + "/" + agentSkillName + "/scripts"
 	err := fs.WalkDir(embeddedAgentSkill, scriptsRoot, func(embeddedPath string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -89,7 +93,7 @@ func claudePluginFiles() ([]claudePluginFile, error) {
 			return err
 		}
 		files = append(files, claudePluginFile{
-			path:     filepath.Join("skills", "dire-mux-processes", "scripts", relative),
+			path:     filepath.Join("skills", agentSkillName, "scripts", relative),
 			contents: contents,
 		})
 		return nil

@@ -981,7 +981,7 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
                   <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-faint">Install locations</p>
                   <div className="mt-1.5 space-y-1">
                     {(bundledSkills.length ? bundledSkills : [
-                      { name: 'dire-mux-processes', path: '~/.agents/skills/dire-mux-processes' },
+                      { name: 'kiwi-code-processes', path: '~/.agents/skills/kiwi-code-processes' },
                       { name: 'dire-mux-threads', path: '~/.agents/skills/dire-mux-threads' },
                       { name: 'dire-mux-mermaid', path: '~/.agents/skills/dire-mux-mermaid' },
                     ]).map((skill) => (
