@@ -270,7 +270,7 @@ export function PiNativeComposer({
             type="button"
             className={classNames(
               piNativeStyles.primary,
-              primaryActionIsStop && piNativeStyles.primaryStop,
+              primaryActionIsStop ? piNativeStyles.primaryStop : piNativeStyles.primarySend,
             )}
             aria-label={isUploadingImages
               ? 'Uploading images'
