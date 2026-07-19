@@ -20,6 +20,7 @@ const (
 	defaultClaudeGPTSonnetModel   = "gpt-5.6-terra"
 	defaultClaudeGPTHaikuModel    = "gpt-5.6-luna"
 	claudeGPTProfileDirectoryName = "claude-code-gpt-profile"
+	claudeSettingsFileName        = "settings.json"
 	claudeSandboxPluginID         = "sandbox-exec@dire-agent-extensions"
 	maxCLIProxyAPIModelsResponse  = 1 << 20
 	cliProxyAPIBaseURLEnvironment = "DIRE_MUX_CLIPROXY_BASE_URL"
@@ -30,9 +31,42 @@ var claudeGPTUnsetEnvironment = []string{
 	"ANTHROPIC_API_KEY",
 	"ANTHROPIC_CUSTOM_HEADERS",
 	"CLAUDE_CODE_OAUTH_TOKEN",
+	"CLAUDE_CODE_SUBAGENT_MODEL",
+	"CLAUDE_CODE_USE_ANTHROPIC_AWS",
 	"CLAUDE_CODE_USE_BEDROCK",
 	"CLAUDE_CODE_USE_FOUNDRY",
 	"CLAUDE_CODE_USE_VERTEX",
+}
+
+var claudeGPTExcludedSettings = []string{
+	"model",
+	"availableModels",
+	"enforceAvailableModels",
+	"apiKeyHelper",
+	"awsAuthRefresh",
+	"awsCredentialExport",
+	"forceLoginMethod",
+	"forceLoginOrgUUID",
+}
+
+var claudeGPTExcludedSettingEnvironment = map[string]struct{}{
+	"ANTHROPIC_API_KEY":              {},
+	"ANTHROPIC_AUTH_TOKEN":           {},
+	"ANTHROPIC_BASE_URL":             {},
+	"ANTHROPIC_CUSTOM_HEADERS":       {},
+	"ANTHROPIC_DEFAULT_HAIKU_MODEL":  {},
+	"ANTHROPIC_DEFAULT_OPUS_MODEL":   {},
+	"ANTHROPIC_DEFAULT_SONNET_MODEL": {},
+	"ANTHROPIC_MODEL":                {},
+	"ANTHROPIC_SMALL_FAST_MODEL":     {},
+	"CLAUDE_CONFIG_DIR":              {},
+	"CLAUDE_CODE_OAUTH_TOKEN":        {},
+	"CLAUDE_CODE_PLUGIN_CACHE_DIR":   {},
+	"CLAUDE_CODE_SUBAGENT_MODEL":     {},
+	"CLAUDE_CODE_USE_ANTHROPIC_AWS":  {},
+	"CLAUDE_CODE_USE_BEDROCK":        {},
+	"CLAUDE_CODE_USE_FOUNDRY":        {},
+	"CLAUDE_CODE_USE_VERTEX":         {},
 }
 
 type claudeInstalledPluginRegistry struct {
@@ -231,7 +265,71 @@ func (h *terminalHandler) claudeGPTProfileDirectory() (string, error) {
 	if err := secureClaudeGPTProfileDirectory(profilePath); err != nil {
 		return "", err
 	}
+	if h.claudeConfigErr != nil {
+		return "", h.claudeConfigErr
+	}
+	if h.claudeConfigPath == "" {
+		return "", errors.New("Claude config directory is unavailable")
+	}
+	if err := syncClaudeGPTProfileSettings(profilePath, h.claudeConfigPath); err != nil {
+		return "", err
+	}
 	return profilePath, nil
+}
+
+func syncClaudeGPTProfileSettings(profilePath, configDirectory string) error {
+	contents, err := os.ReadFile(filepath.Join(configDirectory, claudeSettingsFileName))
+	if err != nil {
+		return fmt.Errorf("read Claude settings: %w", err)
+	}
+	filtered, err := filterClaudeGPTSettings(contents)
+	if err != nil {
+		return err
+	}
+	if err := writeFileAtomically(
+		filepath.Join(profilePath, claudeSettingsFileName),
+		filtered,
+		serverAtomicFileOptions{Mode: 0o600, SyncFile: true},
+	); err != nil {
+		return fmt.Errorf("write Claude GPT settings: %w", err)
+	}
+	return nil
+}
+
+func filterClaudeGPTSettings(contents []byte) ([]byte, error) {
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(contents, &settings); err != nil {
+		return nil, fmt.Errorf("decode Claude settings: %w", err)
+	}
+	if settings == nil {
+		return nil, errors.New("decode Claude settings: expected a JSON object")
+	}
+
+	// The GPT profile inherits the user's behavior and plugin choices, while
+	// Dire Mux remains authoritative for model selection and proxy routing.
+	for _, key := range claudeGPTExcludedSettings {
+		delete(settings, key)
+	}
+	if rawEnvironment, ok := settings["env"]; ok {
+		var environment map[string]json.RawMessage
+		if err := json.Unmarshal(rawEnvironment, &environment); err != nil {
+			return nil, fmt.Errorf("decode Claude settings env: %w", err)
+		}
+		for name := range claudeGPTExcludedSettingEnvironment {
+			delete(environment, name)
+		}
+		encoded, err := json.Marshal(environment)
+		if err != nil {
+			return nil, fmt.Errorf("encode Claude settings env: %w", err)
+		}
+		settings["env"] = encoded
+	}
+
+	filtered, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("encode Claude GPT settings: %w", err)
+	}
+	return append(filtered, '\n'), nil
 }
 
 func defaultClaudeConfigDirectory() (string, error) {
@@ -245,12 +343,27 @@ func defaultClaudeConfigDirectory() (string, error) {
 	return filepath.Join(home, ".claude"), nil
 }
 
-func discoverClaudeSandboxPluginPath() (string, error) {
-	configDirectory, err := defaultClaudeConfigDirectory()
-	if err != nil {
-		return "", fmt.Errorf("find Claude config directory: %w", err)
+func defaultClaudePluginDirectory(configDirectory string) (string, error) {
+	if strings.TrimSpace(configDirectory) == "" {
+		return "", errors.New("Claude config directory is unavailable")
 	}
-	settingsContents, err := os.ReadFile(filepath.Join(configDirectory, "settings.json"))
+	if configured := strings.TrimSpace(os.Getenv("CLAUDE_CODE_PLUGIN_CACHE_DIR")); configured != "" {
+		return filepath.Abs(configured)
+	}
+	return filepath.Join(configDirectory, "plugins"), nil
+}
+
+func discoverClaudeSandboxPluginPath() (string, error) {
+	configDirectory, configErr := defaultClaudeConfigDirectory()
+	pluginDirectory, pluginErr := defaultClaudePluginDirectory(configDirectory)
+	return discoverClaudeSandboxPluginPathFrom(configDirectory, pluginDirectory, errors.Join(configErr, pluginErr))
+}
+
+func discoverClaudeSandboxPluginPathFrom(configDirectory, pluginDirectory string, configurationErr error) (string, error) {
+	if configurationErr != nil {
+		return "", fmt.Errorf("find Claude configuration: %w", configurationErr)
+	}
+	settingsContents, err := os.ReadFile(filepath.Join(configDirectory, claudeSettingsFileName))
 	if err != nil {
 		return "", fmt.Errorf("read Claude settings: %w", err)
 	}
@@ -264,7 +377,7 @@ func discoverClaudeSandboxPluginPath() (string, error) {
 		return "", fmt.Errorf("Claude plugin %s is not enabled", claudeSandboxPluginID)
 	}
 
-	registryContents, err := os.ReadFile(filepath.Join(configDirectory, "plugins", "installed_plugins.json"))
+	registryContents, err := os.ReadFile(filepath.Join(pluginDirectory, "installed_plugins.json"))
 	if err != nil {
 		return "", fmt.Errorf("read installed Claude plugins: %w", err)
 	}
@@ -289,9 +402,10 @@ func discoverClaudeSandboxPluginPath() (string, error) {
 	return "", fmt.Errorf("Claude plugin %s is not installed", claudeSandboxPluginID)
 }
 
-func claudeGPTProxyEnvironment(profilePath, baseURL, apiKey, model string) []string {
+func claudeGPTProxyEnvironment(profilePath, pluginDirectory, baseURL, apiKey, model string) []string {
 	return []string{
 		"CLAUDE_CONFIG_DIR=" + profilePath,
+		"CLAUDE_CODE_PLUGIN_CACHE_DIR=" + pluginDirectory,
 		"IS_DEMO=1",
 		"ANTHROPIC_BASE_URL=" + baseURL,
 		"ANTHROPIC_AUTH_TOKEN=" + apiKey,

@@ -24,9 +24,6 @@ var claudePluginHookScript []byte
 //go:embed claude-plugin/servers/dire-mux-browser.mjs
 var claudePluginBrowserServer []byte
 
-//go:embed claude-plugin/servers/dire-mux-workflows.mjs
-var claudePluginWorkflowServer []byte
-
 //go:embed claude-plugin/skills/dire-mux-in-app-browser/SKILL.md
 var claudePluginBrowserSkill []byte
 
@@ -35,9 +32,6 @@ var claudePluginBrowserLicense []byte
 
 //go:embed claude-plugin/skills/kiwi-code-processes/SKILL.md
 var claudePluginProcessSkill []byte
-
-//go:embed claude-plugin/skills/dire-mux-workflows/SKILL.md
-var claudePluginWorkflowSkill []byte
 
 type claudePluginFile struct {
 	path     string
@@ -55,9 +49,15 @@ func materializeClaudePlugin(dataDirectory string) (string, error) {
 			return "", err
 		}
 	}
-	legacyProcessSkill := filepath.Join(root, "skills", legacyProcessAgentSkillName)
-	if err := os.RemoveAll(legacyProcessSkill); err != nil {
-		return "", fmt.Errorf("remove legacy Claude process skill: %w", err)
+	obsoletePaths := []string{
+		filepath.Join("skills", legacyProcessAgentSkillName),
+		filepath.Join("skills", "dire-mux-workflows"),
+		filepath.Join("servers", "dire-mux-workflows.mjs"),
+	}
+	for _, relativePath := range obsoletePaths {
+		if err := os.RemoveAll(filepath.Join(root, relativePath)); err != nil {
+			return "", fmt.Errorf("remove obsolete Claude plugin path %q: %w", relativePath, err)
+		}
 	}
 	return root, nil
 }
@@ -69,11 +69,9 @@ func claudePluginFiles() ([]claudePluginFile, error) {
 		{path: filepath.Join("hooks", "hooks.json"), contents: claudePluginHooks},
 		{path: filepath.Join("scripts", "dire-mux-hook.mjs"), contents: claudePluginHookScript},
 		{path: filepath.Join("servers", "dire-mux-browser.mjs"), contents: claudePluginBrowserServer},
-		{path: filepath.Join("servers", "dire-mux-workflows.mjs"), contents: claudePluginWorkflowServer},
 		{path: filepath.Join("skills", "dire-mux-in-app-browser", "SKILL.md"), contents: claudePluginBrowserSkill},
 		{path: "LICENSE", contents: claudePluginBrowserLicense},
 		{path: filepath.Join("skills", agentSkillName, "SKILL.md"), contents: claudePluginProcessSkill},
-		{path: filepath.Join("skills", "dire-mux-workflows", "SKILL.md"), contents: claudePluginWorkflowSkill},
 	}
 
 	const scriptsRoot = embeddedAgentSkillRoot + "/" + agentSkillName + "/scripts"

@@ -1244,7 +1244,7 @@ export function ClaudeNativePane({
         thinking={selectedThinking}
         thinkingOptions={claudeThinkingLevelIds.map((level) => ({
           value: level,
-          label: level === 'ultracode' ? 'Ultracode (workflows)' : level,
+          label: level === 'ultracode' ? 'Ultracode (Claude built-in)' : level,
         }))}
         thinkingDisabled={connectionStatus !== 'open' || isStreaming || isUploadingImages}
         onThinkingChange={selectThinking}
