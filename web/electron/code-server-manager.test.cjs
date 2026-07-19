@@ -234,9 +234,53 @@ test('starts, authenticates, embeds, reuses, and disposes code-server', async ()
     assert.ok(states.some((state) => state.status === 'ready'))
 
     assert.equal((await fs.stat(manager.paths.config)).mode & 0o777, 0o600)
+
+    const extensionDirectories = await fs.readdir(manager.paths.extensions)
+    const themeDirectory = extensionDirectories.find((name) => name.startsWith('dire-mux.kiwi-code-theme-'))
+    assert.ok(themeDirectory, 'the Kiwi Code theme extension is installed')
+    const installedTheme = JSON.parse(await fs.readFile(
+      path.join(manager.paths.extensions, themeDirectory, 'themes', 'kiwi-code-color-theme.json'),
+      'utf8',
+    ))
+    assert.equal(installedTheme.name, 'Kiwi Code')
+    const seededSettings = JSON.parse(await fs.readFile(
+      path.join(manager.paths.userData, 'User', 'settings.json'),
+      'utf8',
+    ))
+    assert.equal(seededSettings['workbench.colorTheme'], 'Kiwi Code')
   } finally {
     await manager.dispose()
     assert.ok(children[0].kills.includes('SIGTERM'))
+    await fs.rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('preparePaths keeps existing code-server user settings intact', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'dire-mux-code-settings-'))
+  const electronSession = fakeElectronSession()
+  const appView = { webContents: { isDestroyed: () => false, focus() {} } }
+  const manager = new CodeServerWorkspaceManager({
+    app: { getPath: () => directory },
+    WebContentsView: fakeViewClass(electronSession, []),
+    hostWindow: fakeHostWindow(appView),
+    appView,
+    electronSession,
+    environment: {},
+    spawn() { throw new Error('not spawned') },
+  })
+  const settingsPath = path.join(manager.paths.userData, 'User', 'settings.json')
+  try {
+    await manager.preparePaths()
+    assert.equal(
+      JSON.parse(await fs.readFile(settingsPath, 'utf8'))['workbench.colorTheme'],
+      'Kiwi Code',
+    )
+    const custom = '{\n  "workbench.colorTheme": "Custom"\n}\n'
+    await fs.writeFile(settingsPath, custom)
+    await manager.preparePaths()
+    assert.equal(await fs.readFile(settingsPath, 'utf8'), custom)
+  } finally {
+    await manager.dispose()
     await fs.rm(directory, { recursive: true, force: true })
   }
 })
