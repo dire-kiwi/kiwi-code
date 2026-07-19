@@ -601,7 +601,10 @@ func TestClaudeGPTCommandLoadsItsDefaultModelFromCLIProxyAPI(t *testing.T) {
 	for _, expected := range []string{
 		"--model\ngpt-5.4",
 		"ANTHROPIC_MODEL=gpt-5.4",
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5.4",
+		"ANTHROPIC_SMALL_FAST_MODEL=gpt-5.6-luna",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL=gpt-5.6-sol",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-5.6-terra",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5.6-luna",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("default Claude GPT args = %#v, missing %q", args, expected)
@@ -687,10 +690,10 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 					"ANTHROPIC_BASE_URL=http://127.0.0.1:18317",
 					"ANTHROPIC_AUTH_TOKEN=proxy-client-key",
 					"ANTHROPIC_MODEL=gpt-5.4",
-					"ANTHROPIC_SMALL_FAST_MODEL=gpt-5.4",
-					"ANTHROPIC_DEFAULT_OPUS_MODEL=gpt-5.4",
-					"ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-5.4",
-					"ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5.4",
+					"ANTHROPIC_SMALL_FAST_MODEL=gpt-5.6-luna",
+					"ANTHROPIC_DEFAULT_OPUS_MODEL=gpt-5.6-sol",
+					"ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-5.6-terra",
+					"ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5.6-luna",
 					"DIRE_MUX_CODING_AGENT=" + codingAgentClaudeGPT,
 					"/plugin/sandbox-exec",
 				} {
