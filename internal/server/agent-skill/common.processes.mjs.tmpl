@@ -1,0 +1,14 @@
+const threadEndpoint = process.env.DIRE_MUX_THREAD_ENDPOINT?.replace(/\/+$/, "");
+
+/* DIRE_MUX_SHARED_COMMON */
+
+export function processApi(path = "") {
+  if (!threadEndpoint) {
+    throw new Error("DIRE_MUX_THREAD_ENDPOINT is not set. Run this helper from a Dire Mux agent session.");
+  }
+  return `${threadEndpoint}/processes${path}`;
+}
+
+export function request(path = "", init = {}) {
+  return requestURL(processApi(path), init);
+}

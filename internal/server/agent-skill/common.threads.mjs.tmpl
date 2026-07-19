@@ -1,0 +1,88 @@
+const rawThreadEndpoint = process.env.DIRE_MUX_THREAD_ENDPOINT?.replace(/\/+$/, "");
+
+/* DIRE_MUX_SHARED_COMMON */
+
+function context() {
+  if (!rawThreadEndpoint) {
+    throw new Error("DIRE_MUX_THREAD_ENDPOINT is not set. Run this helper from a Dire Mux agent session.");
+  }
+
+  let endpoint;
+  try {
+    endpoint = new URL(rawThreadEndpoint);
+  } catch {
+    throw new Error("DIRE_MUX_THREAD_ENDPOINT is not a valid URL.");
+  }
+
+  const match = endpoint.pathname.match(/\/api\/projects\/([^/]+)\/threads\/([^/]+)\/?$/);
+  return {
+    endpoint,
+    projectId: process.env.DIRE_MUX_PROJECT_ID || (match ? decodeURIComponent(match[1]) : ""),
+    threadId: process.env.DIRE_MUX_THREAD_ID || (match ? decodeURIComponent(match[2]) : ""),
+  };
+}
+
+export function apiPath(pathname) {
+  const { endpoint } = context();
+  return new URL(pathname, `${endpoint.origin}/`).toString();
+}
+
+export function currentProjectId(explicit = "") {
+  const projectId = explicit.trim() || context().projectId;
+  if (!projectId) throw new Error("A project ID is required. Pass --project <project-id>.");
+  return projectId;
+}
+
+export function currentThreadId(explicit = "") {
+  const threadId = explicit.trim() || context().threadId;
+  if (!threadId) throw new Error("A thread ID is required. Pass --thread <thread-id>.");
+  return threadId;
+}
+
+export function threadPath(projectId, threadId, suffix = "") {
+  return `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}${suffix}`;
+}
+
+export function readOption(args, name) {
+  let value;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument !== name && !argument.startsWith(`${name}=`)) continue;
+    if (value !== undefined) throw new Error(`${name} may only be passed once.`);
+
+    if (argument === name) {
+      if (index + 1 >= args.length || args[index + 1].startsWith("--")) {
+        throw new Error(`${name} requires a value.`);
+      }
+      value = args[index + 1];
+      args.splice(index, 2);
+    } else {
+      value = argument.slice(name.length + 1);
+      args.splice(index, 1);
+    }
+    if (!value) throw new Error(`${name} requires a value.`);
+    index -= 1;
+  }
+  return value;
+}
+
+export function readFlag(args, name) {
+  let found = false;
+  for (let index = args.indexOf(name); index !== -1; index = args.indexOf(name)) {
+    if (found) throw new Error(`${name} may only be passed once.`);
+    found = true;
+    args.splice(index, 1);
+  }
+  return found;
+}
+
+export function rejectUnknownOptions(args) {
+  const unknown = args.find((argument) => argument.startsWith("--") && argument !== "--");
+  if (unknown) throw new Error(`Unknown option: ${unknown}`);
+  const separator = args.indexOf("--");
+  if (separator !== -1) args.splice(separator, 1);
+}
+
+export function request(pathname, init = {}) {
+  return requestURL(apiPath(pathname), init);
+}

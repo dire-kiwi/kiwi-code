@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dire Mux event-streaming fix report</title>
+  <style>
+    :root { color-scheme:dark; --bg:#090c0f; --panel:#12171c; --raised:#182028; --line:#29343e; --text:#edf3f8; --muted:#9aaab8; --green:#b5bd68; --green2:#d7df88; --blue:#81a2be; --cyan:#8abeb7; --yellow:#f0c674; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:radial-gradient(circle at 15% -10%,#223123 0,transparent 32rem),radial-gradient(circle at 95% 20%,#172632 0,transparent 30rem),var(--bg); color:var(--text); font:15px/1.6 Inter,ui-sans-serif,system-ui,-apple-system,sans-serif; }
+    main { width:min(1140px,calc(100% - 32px)); margin:auto; padding:58px 0 80px; }
+    header { display:grid; grid-template-columns:1fr auto; gap:26px; align-items:end; padding-bottom:29px; border-bottom:1px solid var(--line); }
+    .eyebrow,.kicker { color:var(--green); font:700 11px/1.2 ui-monospace,SFMono-Regular,monospace; letter-spacing:.14em; text-transform:uppercase; }
+    h1 { margin:8px 0; font-size:clamp(34px,5vw,60px); line-height:1.02; letter-spacing:-.05em; }
+    h2 { margin:0 0 16px; font-size:23px; letter-spacing:-.025em; }
+    h3 { margin:0 0 6px; font-size:15px; }
+    p { margin:0; }
+    .subtitle { max-width:770px; color:var(--muted); font-size:17px; }
+    .result { padding:15px 18px; border:1px solid #b5bd6855; border-radius:13px; background:#b5bd6815; color:var(--green2); font:700 13px/1.6 ui-monospace,SFMono-Regular,monospace; }
+    section { margin-top:42px; }
+    .scorecard { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+    .score { padding:18px; border:1px solid var(--line); border-radius:14px; background:linear-gradient(145deg,var(--raised),var(--panel)); box-shadow:0 20px 60px #0003; }
+    .score strong { display:block; margin:7px 0 1px; color:var(--green2); font-size:27px; line-height:1; }
+    .score span { color:var(--muted); font-size:12px; }
+    .architecture { display:grid; grid-template-columns:1fr 42px 1.15fr 42px 1.15fr; align-items:stretch; }
+    .node { min-height:130px; padding:18px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
+    .node strong { display:block; margin:7px 0; }
+    .node small { color:var(--muted); }
+    .arrow { display:grid; place-items:center; color:var(--green); font-size:23px; }
+    .terminal-line { display:grid; grid-template-columns:1fr 42px 1.15fr 42px 1.15fr; margin-top:11px; }
+    .fixes { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .fix { padding:20px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
+    .fix .number { display:grid; width:28px; height:28px; place-items:center; margin-bottom:14px; border:1px solid #b5bd6866; border-radius:8px; background:#b5bd6818; color:var(--green2); font:700 12px ui-monospace,SFMono-Regular,monospace; }
+    .fix p { color:var(--muted); }
+    code { padding:2px 5px; border:1px solid var(--line); border-radius:5px; background:#090d11; color:#cfdae4; font:12px ui-monospace,SFMono-Regular,monospace; }
+    table { width:100%; border-collapse:separate; border-spacing:0; overflow:hidden; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
+    th,td { padding:13px 15px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { color:var(--muted); background:#101419; font:700 10px/1.2 ui-monospace,SFMono-Regular,monospace; letter-spacing:.1em; text-transform:uppercase; }
+    tr:last-child td { border-bottom:0; }
+    .pass { color:var(--green2); font:700 11px ui-monospace,SFMono-Regular,monospace; }
+    .matrix { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .console { padding:20px; overflow:auto; border:1px solid var(--line); border-radius:14px; background:#070a0d; color:#c9d6df; font:12px/1.8 ui-monospace,SFMono-Regular,monospace; white-space:pre-wrap; }
+    .console b { color:var(--green2); }
+    .note { padding:20px 22px; border-left:3px solid var(--blue); border-radius:0 12px 12px 0; background:#81a2be12; }
+    .note p { color:#b8c8d5; }
+    ul { margin:8px 0 0; padding-left:20px; color:var(--muted); }
+    footer { margin-top:48px; padding-top:20px; border-top:1px solid var(--line); color:var(--muted); font-size:12px; }
+    @media(max-width:850px){header{grid-template-columns:1fr}.scorecard,.fixes,.matrix{grid-template-columns:1fr 1fr}.architecture,.terminal-line{grid-template-columns:1fr}.arrow{height:40px;transform:rotate(90deg)}}
+    @media(max-width:560px){.scorecard,.fixes,.matrix{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <div class="eyebrow">Implementation report · after changes</div>
+      <h1>Reliable global events, scoped terminal streams</h1>
+      <p class="subtitle">Dire Mux now preserves ordered status snapshots for healthy subscribers, bounds stalled-client memory, keeps project and Pi domains independently ordered on one browser stream, and verifies tmux fan-out, isolation, liveness, and cleanup end to end.</p>
+    </div>
+    <div class="result">STATUS: PASS<br />DATE: 2026-07-15<br />REGRESSIONS: 0</div>
+  </header>
+
+  <section class="scorecard" aria-label="Result summary">
+    <div class="score"><div class="kicker">Global SSE</div><strong>1</strong><span>connection per browser, down from 2</span></div>
+    <div class="score"><div class="kicker">Fan-out clients</div><strong>3/3</strong><span>received each tested transition</span></div>
+    <div class="score"><div class="kicker">Shared tmux</div><strong>3/3</strong><span>received the session token</span></div>
+    <div class="score"><div class="kicker">Isolation</div><strong>0</strong><span>tokens leaked across threads</span></div>
+  </section>
+
+  <section>
+    <h2>Resulting architecture</h2>
+    <div class="architecture" aria-label="Global status architecture">
+      <div class="node"><div class="kicker">Commit</div><strong>Capture immutable snapshot</strong><small>The project store and Pi tracker capture state at the mutation that produced the event.</small></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="kicker">Fan-out</div><strong>Ordered bounded queue per subscriber</strong><small>Healthy consumers receive every snapshot. A stalled stream is closed at its backlog limit and reconnects to current authoritative state without blocking mutations.</small></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="kicker">Browser</div><strong><code>GET /api/events</code></strong><small>Named <code>projects</code> and <code>pi-activity</code> SSE messages share one reconnect lifecycle.</small></div>
+    </div>
+    <div class="terminal-line" aria-label="Terminal architecture">
+      <div class="node"><div class="kicker">Open pane</div><strong>Session-specific WebSocket</strong><small>The URL identifies project, thread, and tool.</small></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="kicker">Backend</div><strong>Dedicated tmux attach PTY</strong><small>Upgrade validation happens before session creation; ping/pong deadlines detect dead peers while each pane remains a separate tmux client.</small></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="kicker">Routing</div><strong>Write only to that socket</strong><small>Multiple attachments share output; unrelated sessions receive no bytes.</small></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What changed</h2>
+    <div class="fixes">
+      <article class="fix"><div class="number">01</div><h3>Lossy signals became a bounded broker</h3><p><code>internal/broadcast</code> owns subscriber registration and immutable queues. Project and Pi publishers enqueue every snapshot in order; a stalled subscriber is disconnected at a fixed backlog instead of blocking writes or consuming unbounded memory.</p></article>
+      <article class="fix"><div class="number">02</div><h3>Independent domains share one connection</h3><p><code>GET /api/events</code> sends named <code>projects</code> and <code>pi-activity</code> messages. Keeping the payloads separate avoids cross-domain rollback under bursts. Project events refresh external Git status and Pi events filter removed threads.</p></article>
+      <article class="fix"><div class="number">03</div><h3>Terminal lifecycle is explicit</h3><p>Plain HTTP probes cannot start tmux, WebSocket handshakes precede session creation, ping/pong deadlines remove dead peers, and deleting a project stops every thread/tool session before removing its record.</p></article>
+      <article class="fix"><div class="number">04</div><h3>Reusable headless contract runner</h3><p><code>internal/headless</code> and <code>cmd/headless-client</code> health-check the server, coordinate simultaneous clients, test heartbeats and transitions, verify tmux fan-out/isolation/closure, support remote paths, and offer <code>-skip-terminal</code>.</p></article>
+    </div>
+  </section>
+
+  <section>
+    <h2>Headless test matrix</h2>
+    <table>
+      <thead><tr><th>Scenario</th><th>Expected contract</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>Three clients open <code>/api/events</code></td><td>Each receives initial project and Pi snapshots.</td><td class="pass">PASS</td></tr>
+        <tr><td>Create project and thread</td><td>All three receive matching <code>projects</code> snapshots.</td><td class="pass">PASS</td></tr>
+        <tr><td>Working → heartbeat → finished → idle</td><td>All three receive every snapshot in order, including the same-state heartbeat.</td><td class="pass">PASS</td></tr>
+        <tr><td>Three WebSockets attach to thread A</td><td>A token written through one attachment appears on all three.</td><td class="pass">PASS</td></tr>
+        <tr><td>One WebSocket attaches to thread B</td><td>Thread A’s token never appears; B’s token never appears on A.</td><td class="pass">PASS</td></tr>
+        <tr><td>Rename and delete thread</td><td>All global consumers update and the deleted thread’s open terminal closes.</td><td class="pass">PASS</td></tr>
+        <tr><td>Delete project</td><td>All consumers remove it and every remaining project terminal closes.</td><td class="pass">PASS</td></tr>
+        <tr><td>Stalled subscriber</td><td>Its bounded broker queue closes while a healthy subscriber remains ordered.</td><td class="pass">PASS</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Verification evidence</h2>
+    <div class="matrix">
+      <div class="console"><b>PASS</b>  opened 3 global event clients
+<b>PASS</b>  project creation reached every global client
+<b>PASS</b>  thread creation reached every global client
+<b>PASS</b>  working heartbeat and rapid status transitions reached every global client in order
+<b>PASS</b>  tmux output reached attached clients and did not leak to another thread
+<b>PASS</b>  thread deletion closed its open terminal stream
+<b>PASS</b>  project deletion reached every client and closed its terminal streams
+<b>PASS</b>  multi-client API check passed</div>
+      <div class="console"><b>PASS</b>  go test ./...
+<b>PASS</b>  go test -race ./internal/broadcast ./internal/headless ./internal/project ./internal/server
+<b>PASS</b>  go vet ./...
+<b>PASS</b>  npm run build
+
+Go packages: all passed
+Race detector: clean
+TypeScript: clean
+Vite production build: complete</div>
+    </div>
+  </section>
+
+  <section class="note">
+    <h3>Compatibility and operating boundary</h3>
+    <p>The project-only and Pi-only SSE endpoints are retained for compatibility, but the UI uses the named global stream. Connected consumers receive ordered snapshots; a consumer that exceeds 256 queued snapshots is deliberately disconnected so EventSource can reconnect to authoritative initial state. The stream is state delivery rather than a durable audit log, so it does not replay intermediate events missed while offline. Terminal window selection remains tmux session semantics.</p>
+  </section>
+
+  <section>
+    <h2>How to rerun</h2>
+    <div class="console"># Start Dire Mux, then run:
+make headless-test
+
+# More clients or a remote server-visible path:
+go run ./cmd/headless-client -url http://server:8080 -clients 5 -project-path /absolute/path/on/server
+
+# Status-only check where tmux is unavailable:
+go run ./cmd/headless-client -skip-terminal</div>
+  </section>
+
+  <footer>Prepared from the implemented workspace state on 2026-07-15. The companion <strong>event-streaming-review.html</strong> records the baseline analysis.</footer>
+</main>
+</body>
+</html>

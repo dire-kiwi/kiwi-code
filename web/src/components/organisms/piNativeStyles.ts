@@ -1,0 +1,92 @@
+export const piNativeStyles = {
+  pane: 'absolute inset-0 grid grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-[radial-gradient(circle_at_50%_-10%,color-mix(in_srgb,var(--theme-color-green)_4%,transparent),transparent_34%),var(--theme-color-background)] text-ghost-bright-white transition-opacity duration-150 motion-reduce:transition-none',
+  paneActive: 'visible opacity-100',
+  paneHidden: 'pointer-events-none invisible opacity-0',
+  timeline: 'min-h-0 overflow-auto overscroll-contain',
+  conversation: 'mx-auto flex min-h-full w-[min(100%,900px)] flex-col justify-end px-7 pb-6 pt-[34px] max-[820px]:px-5',
+  empty: 'grid min-h-full place-content-center justify-items-center px-6 pb-[110px] pt-12 text-center',
+  emptyGlyph: 'grid size-12 place-items-center rounded-[15px] border border-ghost-border/80 bg-ghost-panel/90 text-ghost-green shadow-[0_16px_40px_color-mix(in_srgb,var(--theme-color-canvas)_34%,transparent)]',
+  emptyTitle: 'mt-[18px] text-[15px] font-[650] tracking-[-0.01em]',
+  emptyCopy: 'mt-[7px] max-w-[390px] text-[11px] leading-[1.7] text-ghost-muted',
+  jump: 'absolute bottom-[142px] left-1/2 z-4 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-ghost-border/80 bg-ghost-panel/95 px-[11px] py-[7px] text-[9px] text-ghost-muted shadow-[0_10px_28px_color-mix(in_srgb,var(--theme-color-canvas)_35%,transparent)] backdrop-blur-[10px]',
+  composerWrap: 'relative z-[3] w-full min-w-0 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--theme-color-background)_88%,transparent),var(--theme-color-background)_22%)] px-6 pb-[17px] pt-[13px] max-[820px]:px-3.5',
+  composerStatus: 'mx-auto mb-2 flex w-[min(100%,860px)] justify-start',
+  activityToggle: 'inline-flex h-[25px] w-auto max-w-full flex-[0_1_auto] items-center justify-start gap-1.5 rounded-full border border-ghost-green/25 bg-ghost-black/20 px-2 font-mono text-[7px] text-ghost-green hover:bg-ghost-raised/70 [&>span]:truncate',
+  composer: 'mx-auto w-[min(100%,860px)] min-w-0 overflow-hidden rounded-[14px] border border-ghost-border/80 bg-[color-mix(in_srgb,var(--theme-color-panel)_94%,var(--theme-color-background))] shadow-[0_14px_34px_color-mix(in_srgb,var(--theme-color-canvas)_24%,transparent)] focus-within:border-ghost-green/50 focus-within:ring-2 focus-within:ring-ghost-green/[0.07]',
+  queue: 'flex max-h-[84px] flex-col gap-1 overflow-auto border-b border-ghost-border/55 px-3 py-2 text-[9px]',
+  queueLabel: 'font-mono text-[8px] font-bold uppercase tracking-[0.08em] text-ghost-green',
+  queueMessage: 'truncate text-ghost-muted',
+  notice: 'flex items-center gap-[7px] border-b border-ghost-border/55 px-[13px] py-2 text-[9px] leading-[1.45] text-ghost-muted',
+  error: 'flex items-center gap-[7px] border-b border-ghost-border/55 bg-ghost-bright-red/[0.08] px-[13px] py-2 text-[9px] leading-[1.45] text-ghost-bright-red',
+  activityPanel: 'border-b border-ghost-border/60 bg-ghost-black/30 px-3 pb-3 pt-2.5 font-mono',
+  activityHeader: 'mb-[9px] flex items-center justify-between gap-3 max-[700px]:flex-col max-[700px]:items-start [&>div:first-child]:flex [&>div:first-child]:min-w-0 [&>div:first-child]:items-center [&>div:first-child]:gap-2 [&>div:first-child]:text-ghost-green [&_span]:flex [&_span]:min-w-0 [&_span]:flex-col [&_span]:gap-px [&_strong]:text-[9px] [&_strong]:font-bold [&_strong]:text-ghost-bright-white [&_small]:truncate [&_small]:text-[7px] [&_small]:font-normal [&_small]:text-ghost-dim',
+  activityActions: 'flex shrink-0 items-center gap-1 [&_button]:flex [&_button]:min-h-6 [&_button]:items-center [&_button]:gap-1 [&_button]:rounded-md [&_button]:border [&_button]:border-ghost-border/70 [&_button]:bg-ghost-panel/80 [&_button]:px-[7px] [&_button]:py-[3px] [&_button]:font-inherit [&_button]:text-[7px] [&_button]:text-ghost-muted [&_button:hover:not(:disabled)]:border-ghost-green/35 [&_button:hover:not(:disabled)]:text-ghost-bright-white [&_button:disabled]:cursor-default [&_button:disabled]:opacity-50',
+  activityGrid: 'm-0 grid grid-cols-2 gap-[5px] max-[700px]:grid-cols-1 [&>div]:min-w-0 [&>div]:rounded-[7px] [&>div]:border [&>div]:border-ghost-border/55 [&>div]:bg-ghost-panel/55 [&>div]:px-2 [&>div]:py-[7px] [&_dt]:mb-1 [&_dt]:text-[7px] [&_dt]:font-bold [&_dt]:uppercase [&_dt]:tracking-[0.07em] [&_dt]:text-ghost-dim [&_dd]:m-0 [&_dd]:flex [&_dd]:min-w-0 [&_dd]:items-center [&_dd]:gap-[5px] [&_dd]:overflow-hidden [&_dd]:text-ellipsis [&_dd]:whitespace-nowrap [&_dd]:text-[8px] [&_dd]:text-ghost-white [&_dd_code]:truncate [&_dd_code]:text-ghost-bright-cyan [&_dd_small]:ml-auto [&_dd_small]:whitespace-nowrap [&_dd_small]:text-[7px] [&_dd_small]:text-ghost-dim',
+  activityGridUsage: 'col-span-full',
+  activityLog: 'mt-[7px] border-t border-ghost-border/50 pt-[7px] [&>span]:mb-[5px] [&>span]:block [&>span]:text-[7px] [&>span]:font-bold [&>span]:uppercase [&>span]:tracking-[0.07em] [&>span]:text-ghost-dim [&>p]:m-0 [&>p]:text-[8px] [&>p]:text-ghost-dim [&_ol]:m-0 [&_ol]:flex [&_ol]:max-h-[92px] [&_ol]:list-none [&_ol]:flex-col [&_ol]:gap-[3px] [&_ol]:overflow-auto [&_ol]:p-0 [&_li]:grid [&_li]:grid-cols-[60px_minmax(100px,auto)_minmax(0,1fr)] [&_li]:items-baseline [&_li]:gap-[7px] [&_li]:text-[7px] [&_li]:text-ghost-muted max-[700px]:[&_li]:grid-cols-[56px_minmax(0,1fr)] [&_time]:text-ghost-dim [&_code]:truncate [&_code]:text-ghost-cyan [&_li>span]:truncate max-[700px]:[&_li>span]:hidden',
+  commandMenu: 'flex max-h-[232px] flex-col gap-0.5 overflow-auto border-b border-ghost-border/60 bg-ghost-black/20 p-1.5',
+  commandOption: 'grid min-h-[37px] grid-cols-[minmax(112px,auto)_minmax(0,1fr)_auto] items-center gap-[11px] rounded-lg border-0 bg-transparent px-[9px] py-[7px] text-left text-ghost-muted hover:bg-ghost-raised/80 max-[820px]:grid-cols-[minmax(0,1fr)_auto]',
+  commandOptionSelected: 'bg-ghost-raised/80',
+  commandLabel: 'truncate font-mono text-[10px] font-[650] text-ghost-bright-white',
+  commandDescription: 'truncate text-[9px] max-[820px]:hidden',
+  commandSource: 'rounded-full border border-ghost-border/70 px-1.5 py-0.5 font-mono text-[7px] font-bold uppercase tracking-[0.05em] text-ghost-dim',
+  attachments: 'm-0 flex max-h-[92px] list-none gap-[7px] overflow-x-auto border-b border-ghost-border/50 px-2.5 py-2',
+  attachment: 'grid min-w-[178px] max-w-[230px] grid-cols-[38px_minmax(0,1fr)_24px] items-center gap-2 rounded-lg border border-ghost-border/65 bg-ghost-black/30 p-[5px] [&>img]:size-[38px] [&>img]:rounded-md [&>img]:object-cover [&>span]:flex [&>span]:min-w-0 [&>span]:flex-col [&>span]:gap-0.5 [&_strong]:truncate [&_strong]:text-[8px] [&_strong]:font-semibold [&_strong]:text-ghost-bright-white [&_small]:truncate [&_small]:font-mono [&_small]:text-[7px] [&_small]:text-ghost-dim [&_button]:grid [&_button]:size-6 [&_button]:place-items-center [&_button]:rounded-md [&_button]:border-0 [&_button]:bg-transparent [&_button]:text-ghost-dim [&_button:hover:not(:disabled)]:bg-ghost-raised/75 [&_button:hover:not(:disabled)]:text-ghost-bright-white [&_button:disabled]:cursor-default [&_button:disabled]:opacity-40',
+  textarea: 'block min-h-[54px] max-h-[180px] w-full resize-none border-0 bg-transparent px-[15px] pb-[5px] pt-[13px] font-inherit text-xs leading-[1.55] text-ghost-bright-white outline-none placeholder:text-ghost-dim/70 disabled:opacity-70',
+  composerFooter: 'flex min-h-[42px] items-center gap-3 border-t border-ghost-border/45 pb-1.5 pl-2.5 pr-2 pt-[5px]',
+  composerSettings: 'flex min-w-0 items-center max-[700px]:flex-1 max-[700px]:overflow-hidden [&_label]:flex [&_label]:h-[26px] [&_label]:min-w-0 [&_label]:items-center [&_label]:gap-1 [&_label]:whitespace-nowrap [&_label]:font-mono [&_label]:text-[8px] [&_label]:text-ghost-dim max-[700px]:[&_label]:flex-1 [&_label+label]:ml-[7px] [&_label+label]:border-l [&_label+label]:border-ghost-border/55 [&_label+label]:pl-[7px] [&_label>span]:after:content-[\':\'] max-[700px]:[&_label>span]:hidden',
+  attach: 'relative grid size-7 shrink-0 cursor-pointer place-items-center rounded-[7px] border border-ghost-border/70 text-ghost-dim hover:border-ghost-green/35 hover:bg-ghost-raised/70 hover:text-ghost-green has-[:disabled]:cursor-default has-[:disabled]:opacity-40 [&_input]:sr-only',
+  composerHint: 'flex-1 truncate font-mono text-[8px] text-ghost-dim max-[700px]:hidden',
+  primary: 'grid size-[30px] shrink-0 place-items-center rounded-[9px] border-0 bg-ghost-green text-ghost-black transition-[opacity,transform] duration-150 hover:not-disabled:-translate-y-px disabled:cursor-default disabled:opacity-30 motion-reduce:transition-none',
+  primaryStop: 'bg-[color-mix(in_srgb,var(--theme-color-bright-red)_18%,var(--theme-color-raised))] text-ghost-bright-red',
+  spin: 'animate-spin motion-reduce:[animation-duration:1.8s]',
+  sessionUsage: 'flex w-full min-w-0 items-center gap-2.5 overflow-x-auto whitespace-nowrap font-mono text-[8px] leading-none text-ghost-muted [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+  sessionUsageLoading: 'text-ghost-dim',
+  sessionUsageMetric: 'tabular-nums [&_b]:mr-px [&_b]:font-[650] [&_b]:text-ghost-dim',
+  sessionUsageCost: 'tabular-nums text-ghost-green/70',
+  statusDot: 'size-1.5 shrink-0 rounded-full bg-ghost-dim',
+  turnMarker: 'mb-[18px] ml-auto text-right font-mono text-[9px] text-ghost-dim',
+  summary: 'mb-[22px] mt-[17px] border-l-2 border-ghost-blue/65 py-[5px] pl-[13px] text-[11px] text-ghost-muted [&>span]:mb-[5px] [&>span]:block [&>span]:font-mono [&>span]:text-[9px] [&>span]:font-bold [&>span]:uppercase [&>span]:tracking-[0.08em] [&>span]:text-ghost-blue',
+  tool: 'mb-[17px] -mt-[5px] max-w-[810px] overflow-hidden rounded-[9px] border border-ghost-border/65 bg-ghost-panel/70',
+  toolHeader: 'grid min-h-[38px] w-full grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-2 border-0 bg-transparent px-[11px] py-2 text-left text-ghost-dim not-disabled:hover:bg-ghost-raised/65 disabled:cursor-default',
+  toolChevronOpen: 'rotate-90',
+  toolChevron: 'transition-transform duration-150 motion-reduce:transition-none',
+  toolLabel: 'truncate font-mono text-[10px] font-semibold text-ghost-white',
+  toolMeta: 'inline-flex items-center gap-[5px] whitespace-nowrap font-mono text-[8px] text-ghost-dim max-[820px]:max-w-[150px] max-[820px]:truncate',
+} as const
+
+export const piNativeActivityToneStyles = {
+  healthy: '',
+  working: '',
+  idle: '',
+  warning: 'border-ghost-yellow/30 text-ghost-yellow',
+  error: 'border-ghost-bright-red/35 text-ghost-bright-red',
+} as const
+
+export const piNativeStatusDotToneStyles = {
+  healthy: 'bg-ghost-green shadow-[0_0_7px_color-mix(in_srgb,var(--theme-color-green)_55%,transparent)]',
+  working: 'animate-pulse bg-ghost-cyan shadow-[0_0_7px_color-mix(in_srgb,var(--theme-color-cyan)_55%,transparent)] motion-reduce:animate-none',
+  warning: 'bg-ghost-yellow',
+  error: 'bg-ghost-bright-red',
+  idle: '',
+} as const
+
+export const piNativeCommandSourceStyles = {
+  native: 'border-ghost-green/30 text-ghost-green',
+  model: 'border-ghost-green/30 text-ghost-green',
+  level: 'border-ghost-green/30 text-ghost-green',
+  extension: 'border-ghost-magenta/35 text-ghost-magenta',
+  prompt: 'border-ghost-blue/35 text-ghost-blue',
+  skill: 'border-ghost-blue/35 text-ghost-blue',
+} as const
+
+export const piNativeSummaryToneStyles = {
+  warning: 'border-ghost-yellow/70 [&>span]:text-ghost-yellow',
+  error: 'border-ghost-bright-red/70 [&>span]:text-ghost-bright-red',
+} as const
+
+export const piNativeToolStatusStyles = {
+  running: '',
+  success: '[&_svg:last-child]:text-ghost-green',
+  error: 'border-ghost-bright-red/40 [&_svg:last-child]:text-ghost-bright-red',
+} as const

@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "browser": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/servers/dire-mux-browser.mjs"],
+      "env": {
+        "DIRE_MUX_THREAD_ENDPOINT": "${DIRE_MUX_THREAD_ENDPOINT}",
+        "DIRE_MUX_AGENT_TOKEN_FILE": "${CLAUDE_PLUGIN_ROOT}/../agent-token"
+      }
+    },
+    "workflows": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/servers/dire-mux-workflows.mjs"],
+      "env": {
+        "DIRE_MUX_THREAD_ENDPOINT": "${DIRE_MUX_THREAD_ENDPOINT}",
+        "DIRE_MUX_AGENT_TOKEN_FILE": "${CLAUDE_PLUGIN_ROOT}/../agent-token"
+      }
+    }
+  }
+}

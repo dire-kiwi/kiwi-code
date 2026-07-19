@@ -1,0 +1,36 @@
+.PHONY: build dev dev\:desktop headless-test run run\:desktop test web
+
+DEV_ARGS ?=
+
+web:
+	cd web && npm install && npm run build
+
+build: web
+	mkdir -p bin
+	go build -o bin/dire-mux .
+
+dev:
+	cd web && npm install && npm run dev:servers -- $(DEV_ARGS)
+
+dev\:desktop:
+	cd web && npm install && npm run dev:desktop -- $(DEV_ARGS)
+
+run: web
+	@while true; do \
+		DIRE_MUX_ADDR="$${DIRE_MUX_ADDR:-0.0.0.0:4000}" go run .; \
+		status=$$?; \
+		if [ "$$status" -ne 0 ]; then exit "$$status"; fi; \
+		printf '%s\n' 'dire-mux restart requested; rebuilding and starting a fresh instance...'; \
+		(cd web && npm install && npm run build) || exit $$?; \
+	done
+
+run\:desktop: web
+	cd web && npm run run:desktop
+
+headless-test:
+	go run ./cmd/headless-client
+
+test:
+	go test ./...
+	go vet ./...
+	cd web && npm install && npm test && npm run build

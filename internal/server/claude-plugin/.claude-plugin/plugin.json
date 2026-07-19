@@ -1,0 +1,9 @@
+{
+  "name": "dire-mux",
+  "displayName": "Dire Mux",
+  "version": "1.2.0",
+  "description": "Integrates Claude Code with Dire Mux activity, thread naming, process shells, server-side thread workflows, and the in-app browser.",
+  "author": {
+    "name": "Ivan Meredith"
+  }
+}

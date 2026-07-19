@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dire Mux event-streaming review</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b0d10; --panel:#14181d; --panel2:#1a2027; --line:#2a333d; --text:#e7edf3; --muted:#98a7b6; --green:#b5bd68; --blue:#81a2be; --yellow:#f0c674; --red:#cc6666; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:radial-gradient(circle at 85% 0,#18221d 0,transparent 30rem),var(--bg); color:var(--text); font:15px/1.6 Inter,ui-sans-serif,system-ui,-apple-system,sans-serif; }
+    main { width:min(1120px,calc(100% - 32px)); margin:0 auto; padding:58px 0 80px; }
+    header { display:grid; grid-template-columns:1fr auto; gap:24px; align-items:end; padding-bottom:28px; border-bottom:1px solid var(--line); }
+    .eyebrow,.label { color:var(--green); font:700 11px/1.2 ui-monospace,SFMono-Regular,monospace; letter-spacing:.14em; text-transform:uppercase; }
+    h1 { margin:9px 0 8px; font-size:clamp(32px,5vw,58px); line-height:1.02; letter-spacing:-.045em; }
+    h2 { margin:0 0 16px; font-size:23px; letter-spacing:-.025em; }
+    h3 { margin:0 0 5px; font-size:15px; }
+    p { margin:0; }
+    .subtitle { max-width:760px; color:var(--muted); font-size:17px; }
+    .stamp { min-width:190px; padding:14px 16px; border:1px solid var(--line); border-radius:12px; background:#101419cc; color:var(--muted); font:12px/1.7 ui-monospace,SFMono-Regular,monospace; }
+    section { margin-top:42px; }
+    .summary { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+    .metric,.card { border:1px solid var(--line); border-radius:14px; background:linear-gradient(145deg,var(--panel2),var(--panel)); box-shadow:0 18px 60px #0003; }
+    .metric { padding:18px; }
+    .metric strong { display:block; margin:6px 0 2px; font-size:27px; line-height:1; }
+    .metric span { color:var(--muted); font-size:12px; }
+    .flow { display:grid; grid-template-columns:1fr 46px 1.15fr 46px 1fr; align-items:stretch; }
+    .node { min-height:118px; padding:18px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
+    .node strong { display:block; margin:6px 0; }
+    .node small { color:var(--muted); }
+    .arrow { display:grid; place-items:center; color:var(--green); font-size:24px; }
+    .findings { display:grid; gap:12px; }
+    .finding { display:grid; grid-template-columns:92px 1fr 220px; gap:18px; align-items:start; padding:20px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
+    .severity { width:max-content; padding:5px 8px; border-radius:999px; font:700 10px/1 ui-monospace,SFMono-Regular,monospace; letter-spacing:.08em; }
+    .high { color:#ffd5d5; background:#cc66662a; border:1px solid #cc666655; }
+    .medium { color:#ffe8ad; background:#f0c6741f; border:1px solid #f0c67455; }
+    .verified { color:#dce5a0; background:#b5bd681d; border:1px solid #b5bd6855; }
+    .finding p,.evidence { color:var(--muted); }
+    .evidence { font:12px/1.55 ui-monospace,SFMono-Regular,monospace; }
+    .timeline { display:grid; grid-template-columns:repeat(4,1fr); gap:1px; overflow:hidden; border:1px solid var(--line); border-radius:14px; background:var(--line); }
+    .step { min-height:160px; padding:18px; background:var(--panel); }
+    .step b { color:var(--blue); font:700 11px/1 ui-monospace,SFMono-Regular,monospace; }
+    .step strong { display:block; margin:13px 0 7px; }
+    .step p { color:var(--muted); font-size:13px; }
+    table { width:100%; border-collapse:separate; border-spacing:0; overflow:hidden; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
+    th,td { padding:13px 15px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { color:var(--muted); background:#11151a; font:700 10px/1.2 ui-monospace,SFMono-Regular,monospace; letter-spacing:.1em; text-transform:uppercase; }
+    tr:last-child td { border-bottom:0; }
+    td:nth-child(3) { color:var(--muted); }
+    code { padding:2px 5px; border:1px solid var(--line); border-radius:5px; background:#0b0f13; color:#c5d3df; font:12px ui-monospace,SFMono-Regular,monospace; }
+    .callout { padding:20px 22px; border-left:3px solid var(--yellow); border-radius:0 12px 12px 0; background:#f0c67412; }
+    .callout p { color:#d6c99f; }
+    footer { margin-top:48px; padding-top:20px; border-top:1px solid var(--line); color:var(--muted); font-size:12px; }
+    @media (max-width:850px) { header{grid-template-columns:1fr}.summary{grid-template-columns:1fr 1fr}.flow{grid-template-columns:1fr}.arrow{height:40px;transform:rotate(90deg)}.finding{grid-template-columns:1fr}.timeline{grid-template-columns:1fr}.stamp{min-width:0} }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <div class="eyebrow">Architecture review · before changes</div>
+      <h1>Event streaming and tmux routing</h1>
+      <p class="subtitle">A focused review of how Dire Mux distributed project, thread, and Pi status to browser clients—and how terminal bytes were scoped to clients attached to a tmux session.</p>
+    </div>
+    <div class="stamp">Reviewed: 2026-07-15<br />Baseline: eeb9cf3<br />Workspace: dire-mux</div>
+  </header>
+
+  <section class="summary" aria-label="Review summary">
+    <div class="metric"><div class="label">High risk</div><strong>1</strong><span>lossy status transition delivery</span></div>
+    <div class="metric"><div class="label">Medium risk</div><strong>1</strong><span>split global stream lifecycle</span></div>
+    <div class="metric"><div class="label">Coverage gaps</div><strong>3</strong><span>Pi fan-out, bursts, tmux isolation</span></div>
+    <div class="metric"><div class="label">Verified</div><strong>✓</strong><span>terminal bytes were session-scoped</span></div>
+  </section>
+
+  <section>
+    <h2>Baseline data paths</h2>
+    <div class="flow" aria-label="Baseline event flow">
+      <div class="node"><div class="label">Mutation</div><strong>Store or Pi tracker changes</strong><small>Project/thread writes and Pi lifecycle transitions originated in separate state owners.</small></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="label">Wake-up</div><strong>One-slot channel per subscriber</strong><small>A non-blocking empty signal said “state changed”; duplicate signals were dropped while the slot was occupied.</small></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="label">Network</div><strong>Two browser EventSource connections</strong><small>The handler read current state only after consuming the wake-up, then wrote a full SSE snapshot.</small></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Findings</h2>
+    <div class="findings">
+      <article class="finding">
+        <span class="severity high">HIGH</span>
+        <div><h3>Committed transitions could disappear for slower clients</h3><p>The subscriber channel contained only one empty wake-up. If another mutation occurred before a client handler consumed it, the second signal was dropped. When the handler eventually woke, it read the latest live state, not the state associated with the original transition. That violates the requested “all status events to all clients” behavior.</p></div>
+        <div class="evidence">project.Store.notifyChangesLocked<br />piActivityTracker.notifyLocked<br />buffer: 1<br />send: non-blocking/default<br />payload: struct{}{}</div>
+      </article>
+      <article class="finding">
+        <span class="severity medium">MEDIUM</span>
+        <div><h3>Global status was split across two long-lived connections</h3><p>Each browser opened one SSE connection for project/thread snapshots and another for Pi activity. The split duplicated reconnect lifecycle and consumed two persistent HTTP connections per UI even though both streams had the same global audience.</p></div>
+        <div class="evidence">/api/projects/events<br />/api/pi/activity/events<br />two EventSource instances<br />in App.tsx</div>
+      </article>
+      <article class="finding">
+        <span class="severity medium">COVERAGE</span>
+        <div><h3>Tests did not model the failure mode</h3><p>The project stream test used two clients, but consumed every snapshot before making the next mutation. Pi activity had only a single stream reader. No automated test attached multiple clients to one tmux session while keeping an unrelated session open.</p></div>
+        <div class="evidence">sequential project mutations<br />one Pi SSE reader<br />no cross-session token test<br />no reusable live client</div>
+      </article>
+      <article class="finding">
+        <span class="severity verified">VERIFIED</span>
+        <div><h3>Terminal bytes were already scoped correctly</h3><p>Every terminal WebSocket created its own PTY-backed <code>tmux attach-session</code> process. The tmux session name included project, thread, and tool IDs, and the PTY read loop wrote only to that WebSocket. There was no global terminal broadcaster leaking bytes to unrelated clients.</p></div>
+        <div class="evidence">session key:<br />project + thread + tool<br />one PTY per WebSocket<br />one writer closure per socket</div>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>Concrete loss scenario</h2>
+    <div class="timeline">
+      <div class="step"><b>T0</b><strong>Pi finishes</strong><p>A “changed” token is queued for clients A and B.</p></div>
+      <div class="step"><b>T1</b><strong>Client A reads quickly</strong><p>A reads current state, sees <code>finished</code>, and acknowledges it.</p></div>
+      <div class="step"><b>T2</b><strong>State is cleared</strong><p>The tracker deletes the activity. B’s channel is still full, so the new wake-up is dropped.</p></div>
+      <div class="step"><b>T3</b><strong>Client B finally reads</strong><p>B consumes its old token but reads the new empty state. It never receives the finished transition.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Contract assessment</h2>
+    <table>
+      <thead><tr><th>Contract</th><th>Baseline</th><th>Assessment</th></tr></thead>
+      <tbody>
+        <tr><td>Project/thread status reaches every client</td><td>Partial</td><td>Final state generally reconciled, but intermediate committed snapshots could be coalesced away.</td></tr>
+        <tr><td>Pi status reaches every client</td><td>Partial</td><td>The same lossy wake-up pattern allowed a fast client to race a slower one.</td></tr>
+        <tr><td>Terminal output reaches clients with that session open</td><td>Yes</td><td>Per-WebSocket tmux attachments correctly scoped the byte stream.</td></tr>
+        <tr><td>Terminal output stays out of unrelated clients</td><td>Likely, unproven</td><td>The code path was correct, but there was no multi-client isolation regression test.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="callout">
+    <h3>Recommended remediation</h3>
+    <p>Capture an immutable snapshot at mutation time, queue snapshots in order for each subscriber, expose one named global SSE endpoint for browser state, retain terminal data on session-scoped WebSockets, and add an executable headless multi-client contract test.</p>
+  </section>
+
+  <footer>This report records the pre-fix review. See <strong>event-streaming-fix-report.html</strong> for implementation and verification evidence.</footer>
+</main>
+</body>
+</html>

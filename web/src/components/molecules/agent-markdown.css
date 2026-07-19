@@ -1,0 +1,140 @@
+.agent-markdown > :first-child {
+  margin-top: 0;
+}
+
+.agent-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.agent-markdown p {
+  margin: 0 0 13px;
+  white-space: pre-wrap;
+}
+
+.agent-markdown h1,
+.agent-markdown h2,
+.agent-markdown h3,
+.agent-markdown h4 {
+  margin: 21px 0 9px;
+  color: var(--theme-color-bright-white);
+  font-size: 1em;
+  font-weight: 700;
+}
+
+.agent-markdown ul,
+.agent-markdown ol {
+  margin: 8px 0 14px;
+  padding-left: 22px;
+}
+
+.agent-markdown ul {
+  list-style-type: disc;
+}
+
+.agent-markdown ol {
+  list-style-type: decimal;
+}
+
+.agent-markdown li {
+  margin: 4px 0;
+}
+
+.agent-markdown li::marker {
+  color: var(--theme-color-dim);
+}
+
+.agent-markdown blockquote {
+  margin: 12px 0;
+  border-left: 2px solid color-mix(in srgb, var(--theme-color-green) 58%, transparent);
+  padding-left: 12px;
+  color: var(--theme-color-muted);
+}
+
+.agent-markdown a {
+  color: var(--theme-color-cyan);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--theme-color-cyan) 42%, transparent);
+  text-underline-offset: 3px;
+}
+
+.agent-markdown code {
+  border: 1px solid color-mix(in srgb, var(--theme-color-border) 72%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--theme-color-canvas) 48%, transparent);
+  padding: 1px 5px;
+  color: var(--theme-color-bright-cyan);
+  font-family: var(--theme-font-family);
+  font-size: 0.9em;
+}
+
+.agent-markdown-table-wrap {
+  margin: 13px 0 17px;
+  overflow-x: auto;
+}
+
+.agent-markdown-table {
+  width: 100%;
+  min-width: 480px;
+  border: 1px solid color-mix(in srgb, var(--theme-color-border) 74%, transparent);
+  border-collapse: collapse;
+}
+
+.agent-markdown-table th,
+.agent-markdown-table td {
+  border: 1px solid color-mix(in srgb, var(--theme-color-border) 70%, transparent);
+  padding: 8px 9px;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.agent-markdown-table thead th {
+  background: color-mix(in srgb, var(--theme-color-canvas) 78%, var(--theme-color-panel));
+  font-weight: 700;
+}
+
+.agent-markdown-table tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--theme-color-canvas) 36%, transparent);
+}
+
+.agent-markdown-math {
+  color: var(--theme-color-bright-white);
+}
+
+.agent-markdown-math--inline {
+  white-space: normal;
+}
+
+.agent-markdown-math--display {
+  margin: 13px 0 17px;
+  overflow-x: auto;
+  padding: 5px 2px;
+  text-align: center;
+}
+
+.agent-markdown-math--display .katex-display {
+  margin: 0;
+}
+
+.agent-markdown-mermaid {
+  margin: 13px 0 17px;
+  overflow-x: auto;
+  border: 1px solid color-mix(in srgb, var(--theme-color-border) 74%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--theme-color-canvas) 56%, var(--theme-color-panel));
+  padding: 15px;
+}
+
+.agent-markdown-mermaid svg {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  height: auto;
+}
+
+.agent-markdown-math--fallback {
+  color: var(--theme-color-muted);
+  font-family: var(--theme-font-family);
+  font-size: 0.92em;
+  text-align: left;
+  white-space: pre-wrap;
+}

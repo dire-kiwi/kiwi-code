@@ -1,0 +1,8 @@
+web/node_modules/
+internal/server/static/app/
+.DS_Store
+dire-mux
+bin/
+web/*.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts

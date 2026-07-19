@@ -1,0 +1,47 @@
+{
+  "name": "dire-mux-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "generate:theme": "node scripts/generate-default-theme.mjs",
+    "predev": "npm run generate:theme",
+    "dev": "vite",
+    "predev:servers": "npm run generate:theme",
+    "dev:servers": "node scripts/dev-stack.mjs",
+    "predev:desktop": "npm run generate:theme",
+    "dev:desktop": "node scripts/dev-stack.mjs --desktop",
+    "run:desktop": "concurrently --kill-others --success command-desktop --names server,desktop \"cd .. && make run\" \"wait-on --timeout 30000 http-get://127.0.0.1:4000/api/health && DIRE_MUX_DESKTOP_URL=http://127.0.0.1:4000 node scripts/electron-launcher.mjs\"",
+    "test": "node --test scripts/*.test.mjs electron/*.test.cjs",
+    "prebuild": "npm run generate:theme",
+    "build": "tsc --noEmit -p tsconfig.app.json && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@fontsource-variable/jetbrains-mono": "latest",
+    "@xterm/addon-canvas": "latest",
+    "@xterm/addon-fit": "latest",
+    "@xterm/addon-web-links": "latest",
+    "@xterm/xterm": "latest",
+    "fzf": "^0.5.2",
+    "katex": "^0.16.47",
+    "lucide-react": "latest",
+    "mermaid": "^11.16.0",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-router-dom": "latest"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "latest",
+    "concurrently": "latest",
+    "electron": "latest",
+    "tailwindcss": "latest",
+    "typescript": "latest",
+    "vite": "latest",
+    "wait-on": "latest"
+  }
+}
