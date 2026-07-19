@@ -324,6 +324,23 @@ func filterClaudeGPTSettings(contents []byte) ([]byte, error) {
 		}
 		settings["env"] = encoded
 	}
+	if rawPlugins, ok := settings["enabledPlugins"]; ok {
+		var plugins map[string]json.RawMessage
+		if err := json.Unmarshal(rawPlugins, &plugins); err != nil {
+			return nil, fmt.Errorf("decode Claude settings enabledPlugins: %w", err)
+		}
+		// The sandbox plugin is loaded explicitly with --plugin-dir below. Do
+		// not also present its installed-plugin enablement to the isolated GPT
+		// profile: resolving it through both paths can prevent Claude from
+		// loading session plugin hooks, including Dire Mux's title and activity
+		// hooks.
+		delete(plugins, claudeSandboxPluginID)
+		encoded, err := json.Marshal(plugins)
+		if err != nil {
+			return nil, fmt.Errorf("encode Claude settings enabledPlugins: %w", err)
+		}
+		settings["enabledPlugins"] = encoded
+	}
 
 	filtered, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {

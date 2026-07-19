@@ -173,7 +173,7 @@ func TestSyncClaudeGPTProfileSettingsCopiesNonModelConfiguration(t *testing.T) {
 		t.Fatalf("copied Claude GPT settings = %#v", copied)
 	}
 	plugins, _ := copied["enabledPlugins"].(map[string]any)
-	if plugins[claudeSandboxPluginID] != true || plugins["formatter@example"] != true {
+	if _, duplicated := plugins[claudeSandboxPluginID]; duplicated || plugins["formatter@example"] != true {
 		t.Fatalf("copied Claude GPT plugins = %#v", plugins)
 	}
 	environment, _ := copied["env"].(map[string]any)
