@@ -12,12 +12,13 @@ import (
 )
 
 const (
-	runtimeModeProduction  = "production"
-	runtimeModeDevelopment = "development"
-	productionGitBranch    = "main"
-	productionHTTPAddress  = "0.0.0.0:4000"
-	productionHTTPPort     = 4000
-	productionTmuxSocket   = "dire-mux"
+	runtimeModeProduction      = "production"
+	runtimeModeDevelopment     = "development"
+	productionGitBranch        = "main"
+	productionHTTPAddress      = "0.0.0.0:4000"
+	productionHTTPPort         = 4000
+	productionTmuxSocket       = "kiwi-code"
+	legacyProductionTmuxSocket = "dire-mux"
 )
 
 type runtimeConfiguration struct {
@@ -57,8 +58,11 @@ func validateRuntimeStartup(configuration runtimeConfiguration) error {
 func validateRuntimeConfiguration(configuration runtimeConfiguration, checkout gitCheckout) error {
 	switch configuration.Mode {
 	case runtimeModeDevelopment:
-		if configuration.TmuxSocket == "" || configuration.TmuxSocket == productionTmuxSocket {
-			return fmt.Errorf("development mode may not use production tmux socket %q; set -tmux-socket to an isolated name", productionTmuxSocket)
+		if configuration.TmuxSocket == "" {
+			return fmt.Errorf("development mode may not use the implicit production tmux socket %q; set -tmux-socket to an isolated name", productionTmuxSocket)
+		}
+		if configuration.TmuxSocket == productionTmuxSocket || configuration.TmuxSocket == legacyProductionTmuxSocket {
+			return fmt.Errorf("development mode may not use production tmux socket %q; set -tmux-socket to an isolated name", configuration.TmuxSocket)
 		}
 
 		port, err := addressPort(configuration.Address)

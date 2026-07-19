@@ -591,7 +591,7 @@ func TestClaudeGPTCommandLoadsItsDefaultModelFromCLIProxyAPI(t *testing.T) {
 		project.Thread{ID: "thread"},
 		codingAgentClaudeGPT,
 		"",
-		"dire-mux-project-thread-tools",
+		"kiwi-code-project-thread-tools",
 		codingAgentLaunchOptions{},
 	)
 	if err != nil || notice != "" {
@@ -666,7 +666,7 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 				project.Thread{ID: "thread"},
 				test.agent,
 				"",
-				"dire-mux-project-thread-tools",
+				"kiwi-code-project-thread-tools",
 				test.options,
 			)
 			if err != nil || notice != "" || command != "/usr/bin/env" {

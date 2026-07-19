@@ -102,6 +102,7 @@ func TestTmuxBrowserOwnerUsesFreshStoreAndDurableStopRecipe(t *testing.T) {
 
 	for _, sessionName := range []string{
 		tmuxSessionName(item.ID, thread.ID, "terminal"),
+		previousTmuxSessionName(item.ID, thread.ID, "process"),
 		legacyThreadTmuxSessionName(item.ID, thread.ID, "pi"),
 	} {
 		owner, ownerThread, managed, ownerErr := handler.tmuxBrowserSessionOwner(sessionName)
@@ -168,9 +169,9 @@ func TestTmuxBrowserParsesSessionsAndHidesTemporaryViews(t *testing.T) {
 	directory := t.TempDir()
 	tmuxPath := filepath.Join(directory, "tmux")
 	output := strings.Join([]string{
-		"dire-mux-project-thread-terminal\t1\t@2\t2\tshell two\t1\t1\tzsh\t421\t",
-		"dire-mux-project-thread-terminal\t1\t@1\t1\tshell one\t0\t2\tbash\t421\t",
-		"dire-mux-project-thread-tools\t0\t@3\t1\tpi\t1\t2\tnode\t421\tprocess-3",
+		"kiwi-code-project-thread-terminal\t1\t@2\t2\tshell two\t1\t1\tzsh\t421\t",
+		"kiwi-code-project-thread-terminal\t1\t@1\t1\tshell one\t0\t2\tbash\t421\t",
+		"kiwi-code-project-thread-tools\t0\t@3\t1\tpi\t1\t2\tnode\t421\tprocess-3",
 		"dire-mux-view-123\t1\t@3\t1\tpi\t1\t2\tnode\t421\tprocess-3",
 	}, "\\n")
 	script := "#!/bin/sh\nprintf '%b\\n' " + shellQuote(output) + "\n"
@@ -186,7 +187,7 @@ func TestTmuxBrowserParsesSessionsAndHidesTemporaryViews(t *testing.T) {
 	if len(sessions) != 2 {
 		t.Fatalf("sessions = %#v, want two persistent sessions", sessions)
 	}
-	terminal := findTmuxBrowserSession(t, sessions, "dire-mux-project-thread-terminal")
+	terminal := findTmuxBrowserSession(t, sessions, "kiwi-code-project-thread-terminal")
 	if !terminal.Attached || len(terminal.Windows) != 2 || terminal.Windows[0].ID != "@1" || terminal.Windows[1].ID != "@2" {
 		t.Fatalf("parsed terminal session = %#v", terminal)
 	}
@@ -196,7 +197,7 @@ func TestTmuxBrowserParsesSessionsAndHidesTemporaryViews(t *testing.T) {
 	if terminal.Windows[0].ServerPID != "421" || terminal.Windows[0].ProcessID != "" {
 		t.Fatalf("parsed terminal window identity = %#v", terminal.Windows[0])
 	}
-	tools := findTmuxBrowserSession(t, sessions, "dire-mux-project-thread-tools")
+	tools := findTmuxBrowserSession(t, sessions, "kiwi-code-project-thread-tools")
 	if len(tools.Windows) != 1 || tools.Windows[0].ProcessID != "process-3" {
 		t.Fatalf("parsed process window identity = %#v", tools.Windows)
 	}

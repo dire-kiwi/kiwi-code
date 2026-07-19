@@ -4,6 +4,7 @@ import {
   assertDevelopmentApiTarget,
   assertDevelopmentPort,
   defaultDevelopmentTmuxSocket,
+  legacyProductionTmuxSocket,
   parseArgs,
   productionTmuxSocket,
   reservedProductionPort,
@@ -86,7 +87,8 @@ test('parseArgs rejects invalid development options', () => {
     { args: ['--go-port=4000'], message: /reserved production port 4000/ },
     { args: ['--tmux-socket', ''], message: /tmux-socket must be/ },
     { args: ['--tmux-socket', '../dire-mux'], message: /tmux-socket must be/ },
-    { args: ['--tmux-socket', productionTmuxSocket], message: /production tmux server dire-mux/ },
+    { args: ['--tmux-socket', productionTmuxSocket], message: /production tmux server kiwi-code/ },
+    { args: ['--tmux-socket', legacyProductionTmuxSocket], message: /production tmux server dire-mux/ },
     { args: ['--unknown'], message: /unknown option/ },
   ]
 

@@ -34,7 +34,7 @@ Child threads do not appear as top-level sidebar rows. While a child is open, a 
 
 Archive a thread from its sidebar action to move it into the project's **Show more** group alongside older active threads; expand that group to open, restore, or immediately delete archived threads. Archived threads are retained for 30 days by default. The Settings page can change that period or set it to `0` to keep them forever. Dire Mux checks at startup and once per hour, stops an expired thread's tmux sessions, and removes its record. Deleting a thread immediately still stops its sessions and detaches its managed worktree. Unattached worktrees are retained for 30 days by default, then removed only when `git status` reports no staged, unstaged, or untracked changes. Dirty worktrees are kept and checked again later, and cleanup never deletes their Git branches. The **Cleanup** page lists every archived thread and unattached worktree, its deletion-eligibility time, and worktrees currently protected by uncommitted changes or a failed status check.
 
-Threads own their detached sessions in Dire Mux's dedicated tmux server (`tmux -L dire-mux`), so switching threads never attaches to another thread's processes. A collapsible details sidebar on the right shows the active thread and project; click the thread name there to rename it.
+Threads own their detached sessions in Dire Mux's dedicated tmux server (`tmux -L kiwi-code`), so switching threads never attaches to another thread's processes. Existing `dire-mux` servers are adopted through a compatibility socket alias, and existing `dire-mux-…` sessions remain linked while their live processes continue; no pane is restarted during migration. A collapsible details sidebar on the right shows the active thread and project; click the thread name there to rename it.
 
 Each thread has a standalone Shell tmux session plus a shared tools session. Shell tmux windows appear as tabs beneath the tool selector, and the `+` button creates another shell window in that session. Neovim, Lazygit, and Pi run in the shared session as fixed windows named `nvim`, `lazygit`, and `pi`. If Neovim or Lazygit exits, its window is recreated automatically when the terminal reconnects.
 
@@ -88,9 +88,9 @@ make dev
 
 Vite listens on port 5173 and the Go server listens independently on port 8080. Open [http://127.0.0.1:5173](http://127.0.0.1:5173) locally, or use `http://<this-machine's-LAN-IP>:5173` from another device. The browser calls the Go port directly; Vite does not proxy API, event-stream, or WebSocket traffic. Vite reloads the React frontend as its files change, and the Go development runner rebuilds and restarts the backend when `.go`, `go.mod`, or `go.sum` files change or the in-app restart control is used. Terminal panes reattach to their tmux sessions automatically after a backend restart.
 
-Development mode cannot bind or target production port `4000`, or use the canonical `dire-mux` tmux socket. With no `--tmux-socket` option, the launcher derives a stable isolated socket name from the checkout path, so `make dev` cannot reach production sessions. Explicit socket names are still useful for parallel runs.
+Development mode cannot bind or target production port `4000`, or use the canonical `kiwi-code` tmux socket or legacy production socket `dire-mux`. With no `--tmux-socket` option, the launcher derives a stable isolated socket name from the checkout path, so `make dev` cannot reach production sessions. Explicit socket names are still useful for parallel runs.
 
-Choose distinct ports for a parallel development instance with command-line arguments. Agent and test instances must also use a unique tmux socket instead of the main `dire-mux` server:
+Choose distinct ports for a parallel development instance with command-line arguments. Agent and test instances must also use a unique tmux socket instead of the production `kiwi-code` or legacy `dire-mux` server:
 
 ```sh
 make dev DEV_ARGS="--vite-port 15173 --go-port 18080 --tmux-socket dmv-dev-a1"
@@ -137,7 +137,7 @@ After a health preflight, the client opens three simultaneous global event consu
 
 Use `go run ./cmd/headless-client -help` for options. Pass `-skip-terminal` when tmux is unavailable. When checking a server on another machine, pass `-project-path` with an absolute directory that exists on the server.
 
-`make build` compiles the frontend into the Go server's embedded static directory, then produces `bin/dire-mux`. The production server listens on `0.0.0.0:4000` by default. Override it with `-addr` or `DIRE_MUX_ADDR`; override the project data location with `-data-dir` or `DIRE_MUX_DATA_DIR`. Runtime mode defaults to `production` and can be set with `-mode` or `DIRE_MUX_MODE`. The canonical tmux socket remains `dire-mux`; development, test, and agent instances must override it with `-tmux-socket` or `DIRE_MUX_TMUX_SOCKET`. Direct isolated development-server launches can pass `-add-current-directory` to ensure their working directory is present as a project at startup; production mode rejects this test-only convenience.
+`make build` compiles the frontend into the Go server's embedded static directory, then produces `bin/dire-mux`. The production server listens on `0.0.0.0:4000` by default. Override it with `-addr` or `DIRE_MUX_ADDR`; override the project data location with `-data-dir` or `DIRE_MUX_DATA_DIR`. Runtime mode defaults to `production` and can be set with `-mode` or `DIRE_MUX_MODE`. The canonical tmux socket is `kiwi-code`; development, test, and agent instances must override it with `-tmux-socket` or `DIRE_MUX_TMUX_SOCKET` and may not use the legacy production name `dire-mux`. Direct isolated development-server launches can pass `-add-current-directory` to ensure their working directory is present as a project at startup; production mode rejects this test-only convenience.
 
 The restart API gracefully closes the current HTTP server and lets the application process terminate instead of re-executing the current binary. Persistent tmux sessions are not stopped. Supported production and development launchers wait for that process to exit completely before they build and launch the replacement; crashes and other nonzero exits are not treated as restart requests.
 
@@ -162,7 +162,7 @@ Dire Mux enables tmux's native verbose logs for server-creating commands and lon
 - `POST /api/settings/agent-skills` installs or updates both skills under `~/.agents/skills/`.
 - `GET /api/profiles` lists profiles; Personal and Work are always available.
 - `POST /api/profiles` creates a profile.
-- `GET /api/tmux/sessions` lists persistent sessions and windows in the dedicated `dire-mux` tmux server; temporary browser-view sessions are omitted.
+- `GET /api/tmux/sessions` lists persistent sessions and windows in the dedicated `kiwi-code` tmux server (including linked legacy sessions during migration); temporary browser-view sessions are omitted.
 - `GET /api/tmux/terminal?session=…&window=…` upgrades to a PTY WebSocket attached to the selected existing window through an isolated linked view.
 - `GET /api/projects` lists saved projects.
 - `GET /api/filesystem/directories?path=…` returns matching local directories for project-path autocomplete.

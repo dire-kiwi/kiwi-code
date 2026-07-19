@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto'
 export const defaultVitePort = 5173
 export const defaultGoPort = 8080
 export const reservedProductionPort = 4000
-export const productionTmuxSocket = 'dire-mux'
+export const productionTmuxSocket = 'kiwi-code'
+export const legacyProductionTmuxSocket = 'dire-mux'
 
 export function defaultDevelopmentTmuxSocket(rootDirectory) {
   const checkoutID = createHash('sha256').update(rootDirectory).digest('hex').slice(0, 12)
@@ -45,7 +46,7 @@ Options:
   --help                 Show this help
 
 Development safety:
-  Port ${reservedProductionPort} and tmux socket ${productionTmuxSocket} are reserved for production.
+  Port ${reservedProductionPort} and tmux sockets ${productionTmuxSocket} and ${legacyProductionTmuxSocket} are reserved for production.
 `
 }
 
@@ -100,8 +101,8 @@ export function parseArgs(args) {
       if (!/^[A-Za-z0-9._-]{1,64}$/.test(value ?? '') || value === '.' || value === '..') {
         throw new Error('--tmux-socket must be 1-64 letters, numbers, dots, hyphens, or underscores')
       }
-      if (value === productionTmuxSocket) {
-        throw new Error(`--tmux-socket may not use the production tmux server ${productionTmuxSocket}`)
+      if (value === productionTmuxSocket || value === legacyProductionTmuxSocket) {
+        throw new Error(`--tmux-socket may not use the production tmux server ${value}`)
       }
       options.tmuxSocket = value
       continue

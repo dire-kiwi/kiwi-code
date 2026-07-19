@@ -66,6 +66,13 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	if err != nil {
 		return nil, err
 	}
+	var tmuxMigration *tmuxSocketMigration
+	if tmuxSocket == tmuxSocketName {
+		tmuxMigration, err = prepareDefaultTmuxSocketMigration(projects.DataDirectory(), tmuxSocketName, legacyTmuxSocketName)
+		if err != nil {
+			return nil, err
+		}
+	}
 	assets, err := frontendAssets(staticFiles)
 	if err != nil {
 		return nil, err
@@ -82,7 +89,11 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	if err != nil {
 		return nil, err
 	}
-	terminal := newTerminalHandlerWithOptions(projects, originPolicy, tmuxSocket)
+	terminal := newTerminalHandlerUnreconciledWithOptions(projects, originPolicy, tmuxSocket)
+	terminal.tmuxSocketMigration = tmuxMigration
+	if err := terminal.reconcileTerminalStops(); err != nil {
+		log.Printf("reconcile durable terminal stops: error=%v", err)
+	}
 	if terminal.tmuxLogErr != nil {
 		return nil, terminal.tmuxLogErr
 	}

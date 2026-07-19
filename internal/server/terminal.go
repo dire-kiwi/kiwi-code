@@ -29,6 +29,7 @@ type terminalHandler struct {
 	projects                *project.Store
 	tmuxPath                string
 	tmuxSocket              string
+	tmuxSocketMigration     *tmuxSocketMigration
 	tmuxLogDirectory        string
 	tmuxLogErr              error
 	piExtensionPaths        []string
@@ -73,7 +74,10 @@ type terminalHandler struct {
 }
 
 const (
-	tmuxSocketName            = "dire-mux"
+	tmuxSocketName            = "kiwi-code"
+	legacyTmuxSocketName      = "dire-mux"
+	tmuxSessionNamePrefix     = "kiwi-code-"
+	legacyTmuxSessionPrefix   = "dire-mux-"
 	tmuxLogDirectoryName      = "tmux-logs"
 	terminalWriteTimeout      = 10 * time.Second
 	terminalPongTimeout       = 45 * time.Second
@@ -693,6 +697,9 @@ func (h *terminalHandler) ensureTmuxSessionWithCodingAgentOptions(
 		}
 	}()
 	if tool == "terminal" {
+		if err := h.adoptPreviousTmuxSessionLocked(item.ID, thread.ID, tool, sessionName); err != nil {
+			return "", "", false, err
+		}
 		if err := h.adoptLegacyTerminalSessionLocked(item, thread, sessionName); err != nil {
 			return "", "", false, err
 		}
@@ -713,6 +720,9 @@ func (h *terminalHandler) ensureTmuxSessionWithCodingAgentOptions(
 	}
 	if tool == "terminal" {
 		if exists {
+			if err := h.ensurePreviousTmuxCompatibilityAliasLocked(item.ID, thread.ID, tool, sessionName); err != nil {
+				return "", "", false, err
+			}
 			return sessionName, "", false, nil
 		}
 		command, args, notice, err := commandFor(tool)
@@ -723,8 +733,14 @@ func (h *terminalHandler) ensureTmuxSessionWithCodingAgentOptions(
 			// A newly restarted server may briefly overlap the old handler and
 			// lose the race to create the persistent session.
 			if exists, checkErr := h.tmuxSessionExists(sessionName); checkErr == nil && exists {
+				if aliasErr := h.ensurePreviousTmuxCompatibilityAliasLocked(item.ID, thread.ID, tool, sessionName); aliasErr != nil {
+					return "", "", false, aliasErr
+				}
 				return sessionName, "", false, nil
 			}
+			return "", "", false, err
+		}
+		if err := h.ensurePreviousTmuxCompatibilityAliasLocked(item.ID, thread.ID, tool, sessionName); err != nil {
 			return "", "", false, err
 		}
 		return sessionName, notice, true, nil
@@ -788,6 +804,9 @@ func (h *terminalHandler) ensureTmuxSessionWithCodingAgentOptions(
 					}
 				}
 			}
+			if aliasErr := h.ensurePreviousTmuxCompatibilityAliasLocked(item.ID, thread.ID, tool, sessionName); aliasErr != nil {
+				return "", "", false, aliasErr
+			}
 			return sessionName, notice, true, nil
 		}
 		// A newly restarted server may briefly overlap the old handler. If it
@@ -809,6 +828,9 @@ func (h *terminalHandler) ensureTmuxSessionWithCodingAgentOptions(
 		restartCodingAgent,
 	)
 	if err != nil {
+		return "", "", false, err
+	}
+	if err := h.ensurePreviousTmuxCompatibilityAliasLocked(item.ID, thread.ID, tool, sessionName); err != nil {
 		return "", "", false, err
 	}
 	return sessionName, notice, created, nil
@@ -923,6 +945,9 @@ func (h *terminalHandler) reconcileThreadTmuxStateLocked(item project.Project, t
 		err = errors.Join(err, h.finishTerminalThreadMutationLocked(item, thread))
 	}()
 	canonicalSession := tmuxSessionName(item.ID, thread.ID, "process")
+	if err := h.adoptPreviousTmuxSessionLocked(item.ID, thread.ID, "process", canonicalSession); err != nil {
+		return err
+	}
 	if err := h.adoptLegacyToolSessionsLocked(item, thread, canonicalSession); err != nil {
 		return err
 	}
@@ -1134,6 +1159,140 @@ func (h *terminalHandler) prepareCanonicalCodingAgentWindowsLocked(projectID, th
 		}
 	}
 	return nil
+}
+
+// adoptPreviousTmuxSessionLocked exposes a session created under the previous
+// canonical name through the current name without moving or restarting any
+// window. Keeping the previous session as a grouped compatibility alias is
+// required because processes that are already running may still target it via
+// DIRE_MUX_TMUX_SESSION.
+func (h *terminalHandler) adoptPreviousTmuxSessionLocked(projectID, threadID, tool, canonicalSession string) error {
+	previousSession := previousTmuxSessionName(projectID, threadID, tool)
+	if previousSession == canonicalSession {
+		return nil
+	}
+	previousExists, err := h.tmuxSessionExists(previousSession)
+	if err != nil || !previousExists {
+		return err
+	}
+	previousWindows, err := h.tmuxDetailedWindows(previousSession)
+	if err != nil {
+		return err
+	}
+	canonicalExists, err := h.tmuxSessionExists(canonicalSession)
+	if err != nil {
+		return err
+	}
+	if !canonicalExists {
+		output, groupErr := h.tmuxCommand(
+			"new-session", "-d",
+			"-s", canonicalSession,
+			"-t", exactTmuxSessionTarget(previousSession),
+		).CombinedOutput()
+		if groupErr != nil {
+			if exists, checkErr := h.tmuxSessionExists(canonicalSession); checkErr != nil || !exists {
+				return tmuxCommandError("adopt previous canonical tmux session", output, groupErr)
+			}
+		}
+	}
+
+	canonicalWindows, err := h.tmuxDetailedWindows(canonicalSession)
+	if err != nil {
+		return err
+	}
+	canonicalWindowIDs := make(map[string]struct{}, len(canonicalWindows))
+	canonicalTools := make(map[string]string)
+	for _, window := range canonicalWindows {
+		canonicalWindowIDs[window.Target.ID] = struct{}{}
+		if fixedTool := fixedTmuxTool(window); fixedTool != "" {
+			canonicalTools[fixedTool] = window.Target.ID
+		}
+	}
+
+	for _, window := range previousWindows {
+		fixedTool := fixedTmuxTool(window)
+		if _, linked := canonicalWindowIDs[window.Target.ID]; !linked {
+			if conflictingWindow := canonicalTools[fixedTool]; fixedTool != "" && conflictingWindow != "" && conflictingWindow != window.Target.ID {
+				log.Printf("preserve previous canonical tmux window: previous_session=%q canonical_session=%q tool=%q window=%q canonical_window=%q reason=conflicting canonical window", previousSession, canonicalSession, fixedTool, window.Target.ID, conflictingWindow)
+				if fixedTool == "pi" {
+					if prepareErr := h.prepareCodingAgentWindowForReconciliation(projectID, threadID, previousSession, window.Target.ID); prepareErr != nil {
+						return prepareErr
+					}
+				}
+				continue
+			}
+			destination, destinationErr := h.nextTmuxWindowIndex(canonicalSession)
+			if destinationErr != nil {
+				return destinationErr
+			}
+			output, linkErr := h.tmuxCommand(
+				"link-window",
+				"-s", window.Target.ID,
+				"-t", exactTmuxWindowTarget(canonicalSession, destination),
+			).CombinedOutput()
+			if linkErr != nil {
+				linkedAfterRace := false
+				if current, checkErr := h.tmuxDetailedWindows(canonicalSession); checkErr == nil {
+					for _, existing := range current {
+						if existing.Target.ID == window.Target.ID {
+							linkedAfterRace = true
+							break
+						}
+					}
+				}
+				if !linkedAfterRace {
+					return tmuxCommandError("link previous canonical tmux window", output, linkErr)
+				}
+			}
+			canonicalWindowIDs[window.Target.ID] = struct{}{}
+			if fixedTool != "" {
+				canonicalTools[fixedTool] = window.Target.ID
+			}
+		}
+		if fixedTool == "" {
+			continue
+		}
+		if err := h.configureSharedToolWindow(canonicalSession, window.Target, fixedTool); err != nil {
+			return err
+		}
+		if fixedTool == "pi" {
+			if err := h.prepareCodingAgentWindowForReconciliation(projectID, threadID, canonicalSession, window.Target.ID); err != nil {
+				return err
+			}
+		}
+	}
+	if output, optionErr := h.tmuxCommand("set-option", "-t", exactTmuxCurrentWindowTarget(canonicalSession), "status", "off").CombinedOutput(); optionErr != nil {
+		return tmuxCommandError("configure adopted previous tmux session", output, optionErr)
+	}
+	return h.rewriteAdoptedTmuxViewSourcesLocked(previousSession, canonicalSession, previousWindows)
+}
+
+func (h *terminalHandler) ensurePreviousTmuxCompatibilityAliasLocked(projectID, threadID, tool, canonicalSession string) error {
+	if h.tmuxSocketMigration == nil || !h.tmuxSocketMigration.active() {
+		return nil
+	}
+	previousSession := previousTmuxSessionName(projectID, threadID, tool)
+	previousExists, err := h.tmuxSessionExists(previousSession)
+	if err != nil {
+		return err
+	}
+	if previousExists {
+		return h.adoptPreviousTmuxSessionLocked(projectID, threadID, tool, canonicalSession)
+	}
+	output, err := h.tmuxCommand(
+		"new-session", "-d",
+		"-s", previousSession,
+		"-t", exactTmuxSessionTarget(canonicalSession),
+	).CombinedOutput()
+	if err != nil {
+		if exists, checkErr := h.tmuxSessionExists(previousSession); checkErr != nil || !exists {
+			return tmuxCommandError("create previous tmux compatibility session", output, err)
+		}
+	}
+	if output, optionErr := h.tmuxCommand("set-option", "-t", exactTmuxCurrentWindowTarget(previousSession), "status", "off").CombinedOutput(); optionErr != nil {
+		return tmuxCommandError("configure previous tmux compatibility session", output, optionErr)
+	}
+	return h.adoptPreviousTmuxSessionLocked(projectID, threadID, tool, canonicalSession)
 }
 
 func (h *terminalHandler) adoptLegacyToolSessionsLocked(item project.Project, thread project.Thread, canonicalSession string) error {
@@ -1613,13 +1772,20 @@ func (h *terminalHandler) tmuxWindowSession(windowID string) (string, error) {
 	if err != nil {
 		return "", tmuxCommandError("find tmux window session", output, err)
 	}
+	fallback := ""
 	for _, line := range strings.FieldsFunc(string(output), func(r rune) bool { return r == '\n' || r == '\r' }) {
 		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) == 2 && parts[1] == windowID && !strings.HasPrefix(parts[0], "dire-mux-view-") {
+		if len(parts) != 2 || parts[1] != windowID || strings.HasPrefix(parts[0], tmuxViewSessionPrefix) {
+			continue
+		}
+		if strings.HasPrefix(parts[0], tmuxSessionNamePrefix) {
 			return parts[0], nil
 		}
+		if fallback == "" {
+			fallback = parts[0]
+		}
 	}
-	return "", nil
+	return fallback, nil
 }
 
 func (h *terminalHandler) tmuxCanonicalSessionLinkedToWindow(windowID string) (string, error) {
@@ -1724,11 +1890,11 @@ func tmuxViewHasLiveCreationGrace(sessionName string, now time.Time) bool {
 }
 
 func legacyThreadTmuxSessionName(projectID, threadID, tool string) string {
-	return "dire-mux-" + projectID + "-" + threadID + "-" + tool
+	return legacyTmuxSessionPrefix + projectID + "-" + threadID + "-" + tool
 }
 
 func legacyProjectTmuxSessionName(projectID, tool string) string {
-	return "dire-mux-" + projectID + "-" + tool
+	return legacyTmuxSessionPrefix + projectID + "-" + tool
 }
 
 const codingAgentLaunchScript = `set -eu
@@ -3444,8 +3610,10 @@ func (h *terminalHandler) tmuxWindows(sessionName string) ([]tmuxWindow, error) 
 
 func threadTmuxSessionNameSet(item project.Project, threadID string) map[string]struct{} {
 	sessionNames := map[string]struct{}{
-		tmuxSessionName(item.ID, threadID, "terminal"): {},
-		tmuxSessionName(item.ID, threadID, "process"):  {},
+		tmuxSessionName(item.ID, threadID, "terminal"):         {},
+		tmuxSessionName(item.ID, threadID, "process"):          {},
+		previousTmuxSessionName(item.ID, threadID, "terminal"): {},
+		previousTmuxSessionName(item.ID, threadID, "process"):  {},
 	}
 	if len(item.Threads) > 0 && item.Threads[0].ID == threadID {
 		sessionNames[legacyProjectTmuxSessionName(item.ID, "terminal")] = struct{}{}
@@ -3967,6 +4135,11 @@ func (h *terminalHandler) tmuxExactSessionExists(sessionName string) (bool, erro
 }
 
 func (h *terminalHandler) createTmuxSession(sessionName, directory, windowName, command string, args []string) (tmuxWindowTarget, error) {
+	if h.tmuxSocketMigration != nil {
+		if err := h.tmuxSocketMigration.prepareServerStart(); err != nil {
+			return tmuxWindowTarget{}, err
+		}
+	}
 	output, err := h.tmuxCommand(
 		"new-session",
 		"-d",
@@ -4066,14 +4239,22 @@ func exactTmuxWindowTarget(sessionName string, index int) string {
 }
 
 func tmuxSessionName(projectID, threadID, tool string) string {
-	suffix := tool
+	return tmuxSessionNamePrefix + projectID + "-" + threadID + "-" + tmuxSessionSuffix(tool)
+}
+
+func previousTmuxSessionName(projectID, threadID, tool string) string {
+	return legacyTmuxSessionPrefix + projectID + "-" + threadID + "-" + tmuxSessionSuffix(tool)
+}
+
+func tmuxSessionSuffix(tool string) string {
 	switch tool {
 	case "", "terminal":
-		suffix = "terminal"
+		return "terminal"
 	case "nvim", "lazygit", "pi", "process":
-		suffix = "tools"
+		return "tools"
+	default:
+		return tool
 	}
-	return "dire-mux-" + projectID + "-" + threadID + "-" + suffix
 }
 
 func threadEndpointURL(r *http.Request, projectID, threadID string) string {
