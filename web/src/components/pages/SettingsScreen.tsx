@@ -639,7 +639,7 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
               <SectionHeader
                 icon={<Network size={16} />}
                 title="Sub-agent nesting"
-                description="Limit how many generations of workflow agents can delegate to more workflows."
+                description="Limit how many generations of child agents can delegate to more children."
                 tone="blue"
               />
 
@@ -670,14 +670,14 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
                     </span>
                   </span>
                   <span id="sub-agent-nesting-help" className="mt-2 block text-[9px] leading-4 text-ghost-faint">
-                    0 disables workflow agents. 1 lets a root workflow create one child generation. Projects can
-                    override this value in their details sidebar.
+                    0 disables child agents, including skill forks and workflows. 1 lets a root create one child
+                    generation. Projects can override this value in their details sidebar.
                   </span>
                 </label>
 
                 <InfoCallout className="mt-4">
-                  This limits workflow delegation depth, not the number of agents scheduled in parallel. Lowering it
-                  only blocks future child creation; existing workflow threads remain retained.
+                  This limits child-agent delegation depth, not the number of agents scheduled in parallel. Lowering
+                  it only blocks future child creation; existing child threads remain retained.
                 </InfoCallout>
 
                 {nestingError && (

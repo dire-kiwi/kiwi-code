@@ -12,23 +12,24 @@ const maxVisibleResultBytes = 50 * 1024;
 const threadEndpoint = process.env.DIRE_MUX_THREAD_ENDPOINT?.replace(/\/+$/, "") ?? "";
 const agentToken = process.env.DIRE_MUX_AGENT_TOKEN ?? "";
 
-type WorkflowState = "queued" | "running" | "finished" | "failed" | "stopped";
-
-type WorkflowAgent = {
-	id: string;
-	label: string;
+type ChildRun = {
+	id: number;
 	state: "starting" | "working" | "finished" | "failed";
+	output?: string;
 	error?: string;
+	startedAt: string;
+	finishedAt?: string;
 };
 
-type WorkflowRun = {
+type ChildThread = {
 	id: string;
-	state: WorkflowState;
-	name: string;
-	currentPhase?: string;
-	error?: string;
-	result?: unknown;
-	agents: WorkflowAgent[];
+	title: string;
+};
+
+type CreatedChild = {
+	thread: ChildThread;
+	run: ChildRun;
+	agent: "pi";
 };
 
 type ForkedSkill = {
@@ -107,43 +108,52 @@ function sleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
 	});
 }
 
-function settled(state: WorkflowState): boolean {
-	return state === "finished" || state === "failed" || state === "stopped";
+function progress(skill: ForkedSkill, child: ChildThread, run: ChildRun): string {
+	return `${skill.name} (${child.id}) — ${run.state}.`;
 }
 
-function progress(run: WorkflowRun): string {
-	const finished = run.agents.filter((agent) => agent.state === "finished").length;
-	const failed = run.agents.filter((agent) => agent.state === "failed").length;
-	const active = run.agents.filter((agent) => agent.state === "starting" || agent.state === "working").length;
-	return `${run.name} (${run.id}) — ${run.state}: ${finished} finished, ${failed} failed, ${active} active.`;
+async function readRun(threadID: string, runID: number, signal?: AbortSignal): Promise<ChildRun> {
+	return request<ChildRun>(
+		`/children/${encodeURIComponent(threadID)}/runs/${encodeURIComponent(String(runID))}`,
+		{},
+		signal,
+	);
 }
 
-async function stopWorkflow(runID: string): Promise<void> {
-	await request(`/workflows/${encodeURIComponent(runID)}/stop`, {
+async function stopChild(threadID: string): Promise<void> {
+	await request(`/skill-forks/${encodeURIComponent(threadID)}/stop`, {
 		method: "POST",
 		body: "{}",
 	});
 }
 
-async function waitForWorkflow(
-	run: WorkflowRun,
+async function waitForRun(
+	created: CreatedChild,
 	signal: AbortSignal | undefined,
-	onUpdate?: (run: WorkflowRun) => void,
-): Promise<WorkflowRun> {
+	onUpdate?: (run: ChildRun) => void,
+): Promise<ChildRun> {
+	let run = created.run;
 	try {
-		while (!settled(run.state)) {
+		while (run.state === "starting" || run.state === "working") {
 			onUpdate?.(run);
 			await sleep(pollIntervalMs, signal);
-			run = await request<WorkflowRun>(`/workflows/${encodeURIComponent(run.id)}`, {}, signal);
+			run = await readRun(created.thread.id, run.id, signal);
 		}
 		onUpdate?.(run);
 		return run;
 	} catch (reason) {
 		if (signal?.aborted) {
-			try { await stopWorkflow(run.id); } catch { /* The backend may already be stopping it. */ }
+			try { await stopChild(created.thread.id); } catch { /* Leave the retained child open if cleanup fails. */ }
 		}
 		throw reason;
 	}
+}
+
+async function closeChild(threadID: string): Promise<void> {
+	await request(`/children/${encodeURIComponent(threadID)}/close`, {
+		method: "POST",
+		body: "{}",
+	});
 }
 
 function frontmatterArgumentNames(value: unknown): string[] {
@@ -315,13 +325,6 @@ function renderSkillPrompt(skill: ForkedSkill, rawArguments: string): string {
 	].filter((line) => line !== "").join("\n");
 }
 
-function workflowScript(skill: ForkedSkill): string {
-	const metadataName = `skill:${skill.name}`;
-	const metadataDescription = skill.description || `Run ${skill.name} in a forked child context`;
-	return `export const meta = { name: ${JSON.stringify(metadataName)}, description: ${JSON.stringify(metadataDescription)} }\n` +
-		`return await agent(args.prompt, { label: args.label, isolation: 'shared', closeOnComplete: true })\n`;
-}
-
 function visibleText(text: string): string {
 	const bytes = Buffer.byteLength(text, "utf8");
 	if (bytes <= maxVisibleResultBytes) return text;
@@ -330,25 +333,11 @@ function visibleText(text: string): string {
 	return `${visible}\n\n[Forked skill result truncated by ${bytes - Buffer.byteLength(visible, "utf8")} bytes.]`;
 }
 
-function visibleJSON(value: unknown): string {
-	try {
-		return visibleText(JSON.stringify(value, null, 2) ?? String(value));
-	} catch {
-		return visibleText(String(value));
-	}
-}
-
-function completedOutput(run: WorkflowRun, skill: ForkedSkill): string {
+function completedOutput(run: ChildRun, skill: ForkedSkill): string {
 	if (run.state !== "finished") {
 		throw new Error(run.error || `Forked skill ${skill.name} ended in state ${run.state}.`);
 	}
-	const failed = run.agents.find((agent) => agent.state === "failed");
-	if (failed) throw new Error(failed.error || `The child running ${skill.name} failed.`);
-	if (typeof run.result === "string") return run.result ? visibleText(run.result) : "(no output)";
-	if (run.result === undefined || run.result === null) {
-		throw new Error(`The child running ${skill.name} did not return a result.`);
-	}
-	return visibleJSON(run.result);
+	return run.output ? visibleText(run.output) : "(no output)";
 }
 
 function xml(value: string): string {
@@ -384,14 +373,14 @@ function forkedSkillGuidance(skills: ForkedSkill[]): string {
 		...(skill.agent ? [`    <agent>${xml(skill.agent)}</agent>`] : []),
 		"  </skill>",
 	].join("\n"));
-	return `\n\nThe following skills declare \`context: fork\`. To execute one, do not read its SKILL.md into the parent context. Call \`run_forked_skill\` with its name and the relevant user request as \`arguments\`. The tool renders the skill and runs it in a visible, isolated Pi Native child thread through a Dire Mux workflow.\n\n<forked_skills>\n${entries.join("\n")}\n</forked_skills>`;
+	return `\n\nThe following skills declare \`context: fork\`. To execute one, do not read its SKILL.md into the parent context. Call \`run_forked_skill\` with its name and the relevant user request as \`arguments\`. The tool renders the skill and runs it in a visible, isolated Pi Native child thread. It does not start or require activation of a Dire Mux workflow.\n\n<forked_skills>\n${entries.join("\n")}\n</forked_skills>`;
 }
 
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "run_forked_skill",
 		label: "Run Forked Skill",
-		description: "Run a loaded Agent Skill whose SKILL.md frontmatter declares context: fork. The skill body becomes the task for one visible Pi Native child thread in the current workspace. Pass the user's relevant request as arguments; Claude-style $ARGUMENTS, indexed, positional, and named placeholders are rendered before execution. The child inherits the current Pi model and thinking level and is retained in Dire Mux for review.",
+		description: "Run a loaded Agent Skill whose SKILL.md frontmatter declares context: fork. The skill body becomes the task for one visible Pi Native child thread in the current workspace. Pass the user's relevant request as arguments; Claude-style $ARGUMENTS, indexed, positional, and named placeholders are rendered before execution. The child inherits the current Pi model and thinking level and is retained in Dire Mux for review. This direct skill fork does not start or require activation of a Dire Mux workflow.",
 		promptSnippet: "Run skills with context: fork in visible Dire Mux child threads",
 		promptGuidelines: [
 			"Use run_forked_skill instead of read when an available skill is listed under forked_skills or the user explicitly invokes such a skill.",
@@ -412,31 +401,53 @@ export default function (pi: ExtensionAPI) {
 			const thinkingLevel = pi.getThinkingLevel();
 			const label = skill.agent ? `${skill.name} · ${skill.agent}` : skill.name;
 			const body: Record<string, unknown> = {
-				script: workflowScript(skill),
-				args: {
-					prompt: renderSkillPrompt(skill, params.arguments?.trim() ?? ""),
-					label,
-				},
-				closeOnComplete: true,
+				title: label,
+				prompt: renderSkillPrompt(skill, params.arguments?.trim() ?? ""),
+				agent: "pi",
+				worktree: false,
 			};
 			if (model) body.model = model;
 			if (thinkingLevel) body.thinkingLevel = thinkingLevel;
-			let run = await request<WorkflowRun>("/workflows", {
+			const created = await request<CreatedChild>("/skill-forks", {
 				method: "POST",
 				body: JSON.stringify(body),
 			}, signal);
-			run = await waitForWorkflow(run, signal, (current) => onUpdate?.({
-				content: [{ type: "text", text: progress(current) }],
-				details: { skill: skill.name, agent: skill.agent || "general-purpose", run: current },
+			const run = await waitForRun(created, signal, (current) => onUpdate?.({
+				content: [{ type: "text", text: progress(skill, created.thread, current) }],
+				details: {
+					skill: skill.name,
+					agent: skill.agent || "general-purpose",
+					thread: created.thread,
+					run: current,
+				},
 			}));
-			const output = completedOutput(run, skill);
+			let closeError = "";
+			try {
+				await closeChild(created.thread.id);
+			} catch (reason) {
+				closeError = reason instanceof Error ? reason.message : String(reason);
+			}
+			let output: string;
+			try {
+				output = completedOutput(run, skill);
+			} catch (reason) {
+				if (!closeError) throw reason;
+				const message = reason instanceof Error ? reason.message : String(reason);
+				throw new Error(`${message} The child thread also could not be closed: ${closeError}`);
+			}
+			if (closeError) {
+				output += `\n\n[The child completed, but its thread could not be closed: ${closeError}]`;
+			}
 			return {
 				content: [{ type: "text", text: output }],
 				details: {
 					skill: skill.name,
 					skillPath: skill.filePath,
 					agent: skill.agent || "general-purpose",
+					thread: created.thread,
 					run,
+					closed: !closeError,
+					...(closeError ? { closeError } : {}),
 				},
 			};
 		},

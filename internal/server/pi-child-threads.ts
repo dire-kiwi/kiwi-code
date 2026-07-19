@@ -4,7 +4,8 @@ import { Type } from "typebox";
 
 const maxChildren = 8;
 // Keep inbox delivery compatible with retained child conversations, but do not
-// expose direct child tools. Server-side Dire Mux workflows own orchestration.
+// expose general direct-child tools. Workflows own general orchestration, while
+// context: fork skills use their dedicated one-child tool.
 const childThreadToolsEnabled = false;
 const pollIntervalMs = 750;
 const inboxIntervalMs = 1_000;

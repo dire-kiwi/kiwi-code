@@ -150,6 +150,7 @@ skillForkModule.default({
   registerTool(tool) { skillForkTools.push(tool); },
 });
 assert.deepEqual(skillForkTools.map((tool) => tool.name), ["run_forked_skill"]);
+assert.match(skillForkTools[0].description, /does not start or require activation of a Dire Mux workflow/);
 assert.deepEqual([...skillForkHandlers.keys()], ["input", "before_agent_start"]);
 
 const beforeAgentStart = skillForkHandlers.get("before_agent_start")[0];
@@ -161,6 +162,7 @@ const piSkillBlock = `Base prompt
   </skill>`;
 const guidance = beforeAgentStart({ prompt: "Research this", systemPrompt: piSkillBlock }, {});
 assert.match(guidance.systemPrompt, /context: fork/);
+assert.match(guidance.systemPrompt, /does not start or require activation of a Dire Mux workflow/);
 assert.doesNotMatch(guidance.systemPrompt, new RegExp(`<location>${forkedSkillPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
 assert.match(guidance.systemPrompt, /<name>deep-research<\/name>/);
 assert.match(guidance.systemPrompt, /<name>dire-mux-in-app-browser<\/name>/);
@@ -186,15 +188,38 @@ assert.equal(inputHandler({ text: "/skill:manual-fork request" }, {}).action, "t
 
 const skillForkRequests = [];
 let skillForkResponseResult = "Child research result";
+let skillForkCreateState = "starting";
 globalThis.fetch = async (url, init) => {
-  skillForkRequests.push({ url: String(url), init });
-  return Response.json({
-    id: "wf-skill",
-    state: "finished",
-    name: "skill:deep-research",
-    result: skillForkResponseResult,
-    agents: [{ id: "agent-0001", label: "deep-research · Explore", state: "finished" }],
-  }, { status: 201 });
+  const request = { url: String(url), init };
+  skillForkRequests.push(request);
+  if (request.url.endsWith("/skill-forks")) {
+    return Response.json({
+      thread: { id: "skill-child", title: "deep-research · Explore" },
+      run: {
+        id: 7,
+        state: skillForkCreateState,
+        ...(skillForkCreateState === "finished" ? { output: skillForkResponseResult } : {}),
+        startedAt: "2026-01-01T00:00:00Z",
+      },
+      agent: "pi",
+    }, { status: 201 });
+  }
+  if (request.url.endsWith("/children/skill-child/runs/7")) {
+    return Response.json({
+      id: 7,
+      state: "finished",
+      output: skillForkResponseResult,
+      startedAt: "2026-01-01T00:00:00Z",
+      finishedAt: "2026-01-01T00:00:01Z",
+    });
+  }
+  if (request.url.endsWith("/children/skill-child/close")) {
+    return Response.json({ id: "skill-child", title: "deep-research · Explore" });
+  }
+  if (request.url.endsWith("/skill-forks/skill-child/stop")) {
+    return Response.json({ id: "skill-child", title: "deep-research · Explore" });
+  }
+  throw new Error(`unexpected skill fork request: ${request.url}`);
 };
 const skillUpdates = [];
 const skillResult = await skillForkTools[0].execute(
@@ -207,26 +232,31 @@ const skillResult = await skillForkTools[0].execute(
 assert.equal(skillResult.content[0].text, "Child research result");
 assert.equal(skillResult.details.skill, "deep-research");
 assert.equal(skillResult.details.agent, "Explore");
+assert.equal(skillResult.details.thread.id, "skill-child");
+assert.equal(skillResult.details.closed, true);
 assert.equal(skillUpdates.at(-1).details.run.state, "finished");
-assert.equal(skillForkRequests.length, 1);
-assert.equal(skillForkRequests[0].url, `${process.env.DIRE_MUX_THREAD_ENDPOINT}/workflows`);
+assert.equal(skillForkRequests.length, 3);
+assert.equal(skillForkRequests[0].url, `${process.env.DIRE_MUX_THREAD_ENDPOINT}/skill-forks`);
 assert.equal(skillForkRequests[0].init.method, "POST");
 const skillHeaders = new Headers(skillForkRequests[0].init.headers);
 assert.equal(skillHeaders.get("x-dire-mux-agent-token"), process.env.DIRE_MUX_AGENT_TOKEN);
 const skillRequest = JSON.parse(skillForkRequests[0].init.body);
 assert.equal(skillRequest.model, "openai-codex/gpt-test");
 assert.equal(skillRequest.thinkingLevel, "high");
-assert.equal(skillRequest.closeOnComplete, true);
-assert.match(skillRequest.script, /export const meta/);
-assert.match(skillRequest.script, /isolation: 'shared'/);
-assert.equal(skillRequest.args.label, "deep-research · Explore");
-assert.match(skillRequest.args.prompt, /Research alpha beta in src files\./);
-assert.match(skillRequest.args.prompt, /Full request: "alpha beta" "src files"\./);
-assert.match(skillRequest.args.prompt, /First argument: alpha beta\./);
-assert.match(skillRequest.args.prompt, /Indexed scope: src files\./);
-assert.match(skillRequest.args.prompt, /Explore agent profile/);
-assert.match(skillRequest.args.prompt, new RegExp(forkedSkillDirectory.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+assert.equal(skillRequest.agent, "pi");
+assert.equal(skillRequest.worktree, false);
+assert.equal(skillRequest.title, "deep-research · Explore");
+assert.match(skillRequest.prompt, /Research alpha beta in src files\./);
+assert.match(skillRequest.prompt, /Full request: "alpha beta" "src files"\./);
+assert.match(skillRequest.prompt, /First argument: alpha beta\./);
+assert.match(skillRequest.prompt, /Indexed scope: src files\./);
+assert.match(skillRequest.prompt, /Explore agent profile/);
+assert.match(skillRequest.prompt, new RegExp(forkedSkillDirectory.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+assert.equal(skillForkRequests[1].url, `${process.env.DIRE_MUX_THREAD_ENDPOINT}/children/skill-child/runs/7`);
+assert.equal(skillForkRequests[2].url, `${process.env.DIRE_MUX_THREAD_ENDPOINT}/children/skill-child/close`);
 
+skillForkRequests.length = 0;
+skillForkCreateState = "finished";
 skillForkResponseResult = "large result ".repeat(6000);
 const manualResult = await skillForkTools[0].execute(
   "manual-fork",
@@ -235,9 +265,28 @@ const manualResult = await skillForkTools[0].execute(
   undefined,
   {},
 );
-assert.match(JSON.parse(skillForkRequests.at(-1).init.body).args.prompt, /ARGUMENTS: append-this/);
+assert.equal(skillForkRequests.length, 2);
+assert.match(JSON.parse(skillForkRequests[0].init.body).prompt, /ARGUMENTS: append-this/);
 assert.match(manualResult.content[0].text, /Forked skill result truncated by/);
 assert.ok(Buffer.byteLength(manualResult.content[0].text, "utf8") < 52 * 1024);
+
+skillForkRequests.length = 0;
+skillForkCreateState = "starting";
+skillForkResponseResult = "should be cancelled";
+const skillAbort = new AbortController();
+await assert.rejects(
+  skillForkTools[0].execute(
+    "abort-fork",
+    { skill: "deep-research", arguments: "cancel me" },
+    skillAbort.signal,
+    () => skillAbort.abort(),
+    { model: { provider: "openai-codex", id: "gpt-test" } },
+  ),
+  /cancelled/,
+);
+assert.equal(skillForkRequests.length, 2);
+assert.equal(skillForkRequests[1].url, `${process.env.DIRE_MUX_THREAD_ENDPOINT}/skill-forks/skill-child/stop`);
+
 await assert.rejects(
   skillForkTools[0].execute("missing-skill", { skill: "missing" }, undefined, undefined, {}),
   /Unknown context: fork skill/,

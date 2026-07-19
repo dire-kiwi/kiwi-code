@@ -82,7 +82,7 @@ func TestSubAgentNestingContextIsAppendedToPiSystemPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "You are a sub-agent at nesting depth 1. The effective maximum sub-agent nesting depth for this thread tree is 3 after applying project and ancestor limits. " +
-		"Root agents are at depth 0. Delegate further work only through a Dire Mux workflow, and only while your current depth is below the effective maximum."
+		"Root agents are at depth 0. Delegate further work only through an available context: fork skill or an explicitly activated Dire Mux workflow, and only while your current depth is below the effective maximum."
 	if options.AppendSystemPrompt != want {
 		t.Fatalf("sub-agent system prompt = %q, want %q", options.AppendSystemPrompt, want)
 	}

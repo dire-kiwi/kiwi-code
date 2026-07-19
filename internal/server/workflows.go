@@ -1588,7 +1588,7 @@ func (s *Server) createWorkflowAgent(w http.ResponseWriter, r *http.Request) {
 	request := r.Clone(requestContext)
 	request.Body = io.NopCloser(bytes.NewReader(body))
 	capture := newCapturedResponse()
-	s.createChildThreadAuthorized(capture, request, true)
+	s.createChildThreadAuthorized(capture, request, childThreadCreationWorkflow)
 	if capture.status != http.StatusCreated {
 		copyCapturedResponse(w, capture)
 		return
