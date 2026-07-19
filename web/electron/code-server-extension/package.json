@@ -1,0 +1,22 @@
+{
+  "name": "kiwi-code-theme",
+  "displayName": "Kiwi Code Theme",
+  "description": "Dark color theme matching the kiwi-code workspace palette.",
+  "version": "1.0.0",
+  "publisher": "dire-mux",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Themes"
+  ],
+  "contributes": {
+    "themes": [
+      {
+        "label": "Kiwi Code",
+        "uiTheme": "vs-dark",
+        "path": "./themes/kiwi-code-color-theme.json"
+      }
+    ]
+  }
+}
