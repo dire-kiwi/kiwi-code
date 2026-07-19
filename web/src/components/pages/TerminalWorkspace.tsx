@@ -23,6 +23,7 @@ import type {
   Profile,
   Project,
   Thread,
+  ThreadPlan,
   WorkspaceTool,
   ThreadStatusSnapshot,
   ThreadUsageSnapshot,
@@ -38,6 +39,7 @@ import { ProcessWindowTabs } from '../organisms/ProcessWindowTabs'
 import { BrowserPane } from '../organisms/BrowserPane'
 import { CodeServerPane } from '../organisms/CodeServerPane'
 import { TerminalSession } from '../organisms/TerminalSession'
+import { ThreadPlanViewer } from '../organisms/ThreadPlanViewer'
 import { ThreadProjectSidebar } from '../organisms/ThreadProjectSidebar'
 import { TmuxWindowTabs } from '../organisms/TmuxWindowTabs'
 
@@ -198,6 +200,9 @@ export function TerminalWorkspace({
   const [shellWindowsError, setShellWindowsError] = useState('')
   const [workflowRuns, setWorkflowRuns] = useState<WorkflowRun[]>([])
   const [workflowsError, setWorkflowsError] = useState('')
+  const [threadPlans, setThreadPlans] = useState<ThreadPlan[]>([])
+  const [plansError, setPlansError] = useState('')
+  const [selectedPlan, setSelectedPlan] = useState<ThreadPlan | null>(null)
   const [statusReloadKey, setStatusReloadKey] = useState(0)
   const [branchOverlayOpen, setBranchOverlayOpen] = useState(false)
   const toolTabsRef = useRef<HTMLDivElement>(null)
@@ -207,6 +212,7 @@ export function TerminalWorkspace({
   }, [])
 
   const activateTool = useCallback((tool: WorkspaceTool) => {
+    setSelectedPlan(null)
     markToolOpened(tool)
     navigate(workspacePath(project.id, thread.id, tool))
   }, [markToolOpened, navigate, project.id, thread.id])
@@ -272,6 +278,7 @@ export function TerminalWorkspace({
 
   useEffect(() => {
     markToolOpened(activeTool)
+    setSelectedPlan(null)
   }, [activeTool, markToolOpened])
 
   useEffect(() => {
@@ -279,6 +286,8 @@ export function TerminalWorkspace({
     setProcessesLoading(true)
     setBranchesLoading(true)
     setShellWindowsLoading(true)
+    setThreadPlans([])
+    setPlansError('')
 
     function handleStatus(event: Event) {
       try {
@@ -297,10 +306,12 @@ export function TerminalWorkspace({
         setContextStatuses(snapshot.contextStatuses ?? {})
         setShellWindows(snapshot.shellWindows)
         setWorkflowRuns(snapshot.workflows)
+        setThreadPlans(Array.isArray(snapshot.plans) ? snapshot.plans : [])
         setProcessesError(snapshot.errors?.processes ?? '')
         setBranchesError(snapshot.errors?.gitBranches ?? '')
         setShellWindowsError(snapshot.errors?.shellWindows ?? '')
         setWorkflowsError(snapshot.errors?.workflows ?? '')
+        setPlansError(snapshot.errors?.plans ?? '')
         setProcessesLoading(false)
         setBranchesLoading(false)
         setShellWindowsLoading(false)
@@ -316,6 +327,7 @@ export function TerminalWorkspace({
       setBranchesError(message)
       setShellWindowsError(message)
       setWorkflowsError(message)
+      setPlansError(message)
       setProcessesLoading(false)
       setBranchesLoading(false)
       setShellWindowsLoading(false)
@@ -444,7 +456,10 @@ export function TerminalWorkspace({
                       role="tab"
                       aria-label={selectedCodingAgent.label}
                       aria-selected={active}
-                      onClick={() => markToolOpened(tool.id)}
+                      onClick={() => {
+                        setSelectedPlan(null)
+                        markToolOpened(tool.id)
+                      }}
                       className="flex h-full items-center gap-2 pl-2.5 pr-1.5 lg:pl-3.5 lg:pr-2"
                     >
                       <Icon size={14} strokeWidth={1.8} className={active ? 'text-ghost-green' : ''} />
@@ -478,7 +493,10 @@ export function TerminalWorkspace({
                   to={workspacePath(project.id, thread.id, tool.id)}
                   role="tab"
                   aria-selected={active}
-                  onClick={() => markToolOpened(tool.id)}
+                  onClick={() => {
+                    setSelectedPlan(null)
+                    markToolOpened(tool.id)
+                  }}
                   className={`group relative flex h-9 shrink-0 items-center gap-2 rounded-lg px-2.5 text-[11px] font-medium transition lg:px-3.5 ${
                     active
                       ? 'workspace-tool-tab-active text-ghost-foreground'
@@ -564,7 +582,7 @@ export function TerminalWorkspace({
                     threadId={thread.id}
                     threadTitle={thread.title}
                     active={activeTool === 'browser'}
-                    suppressed={nativeViewSuppressed || branchOverlayOpen}
+                    suppressed={nativeViewSuppressed || branchOverlayOpen || selectedPlan !== null}
                     onWorkspaceShortcut={(index) => {
                       const tool = tools[index - 1]
                       if (tool) activateTool(tool.id)
@@ -586,7 +604,7 @@ export function TerminalWorkspace({
                     threadTitle={thread.title}
                     workspacePath={thread.cwd}
                     active={activeTool === 'code'}
-                    suppressed={nativeViewSuppressed || branchOverlayOpen}
+                    suppressed={nativeViewSuppressed || branchOverlayOpen || selectedPlan !== null}
                     onWorkspaceShortcut={(index) => {
                       const selectedTool = tools[index - 1]
                       if (selectedTool) activateTool(selectedTool.id)
@@ -731,6 +749,13 @@ export function TerminalWorkspace({
                 </div>
               </div>
             )}
+            {selectedPlan && (
+              <ThreadPlanViewer
+                projectId={project.id}
+                plan={selectedPlan}
+                onClose={() => setSelectedPlan(null)}
+              />
+            )}
           </div>
         </div>
       </main>
@@ -756,6 +781,9 @@ export function TerminalWorkspace({
         usage={usage}
         workflowRuns={workflowRuns}
         workflowsError={workflowsError}
+        plans={threadPlans}
+        plansError={plansError}
+        onViewPlan={setSelectedPlan}
         onWorkflowUpdated={(updated) => setWorkflowRuns((current) => current.map((run) => run.id === updated.id ? updated : run))}
         expanded={detailsExpanded}
         onExpandedChange={onDetailsExpandedChange}

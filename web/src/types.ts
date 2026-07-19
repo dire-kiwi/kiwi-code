@@ -333,6 +333,16 @@ export type WorkflowAgent = {
   valueOmitted?: boolean
 }
 
+export type ThreadPlan = {
+  id: string
+  projectId: string
+  threadId: string
+  sourceThreadId: string
+  title: string
+  createdAt: string
+  sizeBytes: number
+}
+
 export type WorkflowRun = {
   id: string
   projectId: string
@@ -366,6 +376,7 @@ export type ThreadStatusErrors = {
   processes?: string
   shellWindows?: string
   workflows?: string
+  plans?: string
 }
 
 export type ThreadStatusSnapshot = {
@@ -374,5 +385,6 @@ export type ThreadStatusSnapshot = {
   processes: ProcessWindow[]
   shellWindows: TmuxWindow[]
   workflows: WorkflowRun[]
+  plans: ThreadPlan[]
   errors: ThreadStatusErrors
 }

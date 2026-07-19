@@ -32,6 +32,7 @@ type Server struct {
 	threadMessages            *childThreadMessageStore
 	threadStatusChanges       *broadcast.Broker[threadStatusKey]
 	workflows                 *workflowManager
+	plans                     *threadPlanManager
 	agentSkills               *agentSkillInstaller
 	instanceID                string
 	restart                   func()
@@ -90,6 +91,10 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	if err != nil {
 		return nil, err
 	}
+	plans, err := newThreadPlanManager(projects.DataDirectory())
+	if err != nil {
+		return nil, err
+	}
 	terminal := newTerminalHandlerUnreconciledWithOptions(projects, originPolicy, tmuxSocket)
 	terminal.tmuxSocketMigration = tmuxMigration
 	if err := terminal.reconcileTerminalStops(); err != nil {
@@ -119,6 +124,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 		threadMessages:      newChildThreadMessageStore(),
 		threadStatusChanges: broadcast.NewBroker[threadStatusKey](broadcast.DefaultMaxPending),
 		workflows:           workflows,
+		plans:               plans,
 		agentSkills:         newAgentSkillInstaller(agentSkillsDirectory),
 		instanceID:          newServerInstanceID(),
 		restart:             options.Restart,
@@ -192,6 +198,9 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/children/{childId}/runs/{runId}", server.getChildThreadRun)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/messages", server.sendThreadMessage)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/messages/receive", server.receiveThreadMessages)
+	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/plans", server.listThreadPlans)
+	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/plans", server.uploadThreadPlan)
+	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/plans/{planId}", server.downloadThreadPlan)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}", server.getThread)
 	mux.HandleFunc("PATCH /api/projects/{id}/threads/{threadId}", server.updateThread)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/limits", server.updateThreadLimits)
@@ -462,9 +471,13 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 				_ = s.threadUsage.remove(projectID, "")
 			}
 			s.contextStatuses.removeProject(projectID)
+			s.removeDeletedProjectPlans(projectID)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		// A previous deletion may have removed the project before its auxiliary
+		// plan cleanup completed and before a durable stop marker remained.
+		s.removeDeletedProjectPlans(projectID)
 		writeError(w, http.StatusNotFound, "Project not found.")
 		return
 	}
@@ -497,6 +510,7 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 				_ = s.threadUsage.remove(projectID, "")
 			}
 			s.contextStatuses.removeProject(projectID)
+			s.removeDeletedProjectPlans(projectID)
 			if resolveErr != nil {
 				log.Printf("finish published deleted project terminal stop: project=%q store_error=%v finish_error=%v", projectID, storeErr, resolveErr)
 				writeError(w, http.StatusInternalServerError, "The project was removed, but its terminal cleanup did not finish.")
@@ -525,6 +539,7 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.contextStatuses.removeProject(projectID)
+	s.removeDeletedProjectPlans(projectID)
 	if s.threadMessages != nil {
 		s.threadMessages.removeProject(projectID)
 	}
@@ -823,6 +838,11 @@ func (s *Server) deleteThreadTree(projectID, threadID string, archivedBefore *ti
 		if found {
 			return nil
 		}
+		if s.plans != nil {
+			if planErr := s.plans.removeThread(projectID, threadID); planErr != nil {
+				log.Printf("remove plans for already-deleted thread: project=%q thread=%q error=%v", projectID, threadID, planErr)
+			}
+		}
 		return &deleteThreadFailure{status: http.StatusNotFound, message: "Thread not found.", cause: err}
 	}
 	if err != nil {
@@ -943,6 +963,11 @@ func (s *Server) finishDeletedThreadRuntime(projectID, threadID, context string)
 	if s.workflows != nil {
 		if err := s.workflows.removeThread(projectID, threadID); err != nil {
 			log.Printf("remove deleted thread workflows: project=%q thread=%q error=%v", projectID, threadID, err)
+		}
+	}
+	if s.plans != nil {
+		if err := s.plans.removeThread(projectID, threadID); err != nil {
+			log.Printf("remove deleted thread plans: project=%q thread=%q error=%v", projectID, threadID, err)
 		}
 	}
 }

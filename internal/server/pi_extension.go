@@ -35,6 +35,9 @@ var piBrowserExtension []byte
 //go:embed pi-browser/chrome-devtools-browser/SKILL.md
 var piBrowserSkill []byte
 
+//go:embed pi-planner/kiwi-code-planner/SKILL.md
+var piPlannerSkill []byte
+
 func materializePiExtensions(dataDirectory string) ([]string, error) {
 	titlePath, err := materializePiThreadTitleExtension(dataDirectory)
 	if err != nil {
@@ -57,6 +60,9 @@ func materializePiExtensions(dataDirectory string) ([]string, error) {
 	}
 	workflowsPath, err := materializePiWorkflowsExtension(dataDirectory)
 	if err != nil {
+		return nil, err
+	}
+	if err := materializePiPlannerSkill(dataDirectory); err != nil {
 		return nil, err
 	}
 	if _, err := materializePiSkillForksExtension(dataDirectory); err != nil {
@@ -107,19 +113,27 @@ func materializePiBrowserExtension(dataDirectory string) (string, error) {
 }
 
 func materializePiBrowserSkill(dataDirectory string) error {
-	skillDirectory := filepath.Join(dataDirectory, "skills", "dire-mux-in-app-browser")
+	return materializePiSkill(dataDirectory, "dire-mux-in-app-browser", piBrowserSkill)
+}
+
+func materializePiPlannerSkill(dataDirectory string) error {
+	return materializePiSkill(dataDirectory, "kiwi-code-planner", piPlannerSkill)
+}
+
+func materializePiSkill(dataDirectory, name string, contents []byte) error {
+	skillDirectory := filepath.Join(dataDirectory, "skills", name)
 	if err := os.MkdirAll(skillDirectory, 0o700); err != nil {
-		return fmt.Errorf("create Pi browser skill directory: %w", err)
+		return fmt.Errorf("create Pi skill directory %q: %w", name, err)
 	}
 	path := filepath.Join(skillDirectory, "SKILL.md")
-	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, piBrowserSkill) {
+	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, contents) {
 		return nil
 	}
-	if err := writeFileAtomically(path, piBrowserSkill, serverAtomicFileOptions{
+	if err := writeFileAtomically(path, contents, serverAtomicFileOptions{
 		Mode:     0o600,
 		SyncFile: true,
 	}); err != nil {
-		return fmt.Errorf("write Pi browser skill: %w", err)
+		return fmt.Errorf("write Pi skill %q: %w", name, err)
 	}
 	return nil
 }
