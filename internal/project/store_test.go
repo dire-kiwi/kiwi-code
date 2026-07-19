@@ -1400,6 +1400,99 @@ func TestStoreAddsNewRootThreadsAtTop(t *testing.T) {
 	}
 }
 
+func TestStoreBookmarksThreadsWithoutReordering(t *testing.T) {
+	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
+	store, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.AddThread(item.ID, "Second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := store.AddThread(item.ID, "Third")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantOrder := []string{third.ID, second.ID, item.Threads[0].ID}
+
+	updates, unsubscribe := store.SubscribeChanges()
+	defer unsubscribe()
+	bookmarked, err := store.SetThreadBookmarked(item.ID, second.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bookmarked.Bookmarked {
+		t.Fatalf("bookmarked thread = %#v", bookmarked)
+	}
+	if snapshot := readProjectSnapshot(t, updates); !snapshot[0].Threads[1].Bookmarked {
+		t.Fatalf("bookmark snapshot = %#v", snapshot)
+	}
+	persisted, err := store.Get(item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, threadID := range wantOrder {
+		if persisted.Threads[index].ID != threadID {
+			t.Fatalf("bookmark changed thread order: %#v", persisted.Threads)
+		}
+	}
+
+	if _, err := store.SetThreadBookmarked(item.ID, second.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case snapshot := <-updates:
+		t.Fatalf("idempotent bookmark published a snapshot: %#v", snapshot)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	archived, err := store.SetThreadArchived(item.ID, second.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !archived.Bookmarked {
+		t.Fatalf("archive cleared bookmark: %#v", archived)
+	}
+	restored, err := store.SetThreadArchived(item.ID, second.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !restored.Bookmarked {
+		t.Fatalf("restore cleared bookmark: %#v", restored)
+	}
+
+	reloaded, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, reloadedThread, err := reloaded.GetThread(item.ID, second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reloadedThread.Bookmarked {
+		t.Fatalf("bookmark was not persisted: %#v", reloadedThread)
+	}
+	if _, err := reloaded.SetThreadBookmarked(item.ID, second.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, clearedThread, err := cleared.GetThread(item.ID, second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clearedThread.Bookmarked {
+		t.Fatalf("cleared bookmark was persisted as true: %#v", clearedThread)
+	}
+}
+
 func TestStoreArchivesRestoresAndExpiresThreads(t *testing.T) {
 	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
 	store, err := NewStore(dataFile)
@@ -2214,6 +2307,9 @@ func TestStoreRollbackThreadCreationRecoversAfterPartialArtifactCleanup(t *testi
 	}
 	if _, err := store.SetThreadArchived(item.ID, child.ID, true); !errors.Is(err, ErrThreadRollbackPending) {
 		t.Fatalf("pending rollback accepted archive mutation: %v", err)
+	}
+	if _, err := store.SetThreadBookmarked(item.ID, child.ID, true); !errors.Is(err, ErrThreadRollbackPending) {
+		t.Fatalf("pending rollback accepted bookmark mutation: %v", err)
 	}
 	if _, err := store.UpdateThreadLimits(item.ID, child.ID, nil, nil); !errors.Is(err, ErrThreadRollbackPending) {
 		t.Fatalf("pending rollback accepted limit mutation: %v", err)

@@ -102,6 +102,15 @@ func TestGlobalEventStreamFansOutNamedStatusesToEveryClient(t *testing.T) {
 			t.Fatalf("client %d project event = %q %s", index, event.Name, event.Data)
 		}
 	}
+
+	bookmarkURL := fmt.Sprintf("%s/api/projects/%s/threads/%s", server.URL, item.ID, thread.ID)
+	putJSONForEventTest(t, ctx, server.Client(), bookmarkURL, `{"bookmarked":true}`, http.StatusOK, http.MethodPatch)
+	for index, reader := range readers {
+		event := readServerSentEvent(t, reader)
+		if event.Name != projectsEventName || !strings.Contains(string(event.Data), `"id":"`+thread.ID+`"`) || !strings.Contains(string(event.Data), `"bookmarked":true`) {
+			t.Fatalf("client %d bookmark event = %q %s", index, event.Name, event.Data)
+		}
+	}
 }
 
 func TestClientPiActivitiesFiltersRemovedThreads(t *testing.T) {

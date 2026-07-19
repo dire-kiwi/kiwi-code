@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  bookmarkedThreadPathIds,
   collapsedRootThreadLimit,
   defaultVisibleRootThreadIds,
 } from '../src/sidebar-thread-visibility.mjs'
@@ -70,6 +71,24 @@ test('working and unread-finished roots stay visible beyond the recency limit', 
   assert.deepEqual(defaultVisibleRootThreadIds(threads, activities, projectId), threads.map(({ id }) => id))
 })
 
+test('bookmarked roots and bookmarked descendants keep their active roots visible', () => {
+  const threads = [
+    { ...thread('old-bookmark', 1, 1), bookmarked: true },
+    thread('old-parent', 2, 2),
+    thread('recent-a', 3, 3),
+    thread('recent-b', 4, 4),
+    thread('recent-c', 5, 5),
+    thread('recent-d', 6, 6),
+    thread('recent-e', 7, 7),
+    { ...thread('bookmarked-child', 8, 8), parentThreadId: 'old-parent', bookmarked: true },
+  ]
+
+  const visible = defaultVisibleRootThreadIds(threads, [], projectId)
+  assert.equal(visible.includes('old-bookmark'), true)
+  assert.equal(visible.includes('old-parent'), true)
+  assert.equal(visible.includes('bookmarked-child'), false)
+})
+
 test('child activity keeps its active root visible while archived roots remain under Show more', () => {
   const roots = [
     thread('old-parent', 1, 1),
@@ -95,4 +114,43 @@ test('child activity keeps its active root visible while archived roots remain u
   assert.equal(visible.includes('old-parent'), true)
   assert.equal(visible.includes('archived-parent'), false)
   assert.equal(visible.includes('active-child'), false)
+})
+
+test('bookmark paths include archived bookmarks and only their required ancestors', () => {
+  const threads = [
+    thread('root', 1),
+    { ...thread('sibling', 2), parentThreadId: 'root' },
+    { ...thread('parent', 3), parentThreadId: 'root' },
+    { ...thread('bookmarked-child', 4), parentThreadId: 'parent', bookmarked: true },
+    { ...thread('other-child', 5), parentThreadId: 'parent' },
+    { ...thread('archived-bookmark', 6), archivedAt: '2026-03-01T00:00:00Z', bookmarked: true },
+  ]
+
+  assert.deepEqual(bookmarkedThreadPathIds(threads), [
+    'root',
+    'parent',
+    'bookmarked-child',
+    'archived-bookmark',
+  ])
+})
+
+test('bookmark paths deduplicate shared ancestors in saved order', () => {
+  const threads = [
+    thread('root', 1),
+    { ...thread('parent', 2), parentThreadId: 'root' },
+    { ...thread('first', 3), parentThreadId: 'parent', bookmarked: true },
+    { ...thread('second', 4), parentThreadId: 'parent', bookmarked: true },
+  ]
+
+  assert.deepEqual(bookmarkedThreadPathIds(threads), threads.map(({ id }) => id))
+})
+
+test('bookmark paths terminate for missing parents and cycles', () => {
+  const threads = [
+    { ...thread('orphan', 1), parentThreadId: 'missing', bookmarked: true },
+    { ...thread('cycle-a', 2), parentThreadId: 'cycle-b', bookmarked: true },
+    { ...thread('cycle-b', 3), parentThreadId: 'cycle-a' },
+  ]
+
+  assert.deepEqual(bookmarkedThreadPathIds(threads), ['orphan', 'cycle-a', 'cycle-b'])
 })

@@ -7,6 +7,7 @@ import {
   listProfiles,
   listProjects,
   setThreadArchived,
+  setThreadBookmarked,
   updateProjectOrder,
   updateThreadOrder,
 } from './api'
@@ -122,6 +123,7 @@ function sameThreads(current: Thread[], next: Thread[]) {
       && candidate.autoNamed === thread.autoNamed
       && candidate.closedAt === thread.closedAt
       && candidate.archivedAt === thread.archivedAt
+      && candidate.bookmarked === thread.bookmarked
       && candidate.tokenLimit === thread.tokenLimit
       && candidate.costLimitUsd === thread.costLimitUsd
       && candidate.nestedDepth === thread.nestedDepth
@@ -243,6 +245,7 @@ export default function App() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null)
   const [archivingThreadId, setArchivingThreadId] = useState<string | null>(null)
+  const [bookmarkingThreadId, setBookmarkingThreadId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [projectFinderOpen, setProjectFinderOpen] = useState(false)
   const [detailsSidebarExpanded, setDetailsSidebarExpanded] = useState(false)
@@ -690,6 +693,30 @@ export default function App() {
     }
   }
 
+  async function handleThreadBookmarked(project: Project, thread: Thread, bookmarked: boolean) {
+    if (bookmarkingThreadId) return
+    setBookmarkingThreadId(thread.id)
+    try {
+      const updated = await setThreadBookmarked(project.id, thread.id, bookmarked)
+      setProjects((current) => current.map((candidateProject) =>
+        candidateProject.id === project.id
+          ? {
+              ...candidateProject,
+              threads: candidateProject.threads.map((candidateThread) =>
+                candidateThread.id === thread.id
+                  ? { ...candidateThread, bookmarked: updated.bookmarked }
+                  : candidateThread,
+              ),
+            }
+          : candidateProject,
+      ))
+    } catch (reason) {
+      window.alert(reason instanceof Error ? reason.message : `Could not ${bookmarked ? 'bookmark' : 'remove the bookmark from'} that thread.`)
+    } finally {
+      setBookmarkingThreadId(null)
+    }
+  }
+
   async function handleDeleteThread(project: Project, thread: Thread) {
     const descendantIds = new Set<string>()
     const collectDescendants = (parentId: string) => {
@@ -757,6 +784,7 @@ export default function App() {
         deletingProjectId={deletingId}
         deletingThreadId={deletingThreadId}
         archivingThreadId={archivingThreadId}
+        bookmarkingThreadId={bookmarkingThreadId}
         cleanupSelected={Boolean(cleanupMatch)}
         tmuxSelected={Boolean(tmuxMatch)}
         settingsSelected={Boolean(settingsMatch)}
@@ -787,6 +815,7 @@ export default function App() {
         onReorderThreads={handleThreadsReordered}
         onDeleteProject={handleDelete}
         onArchiveThread={(project, thread, archived) => void handleThreadArchived(project, thread, archived)}
+        onBookmarkThread={(project, thread, bookmarked) => void handleThreadBookmarked(project, thread, bookmarked)}
         onDeleteThread={(project, thread) => void handleDeleteThread(project, thread)}
       />
 
