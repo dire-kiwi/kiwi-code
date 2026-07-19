@@ -57,12 +57,16 @@ type NewThreadScreenProps = {
   onCreated: (thread: Thread, start: CodingAgentStart) => void
 }
 
+type AgentModelPreferences = {
+  model: string
+  thinkingLevel: string
+}
+
 type NewThreadPreferences = {
   location: ThreadLocation
   baseBranch: string
   codingAgent: CodingAgentSelection
-  model: string
-  thinkingLevel: string
+  agentModels: Partial<Record<CodingAgent, AgentModelPreferences>>
 }
 
 function newThreadPreferencesStorageKey(projectId: string) {
@@ -75,7 +79,7 @@ function rememberedNewThreadPreferences(projectId: string): NewThreadPreferences
       window.localStorage.getItem(newThreadPreferencesStorageKey(projectId)) ?? 'null',
     )
     if (!value || typeof value !== 'object') return null
-    const candidate = value as Partial<NewThreadPreferences>
+    const candidate = value as Partial<NewThreadPreferences> & Partial<AgentModelPreferences>
     if (
       (candidate.location !== 'project' && candidate.location !== 'worktree')
       || (candidate.codingAgent !== 'pi'
@@ -84,12 +88,39 @@ function rememberedNewThreadPreferences(projectId: string): NewThreadPreferences
         && candidate.codingAgent !== 'claude-gpt'
         && candidate.codingAgent !== 'claude-native')
       || typeof candidate.baseBranch !== 'string'
-      || typeof candidate.model !== 'string'
-      || typeof candidate.thinkingLevel !== 'string'
     ) {
       return null
     }
-    return candidate as NewThreadPreferences
+
+    const agentModels: Partial<Record<CodingAgent, AgentModelPreferences>> = {}
+    if (candidate.agentModels && typeof candidate.agentModels === 'object') {
+      for (const agent of ['pi', 'claude', 'claude-gpt'] as const) {
+        const preferences = candidate.agentModels[agent]
+        if (
+          preferences
+          && typeof preferences.model === 'string'
+          && typeof preferences.thinkingLevel === 'string'
+        ) {
+          agentModels[agent] = preferences
+        }
+      }
+    }
+
+    // Migrate preferences saved before model settings were remembered per agent.
+    if (typeof candidate.model === 'string' && typeof candidate.thinkingLevel === 'string') {
+      const agent = codingAgentIdForSelection(candidate.codingAgent)
+      agentModels[agent] ??= {
+        model: candidate.model,
+        thinkingLevel: candidate.thinkingLevel,
+      }
+    }
+
+    return {
+      location: candidate.location,
+      baseBranch: candidate.baseBranch,
+      codingAgent: candidate.codingAgent,
+      agentModels,
+    }
   } catch {
     // Storage can be unavailable or contain stale data. The form defaults are
     // still usable for this visit.
@@ -141,8 +172,12 @@ export function NewThreadScreen({
   const [codingAgent, setCodingAgent] = useState<CodingAgentSelection>(
     rememberedPreferences?.codingAgent ?? 'pi-native',
   )
-  const [model, setModel] = useState(rememberedPreferences?.model ?? '')
-  const [thinkingLevel, setThinkingLevel] = useState(rememberedPreferences?.thinkingLevel ?? '')
+  const [agentModels, setAgentModels] = useState<Partial<Record<CodingAgent, AgentModelPreferences>>>(
+    rememberedPreferences?.agentModels ?? {},
+  )
+  const initialAgentModel = agentModels[codingAgentIdForSelection(codingAgent)]
+  const [model, setModel] = useState(initialAgentModel?.model ?? '')
+  const [thinkingLevel, setThinkingLevel] = useState(initialAgentModel?.thinkingLevel ?? '')
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [settingsLoading, setSettingsLoading] = useState(true)
   const [settingsError, setSettingsError] = useState('')
@@ -204,17 +239,21 @@ export function NewThreadScreen({
     const config = codingAgents.find((agent) => agent.id === agentId)
       ?? fallbackCodingAgentConfigs.find((agent) => agent.id === agentId)
     if (!config) return
-    setModel((current) =>
-      config.models.some((option) => option.id === current)
-        ? current
-        : config.models[0]?.id ?? '',
-    )
-    setThinkingLevel((current) =>
-      config.thinkingLevels.some((option) => option.id === current)
-        ? current
-        : config.thinkingLevels[0]?.id ?? '',
-    )
-  }, [codingAgent, codingAgents, codingAgentsLoading])
+    const nextModel = config.models.some((option) => option.id === model)
+      ? model
+      : config.models[0]?.id ?? ''
+    const nextThinkingLevel = config.thinkingLevels.some((option) => option.id === thinkingLevel)
+      ? thinkingLevel
+      : config.thinkingLevels[0]?.id ?? ''
+    if (nextModel === model && nextThinkingLevel === thinkingLevel) return
+
+    setModel(nextModel)
+    setThinkingLevel(nextThinkingLevel)
+    setAgentModels((current) => ({
+      ...current,
+      [agentId]: { model: nextModel, thinkingLevel: nextThinkingLevel },
+    }))
+  }, [codingAgent, codingAgents, codingAgentsLoading, model, thinkingLevel])
 
   useEffect(() => {
     if (!project.isGitRepo) {
@@ -294,8 +333,10 @@ export function NewThreadScreen({
         location,
         baseBranch,
         codingAgent,
-        model,
-        thinkingLevel,
+        agentModels: {
+          ...agentModels,
+          [codingAgentIdForSelection(codingAgent)]: { model, thinkingLevel },
+        },
       })
       writeNewThreadDraft(project.id, '')
       onCreated(thread, {
@@ -384,12 +425,34 @@ export function NewThreadScreen({
     const currentAgentId = codingAgentIdForSelection(codingAgent)
     const nextConfig = codingAgents.find((agent) => agent.id === nextAgentId)
       ?? fallbackCodingAgentConfigs.find((agent) => agent.id === nextAgentId)
+    const nextAgentModels = {
+      ...agentModels,
+      [currentAgentId]: { model, thinkingLevel },
+    }
+    setAgentModels(nextAgentModels)
     setCodingAgent(nextAgent)
     if (nextAgentId !== currentAgentId) {
-      setModel(nextConfig?.models[0]?.id ?? '')
-      setThinkingLevel(nextConfig?.thinkingLevels[0]?.id ?? '')
+      const remembered = nextAgentModels[nextAgentId]
+      setModel(remembered?.model ?? nextConfig?.models[0]?.id ?? '')
+      setThinkingLevel(remembered?.thinkingLevel ?? nextConfig?.thinkingLevels[0]?.id ?? '')
     }
     setError('')
+  }
+
+  function handleModelChange(nextModel: string) {
+    setModel(nextModel)
+    setAgentModels((current) => ({
+      ...current,
+      [selectedAgentId]: { model: nextModel, thinkingLevel },
+    }))
+  }
+
+  function handleThinkingLevelChange(nextThinkingLevel: string) {
+    setThinkingLevel(nextThinkingLevel)
+    setAgentModels((current) => ({
+      ...current,
+      [selectedAgentId]: { model, thinkingLevel: nextThinkingLevel },
+    }))
   }
 
   return (
@@ -452,11 +515,11 @@ export function NewThreadScreen({
               model={model}
               modelOptions={selectedAgent.models.map((option) => ({ value: option.id, label: option.label }))}
               modelDisabled={submitting || selectedAgentModelsUnavailable}
-              onModelChange={setModel}
+              onModelChange={handleModelChange}
               thinking={thinkingLevel}
               thinkingOptions={selectedAgent.thinkingLevels.map((option) => ({ value: option.id, label: option.label }))}
               thinkingDisabled={submitting}
-              onThinkingChange={setThinkingLevel}
+              onThinkingChange={handleThinkingLevelChange}
             />
 
             <p className="mt-2 text-[9px] leading-4 text-ghost-faint">

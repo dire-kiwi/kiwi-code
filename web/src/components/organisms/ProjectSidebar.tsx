@@ -40,6 +40,7 @@ import {
   waitForApplicationRestart,
 } from '../../api'
 import { formatCompactTokens, formatCompactUsd, usageDescription } from '../../lib/formatUsage'
+import { sidebarThreadActivity } from '../../sidebar-thread-activity.mjs'
 import { bookmarkedThreadPathIds, defaultVisibleRootThreadIds } from '../../sidebar-thread-visibility.mjs'
 import type { PiThreadActivity, Profile, Project, Thread, ThreadUsageSnapshot } from '../../types'
 import { Button } from '../atoms/Button'
@@ -190,7 +191,7 @@ export function ProjectSidebar({
   const [restarting, setRestarting] = useState(false)
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<ReadonlySet<string>>(() => new Set())
   const [expandedMoreProjectIds, setExpandedMoreProjectIds] = useState<ReadonlySet<string>>(() => new Set())
-  const [expandedChildThreadIds, setExpandedChildThreadIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [collapsedChildThreadIds, setCollapsedChildThreadIds] = useState<ReadonlySet<string>>(() => new Set())
   const [bookmarksOnly, setBookmarksOnly] = useState(false)
   const draggedItemRef = useRef<DragItem | null>(null)
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0]
@@ -218,9 +219,9 @@ export function ProjectSidebar({
       parentId = byId.get(parentId)?.parentThreadId
     }
     if (ancestors.length > 0) {
-      setExpandedChildThreadIds((current) => {
+      setCollapsedChildThreadIds((current) => {
         const next = new Set(current)
-        for (const id of ancestors) next.add(id)
+        for (const id of ancestors) next.delete(id)
         return next.size === current.size ? current : next
       })
     }
@@ -320,7 +321,7 @@ export function ProjectSidebar({
   }
 
   function toggleChildThreads(threadId: string) {
-    setExpandedChildThreadIds((current) => {
+    setCollapsedChildThreadIds((current) => {
       const next = new Set(current)
       if (next.has(threadId)) next.delete(threadId)
       else next.add(threadId)
@@ -475,7 +476,7 @@ export function ProjectSidebar({
         && (!candidate.closedAt || bookmarksOnly),
     )
     const hasChildren = children.length > 0
-    const childrenExpanded = bookmarksOnly ? hasChildren : expandedChildThreadIds.has(thread.id)
+    const childrenExpanded = bookmarksOnly ? hasChildren : !collapsedChildThreadIds.has(thread.id)
     const descendantIds = new Set<string>()
     const collectDescendants = (parentId: string) => {
       for (const candidate of project.threads) {
@@ -494,16 +495,12 @@ export function ProjectSidebar({
     const usageTitle = displayedUsage
       ? `\n${usageScope}: ${usageDescription(displayedUsage)}${usage?.limitReached ? ' — limit reached' : ''}`
       : ''
-    const ownActivity = piActivities.find((activity) =>
-      activity.projectId === project.id && activity.threadId === thread.id,
+    const { activity: piActivity, childActivity } = sidebarThreadActivity(
+      project.threads,
+      piActivities,
+      project.id,
+      thread.id,
     )
-    const descendantActivities = piActivities.filter((activity) =>
-      activity.projectId === project.id && descendantIds.has(activity.threadId),
-    )
-    const piActivity = ownActivity
-      ?? descendantActivities.find((activity) => activity.state === 'working')
-      ?? descendantActivities.find((activity) => activity.state === 'finished')
-    const childActivity = !ownActivity && Boolean(piActivity)
     const locationTitle = thread.worktree && thread.branch
       ? `${thread.branch}\n${thread.cwd}`
       : thread.cwd
