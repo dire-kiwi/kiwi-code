@@ -247,7 +247,7 @@ func (s *Server) activateWorkflows(w http.ResponseWriter, r *http.Request) {
 	}
 	input.Source = strings.TrimSpace(input.Source)
 	input.Mode = strings.ToLower(strings.TrimSpace(input.Mode))
-	humanSource := input.Source == "interactive" || input.Source == "rpc" || input.Source == "claude-hook"
+	humanSource := input.Source == "interactive" || input.Source == "rpc"
 	activated := false
 	mode := "prompt"
 	if humanSource && input.Mode == "ultracode" {

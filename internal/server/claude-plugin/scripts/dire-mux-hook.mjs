@@ -79,52 +79,6 @@ async function request(url, init = {}, timeoutMs = requestTimeoutMs) {
   }
 }
 
-async function agentCapability() {
-  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT
-  if (!pluginRoot) return ''
-  try {
-    return (await fs.readFile(path.join(pluginRoot, '..', 'agent-token'), 'utf8')).trim()
-  } catch {
-    return ''
-  }
-}
-
-async function updateWorkflowActivation(input) {
-  const endpoint = threadEndpoint()
-  const token = await agentCapability()
-  if (!endpoint || !token || typeof input.prompt !== 'string') return
-  const effort = String(input?.effort?.level || process.env.CLAUDE_EFFORT || '').trim().toLowerCase()
-  const response = await request(`${endpoint}/workflows/activation`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Dire-Mux-Agent-Token': token,
-    },
-    body: JSON.stringify({
-      prompt: input.prompt,
-      source: 'claude-hook',
-      mode: effort === 'ultracode' ? 'ultracode' : 'prompt',
-    }),
-  }, 2_500)
-  const activation = await response.json()
-  const sizeInstructions = {
-    small: ' Aim for fewer than 5 agents unless the human prompt clearly requires a different scale.',
-    medium: ' Aim for fewer than 15 agents unless the human prompt clearly requires a different scale.',
-    large: ' Aim for fewer than 50 agents unless the human prompt clearly requires a different scale.',
-  }
-  const size = sizeInstructions[activation?.sizeGuideline] || ''
-  const additionalContext = activation?.activated
-    ? `[Dire Mux workflow activation] This human turn activated Dire Mux workflows (${activation.mode || 'prompt'}). You may use the dire_mux_run_workflow or dire_mux_run_saved_workflow MCP tool when useful.${size}`
-    : '[Dire Mux workflow activation] This human turn did not activate Dire Mux workflows. Do not call dire_mux_run_workflow or dire_mux_run_saved_workflow; broad work alone is not activation.'
-  process.stdout.write(JSON.stringify({
-    suppressOutput: true,
-    hookSpecificOutput: {
-      hookEventName: 'UserPromptSubmit',
-      additionalContext,
-    },
-  }))
-}
-
 async function sendActivity(state, timeoutMs = requestTimeoutMs, promptStartedAt = '') {
   const endpoint = threadEndpoint()
   if (!endpoint) return
@@ -330,9 +284,6 @@ async function main() {
   const action = process.argv[2]
   const input = await readInput()
   switch (action) {
-    case 'workflow-activation':
-      await updateWorkflowActivation(input)
-      break
     case 'heartbeat':
       await heartbeat(input)
       break

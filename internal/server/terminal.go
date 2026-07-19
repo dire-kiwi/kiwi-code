@@ -43,6 +43,10 @@ type terminalHandler struct {
 	nativeClaude            *claudeNativeManager
 	claudePluginPath        string
 	claudePluginErr         error
+	claudeConfigPath        string
+	claudeConfigErr         error
+	claudePluginRootPath    string
+	claudePluginRootErr     error
 	claudeSandboxPluginPath string
 	claudeSandboxPluginErr  error
 	claudeGPTProfilePath    string
@@ -209,7 +213,13 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 	extensionPaths, extensionErr := materializePiExtensions(projects.DataDirectory())
 	agentToken, agentTokenErr := loadOrCreateAgentToken(projects.DataDirectory())
 	claudePluginPath, claudePluginErr := materializeClaudePlugin(projects.DataDirectory())
-	claudeSandboxPluginPath, claudeSandboxPluginErr := discoverClaudeSandboxPluginPath()
+	claudeConfigPath, claudeConfigErr := defaultClaudeConfigDirectory()
+	claudePluginRootPath, claudePluginRootErr := defaultClaudePluginDirectory(claudeConfigPath)
+	claudeSandboxPluginPath, claudeSandboxPluginErr := discoverClaudeSandboxPluginPathFrom(
+		claudeConfigPath,
+		claudePluginRootPath,
+		errors.Join(claudeConfigErr, claudePluginRootErr),
+	)
 	claudeGPTProfilePath, claudeGPTProfileErr := prepareClaudeGPTProfileDirectory(projects.DataDirectory())
 	cliProxyAPIBaseURL, cliProxyAPIKey, cliProxyAPIErr := configuredCLIProxyAPI()
 	return &terminalHandler{
@@ -226,6 +236,10 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 		nativeClaude:            newClaudeNativeManager(projects.DataDirectory(), claudePluginPath, claudePluginErr),
 		claudePluginPath:        claudePluginPath,
 		claudePluginErr:         claudePluginErr,
+		claudeConfigPath:        claudeConfigPath,
+		claudeConfigErr:         claudeConfigErr,
+		claudePluginRootPath:    claudePluginRootPath,
+		claudePluginRootErr:     claudePluginRootErr,
 		claudeSandboxPluginPath: claudeSandboxPluginPath,
 		claudeSandboxPluginErr:  claudeSandboxPluginErr,
 		claudeGPTProfilePath:    claudeGPTProfilePath,
@@ -3182,6 +3196,12 @@ func (h *terminalHandler) commandForTmuxTarget(
 		}
 		pluginArguments := []string{"--plugin-dir", h.claudePluginPath}
 		if tool == codingAgentClaudeGPT {
+			if h.claudePluginRootErr != nil {
+				return "", nil, "", h.claudePluginRootErr
+			}
+			if h.claudePluginRootPath == "" {
+				return "", nil, "", errors.New("Claude plugin root is unavailable")
+			}
 			if h.claudeSandboxPluginErr != nil {
 				return "", nil, "", h.claudeSandboxPluginErr
 			}
@@ -3207,10 +3227,10 @@ func (h *terminalHandler) commandForTmuxTarget(
 	if (tool == "pi" || isClaudeCodingAgent(tool)) && threadEndpoint != "" {
 		environment = append(environment, direMuxThreadEnvironment(threadEndpoint, item.ID, thread.ID)...)
 	}
-	// Child execution is deliberately Pi Native even when Claude starts the
-	// server-side workflow. Do not pass the broad managed-agent capability or
-	// relationship metadata to other coding harnesses. Claude's scoped MCP
-	// integrations read their capability from the protected data directory.
+	// Dire Mux child and workflow execution is deliberately Pi Native. Do not
+	// pass the broad managed-agent capability or relationship metadata to other
+	// coding harnesses. Claude's browser MCP reads its capability from the
+	// protected data directory.
 	if tool == codingAgentPi && threadEndpoint != "" {
 		if h.agentToken != "" {
 			environment = append(environment, "DIRE_MUX_AGENT_TOKEN="+h.agentToken)
@@ -3245,6 +3265,7 @@ func (h *terminalHandler) commandForTmuxTarget(
 		environment = append(unsetArguments, environment...)
 		environment = append(environment, claudeGPTProxyEnvironment(
 			profilePath,
+			h.claudePluginRootPath,
 			baseURL,
 			apiKey,
 			launchOptions.Model,

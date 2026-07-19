@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,18 +21,26 @@ import (
 func TestMaterializeClaudePlugin(t *testing.T) {
 	dataDirectory := t.TempDir()
 	legacyProcessSkill := filepath.Join(dataDirectory, "claude-plugin", "skills", legacyProcessAgentSkillName)
-	if err := os.MkdirAll(legacyProcessSkill, 0o700); err != nil {
-		t.Fatal(err)
+	staleWorkflowSkill := filepath.Join(dataDirectory, "claude-plugin", "skills", "dire-mux-workflows")
+	staleWorkflowServer := filepath.Join(dataDirectory, "claude-plugin", "servers", "dire-mux-workflows.mjs")
+	for _, directory := range []string{legacyProcessSkill, staleWorkflowSkill, filepath.Dir(staleWorkflowServer)} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := os.WriteFile(filepath.Join(legacyProcessSkill, "SKILL.md"), []byte("legacy"), 0o600); err != nil {
-		t.Fatal(err)
+	for _, path := range []string{filepath.Join(legacyProcessSkill, "SKILL.md"), filepath.Join(staleWorkflowSkill, "SKILL.md"), staleWorkflowServer} {
+		if err := os.WriteFile(path, []byte("legacy"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	root, err := materializeClaudePlugin(dataDirectory)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(legacyProcessSkill); !os.IsNotExist(err) {
-		t.Fatalf("legacy Claude process skill still exists: %v", err)
+	for _, path := range []string{legacyProcessSkill, staleWorkflowSkill, staleWorkflowServer} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("obsolete Claude plugin path %q still exists: %v", path, err)
+		}
 	}
 
 	files, err := claudePluginFiles()
@@ -60,7 +67,7 @@ func TestMaterializeClaudePlugin(t *testing.T) {
 	if manifest.Name != "dire-mux" {
 		t.Fatalf("plugin name = %q, want dire-mux", manifest.Name)
 	}
-	for _, capability := range []string{"browser", "process", "workflow"} {
+	for _, capability := range []string{"browser", "process"} {
 		if !strings.Contains(strings.ToLower(manifest.Description), capability) {
 			t.Fatalf("plugin description %q does not mention %q support", manifest.Description, capability)
 		}
@@ -85,11 +92,13 @@ func TestMaterializeClaudePlugin(t *testing.T) {
 		browserServer.Env["DIRE_MUX_AGENT_TOKEN_FILE"] != "${CLAUDE_PLUGIN_ROOT}/../"+agentTokenFileName {
 		t.Fatalf("browser MCP server config = %#v", browserServer)
 	}
-	workflowServer, ok := mcpConfig.MCPServers["workflows"]
-	if !ok || workflowServer.Command != "node" || len(workflowServer.Args) != 1 || !strings.Contains(workflowServer.Args[0], "dire-mux-workflows.mjs") ||
-		workflowServer.Env["DIRE_MUX_THREAD_ENDPOINT"] != "${DIRE_MUX_THREAD_ENDPOINT}" ||
-		workflowServer.Env["DIRE_MUX_AGENT_TOKEN_FILE"] != "${CLAUDE_PLUGIN_ROOT}/../"+agentTokenFileName {
-		t.Fatalf("workflow MCP server config = %#v", workflowServer)
+	if len(mcpConfig.MCPServers) != 1 {
+		t.Fatalf("Claude plugin MCP servers = %#v, want browser only", mcpConfig.MCPServers)
+	}
+	if strings.Contains(strings.ToLower(manifest.Description), "workflow") ||
+		bytes.Contains(claudePluginHooks, []byte("workflow-activation")) ||
+		bytes.Contains(claudePluginHookScript, []byte("/workflows/activation")) {
+		t.Fatal("Claude plugin still advertises or activates Dire Mux workflows")
 	}
 	if !bytes.Contains(claudePluginBrowserSkill, []byte("ToolSearch")) {
 		t.Fatal("Claude browser skill does not explain deferred MCP tool discovery")
@@ -105,12 +114,6 @@ func TestMaterializeClaudePlugin(t *testing.T) {
 	}
 	if !bytes.Contains(claudePluginProcessSkill, []byte("${CLAUDE_PLUGIN_ROOT}")) {
 		t.Fatal("Claude process skill does not use its materialized plugin path")
-	}
-	if !bytes.Contains(claudePluginWorkflowSkill, []byte("dire_mux_run_workflow")) ||
-		!bytes.Contains(claudePluginWorkflowSkill, []byte("built-in `Workflow`")) ||
-		!bytes.Contains(claudePluginWorkflowSkill, []byte("current human-authored prompt")) ||
-		!bytes.Contains(claudePluginHooks, []byte("workflow-activation")) {
-		t.Fatal("Claude workflow integration does not enforce and explain explicit human activation")
 	}
 	for _, name := range []string{
 		"common.mjs", "interrupt-process.mjs", "list-processes.mjs", "read-logs.mjs",
@@ -335,187 +338,6 @@ func TestClaudeBrowserMCPServer(t *testing.T) {
 	}
 }
 
-func TestClaudeWorkflowMCPServer(t *testing.T) {
-	nodePath, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is not installed")
-	}
-	dataDirectory := t.TempDir()
-	pluginRoot, err := materializeClaudePlugin(dataDirectory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dataDirectory, agentTokenFileName), []byte("claude-workflow-capability\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	basePath := "/api/projects/project/threads/thread/workflows"
-	var mu sync.Mutex
-	requests := make([]string, 0)
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get(agentTokenHeader); got != "claude-workflow-capability" {
-			t.Errorf("workflow MCP token = %q", got)
-		}
-		mu.Lock()
-		requests = append(requests, r.Method+" "+r.URL.Path)
-		mu.Unlock()
-		run := map[string]any{
-			"id": "wf-test", "name": "MCP test", "description": "Workflow MCP lifecycle",
-			"scriptPath": "/tmp/workflow.js", "agents": []any{},
-			"createdAt": time.Now().UTC(), "updatedAt": time.Now().UTC(),
-		}
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == basePath:
-			var input struct {
-				Script string         `json:"script"`
-				Args   map[string]any `json:"args"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-				t.Errorf("decode workflow MCP start: %v", err)
-			}
-			if !strings.Contains(input.Script, "export const meta") || input.Args["scope"] != "test" {
-				t.Errorf("workflow MCP start input = %#v", input)
-			}
-			run["state"] = workflowStateQueued
-			writeJSON(w, http.StatusCreated, run)
-		case r.Method == http.MethodGet && r.URL.Path == basePath+"/wf-test":
-			run["state"] = workflowStateFinished
-			run["result"] = map[string]any{"ok": true}
-			writeJSON(w, http.StatusOK, run)
-		case r.Method == http.MethodPost && r.URL.Path == basePath+"/commands/run/saved-test":
-			run["state"] = workflowStateQueued
-			writeJSON(w, http.StatusCreated, run)
-		case r.Method == http.MethodGet && r.URL.Path == basePath+"/saved":
-			writeJSON(w, http.StatusOK, []any{map[string]any{"name": "saved-test", "scope": "project", "path": "/tmp/saved-test.js"}})
-		case r.Method == http.MethodPost && r.URL.Path == basePath+"/wf-test/save":
-			writeJSON(w, http.StatusCreated, map[string]any{"name": "saved-test", "scope": "project", "path": "/tmp/saved-test.js"})
-		case r.Method == http.MethodGet && r.URL.Path == basePath:
-			run["state"] = workflowStateFinished
-			writeJSON(w, http.StatusOK, []any{run})
-		case r.Method == http.MethodPost && r.URL.Path == basePath+"/wf-test/pause":
-			run["state"] = workflowStatePaused
-			writeJSON(w, http.StatusOK, run)
-		case r.Method == http.MethodPost && r.URL.Path == basePath+"/wf-test/resume":
-			run["state"] = workflowStateQueued
-			writeJSON(w, http.StatusOK, run)
-		case r.Method == http.MethodPost && r.URL.Path == basePath+"/wf-test/stop":
-			run["state"] = workflowStateStopped
-			run["error"] = "Workflow stopped."
-			writeJSON(w, http.StatusOK, run)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer api.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	command := exec.CommandContext(ctx, nodePath, filepath.Join(pluginRoot, "servers", "dire-mux-workflows.mjs"))
-	command.Env = append(os.Environ(),
-		"DIRE_MUX_THREAD_ENDPOINT="+api.URL+"/api/projects/project/threads/thread",
-		"DIRE_MUX_AGENT_TOKEN_FILE="+filepath.Join(pluginRoot, "..", agentTokenFileName),
-	)
-	stdin, err := command.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var stderr bytes.Buffer
-	command.Stderr = &stderr
-	if err := command.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = stdin.Close()
-		if command.Process != nil {
-			_ = command.Process.Kill()
-		}
-		_ = command.Wait()
-	})
-	scanner := bufio.NewScanner(stdout)
-	nextID := 0
-	roundTrip := func(method string, params any) map[string]any {
-		t.Helper()
-		nextID++
-		encoded, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": nextID, "method": method, "params": params})
-		if _, err := stdin.Write(append(encoded, '\n')); err != nil {
-			t.Fatalf("write workflow MCP request: %v; stderr=%s", err, stderr.String())
-		}
-		if !scanner.Scan() {
-			t.Fatalf("read workflow MCP response: %v; stderr=%s", scanner.Err(), stderr.String())
-		}
-		var response map[string]any
-		if err := json.Unmarshal(scanner.Bytes(), &response); err != nil {
-			t.Fatalf("parse workflow MCP response: %v", err)
-		}
-		if response["error"] != nil || response["id"] != float64(nextID) {
-			t.Fatalf("workflow MCP response = %#v", response)
-		}
-		result, ok := response["result"].(map[string]any)
-		if !ok {
-			t.Fatalf("workflow MCP result = %#v", response["result"])
-		}
-		return result
-	}
-
-	roundTrip("initialize", map[string]any{"protocolVersion": "2025-06-18"})
-	listed := roundTrip("tools/list", map[string]any{})
-	listedTools, ok := listed["tools"].([]any)
-	if !ok || len(listedTools) != 9 {
-		t.Fatalf("workflow MCP tools = %#v", listed["tools"])
-	}
-	runResult := roundTrip("tools/call", map[string]any{
-		"name": "dire_mux_run_workflow",
-		"arguments": map[string]any{
-			"script": "export const meta = { name: 'test', description: 'test' }\nreturn { ok: true }",
-			"args":   map[string]any{"scope": "test"},
-			"wait":   true,
-		},
-	})
-	if runResult["isError"] != false || !strings.Contains(fmt.Sprint(runResult["content"]), "finished") {
-		t.Fatalf("workflow MCP run result = %#v", runResult)
-	}
-	for _, call := range []struct {
-		name string
-		args map[string]any
-	}{
-		{name: "dire_mux_run_saved_workflow", args: map[string]any{"name": "saved-test"}},
-		{name: "dire_mux_list_saved_workflows", args: map[string]any{}},
-		{name: "dire_mux_save_workflow", args: map[string]any{"runId": "wf-test", "name": "saved-test", "scope": "project"}},
-		{name: "dire_mux_list_workflows", args: map[string]any{}},
-		{name: "dire_mux_wait_workflow", args: map[string]any{"runId": "wf-test"}},
-		{name: "dire_mux_pause_workflow", args: map[string]any{"runId": "wf-test"}},
-		{name: "dire_mux_resume_workflow", args: map[string]any{"runId": "wf-test"}},
-		{name: "dire_mux_stop_workflow", args: map[string]any{"runId": "wf-test"}},
-	} {
-		result := roundTrip("tools/call", map[string]any{"name": call.name, "arguments": call.args})
-		if result["isError"] != false {
-			t.Fatalf("%s result = %#v", call.name, result)
-		}
-	}
-
-	mu.Lock()
-	defer mu.Unlock()
-	for _, expected := range []string{
-		"POST " + basePath,
-		"POST " + basePath + "/commands/run/saved-test",
-		"GET " + basePath + "/saved",
-		"POST " + basePath + "/wf-test/save",
-		"GET " + basePath + "/wf-test",
-		"GET " + basePath,
-		"POST " + basePath + "/wf-test/pause",
-		"POST " + basePath + "/wf-test/resume",
-		"POST " + basePath + "/wf-test/stop",
-	} {
-		if !slices.Contains(requests, expected) {
-			t.Fatalf("workflow MCP requests %#v do not include %q", requests, expected)
-		}
-	}
-}
-
 func TestClaudePluginHeartbeatReportsPromptStart(t *testing.T) {
 	nodePath, err := exec.LookPath("node")
 	if err != nil {
@@ -580,68 +402,6 @@ func TestClaudePluginHeartbeatReportsPromptStart(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for Claude heartbeat")
-	}
-}
-
-func TestClaudePluginHookActivatesOnlyThroughManagedPromptEndpoint(t *testing.T) {
-	nodePath, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is not installed")
-	}
-	dataDirectory := t.TempDir()
-	pluginRoot, err := materializeClaudePlugin(dataDirectory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dataDirectory, agentTokenFileName), []byte("hook-capability\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var prompt, source, mode string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/projects/project/threads/thread/workflows/activation" || r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		if got := r.Header.Get(agentTokenHeader); got != "hook-capability" {
-			t.Errorf("hook capability = %q", got)
-		}
-		var input struct {
-			Prompt string `json:"prompt"`
-			Source string `json:"source"`
-			Mode   string `json:"mode"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-			t.Errorf("decode activation: %v", err)
-		}
-		prompt, source, mode = input.Prompt, input.Source, input.Mode
-		writeJSON(w, http.StatusOK, workflowActivationSnapshot{Activated: true, Mode: "ultracode"})
-	}))
-	defer server.Close()
-	command := exec.Command(nodePath, filepath.Join(pluginRoot, "scripts", "dire-mux-hook.mjs"), "workflow-activation")
-	command.Env = append(os.Environ(),
-		"CLAUDE_PLUGIN_ROOT="+pluginRoot,
-		"DIRE_MUX_THREAD_ENDPOINT="+server.URL+"/api/projects/project/threads/thread",
-	)
-	command.Stdin = strings.NewReader(`{"hook_event_name":"UserPromptSubmit","prompt":"use a workflow for this audit","effort":{"level":"ultracode"}}`)
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("activation hook: %v, output=%s", err, output)
-	}
-	if prompt != "use a workflow for this audit" || source != "claude-hook" || mode != "ultracode" {
-		t.Fatalf("activation hook prompt=%q source=%q mode=%q", prompt, source, mode)
-	}
-	var hookOutput struct {
-		HookSpecificOutput struct {
-			HookEventName     string `json:"hookEventName"`
-			AdditionalContext string `json:"additionalContext"`
-		} `json:"hookSpecificOutput"`
-	}
-	if err := json.Unmarshal(output, &hookOutput); err != nil {
-		t.Fatalf("decode activation hook output %q: %v", output, err)
-	}
-	if hookOutput.HookSpecificOutput.HookEventName != "UserPromptSubmit" ||
-		!strings.Contains(hookOutput.HookSpecificOutput.AdditionalContext, "activated Dire Mux workflows (ultracode)") {
-		t.Fatalf("activation hook output = %q", output)
 	}
 }
 

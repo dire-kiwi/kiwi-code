@@ -153,7 +153,7 @@ export function WorkflowRunsPanel({
         )}
       </div>
       <p className="mt-2 text-[9px] leading-4 text-ghost-dim">
-        Human prompts activate runs with “ultracode,” a direct workflow request, a saved /command, or session-scoped Ultracode effort.
+        Pi prompts activate Dire Mux runs with “ultracode,” a direct workflow request, a saved /command, or session-scoped Ultracode effort.
       </p>
 
       {error && (
