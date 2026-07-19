@@ -32,6 +32,7 @@ import {
   workspacePath,
   workspaceToolFromRoute,
 } from './routes'
+import { activityDisplayThreadId } from './sidebar-thread-activity.mjs'
 import type {
   CodingAgentStart,
   PiThreadActivity,
@@ -250,6 +251,8 @@ export default function App() {
   const [usageSnapshots, setUsageSnapshots] = useState<ThreadUsageSnapshot[]>([])
   const lastWorkspacesRef = useRef<Record<string, LastWorkspace>>({})
   const piActivitiesRef = useRef<PiThreadActivity[]>([])
+  const projectsRef = useRef<Project[]>(projects)
+  projectsRef.current = projects
   const pendingPiAcknowledgementsRef = useRef(new Set<string>())
   const activeThreadIdentityRef = useRef<string | null>(null)
   const previousActiveThreadRef = useRef<string | null>(null)
@@ -274,11 +277,14 @@ export default function App() {
   }, [])
 
   const acknowledgeThreadActivity = useCallback((projectId: string, threadId: string) => {
-    const activity = piActivitiesRef.current.find((item) =>
-      item.projectId === projectId && item.threadId === threadId,
+    const project = projectsRef.current.find((item) => item.id === projectId)
+    if (!project) return
+    const activities = piActivitiesRef.current.filter((activity) =>
+      activity.projectId === projectId
+        && activity.state === 'finished'
+        && activityDisplayThreadId(project.threads, activity) === threadId,
     )
-    if (activity?.state !== 'finished') return
-    queuePiAcknowledgement(projectId, threadId)
+    for (const activity of activities) queuePiAcknowledgement(projectId, activity.threadId)
   }, [queuePiAcknowledgement])
 
   const applyPiActivities = useCallback((nextActivities: PiThreadActivity[]) => {
@@ -291,11 +297,16 @@ export default function App() {
       setPiActivities(visibleActivities)
     }
 
-    const activeFinished = visibleActivities.find((activity) =>
-      activity.state === 'finished'
-        && piActivityKey(activity.projectId, activity.threadId) === activeThreadIdentityRef.current,
-    )
-    if (activeFinished) queuePiAcknowledgement(activeFinished.projectId, activeFinished.threadId)
+    const activeFinished = visibleActivities.filter((activity) => {
+      if (activity.state !== 'finished') return false
+      const project = projectsRef.current.find((item) => item.id === activity.projectId)
+      if (!project) return false
+      const displayThreadId = activityDisplayThreadId(project.threads, activity)
+      return piActivityKey(activity.projectId, displayThreadId) === activeThreadIdentityRef.current
+    })
+    for (const activity of activeFinished) {
+      queuePiAcknowledgement(activity.projectId, activity.threadId)
+    }
   }, [queuePiAcknowledgement])
 
   useEffect(() => {
