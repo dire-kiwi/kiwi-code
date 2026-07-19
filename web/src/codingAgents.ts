@@ -36,7 +36,7 @@ const thinkingLevelLabels: Record<ThinkingLevelId, string> = {
   high: 'High',
   xhigh: 'Extra high',
   max: 'Maximum',
-  ultracode: 'Ultracode (workflows)',
+  ultracode: 'Ultracode (Claude built-in)',
 }
 
 function thinkingLevels(

@@ -714,8 +714,8 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
             >
               <SectionHeader
                 icon={<Workflow size={16} />}
-                title="Dynamic workflows"
-                description="Match Claude Code’s human opt-in, saved-command, and workflow-size behavior."
+                title="Dynamic workflows · Pi"
+                description="Configure Dire Mux workflows exposed through Pi sessions."
                 tone="green"
                 badge={(
                   <StatusBadge tone={disableWorkflows ? 'neutral' : 'success'}>
@@ -739,7 +739,7 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
                   <span>
                     <span className="block text-[10px] font-semibold text-ghost-bright-white">Enable dynamic workflows</span>
                     <span className="mt-1 block text-[9px] leading-4 text-ghost-faint">
-                      Disabling blocks new and resumed runs, saved commands, and ultracode activation. Retained runs remain visible.
+                      Disabling blocks new and resumed Dire Mux runs, saved commands, and Pi ultracode activation. Retained runs remain visible.
                     </span>
                   </span>
                 </label>
@@ -757,7 +757,7 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
                     className="mt-0.5 size-4 accent-ghost-green"
                   />
                   <span>
-                    <span className="block text-[10px] font-semibold text-ghost-bright-white">Ultracode keyword trigger</span>
+                    <span className="block text-[10px] font-semibold text-ghost-bright-white">Pi ultracode keyword trigger</span>
                     <span className="mt-1 block text-[9px] leading-4 text-ghost-faint">
                       A human-typed “ultracode” opts in for one prompt. Direct requests such as “use a workflow” still work when this is off.
                     </span>
@@ -787,12 +787,12 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
                     />
                   </div>
                   <span className="mt-2 block text-[9px] leading-4 text-ghost-faint">
-                    This is advice sent to the parent model. The hard caps remain 16 concurrent and 1,000 total agents.
+                    This is advice sent to the parent Pi model. The hard caps remain 16 concurrent and 1,000 total agents.
                   </span>
                 </label>
 
                 <InfoCallout>
-                  Workflows activate from the current human prompt—use “ultracode,” directly ask to use or run a workflow, or invoke a saved /command—or from session-scoped Ultracode effort. Broad work alone does not opt in.
+                  In Pi, workflows activate from the current human prompt—use “ultracode,” directly ask to use or run a workflow, or invoke a saved /command—or from session-scoped Ultracode effort. Claude Code keeps its separate built-in Ultracode behavior.
                 </InfoCallout>
 
                 {workflowsError && (

@@ -87,15 +87,14 @@ func TestClaudeGPTProfileDirectoryIsPrivateAndRejectsSymlinks(t *testing.T) {
 
 func TestDiscoverClaudeSandboxPluginPathUsesTheExistingNonGPTProfile(t *testing.T) {
 	configDirectory := t.TempDir()
+	pluginDirectory := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", configDirectory)
+	t.Setenv("CLAUDE_CODE_PLUGIN_CACHE_DIR", pluginDirectory)
 	installPath := filepath.Join(t.TempDir(), "sandbox")
 	if err := os.MkdirAll(filepath.Join(installPath, ".claude-plugin"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(installPath, ".claude-plugin", "plugin.json"), []byte(`{"name":"sandbox-exec"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(configDirectory, "plugins"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(configDirectory, "settings.json"), []byte(`{"enabledPlugins":{"sandbox-exec@dire-agent-extensions":true}}`), 0o600); err != nil {
@@ -109,13 +108,107 @@ func TestDiscoverClaudeSandboxPluginPathUsesTheExistingNonGPTProfile(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(configDirectory, "plugins", "installed_plugins.json"), registry, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(pluginDirectory, "installed_plugins.json"), registry, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	got, err := discoverClaudeSandboxPluginPath()
 	if err != nil || got != installPath {
 		t.Fatalf("sandbox plugin path = %q, %v; want %q", got, err, installPath)
 	}
+}
+
+func TestSyncClaudeGPTProfileSettingsCopiesNonModelConfiguration(t *testing.T) {
+	configDirectory := t.TempDir()
+	profilePath, err := prepareClaudeGPTProfileDirectory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := map[string]any{
+		"model":                  "claude-opus-4-6",
+		"availableModels":        []string{"opus", "sonnet"},
+		"enforceAvailableModels": true,
+		"apiKeyHelper":           "/tmp/anthropic-key-helper",
+		"forceLoginMethod":       "claudeai",
+		"effortLevel":            "high",
+		"theme":                  "dark",
+		"enabledPlugins": map[string]bool{
+			claudeSandboxPluginID: true,
+			"formatter@example":   true,
+		},
+		"env": map[string]string{
+			"EDITOR":                        "nvim",
+			"ANTHROPIC_BASE_URL":            "https://anthropic.example.invalid",
+			"ANTHROPIC_MODEL":               "claude-opus-4-6",
+			"ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5",
+			"CLAUDE_CODE_SUBAGENT_MODEL":    "sonnet",
+			"CLAUDE_CODE_USE_BEDROCK":       "1",
+		},
+	}
+	contents, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDirectory, claudeSettingsFileName), contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncClaudeGPTProfileSettings(profilePath, configDirectory); err != nil {
+		t.Fatal(err)
+	}
+
+	copiedPath := filepath.Join(profilePath, claudeSettingsFileName)
+	copiedContents, err := os.ReadFile(copiedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var copied map[string]any
+	if err := json.Unmarshal(copiedContents, &copied); err != nil {
+		t.Fatal(err)
+	}
+	for _, excluded := range claudeGPTExcludedSettings {
+		if _, ok := copied[excluded]; ok {
+			t.Fatalf("copied Claude GPT settings retain %q: %#v", excluded, copied)
+		}
+	}
+	if copied["effortLevel"] != "high" || copied["theme"] != "dark" {
+		t.Fatalf("copied Claude GPT settings = %#v", copied)
+	}
+	plugins, _ := copied["enabledPlugins"].(map[string]any)
+	if plugins[claudeSandboxPluginID] != true || plugins["formatter@example"] != true {
+		t.Fatalf("copied Claude GPT plugins = %#v", plugins)
+	}
+	environment, _ := copied["env"].(map[string]any)
+	if environment["EDITOR"] != "nvim" {
+		t.Fatalf("copied Claude GPT environment = %#v", environment)
+	}
+	for name := range claudeGPTExcludedSettingEnvironment {
+		if _, ok := environment[name]; ok {
+			t.Fatalf("copied Claude GPT environment retains %q: %#v", name, environment)
+		}
+	}
+	if info, err := os.Stat(copiedPath); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("copied Claude GPT settings permissions: info=%v err=%v", info, err)
+	}
+}
+
+func configureTestClaudeGPTUserConfiguration(t *testing.T, handler *terminalHandler) string {
+	t.Helper()
+	configDirectory := t.TempDir()
+	pluginDirectory := filepath.Join(configDirectory, "plugins")
+	if err := os.MkdirAll(pluginDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(configDirectory, claudeSettingsFileName),
+		[]byte(`{"theme":"dark","enabledPlugins":{"sandbox-exec@dire-agent-extensions":true}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	handler.claudeConfigPath = configDirectory
+	handler.claudeConfigErr = nil
+	handler.claudePluginRootPath = pluginDirectory
+	handler.claudePluginRootErr = nil
+	return pluginDirectory
 }
 
 func TestParsePiModels(t *testing.T) {
@@ -484,7 +577,14 @@ done
 		t.Fatalf("Claude thinking levels include Pi-only minimal: %#v", configs[1].ThinkingLevels)
 	}
 	if !codingAgentChoiceExists(configs[1].ThinkingLevels, "ultracode") || !codingAgentChoiceExists(configs[2].ThinkingLevels, "ultracode") {
-		t.Fatalf("Claude thinking levels do not expose session-scoped ultracode: %#v / %#v", configs[1].ThinkingLevels, configs[2].ThinkingLevels)
+		t.Fatalf("Claude thinking levels do not expose built-in ultracode: %#v / %#v", configs[1].ThinkingLevels, configs[2].ThinkingLevels)
+	}
+	for _, config := range configs[1:] {
+		for _, level := range config.ThinkingLevels {
+			if level.ID == "ultracode" && level.Label != "Ultracode (Claude built-in)" {
+				t.Fatalf("%s ultracode label = %q", config.ID, level.Label)
+			}
+		}
 	}
 	for _, model := range []string{"sonnet", "opus", "haiku", "fable"} {
 		if !codingAgentChoiceExists(configs[1].Models, model) {
@@ -586,6 +686,7 @@ func TestClaudeGPTCommandLoadsItsDefaultModelFromCLIProxyAPI(t *testing.T) {
 		cliProxyAPIKey:          "test-key",
 		cliProxyAPIHTTPClient:   proxy.Client(),
 	}
+	pluginDirectory := configureTestClaudeGPTUserConfiguration(t, handler)
 	_, args, notice, err := handler.commandForCodingAgentPaneWithOptions(
 		project.Project{ID: "project"},
 		project.Thread{ID: "thread"},
@@ -605,10 +706,15 @@ func TestClaudeGPTCommandLoadsItsDefaultModelFromCLIProxyAPI(t *testing.T) {
 		"ANTHROPIC_DEFAULT_OPUS_MODEL=gpt-5.6-sol",
 		"ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-5.6-terra",
 		"ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5.6-luna",
+		"CLAUDE_CODE_PLUGIN_CACHE_DIR=" + pluginDirectory,
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("default Claude GPT args = %#v, missing %q", args, expected)
 		}
+	}
+	copiedSettings, err := os.ReadFile(filepath.Join(handler.claudeGPTProfilePath, claudeSettingsFileName))
+	if err != nil || !strings.Contains(string(copiedSettings), `"theme": "dark"`) {
+		t.Fatalf("copied Claude GPT settings = %q, error = %v", copiedSettings, err)
 	}
 }
 
@@ -629,6 +735,7 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 		cliProxyAPIBaseURL:      "http://127.0.0.1:18317",
 		cliProxyAPIKey:          "proxy-client-key",
 	}
+	pluginDirectory := configureTestClaudeGPTUserConfiguration(t, handler)
 
 	tests := []struct {
 		agent       string
@@ -686,6 +793,7 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 				joined := strings.Join(args, "\n")
 				for _, expected := range []string{
 					"CLAUDE_CONFIG_DIR=" + profilePath,
+					"CLAUDE_CODE_PLUGIN_CACHE_DIR=" + pluginDirectory,
 					"IS_DEMO=1",
 					"ANTHROPIC_BASE_URL=http://127.0.0.1:18317",
 					"ANTHROPIC_AUTH_TOKEN=proxy-client-key",

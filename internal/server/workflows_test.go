@@ -307,6 +307,13 @@ func TestWorkflowAPIStartsPersistsReportsAndStopsServerProcess(t *testing.T) {
 	if dismissedResponse.Code != http.StatusOK || strings.Contains(dismissedResponse.Body.String(), `"activated":true`) {
 		t.Fatalf("dismissed activation status = %d, body = %s", dismissedResponse.Code, dismissedResponse.Body.String())
 	}
+	claudeRequest := httptest.NewRequest(http.MethodPost, path+"/activation", bytes.NewBufferString(`{"prompt":"use a workflow for this API test","source":"claude-hook","mode":"prompt"}`))
+	claudeRequest.Header.Set(agentTokenHeader, application.terminal.agentToken)
+	claudeResponse := httptest.NewRecorder()
+	handler.ServeHTTP(claudeResponse, claudeRequest)
+	if claudeResponse.Code != http.StatusOK || strings.Contains(claudeResponse.Body.String(), `"activated":true`) {
+		t.Fatalf("Claude activation status = %d, body = %s", claudeResponse.Code, claudeResponse.Body.String())
+	}
 	activationRequest := httptest.NewRequest(http.MethodPost, path+"/activation", bytes.NewBufferString(`{"prompt":"use a workflow for this API test","source":"rpc","mode":"prompt"}`))
 	activationRequest.Header.Set(agentTokenHeader, application.terminal.agentToken)
 	activationResponse := httptest.NewRecorder()
