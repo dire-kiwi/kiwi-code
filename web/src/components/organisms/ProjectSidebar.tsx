@@ -15,6 +15,7 @@ import {
   ChevronUp,
   Clock3,
   CornerDownRight,
+  ExternalLink,
   Folder,
   FolderGit2,
   FolderOpen,
@@ -26,6 +27,7 @@ import {
   PanelLeftClose,
   PanelsTopLeft,
   Plus,
+  RadioTower,
   RotateCw,
   Search,
   Settings2,
@@ -41,7 +43,7 @@ import {
 import { formatCompactTokens, formatCompactUsd, usageDescription } from '../../lib/formatUsage'
 import { sidebarThreadActivity } from '../../sidebar-thread-activity.mjs'
 import { defaultVisibleRootThreadIds } from '../../sidebar-thread-visibility.mjs'
-import type { PiThreadActivity, Profile, Project, Thread, ThreadUsageSnapshot } from '../../types'
+import type { PiThreadActivity, ProcessWebServer, Profile, Project, Thread, ThreadUsageSnapshot } from '../../types'
 import { Button } from '../atoms/Button'
 import { IconButton } from '../atoms/IconButton'
 import { TextInput } from '../atoms/Input'
@@ -55,6 +57,7 @@ type ProjectSidebarProps = {
   activeProfileId: string
   projects: Project[]
   piActivities: PiThreadActivity[]
+  processWebServers: ProcessWebServer[]
   usageSnapshots: ThreadUsageSnapshot[]
   selectedThreadId: string | null
   deletingProjectId: string | null
@@ -117,6 +120,15 @@ function sameOrder(left: string[], right: string[]) {
   return left.length === right.length && left.every((id, index) => id === right[index])
 }
 
+function webServerAddress(value: string) {
+  try {
+    const url = new URL(value)
+    return `${url.host}${url.pathname === '/' ? '' : url.pathname}`
+  } catch {
+    return value
+  }
+}
+
 function rootThreads(project: Project) {
   return project.threads.filter((thread) => !thread.parentThreadId)
 }
@@ -149,6 +161,7 @@ export function ProjectSidebar({
   activeProfileId,
   projects,
   piActivities,
+  processWebServers,
   usageSnapshots,
   selectedThreadId,
   deletingProjectId,
@@ -895,6 +908,49 @@ export function ProjectSidebar({
             </ul>
           )}
         </nav>
+
+        <section className="max-h-40 shrink-0 overflow-y-auto border-t border-ghost-border/70 px-2 py-2" aria-labelledby="sidebar-processes-title">
+          <div className="flex h-5 items-center gap-1.5 px-1.5">
+            <RadioTower size={11} className={processWebServers.length > 0 ? 'text-ghost-green' : 'text-ghost-faint'} />
+            <h2 id="sidebar-processes-title" className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-dim">
+              Processes
+            </h2>
+            {processWebServers.length > 0 && (
+              <span className="ml-auto rounded-full border border-ghost-border/70 px-1.5 font-mono text-[8px] text-ghost-faint">
+                {processWebServers.length}
+              </span>
+            )}
+          </div>
+          {processWebServers.length === 0 ? (
+            <p className="px-1.5 pt-1 font-mono text-[9px] text-ghost-faint">No web servers</p>
+          ) : (
+            <ul className="mt-1 space-y-0.5">
+              {processWebServers.map((webServer) => (
+                <li key={`${webServer.projectId}:${webServer.threadId}:${webServer.processId}:${webServer.url}`}>
+                  <a
+                    href={webServer.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={onClose}
+                    title={`${webServer.projectName} / ${webServer.threadTitle} / ${webServer.processName}\n${webServer.url}`}
+                    className="group/server flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1.5 text-ghost-muted transition hover:bg-ghost-raised/45 hover:text-ghost-bright-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ghost-green/45"
+                  >
+                    <span className="grid size-5 shrink-0 place-items-center rounded bg-ghost-green/[0.08] text-ghost-green">
+                      <RadioTower size={11} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-mono text-[9px] text-ghost-white">{webServerAddress(webServer.url)}</span>
+                      <span className="block truncate text-[8px] text-ghost-faint">
+                        {webServer.processName} · {webServer.projectName}
+                      </span>
+                    </span>
+                    <ExternalLink size={9} className="shrink-0 text-ghost-faint transition group-hover/server:text-ghost-green" />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
         <div className="shrink-0 space-y-0.5 border-t border-ghost-border/70 bg-ghost-panel/25 p-2">
           <SelectionButton

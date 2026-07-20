@@ -46,15 +46,18 @@ func TestAgentSkillInstallerInstallsAndUpdatesBundle(t *testing.T) {
 		"context: fork",
 		"scripts/start-process.mjs",
 		"scripts/read-logs.mjs",
+		"scripts/update-process.mjs",
 	} {
 		if !strings.Contains(string(contents), expected) {
 			t.Fatalf("SKILL.md does not contain %q", expected)
 		}
 	}
-	if info, err := os.Stat(filepath.Join(status.Path, "scripts", "start-process.mjs")); err != nil {
-		t.Fatal(err)
-	} else if info.Mode()&0o111 == 0 {
-		t.Fatalf("start-process.mjs mode = %v, want executable", info.Mode())
+	for _, name := range []string{"start-process.mjs", "update-process.mjs"} {
+		if info, err := os.Stat(filepath.Join(status.Path, "scripts", name)); err != nil {
+			t.Fatal(err)
+		} else if info.Mode()&0o111 == 0 {
+			t.Fatalf("%s mode = %v, want executable", name, info.Mode())
+		}
 	}
 	threadsPath := filepath.Join(filepath.Dir(status.Path), "dire-mux-threads")
 	threadSkill, err := os.ReadFile(filepath.Join(threadsPath, "SKILL.md"))
@@ -273,6 +276,46 @@ func TestBundledArchiveThreadHelper(t *testing.T) {
 		if !strings.Contains(help, expected) {
 			t.Fatalf("archive helper help does not contain %q: %s", expected, help)
 		}
+	}
+}
+
+func TestBundledUpdateProcessHelperPublishesWebServers(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not available")
+	}
+	type capturedRequest struct {
+		method     string
+		path       string
+		webServers []string
+	}
+	requests := make(chan capturedRequest, 1)
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			WebServers []string `json:"webServers"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		requests <- capturedRequest{method: r.Method, path: r.URL.Path, webServers: body.WebServers}
+		writeJSON(w, http.StatusOK, map[string]any{"id": "web-process", "webServers": body.WebServers})
+	}))
+	defer httpServer.Close()
+
+	script, err := filepath.Abs(filepath.Join("agent-skill", "kiwi-code-processes", "scripts", "update-process.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, node, script, "web/process", "http://127.0.0.1:5173", "https://localhost:8443")
+	command.Env = append(os.Environ(), "DIRE_MUX_THREAD_ENDPOINT="+httpServer.URL+"/api/projects/project/threads/thread")
+	if output, runErr := command.CombinedOutput(); runErr != nil {
+		t.Fatalf("update process helper failed: %v\n%s", runErr, output)
+	}
+	request := <-requests
+	if request.method != http.MethodPatch || request.path != "/api/projects/project/threads/thread/processes/web/process" || len(request.webServers) != 2 {
+		t.Fatalf("update process request = %#v", request)
 	}
 }
 

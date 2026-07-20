@@ -311,6 +311,17 @@ export type ProcessWindow = {
   index: number
   name: string
   currentCommand: string
+  webServers: string[]
+}
+
+export type ProcessWebServer = {
+  projectId: string
+  projectName: string
+  threadId: string
+  threadTitle: string
+  processId: string
+  processName: string
+  url: string
 }
 
 export type WorkflowPhase = {

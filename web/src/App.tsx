@@ -36,6 +36,7 @@ import { activityDisplayThreadId } from './sidebar-thread-activity.mjs'
 import type {
   CodingAgentStart,
   PiThreadActivity,
+  ProcessWebServer,
   Profile,
   Project,
   Thread,
@@ -248,6 +249,7 @@ export default function App() {
   const [projectFinderOpen, setProjectFinderOpen] = useState(false)
   const [detailsSidebarExpanded, setDetailsSidebarExpanded] = useState(false)
   const [piActivities, setPiActivities] = useState<PiThreadActivity[]>([])
+  const [processWebServers, setProcessWebServers] = useState<ProcessWebServer[]>([])
   const [usageSnapshots, setUsageSnapshots] = useState<ThreadUsageSnapshot[]>([])
   const lastWorkspacesRef = useRef<Record<string, LastWorkspace>>({})
   const piActivitiesRef = useRef<PiThreadActivity[]>([])
@@ -380,10 +382,20 @@ export default function App() {
       }
     }
 
+    function handleProcesses(event: Event) {
+      try {
+        const webServers: unknown = JSON.parse((event as MessageEvent<string>).data)
+        if (Array.isArray(webServers)) setProcessWebServers(webServers as ProcessWebServer[])
+      } catch {
+        // Ignore a malformed event; EventSource keeps listening for the next snapshot.
+      }
+    }
+
     events.addEventListener('projects', handleProjects)
     events.addEventListener('profiles', handleProfiles)
     events.addEventListener('pi-activity', handlePiActivity)
     events.addEventListener('thread-usage', handleThreadUsage)
+    events.addEventListener('processes', handleProcesses)
 
     listProjects(controller.signal)
       .then((items) => {
@@ -460,6 +472,10 @@ export default function App() {
     () => projects.filter((project) => project.profileId === activeProfileId),
     [activeProfileId, projects],
   )
+  const activeProcessWebServers = useMemo(() => {
+    const projectIds = new Set(activeProjects.map((project) => project.id))
+    return processWebServers.filter((webServer) => projectIds.has(webServer.projectId))
+  }, [activeProjects, processWebServers])
   const defaultWorkspacePath = useMemo(() => firstWorkspacePath(activeProjects), [activeProjects])
   const routedProject = selectedProject ?? newThreadProject ?? legacyProject ?? landingProject
   const routedProfileId = routedProject?.profileId
@@ -763,6 +779,7 @@ export default function App() {
         activeProfileId={activeProfileId}
         projects={activeProjects}
         piActivities={piActivities}
+        processWebServers={activeProcessWebServers}
         usageSnapshots={usageSnapshots}
         selectedThreadId={selectedThread?.id ?? null}
         deletingProjectId={deletingId}
