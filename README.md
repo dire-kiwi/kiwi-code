@@ -143,7 +143,7 @@ Use `go run ./cmd/headless-client -help` for options. Pass `-skip-terminal` when
 
 The restart API gracefully closes the current HTTP server and lets the application process terminate instead of re-executing the current binary. Persistent tmux sessions are not stopped. Supported production and development launchers wait for that process to exit completely before they build and launch the replacement; crashes and other nonzero exits are not treated as restart requests.
 
-Dire Mux enables tmux's native verbose logs for server-creating commands and long-lived terminal and control clients. Logs are written as `tmux-server-PID.log` and `tmux-client-PID.log` under `<data-dir>/tmux-logs/<tmux-socket>/`. An already-running tmux server cannot be switched to that directory, so its server log begins with the next server incarnation; newly attached clients log immediately. Treat these diagnostics as sensitive because they can contain terminal and command metadata.
+Dire Mux does not enable tmux's native verbose logging, avoiding `tmux-client-*.log` and `tmux-server-*.log` diagnostic files during normal operation.
 
 > **Security:** dire-mux exposes terminal access and does not provide authentication. Backend switching intentionally accepts API and WebSocket clients from other HTTP(S) browser origins. Only use the all-interface default on a trusted network with trusted browser content, or bind it back to loopback with `DIRE_MUX_ADDR=127.0.0.1:4000`.
 

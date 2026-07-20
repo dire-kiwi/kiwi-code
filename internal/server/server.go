@@ -100,9 +100,6 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	if err := terminal.reconcileTerminalStops(); err != nil {
 		log.Printf("reconcile durable terminal stops: error=%v", err)
 	}
-	if terminal.tmuxLogErr != nil {
-		return nil, terminal.tmuxLogErr
-	}
 	if terminal.piExtensionErr != nil {
 		return nil, terminal.piExtensionErr
 	}

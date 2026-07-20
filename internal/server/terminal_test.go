@@ -435,50 +435,27 @@ func TestTmuxEnvironmentDoesNotNestTheParentSession(t *testing.T) {
 	}
 }
 
-func TestTmuxNativeLogConfiguration(t *testing.T) {
-	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler := newTerminalHandlerUnreconciledWithOptions(store, originPolicy{}, "dmv-log-config")
-	if handler.tmuxLogErr != nil {
-		t.Fatal(handler.tmuxLogErr)
-	}
-	wantDirectory := filepath.Join(store.DataDirectory(), tmuxLogDirectoryName, "dmv-log-config")
-	if handler.tmuxLogDirectory != wantDirectory {
-		t.Fatalf("tmux log directory = %q, want %q", handler.tmuxLogDirectory, wantDirectory)
-	}
-	info, err := os.Stat(wantDirectory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
-		t.Fatalf("tmux log path mode = %v, want a private directory", info.Mode())
-	}
-
-	handler.tmuxPath = "/test/tmux"
+func TestTmuxLoggingDisabled(t *testing.T) {
+	handler := &terminalHandler{tmuxPath: "/test/tmux", tmuxSocket: "dmv-no-logging"}
 	for _, test := range []struct {
-		name       string
-		args       []string
-		wantArgs   string
-		wantLogDir bool
+		name     string
+		args     []string
+		wantArgs string
 	}{
 		{
-			name:       "server creating client",
-			args:       []string{"new-session", "-d"},
-			wantArgs:   "/test/tmux -v -L dmv-log-config new-session -d",
-			wantLogDir: true,
+			name:     "server creating client",
+			args:     []string{"new-session", "-d"},
+			wantArgs: "/test/tmux -L dmv-no-logging new-session -d",
 		},
 		{
-			name:       "attached client",
-			args:       []string{"attach-session", "-t", "=session"},
-			wantArgs:   "/test/tmux -v -L dmv-log-config attach-session -t =session",
-			wantLogDir: true,
+			name:     "attached client",
+			args:     []string{"attach-session", "-t", "=session"},
+			wantArgs: "/test/tmux -L dmv-no-logging attach-session -t =session",
 		},
 		{
-			name:     "frequent inspection client",
+			name:     "inspection client",
 			args:     []string{"has-session", "-t", "=session"},
-			wantArgs: "/test/tmux -L dmv-log-config has-session -t =session",
+			wantArgs: "/test/tmux -L dmv-no-logging has-session -t =session",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -486,12 +463,8 @@ func TestTmuxNativeLogConfiguration(t *testing.T) {
 			if got := strings.Join(command.Args, " "); got != test.wantArgs {
 				t.Fatalf("tmux arguments = %q, want %q", got, test.wantArgs)
 			}
-			if test.wantLogDir {
-				if command.Dir != wantDirectory {
-					t.Fatalf("tmux command directory = %q, want %q", command.Dir, wantDirectory)
-				}
-			} else if command.Dir != "" {
-				t.Fatalf("non-verbose tmux command directory = %q, want empty", command.Dir)
+			if command.Dir != "" {
+				t.Fatalf("tmux command directory = %q, want empty", command.Dir)
 			}
 		})
 	}

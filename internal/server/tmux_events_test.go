@@ -61,9 +61,8 @@ exit 1
 
 	updates := make(chan threadStatusKey, 8)
 	handler := &terminalHandler{
-		tmuxPath:         fakeTmux,
-		tmuxSocket:       "watch-test",
-		tmuxLogDirectory: directory,
+		tmuxPath:   fakeTmux,
+		tmuxSocket: "watch-test",
 		threadStatusChanged: func(projectID, threadID string) {
 			updates <- threadStatusKey{projectID: projectID, threadID: threadID}
 		},
@@ -119,9 +118,9 @@ exit 1
 	}
 	argumentText := string(arguments)
 	for _, sessionName := range []string{terminalSession, toolsSession} {
-		want := "-v -L watch-test -C attach-session -E -f no-output,ignore-size -t " + exactTmuxSessionTarget(sessionName)
+		want := "-L watch-test -C attach-session -E -f no-output,ignore-size -t " + exactTmuxSessionTarget(sessionName)
 		if !strings.Contains(argumentText, want) {
-			t.Fatalf("verbose control attachment for %q missing from:\n%s", sessionName, argumentText)
+			t.Fatalf("control attachment for %q missing from:\n%s", sessionName, argumentText)
 		}
 	}
 	input, err := os.ReadFile(inputPath)

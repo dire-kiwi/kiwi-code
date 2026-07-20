@@ -30,8 +30,6 @@ type terminalHandler struct {
 	tmuxPath                string
 	tmuxSocket              string
 	tmuxSocketMigration     *tmuxSocketMigration
-	tmuxLogDirectory        string
-	tmuxLogErr              error
 	piExtensionPaths        []string
 	piExtensionErr          error
 	piModelMu               sync.Mutex
@@ -82,7 +80,6 @@ const (
 	legacyTmuxSocketName      = "dire-mux"
 	tmuxSessionNamePrefix     = "kiwi-code-"
 	legacyTmuxSessionPrefix   = "dire-mux-"
-	tmuxLogDirectoryName      = "tmux-logs"
 	terminalWriteTimeout      = 10 * time.Second
 	terminalPongTimeout       = 45 * time.Second
 	terminalPingInterval      = 15 * time.Second
@@ -209,7 +206,6 @@ func newTerminalHandlerUnreconciledWithOriginPolicy(projects *project.Store, pol
 func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy originPolicy, tmuxSocket string) *terminalHandler {
 	tmuxPath, _ := exec.LookPath("tmux")
 	envPath, _ := exec.LookPath("env")
-	tmuxLogDirectory, tmuxLogErr := prepareTmuxLogDirectory(projects.DataDirectory(), tmuxSocket)
 	extensionPaths, extensionErr := materializePiExtensions(projects.DataDirectory())
 	agentToken, agentTokenErr := loadOrCreateAgentToken(projects.DataDirectory())
 	claudePluginPath, claudePluginErr := materializeClaudePlugin(projects.DataDirectory())
@@ -226,8 +222,6 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 		projects:                projects,
 		tmuxPath:                tmuxPath,
 		tmuxSocket:              tmuxSocket,
-		tmuxLogDirectory:        tmuxLogDirectory,
-		tmuxLogErr:              tmuxLogErr,
 		piExtensionPaths:        extensionPaths,
 		piExtensionErr:          extensionErr,
 		agentToken:              agentToken,
@@ -4325,58 +4319,15 @@ func (h *terminalHandler) notifyThreadStatusChanged(projectID, threadID string) 
 }
 
 func (h *terminalHandler) tmuxCommand(args ...string) *exec.Cmd {
-	arguments, verbose := h.tmuxCommandArguments(args...)
-	command := exec.Command(h.tmuxPath, arguments...)
-	h.configureTmuxCommand(command, verbose)
+	command := exec.Command(h.tmuxPath, h.tmuxCommandArguments(args...)...)
+	command.Env = tmuxEnvironment()
 	return command
 }
 
-func (h *terminalHandler) tmuxCommandArguments(args ...string) ([]string, bool) {
-	// tmux creates a separate tmux-client-PID.log for every process passed -v.
-	// Inspection commands run as often as once per second, so logging all of
-	// them would create an unbounded stream of tiny files. new-session starts a
-	// missing server with verbose server logging, while attach-session covers
-	// the long-lived terminal and control clients involved when a server dies.
-	verbose := h.tmuxLogDirectory != "" && tmuxCommandNeedsVerboseLogging(args)
-	arguments := make([]string, 0, len(args)+3)
-	if verbose {
-		arguments = append(arguments, "-v")
-	}
+func (h *terminalHandler) tmuxCommandArguments(args ...string) []string {
+	arguments := make([]string, 0, len(args)+2)
 	arguments = append(arguments, "-L", h.tmuxSocket)
-	arguments = append(arguments, args...)
-	return arguments, verbose
-}
-
-func (h *terminalHandler) configureTmuxCommand(command *exec.Cmd, verbose bool) {
-	command.Env = tmuxEnvironment()
-	if verbose {
-		// tmux has no log-directory option; native logs are always opened in
-		// the client's working directory, which the daemon also inherits.
-		command.Dir = h.tmuxLogDirectory
-	}
-}
-
-func tmuxCommandNeedsVerboseLogging(args []string) bool {
-	for _, argument := range args {
-		if strings.HasPrefix(argument, "-") {
-			continue
-		}
-		switch argument {
-		case "new-session", "attach-session":
-			return true
-		default:
-			return false
-		}
-	}
-	return false
-}
-
-func prepareTmuxLogDirectory(dataDirectory, tmuxSocket string) (string, error) {
-	directory := filepath.Join(dataDirectory, tmuxLogDirectoryName, tmuxSocket)
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return "", fmt.Errorf("create tmux log directory: %w", err)
-	}
-	return directory, nil
+	return append(arguments, args...)
 }
 
 func exactTmuxSessionTarget(sessionName string) string {

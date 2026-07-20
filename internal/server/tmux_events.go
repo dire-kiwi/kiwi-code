@@ -295,8 +295,7 @@ func (h *terminalHandler) publishThreadStatusChanged(projectID, threadID string)
 }
 
 func (h *terminalHandler) tmuxCommandContext(ctx context.Context, args ...string) *exec.Cmd {
-	arguments, verbose := h.tmuxCommandArguments(args...)
-	command := exec.CommandContext(ctx, h.tmuxPath, arguments...)
-	h.configureTmuxCommand(command, verbose)
+	command := exec.CommandContext(ctx, h.tmuxPath, h.tmuxCommandArguments(args...)...)
+	command.Env = tmuxEnvironment()
 	return command
 }
