@@ -203,6 +203,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/plans/{planId}", server.downloadThreadPlan)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}", server.getThread)
 	mux.HandleFunc("PATCH /api/projects/{id}/threads/{threadId}", server.updateThread)
+	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/coding-agent", server.terminal.startCodingAgent)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/limits", server.updateThreadLimits)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/usage", server.updateThreadUsage)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/budget", server.threadBudget)

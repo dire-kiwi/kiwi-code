@@ -13,8 +13,10 @@ Use the dependency-free scripts in `scripts/` to manage threads through the Dire
 
 ## Rules
 
+- Never create a main thread unless the user explicitly asks to create, start, or open a new thread. Do not infer permission from a broad task, a desire for parallelism, or an opportunity to delegate work; use the current thread unless the user specifically requests another main thread.
 - List threads first when a target is ambiguous. Use immutable project and thread IDs for mutations, never a title alone.
-- Create a normal thread unless the user asks for Git isolation. For a worktree thread, pass `--worktree` and optionally `--base-branch`.
+- When explicitly asked to create a thread, create a normal thread unless the user asks for Git isolation. For a worktree thread, pass `--worktree` and optionally `--base-branch`.
+- Do not start a coding agent merely because the user requested a new thread. Only pass `--agent` when the user also explicitly asks to start an agent in it or supplies an initial task for that new thread; `--model`, `--thinking`, and `--prompt` configure that new agent process.
 - Archive a completed thread when it should leave the active list but remain recoverable. Archiving keeps its record and tmux sessions, but starts the configured archived-thread retention period. Restore it to return it to the active list.
 - Treat closing as destructive: it removes the thread record and stops both of its persistent tmux sessions, including its coding agents and process shells. It does not immediately delete an existing worktree, branch, or project files; a clean managed worktree may be removed later according to automatic cleanup settings.
 - Never close the current thread unless the user explicitly requests it. The helper refuses by default because closing it terminates this agent; only then use `--allow-current`.
@@ -54,13 +56,18 @@ Create a normal thread in the current project:
 node "$HOME/.agents/skills/dire-mux-threads/scripts/create-thread.mjs" "Investigate cache misses"
 ```
 
-Create an isolated worktree thread from a local base branch:
+Create an isolated worktree thread from a local base branch and immediately start Pi Native with its first task:
 
 ```bash
-node "$HOME/.agents/skills/dire-mux-threads/scripts/create-thread.mjs" "Fix cache misses" --worktree --base-branch main
+node "$HOME/.agents/skills/dire-mux-threads/scripts/create-thread.mjs" "Fix cache misses" \
+  --worktree --base-branch main \
+  --agent pi-native --model openai-codex/gpt-5.6-sol --thinking high \
+  --prompt "Find and fix the cache misses, then run the relevant tests."
 ```
 
-Add `--project <project-id>` to create it in another project. The title is optional; without one, Dire Mux uses `New thread` and its first coding-agent prompt can name it automatically.
+`--agent` accepts `pi-native`, `pi`, `claude-native`, `claude`, or `claude-gpt`. The `pi` and `claude` values start terminal presentations; `claude-gpt` is terminal-only. Model IDs and thinking levels must be supported by the selected agent. `--model`, `--thinking`, and `--prompt` require `--agent`. Omitting `--prompt` starts the selected agent without sending a task.
+
+Add `--project <project-id>` to create the thread in another project. The title is optional; without one, Dire Mux uses `New thread` and its first coding-agent prompt can name it automatically. If agent startup fails, the helper reports the ID of the thread that was still created.
 
 ## Rename a thread
 

@@ -268,6 +268,17 @@ func TestThreadAPI(t *testing.T) {
 		t.Fatalf("unexpected thread: %#v", thread)
 	}
 
+	invalidAgentResponse := httptest.NewRecorder()
+	invalidAgentRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/projects/"+item.ID+"/threads/"+thread.ID+"/coding-agent",
+		bytes.NewBufferString(`{"agent":"unknown","model":"example/model","prompt":"Start this"}`),
+	)
+	handler.ServeHTTP(invalidAgentResponse, invalidAgentRequest)
+	if invalidAgentResponse.Code != http.StatusBadRequest {
+		t.Fatalf("invalid coding agent status = %d, body = %s", invalidAgentResponse.Code, invalidAgentResponse.Body.String())
+	}
+
 	invalidDepthResponse := httptest.NewRecorder()
 	invalidDepthRequest := httptest.NewRequest(http.MethodPost, "/api/projects/"+item.ID+"/threads", bytes.NewBufferString(`{"nestedDepth":2}`))
 	handler.ServeHTTP(invalidDepthResponse, invalidDepthRequest)
