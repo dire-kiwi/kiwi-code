@@ -5,7 +5,7 @@ compatibility: Requires Node.js 20+ and a Dire Mux agent session with DIRE_MUX_T
 context: fork
 metadata:
   author: dire-mux
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Kiwi Code processes
@@ -20,6 +20,7 @@ Use the scripts in `scripts/` to manage long-running commands through the Dire M
 - Run the managed command in the foreground so its output and interrupts remain observable.
 - Keep the returned process ID. All later operations use that ID, not a tmux window index.
 - Read a bounded amount of output and avoid tight polling loops.
+- For a web server, publish every browser-reachable HTTP(S) URL after its readiness log appears. Update the published URLs if its address changes.
 - Stop processes that are no longer needed unless the user asked to leave them running.
 
 Set the helper directory once in a shell command when convenient:
@@ -45,6 +46,22 @@ node "$HOME/.agents/skills/kiwi-code-processes/scripts/list-processes.mjs"
 ```
 
 Use this after compaction or whenever an ID is no longer in context.
+
+## Publish web servers in the sidebar
+
+After a web server reports that it is ready, attach one or more browser-reachable URLs to its process:
+
+```bash
+node "$HOME/.agents/skills/kiwi-code-processes/scripts/update-process.mjs" <id> http://127.0.0.1:5173
+```
+
+Pass multiple URLs as additional arguments when one managed process runs multiple servers. Prefer `127.0.0.1` over a wildcard bind address such as `0.0.0.0` so the sidebar link can be opened directly. Replace the complete URL list by running this command again. Clear links while leaving the process shell open with:
+
+```bash
+node "$HOME/.agents/skills/kiwi-code-processes/scripts/update-process.mjs" <id> --clear
+```
+
+Published links disappear automatically when the foreground command finishes or the process shell is stopped.
 
 ## Read logs
 

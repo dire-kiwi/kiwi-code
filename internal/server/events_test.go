@@ -71,6 +71,9 @@ func TestGlobalEventStreamFansOutNamedStatusesToEveryClient(t *testing.T) {
 		if event := readServerSentEvent(t, reader); event.Name != threadUsageEventName || !strings.Contains(string(event.Data), `"threadId":"`+thread.ID+`"`) {
 			t.Fatalf("client %d fourth event = %q %s", index, event.Name, event.Data)
 		}
+		if event := readServerSentEvent(t, reader); event.Name != processWebServersEventName || string(event.Data) != "[]" {
+			t.Fatalf("client %d fifth event = %q %s", index, event.Name, event.Data)
+		}
 	}
 
 	putJSONForEventTest(t, ctx, server.Client(), server.URL+"/api/profiles", `{"name":"Shared client"}`, http.StatusCreated, http.MethodPost)

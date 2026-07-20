@@ -33,14 +33,23 @@ type tmuxSessionWatch struct {
 // sessions. Missing sessions do not get polled: their watcher sleeps until a
 // Dire Mux session creation or a %sessions-changed notification wakes it.
 func (h *terminalHandler) watchThreadTmux(projectID, threadID string) func() {
+	return h.watchThreadTmuxSessions(projectID, threadID, []string{
+		tmuxSessionName(projectID, threadID, "terminal"),
+		tmuxSessionName(projectID, threadID, "process"),
+	})
+}
+
+func (h *terminalHandler) watchThreadProcesses(projectID, threadID string) func() {
+	return h.watchThreadTmuxSessions(projectID, threadID, []string{
+		tmuxSessionName(projectID, threadID, "process"),
+	})
+}
+
+func (h *terminalHandler) watchThreadTmuxSessions(projectID, threadID string, sessionNames []string) func() {
 	if h == nil || h.tmuxPath == "" {
 		return func() {}
 	}
 
-	sessionNames := []string{
-		tmuxSessionName(projectID, threadID, "terminal"),
-		tmuxSessionName(projectID, threadID, "process"),
-	}
 	created := make([]*tmuxSessionWatch, 0, len(sessionNames))
 	h.tmuxWatchMu.Lock()
 	if h.tmuxWatches == nil {
@@ -198,7 +207,7 @@ func (h *terminalHandler) runTmuxControlClient(watch *tmuxSessionWatch) bool {
 	// subscription adds pane_current_command changes, which have no dedicated
 	// control notification. tmux evaluates subscriptions internally and emits
 	// only changes (at most once per second).
-	_, _ = io.WriteString(stdin, "refresh-client -B 'dire-mux-status:%*:#{pane_current_command}|#{window_name}|#{window_active}|#{@dire-mux-process-id}'\n")
+	_, _ = io.WriteString(stdin, "refresh-client -B 'dire-mux-status:%*:#{pane_current_command}|#{window_name}|#{window_active}|#{@dire-mux-process-id}|#{@dire-mux-web-servers}'\n")
 
 	done := make(chan struct{})
 	go func() {

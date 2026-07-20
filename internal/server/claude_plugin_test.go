@@ -117,7 +117,7 @@ func TestMaterializeClaudePlugin(t *testing.T) {
 	}
 	for _, name := range []string{
 		"common.mjs", "interrupt-process.mjs", "list-processes.mjs", "read-logs.mjs",
-		"send-input.mjs", "start-process.mjs", "stop-process.mjs",
+		"send-input.mjs", "start-process.mjs", "stop-process.mjs", "update-process.mjs",
 	} {
 		if _, err := os.Stat(filepath.Join(root, "skills", "kiwi-code-processes", "scripts", name)); err != nil {
 			t.Fatalf("materialized Claude process helper %q: %v", name, err)

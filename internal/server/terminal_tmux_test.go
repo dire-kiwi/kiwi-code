@@ -2297,6 +2297,43 @@ func TestAgentCreatedProcessRunsCommandAndRetainsLogs(t *testing.T) {
 	}
 }
 
+func TestFinishedProcessCommandClearsPublishedWebServers(t *testing.T) {
+	handler, item := newIsolatedTmuxHandler(t)
+	thread := item.Threads[0]
+	window, err := handler.newProcessWindow(item, thread, "web", "/bin/sleep 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionName := tmuxSessionName(item.ID, thread.ID, "process")
+	_, target, found, err := handler.tmuxProcessWindow(sessionName, window.ID)
+	if err != nil || !found {
+		t.Fatalf("find process window: found=%v err=%v", found, err)
+	}
+	if _, err := handler.tmuxProcessCommand(
+		target,
+		"set-option", "-w", "-t", target.ID, tmuxProcessWebServersOption, `["http://127.0.0.1:5173"]`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	published, _, found, err := handler.tmuxProcessWindow(sessionName, window.ID)
+	if err != nil || !found || len(published.WebServers) != 1 {
+		t.Fatalf("published process = %#v found=%v err=%v", published, found, err)
+	}
+
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		finished, _, found, readErr := handler.tmuxProcessWindow(sessionName, window.ID)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if found && len(finished.WebServers) == 0 {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("published web server remained after the foreground command finished")
+}
+
 func TestIncompleteProcessWindowIsPreservedUntilMetadataCompletes(t *testing.T) {
 	handler, item := newIsolatedTmuxHandler(t)
 	thread := item.Threads[0]

@@ -224,6 +224,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/shell/windows/{index}/select", server.terminal.selectShellWindow)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/processes", server.terminal.listProcesses)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/processes", server.terminal.createProcess)
+	mux.HandleFunc("PATCH /api/projects/{id}/threads/{threadId}/processes/{processId}", server.terminal.updateProcess)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/processes/{processId}/logs", server.terminal.processLogs)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/terminal/lines", server.terminal.readTmuxLines)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/processes/{processId}/input", server.terminal.sendProcessInput)
