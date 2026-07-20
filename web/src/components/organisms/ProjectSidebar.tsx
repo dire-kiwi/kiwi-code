@@ -10,6 +10,7 @@ import {
 import {
   Archive,
   ArchiveRestore,
+  Bookmark,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -42,7 +43,7 @@ import {
 } from '../../api'
 import { formatCompactTokens, formatCompactUsd, usageDescription } from '../../lib/formatUsage'
 import { sidebarThreadActivity } from '../../sidebar-thread-activity.mjs'
-import { defaultVisibleRootThreadIds } from '../../sidebar-thread-visibility.mjs'
+import { bookmarkedThreadPathIds, defaultVisibleRootThreadIds } from '../../sidebar-thread-visibility.mjs'
 import type { PiThreadActivity, ProcessWebServer, Profile, Project, Thread, ThreadUsageSnapshot } from '../../types'
 import { Button } from '../atoms/Button'
 import { IconButton } from '../atoms/IconButton'
@@ -63,6 +64,7 @@ type ProjectSidebarProps = {
   deletingProjectId: string | null
   deletingThreadId: string | null
   archivingThreadId: string | null
+  bookmarkingThreadId: string | null
   cleanupSelected: boolean
   tmuxSelected: boolean
   settingsSelected: boolean
@@ -81,6 +83,7 @@ type ProjectSidebarProps = {
   onReorderThreads: (projectId: string, threadIds: string[]) => Promise<void>
   onDeleteProject: (project: Project) => void
   onArchiveThread: (project: Project, thread: Thread, archived: boolean) => void
+  onBookmarkThread: (project: Project, thread: Thread, bookmarked: boolean) => void
   onDeleteThread: (project: Project, thread: Thread) => void
 }
 
@@ -167,6 +170,7 @@ export function ProjectSidebar({
   deletingProjectId,
   deletingThreadId,
   archivingThreadId,
+  bookmarkingThreadId,
   cleanupSelected,
   tmuxSelected,
   settingsSelected,
@@ -185,6 +189,7 @@ export function ProjectSidebar({
   onReorderThreads,
   onDeleteProject,
   onArchiveThread,
+  onBookmarkThread,
   onDeleteThread,
 }: ProjectSidebarProps) {
   const [showProjectForm, setShowProjectForm] = useState(false)
@@ -200,11 +205,18 @@ export function ProjectSidebar({
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<ReadonlySet<string>>(() => new Set())
   const [expandedMoreProjectIds, setExpandedMoreProjectIds] = useState<ReadonlySet<string>>(() => new Set())
   const [collapsedChildThreadIds, setCollapsedChildThreadIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [bookmarksOnly, setBookmarksOnly] = useState(false)
   const draggedItemRef = useRef<DragItem | null>(null)
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0]
   const usageByThread = useMemo(() => new Map(
     usageSnapshots.map((snapshot) => [`${snapshot.projectId}\0${snapshot.threadId}`, snapshot]),
   ), [usageSnapshots])
+  const bookmarkThreadIdsByProject = useMemo(() => new Map(
+    projects.map((project) => [project.id, new Set(bookmarkedThreadPathIds(project.threads))]),
+  ), [projects])
+  const visibleProjects = bookmarksOnly
+    ? projects.filter((project) => (bookmarkThreadIdsByProject.get(project.id)?.size ?? 0) > 0)
+    : projects
 
   useEffect(() => {
     if (!selectedThreadId) return
@@ -460,16 +472,24 @@ export function ProjectSidebar({
     saveThreadOrder(project, orderedThreadTreeIds(project, [...reordered, ...archivedThreadIds]))
   }
 
-  function renderThreadRow(project: Project, thread: Thread, activeThreadCount: number) {
+  function renderThreadRow(
+    project: Project,
+    thread: Thread,
+    activeThreadCount: number,
+    visibleThreadIds?: ReadonlySet<string>,
+  ) {
     const archived = Boolean(thread.archivedAt)
+    const closed = Boolean(thread.closedAt)
     const isChild = Boolean(thread.parentThreadId)
-    const canReorder = !isChild && !archived && activeThreadCount > 1 && !savingOrder
+    const canReorder = !bookmarksOnly && !isChild && !archived && activeThreadCount > 1 && !savingOrder
     const selected = thread.id === selectedThreadId
     const children = project.threads.filter((candidate) =>
-      candidate.parentThreadId === thread.id && !candidate.closedAt,
+      candidate.parentThreadId === thread.id
+        && (!visibleThreadIds || visibleThreadIds.has(candidate.id))
+        && (!candidate.closedAt || bookmarksOnly),
     )
     const hasChildren = children.length > 0
-    const childrenExpanded = !collapsedChildThreadIds.has(thread.id)
+    const childrenExpanded = bookmarksOnly ? hasChildren : !collapsedChildThreadIds.has(thread.id)
     const descendantIds = new Set<string>()
     const collectDescendants = (parentId: string) => {
       for (const candidate of project.threads) {
@@ -503,6 +523,9 @@ export function ProjectSidebar({
     const archivedTitle = thread.archivedAt
       ? `\nArchived ${new Date(thread.archivedAt).toLocaleString()}`
       : ''
+    const closedTitle = thread.closedAt
+      ? `\nCompleted ${new Date(thread.closedAt).toLocaleString()}`
+      : ''
     const selectionPadding = isChild
       ? hasChildren ? 'pl-8' : 'pl-3'
       : hasChildren ? 'pl-12' : 'pl-8'
@@ -514,17 +537,17 @@ export function ProjectSidebar({
         data-project-id={project.id}
         data-thread-id={thread.id}
         data-parent-thread-id={thread.parentThreadId}
-        onDragOver={isChild || archived ? undefined : (event) => handleThreadDragOver(event, project.id, thread.id)}
-        onDrop={isChild || archived ? undefined : (event) => handleThreadDrop(event, project, thread.id)}
-        className={`${archived ? 'opacity-75' : ''} ${
-          draggedItem?.kind === 'thread' && draggedItem.id === thread.id ? 'opacity-45' : ''
-        }`}
+        onDragOver={bookmarksOnly || isChild || archived ? undefined : (event) => handleThreadDragOver(event, project.id, thread.id)}
+        onDrop={bookmarksOnly || isChild || archived ? undefined : (event) => handleThreadDrop(event, project, thread.id)}
+        className={`${archived || closed ? 'opacity-75' : ''} ${
+          bookmarksOnly && !thread.bookmarked ? 'opacity-65' : ''
+        } ${draggedItem?.kind === 'thread' && draggedItem.id === thread.id ? 'opacity-45' : ''}`}
       >
         <div className="group/thread relative transition-opacity">
-          {!isChild && !archived && dropTarget?.kind === 'thread' && dropTarget.projectId === project.id && dropTarget.id === thread.id && dropTarget.position === 'before' && (
+          {!bookmarksOnly && !isChild && !archived && dropTarget?.kind === 'thread' && dropTarget.projectId === project.id && dropTarget.id === thread.id && dropTarget.position === 'before' && (
             <span className="pointer-events-none absolute inset-x-2 top-0 z-20 h-0.5 rounded-full bg-ghost-green shadow-[0_0_7px_rgba(181,189,104,0.8)]" />
           )}
-          {!isChild && !archived && (
+          {!bookmarksOnly && !isChild && !archived && (
             <button
               type="button"
               draggable={canReorder}
@@ -542,7 +565,7 @@ export function ProjectSidebar({
               <GripVertical size={11} />
             </button>
           )}
-          {hasChildren && (
+          {hasChildren && !bookmarksOnly && (
             <button
               type="button"
               onClick={() => toggleChildThreads(thread.id)}
@@ -561,13 +584,15 @@ export function ProjectSidebar({
             selectionVariant="navigation"
             onClick={() => onSelectThread(project.id, thread.id)}
             aria-current={selected ? 'page' : undefined}
-            title={`${locationTitle}${archivedTitle}${activityTitle}${usageTitle}`}
+            title={`${locationTitle}${archivedTitle}${closedTitle}${activityTitle}${usageTitle}`}
             className={`${selectionPadding} pr-[4.75rem]`}
           >
             {isChild && <CornerDownRight size={11} className="shrink-0 text-ghost-cyan" aria-hidden="true" />}
             {thread.worktree && <GitBranch size={11} className="shrink-0 text-ghost-green" />}
             {archived && !thread.worktree && <Archive size={11} className="shrink-0 text-ghost-faint" />}
+            {closed && <Clock3 size={11} className="shrink-0 text-ghost-faint" aria-hidden="true" />}
             <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+            {thread.closedAt && <span className="sr-only">Completed {new Date(thread.closedAt).toLocaleString()}</span>}
             {hasChildren && (
               <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-ghost-border/65 px-1 py-0.5 font-mono text-[8px] text-ghost-faint" aria-label={`${children.length} child ${children.length === 1 ? 'thread' : 'threads'}`}>
                 <GitFork size={8} aria-hidden="true" />
@@ -590,7 +615,7 @@ export function ProjectSidebar({
           {displayedUsage && (
             <span
               aria-hidden="true"
-              className={`pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 flex-col items-end font-mono leading-none transition group-hover/thread:opacity-0 group-focus-within/thread:opacity-0 ${
+              className={`pointer-events-none absolute right-8 top-1/2 flex -translate-y-1/2 flex-col items-end font-mono leading-none transition group-hover/thread:opacity-0 group-focus-within/thread:opacity-0 ${
                 usage?.limitReached ? 'text-ghost-bright-red' : 'text-ghost-faint'
               }`}
             >
@@ -600,39 +625,56 @@ export function ProjectSidebar({
               <span className="text-[8px]">{formatCompactTokens(displayedUsage.totalTokens)} · {formatCompactUsd(displayedUsage.costUsd)}</span>
             </span>
           )}
-          <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center opacity-0 transition group-hover/thread:opacity-100 focus-within:opacity-100">
+          <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center">
+            <div className="pointer-events-none flex opacity-0 transition group-hover/thread:pointer-events-auto group-hover/thread:opacity-100 group-focus-within/thread:pointer-events-auto group-focus-within/thread:opacity-100">
+              <IconButton
+                type="button"
+                size="xs"
+                variant="subtle"
+                disabled={Boolean(archivingThreadId || deletingThreadId || bookmarkingThreadId)}
+                onClick={() => onArchiveThread(project, thread, !archived)}
+                aria-label={`${archived ? 'Restore' : 'Archive'} ${thread.title}`}
+                title={archived ? 'Restore thread' : 'Archive thread'}
+              >
+                {archivingThreadId === thread.id
+                  ? <LoaderCircle size={11} className="animate-spin" />
+                  : archived ? <ArchiveRestore size={11} /> : <Archive size={11} />}
+              </IconButton>
+              <IconButton
+                type="button"
+                size="xs"
+                variant="danger"
+                disabled={Boolean(deletingThreadId || archivingThreadId || bookmarkingThreadId)}
+                onClick={() => onDeleteThread(project, thread)}
+                aria-label={`Delete ${thread.title}`}
+                title="Delete thread now"
+              >
+                {deletingThreadId === thread.id ? <LoaderCircle size={11} className="animate-spin" /> : <Trash2 size={11} />}
+              </IconButton>
+            </div>
             <IconButton
               type="button"
               size="xs"
               variant="subtle"
-              disabled={Boolean(archivingThreadId || deletingThreadId)}
-              onClick={() => onArchiveThread(project, thread, !archived)}
-              aria-label={`${archived ? 'Restore' : 'Archive'} ${thread.title}`}
-              title={archived ? 'Restore thread' : 'Archive thread'}
+              disabled={Boolean(bookmarkingThreadId || archivingThreadId || deletingThreadId)}
+              onClick={() => onBookmarkThread(project, thread, !thread.bookmarked)}
+              aria-pressed={Boolean(thread.bookmarked)}
+              aria-label={thread.bookmarked ? `Remove bookmark from ${thread.title}` : `Bookmark ${thread.title}`}
+              title={thread.bookmarked ? 'Remove bookmark' : 'Bookmark thread'}
+              className={thread.bookmarked ? 'text-ghost-green hover:text-ghost-bright-green' : 'text-ghost-faint'}
             >
-              {archivingThreadId === thread.id
+              {bookmarkingThreadId === thread.id
                 ? <LoaderCircle size={11} className="animate-spin" />
-                : archived ? <ArchiveRestore size={11} /> : <Archive size={11} />}
-            </IconButton>
-            <IconButton
-              type="button"
-              size="xs"
-              variant="danger"
-              disabled={Boolean(deletingThreadId || archivingThreadId)}
-              onClick={() => onDeleteThread(project, thread)}
-              aria-label={`Delete ${thread.title}`}
-              title="Delete thread now"
-            >
-              {deletingThreadId === thread.id ? <LoaderCircle size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                : <Bookmark size={11} fill={thread.bookmarked ? 'currentColor' : 'none'} />}
             </IconButton>
           </div>
-          {!isChild && !archived && dropTarget?.kind === 'thread' && dropTarget.projectId === project.id && dropTarget.id === thread.id && dropTarget.position === 'after' && (
+          {!bookmarksOnly && !isChild && !archived && dropTarget?.kind === 'thread' && dropTarget.projectId === project.id && dropTarget.id === thread.id && dropTarget.position === 'after' && (
             <span className="pointer-events-none absolute inset-x-2 bottom-0 z-20 h-0.5 rounded-full bg-ghost-green shadow-[0_0_7px_rgba(181,189,104,0.8)]" />
           )}
         </div>
         {hasChildren && childrenExpanded && (
           <ul id={`thread-${thread.id}-children`} className="ml-5 space-y-0.5 border-l border-ghost-border/55 pl-1">
-            {children.map((child) => renderThreadRow(project, child, activeThreadCount))}
+            {children.map((child) => renderThreadRow(project, child, activeThreadCount, visibleThreadIds))}
           </ul>
         )}
       </li>
@@ -643,6 +685,12 @@ export function ProjectSidebar({
     const roots = rootThreads(project)
     const activeThreads = roots.filter((thread) => !thread.archivedAt)
     const archivedThreads = roots.filter((thread) => thread.archivedAt)
+    if (bookmarksOnly) {
+      const visibleThreadIds = bookmarkThreadIdsByProject.get(project.id) ?? new Set<string>()
+      return roots
+        .filter((thread) => visibleThreadIds.has(thread.id))
+        .map((thread) => renderThreadRow(project, thread, activeThreads.length, visibleThreadIds))
+    }
     const expanded = expandedMoreProjectIds.has(project.id)
     const defaultVisibleIds = new Set(defaultVisibleRootThreadIds(
       project.threads,
@@ -733,6 +781,18 @@ export function ProjectSidebar({
               type="button"
               size="sm"
               variant="subtle"
+              onClick={() => setBookmarksOnly((current) => !current)}
+              aria-pressed={bookmarksOnly}
+              aria-label={bookmarksOnly ? 'Show all threads' : 'Show bookmarked threads only'}
+              title={bookmarksOnly ? 'Show all threads' : 'Show bookmarked threads only'}
+              className={bookmarksOnly ? 'bg-ghost-green/10 text-ghost-green' : undefined}
+            >
+              <Bookmark size={14} fill={bookmarksOnly ? 'currentColor' : 'none'} />
+            </IconButton>
+            <IconButton
+              type="button"
+              size="sm"
+              variant="subtle"
               onClick={onOpenFinder}
               aria-label="Find a project or thread"
               title="Find projects and threads (Ctrl+F)"
@@ -809,20 +869,33 @@ export function ProjectSidebar({
                 No projects{activeProfile ? ` in ${activeProfile.name}` : ' yet'}
               </p>
             </div>
+          ) : bookmarksOnly && visibleProjects.length === 0 ? (
+            <div className="mx-1 mt-2 rounded-lg border border-dashed border-ghost-border/70 px-3 py-6 text-center">
+              <Bookmark size={17} className="mx-auto text-ghost-faint" />
+              <p className="mt-2.5 text-[10px] text-ghost-muted">No bookmarked threads</p>
+              <Button
+                type="button"
+                variant="text"
+                onClick={() => setBookmarksOnly(false)}
+                className="mt-2 text-[9px] text-ghost-green"
+              >
+                Show all threads
+              </Button>
+            </div>
           ) : (
             <ul className="space-y-2.5">
-              {projects.map((project) => (
+              {visibleProjects.map((project) => (
                 <li
                   key={project.id}
                   data-project-row
                   data-project-id={project.id}
-                  onDragOver={(event) => handleProjectDragOver(event, project.id)}
-                  onDrop={(event) => handleProjectDrop(event, project.id)}
+                  onDragOver={bookmarksOnly ? undefined : (event) => handleProjectDragOver(event, project.id)}
+                  onDrop={bookmarksOnly ? undefined : (event) => handleProjectDrop(event, project.id)}
                   className={`group/project relative transition-opacity ${
                     draggedItem?.kind === 'project' && draggedItem.id === project.id ? 'opacity-45' : ''
                   }`}
                 >
-                  {dropTarget?.kind === 'project' && dropTarget.id === project.id && dropTarget.position === 'before' && (
+                  {!bookmarksOnly && dropTarget?.kind === 'project' && dropTarget.id === project.id && dropTarget.position === 'before' && (
                     <span className="pointer-events-none absolute inset-x-2 top-0 z-20 h-0.5 rounded-full bg-ghost-green shadow-[0_0_7px_rgba(181,189,104,0.8)]" />
                   )}
                   <div
@@ -835,8 +908,8 @@ export function ProjectSidebar({
                   >
                     <button
                       type="button"
-                      draggable={!savingOrder && projects.length > 1}
-                      disabled={savingOrder || projects.length < 2}
+                      draggable={!bookmarksOnly && !savingOrder && projects.length > 1}
+                      disabled={bookmarksOnly || savingOrder || projects.length < 2}
                       data-reorder-handle="project"
                       data-project-id={project.id}
                       onDragStart={(event) => startProjectDrag(event, project.id)}
@@ -850,10 +923,13 @@ export function ProjectSidebar({
                     </button>
                     <Button
                       type="button"
-                      onClick={() => toggleProject(project.id)}
-                      aria-expanded={!collapsedProjectIds.has(project.id)}
+                      onClick={() => {
+                        if (!bookmarksOnly) toggleProject(project.id)
+                      }}
+                      disabled={bookmarksOnly}
+                      aria-expanded={bookmarksOnly || !collapsedProjectIds.has(project.id)}
                       aria-controls={`project-${project.id}-threads`}
-                      title={collapsedProjectIds.has(project.id) ? `Expand ${project.name}` : `Collapse ${project.name}`}
+                      title={bookmarksOnly ? 'Matching projects stay expanded while filtering' : collapsedProjectIds.has(project.id) ? `Expand ${project.name}` : `Collapse ${project.name}`}
                       className="flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md text-left outline-none transition hover:text-ghost-foreground focus-visible:ring-1 focus-visible:ring-ghost-green/45"
                     >
                       <span className={`relative grid size-5 shrink-0 place-items-center ${
@@ -861,7 +937,7 @@ export function ProjectSidebar({
                           ? 'text-ghost-green'
                           : 'text-ghost-dim'
                       }`}>
-                        {collapsedProjectIds.has(project.id)
+                        {!bookmarksOnly && collapsedProjectIds.has(project.id)
                           ? <Folder size={16} strokeWidth={1.7} />
                           : <FolderOpen size={16} strokeWidth={1.7} />}
                         <Globe2 size={7} strokeWidth={1.9} className="absolute bottom-0 right-0 rounded-full bg-ghost-sidebar" />
@@ -895,12 +971,12 @@ export function ProjectSidebar({
 
                   <ul
                     id={`project-${project.id}-threads`}
-                    hidden={collapsedProjectIds.has(project.id)}
+                    hidden={!bookmarksOnly && collapsedProjectIds.has(project.id)}
                     className="mt-0.5 space-y-0.5"
                   >
                     {renderProjectThreadRows(project)}
                   </ul>
-                  {dropTarget?.kind === 'project' && dropTarget.id === project.id && dropTarget.position === 'after' && (
+                  {!bookmarksOnly && dropTarget?.kind === 'project' && dropTarget.id === project.id && dropTarget.position === 'after' && (
                     <span className="pointer-events-none absolute inset-x-2 bottom-0 z-20 h-0.5 rounded-full bg-ghost-green shadow-[0_0_7px_rgba(181,189,104,0.8)]" />
                   )}
                 </li>

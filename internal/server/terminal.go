@@ -262,6 +262,138 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 	}
 }
 
+func (h *terminalHandler) startCodingAgent(w http.ResponseWriter, r *http.Request) {
+	item, thread, err := h.projects.GetThread(r.PathValue("id"), r.PathValue("threadId"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "Thread not found.")
+		return
+	}
+	if thread.RollbackPending {
+		writeError(w, http.StatusConflict, "The thread is being rolled back.")
+		return
+	}
+	if thread.ParentThreadID != "" {
+		writeError(w, http.StatusForbidden, "Subagent coding agents are managed by their parent thread.")
+		return
+	}
+
+	var input struct {
+		Agent         string `json:"agent"`
+		Model         string `json:"model"`
+		ThinkingLevel string `json:"thinkingLevel"`
+		Prompt        string `json:"prompt"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid coding agent details.")
+		return
+	}
+
+	selection := strings.TrimSpace(input.Agent)
+	if selection == "" {
+		writeError(w, http.StatusBadRequest, "A coding agent is required.")
+		return
+	}
+	agent := selection
+	native := false
+	switch selection {
+	case "pi-native":
+		agent = codingAgentPi
+		native = true
+	case "claude-native":
+		agent = codingAgentClaude
+		native = true
+	}
+	launchOptions, err := normalizeCodingAgentLaunchOptions(agent, input.Model, input.ThinkingLevel)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	launchOptions.InitialPrompt = strings.TrimSpace(input.Prompt)
+	if strings.ContainsRune(launchOptions.InitialPrompt, '\x00') {
+		writeError(w, http.StatusBadRequest, "The initial prompt contains an invalid character.")
+		return
+	}
+
+	threadEndpoint := threadEndpointURL(r, item.ID, thread.ID)
+	if native {
+		switch agent {
+		case codingAgentPi:
+			process, startErr := h.startPiNativeProcess(item, thread, threadEndpoint, launchOptions)
+			if startErr != nil {
+				writeError(w, http.StatusInternalServerError, piNativeStartErrorMessage(startErr))
+				return
+			}
+			if launchOptions.InitialPrompt != "" {
+				if _, promptErr := process.startPrompt(launchOptions.InitialPrompt); promptErr != nil {
+					writeError(w, http.StatusInternalServerError, "Pi started, but the initial prompt could not be sent.")
+					return
+				}
+			}
+		case codingAgentClaude:
+			process, startErr := h.startClaudeNativeProcess(item, thread, threadEndpoint, launchOptions)
+			if startErr != nil {
+				writeError(w, http.StatusInternalServerError, claudeNativeStartErrorMessage(startErr))
+				return
+			}
+			if launchOptions.InitialPrompt != "" {
+				if promptErr := process.sendPrompt(launchOptions.InitialPrompt, nil); promptErr != nil {
+					writeError(w, http.StatusInternalServerError, "Claude started, but the initial prompt could not be sent.")
+					return
+				}
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	if h.tmuxPath == "" {
+		writeError(w, http.StatusServiceUnavailable, "tmux is required for terminal coding agents. Install tmux and restart dire-mux.")
+		return
+	}
+	sessionName, _, sessionCreated, err := h.ensureTmuxSessionWithCodingAgentOptions(
+		item,
+		thread,
+		"pi",
+		threadEndpoint,
+		agent,
+		launchOptions,
+		false,
+	)
+	if err != nil {
+		if errors.Is(err, errCodingAgentEnded) {
+			writeError(w, http.StatusConflict, "The coding agent has ended and must be restarted explicitly.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "Could not start the coding agent.")
+		return
+	}
+	_, _, paneCreated, err := h.ensureCodingAgentPaneWithOptions(
+		item,
+		thread,
+		agent,
+		threadEndpoint,
+		sessionName,
+		launchOptions,
+		false,
+		nil,
+	)
+	if err != nil {
+		if errors.Is(err, errCodingAgentEnded) {
+			writeError(w, http.StatusConflict, "The coding agent has ended and must be restarted explicitly.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "Could not start the coding agent.")
+		return
+	}
+	if !sessionCreated && !paneCreated && launchOptions.InitialPrompt != "" {
+		writeError(w, http.StatusConflict, "The coding agent is already running; the initial prompt was not sent.")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 	if !websocket.IsWebSocketUpgrade(r) {
 		writeError(w, http.StatusBadRequest, "The terminal endpoint requires a WebSocket connection.")

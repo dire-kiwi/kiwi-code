@@ -70,6 +70,7 @@ func TestAgentSkillInstallerInstallsAndUpdatesBundle(t *testing.T) {
 		"scripts/archive-thread.mjs",
 		"scripts/close-thread.mjs",
 		"scripts/read-tmux-lines.mjs",
+		"Never create a main thread unless the user explicitly asks",
 		"--restore",
 		"--help",
 	} {
@@ -191,6 +192,85 @@ func TestBundledSkillCommonHelpersAreGenerated(t *testing.T) {
 				t.Fatalf("%s is stale; run go generate ./internal/server", item.target)
 			}
 		})
+	}
+}
+
+func TestBundledCreateThreadHelperStartsSelectedAgent(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not available")
+	}
+
+	type capturedRequest struct {
+		method string
+		path   string
+		body   map[string]any
+	}
+	requests := make(chan capturedRequest, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := map[string]any{}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		requests <- capturedRequest{method: r.Method, path: r.URL.Path, body: body}
+		if strings.HasSuffix(r.URL.Path, "/coding-agent") {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"id":    "created-thread",
+			"title": "Investigate cache misses",
+		})
+	}))
+	defer server.Close()
+
+	script, err := filepath.Abs(filepath.Join("agent-skill", "dire-mux-threads", "scripts", "create-thread.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, node, script,
+		"Investigate cache misses",
+		"--worktree",
+		"--base-branch", "main",
+		"--agent", "pi-native",
+		"--model", "openai-codex/gpt-5.6-sol",
+		"--thinking", "high",
+		"--prompt", "Inspect and fix the cache.",
+	)
+	command.Env = append(os.Environ(),
+		"DIRE_MUX_THREAD_ENDPOINT="+server.URL+"/api/projects/current-project/threads/current-thread",
+		"DIRE_MUX_PROJECT_ID=",
+		"DIRE_MUX_THREAD_ID=",
+	)
+	output, runErr := command.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("create helper timed out: %v", ctx.Err())
+	}
+	if runErr != nil {
+		t.Fatalf("create helper failed: %v\n%s", runErr, output)
+	}
+	if !strings.Contains(string(output), `"id": "created-thread"`) {
+		t.Fatalf("create helper output = %q", output)
+	}
+
+	created := <-requests
+	if created.method != http.MethodPost || created.path != "/api/projects/current-project/threads" {
+		t.Fatalf("create request = %#v", created)
+	}
+	if created.body["title"] != "Investigate cache misses" || created.body["worktree"] != true || created.body["baseBranch"] != "main" {
+		t.Fatalf("create body = %#v", created.body)
+	}
+	started := <-requests
+	if started.method != http.MethodPost || started.path != "/api/projects/current-project/threads/created-thread/coding-agent" {
+		t.Fatalf("coding agent request = %#v", started)
+	}
+	if started.body["agent"] != "pi-native" ||
+		started.body["model"] != "openai-codex/gpt-5.6-sol" ||
+		started.body["thinkingLevel"] != "high" ||
+		started.body["prompt"] != "Inspect and fix the cache." {
+		t.Fatalf("coding agent body = %#v", started.body)
 	}
 }
 

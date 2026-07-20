@@ -69,6 +69,7 @@ type Thread struct {
 	AutoNamed            bool       `json:"autoNamed,omitempty"`
 	ClosedAt             *time.Time `json:"closedAt,omitempty"`
 	ArchivedAt           *time.Time `json:"archivedAt,omitempty"`
+	Bookmarked           bool       `json:"bookmarked,omitempty"`
 	TokenLimit           *int64     `json:"tokenLimit,omitempty"`
 	CostLimitUSD         *float64   `json:"costLimitUsd,omitempty"`
 }
@@ -896,6 +897,50 @@ func (s *Store) ReopenChildThread(projectID, parentThreadID, threadID string) (r
 		}
 		s.notifyChangesLocked()
 		return cloneThread(threads[threadIndex]), nil
+	}
+	return Thread{}, ErrNotFound
+}
+
+func (s *Store) SetThreadBookmarked(projectID, threadID string, bookmarked bool) (result Thread, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	mutation, err := s.lockAndReloadProjectMutationsLocked()
+	if err != nil {
+		return Thread{}, err
+	}
+	defer func() {
+		err = errors.Join(err, mutation.Release())
+	}()
+	for projectIndex := range s.projects {
+		if s.projects[projectIndex].ID != projectID {
+			continue
+		}
+		for threadIndex := range s.projects[projectIndex].Threads {
+			thread := &s.projects[projectIndex].Threads[threadIndex]
+			if thread.ID != threadID {
+				continue
+			}
+			if thread.RollbackPending {
+				return Thread{}, ErrThreadRollbackPending
+			}
+			if thread.Bookmarked == bookmarked {
+				return cloneThread(*thread), nil
+			}
+
+			previous := thread.Bookmarked
+			thread.Bookmarked = bookmarked
+			if err := s.saveLocked(); err != nil {
+				if projectSaveWasPublished(err) {
+					s.notifyChangesLocked()
+					return cloneThread(*thread), err
+				}
+				thread.Bookmarked = previous
+				return Thread{}, err
+			}
+			s.notifyChangesLocked()
+			return cloneThread(*thread), nil
+		}
+		return Thread{}, ErrThreadNotFound
 	}
 	return Thread{}, ErrNotFound
 }

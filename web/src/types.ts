@@ -37,6 +37,7 @@ export type Thread = {
   autoNamed?: boolean
   closedAt?: string
   archivedAt?: string
+  bookmarked?: boolean
   tokenLimit?: number
   costLimitUsd?: number
   nestedDepth?: number
