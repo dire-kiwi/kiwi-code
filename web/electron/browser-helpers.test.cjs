@@ -196,12 +196,12 @@ test('each restarted thread session receives a fresh ephemeral partition', () =>
   })
   const first = manager.partitionFor('project\\0thread')
   const second = manager.partitionFor('project\\0thread')
-  assert.match(first, /^dire-mux-guest-[a-f0-9]{24}$/)
+  assert.match(first, /^kiwi-code-guest-[a-f0-9]{24}$/)
   assert.notEqual(first, second)
 })
 
 test('atomically writes mode-0600 config and removes only a matching config', async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'dire-mux-provider-test-'))
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'kiwi-code-provider-test-'))
   const configPath = path.join(directory, 'nested', 'provider.json')
   const config = { version: 1, pid: 10, port: 20, token: 'a'.repeat(64) }
   try {
@@ -218,7 +218,7 @@ test('atomically writes mode-0600 config and removes only a matching config', as
 })
 
 test('provider binds loopback dynamically, authenticates, and uses the action envelope', async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'dire-mux-provider-http-'))
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'kiwi-code-provider-http-'))
   const configPath = path.join(directory, 'exact-provider.json')
   const actions = []
   const workspace = {
@@ -233,7 +233,7 @@ test('provider binds loopback dynamically, authenticates, and uses the action en
   const provider = new BrowserProviderServer({
     app,
     workspace,
-    environment: { DIRE_MUX_BROWSER_PROVIDER_CONFIG: configPath },
+    environment: { KIWI_CODE_BROWSER_PROVIDER_CONFIG: configPath },
   })
   try {
     const config = await provider.start()
@@ -241,7 +241,7 @@ test('provider binds loopback dynamically, authenticates, and uses the action en
     assert.equal(config.token.length, 64)
     assert.ok(config.port > 0 && config.port !== 4000)
     assert.equal(workspace.origin, `http://127.0.0.1:${config.port}`)
-    assert.equal(configPathFor(app, { DIRE_MUX_BROWSER_PROVIDER_CONFIG: configPath }), configPath)
+    assert.equal(configPathFor(app, { KIWI_CODE_BROWSER_PROVIDER_CONFIG: configPath }), configPath)
 
     const denied = await request(config.port, { token: '0'.repeat(64) })
     assert.equal(denied.status, 401)

@@ -77,7 +77,7 @@ export function TmuxScreen({ onOpenSidebar, onBack }: TmuxScreenProps) {
     <div className="flex h-full min-w-0 flex-col bg-ghost-black">
       <ScreenHeader
         title="tmux sessions"
-        subtitle="dire-mux server"
+        subtitle="Kiwi Code server"
         backLabel="Back to workspace"
         onOpenSidebar={onOpenSidebar}
         onBack={onBack}

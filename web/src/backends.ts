@@ -8,10 +8,10 @@ import {
 } from './backend-config.mjs'
 
 function resolveDefaultBackendOrigin() {
-  const configuredUrl = import.meta.env.VITE_DIRE_MUX_API_URL?.trim()
+  const configuredUrl = import.meta.env.VITE_KIWI_CODE_API_URL?.trim()
   if (configuredUrl) return new URL(configuredUrl, window.location.href).origin
 
-  const configuredPort = import.meta.env.VITE_DIRE_MUX_API_PORT?.trim()
+  const configuredPort = import.meta.env.VITE_KIWI_CODE_API_PORT?.trim()
   if (!configuredPort) return window.location.origin
 
   const origin = new URL(window.location.origin)

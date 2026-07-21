@@ -20,27 +20,9 @@ import (
 
 func TestMaterializeClaudePlugin(t *testing.T) {
 	dataDirectory := t.TempDir()
-	legacyProcessSkill := filepath.Join(dataDirectory, "claude-plugin", "skills", legacyProcessAgentSkillName)
-	staleWorkflowSkill := filepath.Join(dataDirectory, "claude-plugin", "skills", "dire-mux-workflows")
-	staleWorkflowServer := filepath.Join(dataDirectory, "claude-plugin", "servers", "dire-mux-workflows.mjs")
-	for _, directory := range []string{legacyProcessSkill, staleWorkflowSkill, filepath.Dir(staleWorkflowServer)} {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, path := range []string{filepath.Join(legacyProcessSkill, "SKILL.md"), filepath.Join(staleWorkflowSkill, "SKILL.md"), staleWorkflowServer} {
-		if err := os.WriteFile(path, []byte("legacy"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
 	root, err := materializeClaudePlugin(dataDirectory)
 	if err != nil {
 		t.Fatal(err)
-	}
-	for _, path := range []string{legacyProcessSkill, staleWorkflowSkill, staleWorkflowServer} {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Fatalf("obsolete Claude plugin path %q still exists: %v", path, err)
-		}
 	}
 
 	files, err := claudePluginFiles()
@@ -64,8 +46,8 @@ func TestMaterializeClaudePlugin(t *testing.T) {
 	if err := json.Unmarshal(claudePluginManifest, &manifest); err != nil {
 		t.Fatalf("parse plugin manifest: %v", err)
 	}
-	if manifest.Name != "dire-mux" {
-		t.Fatalf("plugin name = %q, want dire-mux", manifest.Name)
+	if manifest.Name != "kiwi-code" {
+		t.Fatalf("plugin name = %q, want kiwi-code", manifest.Name)
 	}
 	for _, capability := range []string{"browser", "process"} {
 		if !strings.Contains(strings.ToLower(manifest.Description), capability) {
@@ -88,8 +70,8 @@ func TestMaterializeClaudePlugin(t *testing.T) {
 	}
 	browserServer, ok := mcpConfig.MCPServers["browser"]
 	if !ok || browserServer.Command != "node" || len(browserServer.Args) != 1 || !strings.Contains(browserServer.Args[0], "${CLAUDE_PLUGIN_ROOT}") ||
-		browserServer.Env["DIRE_MUX_THREAD_ENDPOINT"] != "${DIRE_MUX_THREAD_ENDPOINT}" ||
-		browserServer.Env["DIRE_MUX_AGENT_TOKEN_FILE"] != "${CLAUDE_PLUGIN_ROOT}/../"+agentTokenFileName {
+		browserServer.Env["KIWI_CODE_THREAD_ENDPOINT"] != "${KIWI_CODE_THREAD_ENDPOINT}" ||
+		browserServer.Env["KIWI_CODE_AGENT_TOKEN_FILE"] != "${CLAUDE_PLUGIN_ROOT}/../"+agentTokenFileName {
 		t.Fatalf("browser MCP server config = %#v", browserServer)
 	}
 	if len(mcpConfig.MCPServers) != 1 {
@@ -98,7 +80,7 @@ func TestMaterializeClaudePlugin(t *testing.T) {
 	if strings.Contains(strings.ToLower(manifest.Description), "workflow") ||
 		bytes.Contains(claudePluginHooks, []byte("workflow-activation")) ||
 		bytes.Contains(claudePluginHookScript, []byte("/workflows/activation")) {
-		t.Fatal("Claude plugin still advertises or activates Dire Mux workflows")
+		t.Fatal("Claude plugin still advertises or activates Kiwi Code workflows")
 	}
 	if !bytes.Contains(claudePluginBrowserSkill, []byte("ToolSearch")) {
 		t.Fatal("Claude browser skill does not explain deferred MCP tool discovery")
@@ -192,10 +174,10 @@ func TestClaudeBrowserMCPServer(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, nodePath, filepath.Join(pluginRoot, "servers", "dire-mux-browser.mjs"))
+	command := exec.CommandContext(ctx, nodePath, filepath.Join(pluginRoot, "servers", "kiwi-code-browser.mjs"))
 	command.Env = append(os.Environ(),
-		"DIRE_MUX_THREAD_ENDPOINT="+api.URL,
-		"DIRE_MUX_AGENT_TOKEN_FILE="+filepath.Join(pluginRoot, "..", agentTokenFileName),
+		"KIWI_CODE_THREAD_ENDPOINT="+api.URL,
+		"KIWI_CODE_AGENT_TOKEN_FILE="+filepath.Join(pluginRoot, "..", agentTokenFileName),
 	)
 	stdin, err := command.StdinPipe()
 	if err != nil {
@@ -374,14 +356,14 @@ func TestClaudePluginHeartbeatReportsPromptStart(t *testing.T) {
 	defer activityServer.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	command := exec.CommandContext(ctx, nodePath, filepath.Join(pluginRoot, "scripts", "dire-mux-hook.mjs"), "heartbeat")
+	command := exec.CommandContext(ctx, nodePath, filepath.Join(pluginRoot, "scripts", "kiwi-code-hook.mjs"), "heartbeat")
 	command.Stdin = strings.NewReader(`{"session_id":"session-1","prompt_id":"prompt-1"}`)
 	command.Env = append(os.Environ(),
-		"DIRE_MUX_THREAD_ENDPOINT="+activityServer.URL,
-		"DIRE_MUX_PROJECT_ID=project",
-		"DIRE_MUX_THREAD_ID=thread",
-		"DIRE_MUX_CLAUDE_STATE_DIR="+t.TempDir(),
-		"DIRE_MUX_CODING_AGENT="+codingAgentClaude,
+		"KIWI_CODE_THREAD_ENDPOINT="+activityServer.URL,
+		"KIWI_CODE_PROJECT_ID=project",
+		"KIWI_CODE_THREAD_ID=thread",
+		"KIWI_CODE_CLAUDE_STATE_DIR="+t.TempDir(),
+		"KIWI_CODE_CODING_AGENT="+codingAgentClaude,
 	)
 	if err := command.Start(); err != nil {
 		cancel()
@@ -460,22 +442,22 @@ func TestClaudePluginNamesThreadWithPiFromFirstPrompt(t *testing.T) {
 
 	fakePi := filepath.Join(t.TempDir(), "pi")
 	piArgsPath := filepath.Join(t.TempDir(), "pi-args")
-	fakePiScript := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$DIRE_MUX_TEST_PI_ARGS\"\nprintf 'Add Claude Status Integration\\n'\n"
+	fakePiScript := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$KIWI_CODE_TEST_PI_ARGS\"\nprintf 'Add Claude Status Integration\\n'\n"
 	if err := os.WriteFile(fakePi, []byte(fakePiScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	input := `{"session_id":"session-1","prompt_id":"prompt-1","hook_event_name":"UserPromptSubmit","prompt":"add status and titles"}`
 	stateDirectory := t.TempDir()
 	hookEnvironment := append(os.Environ(),
-		"DIRE_MUX_THREAD_ENDPOINT="+server.URL,
-		"DIRE_MUX_PROJECT_ID=project",
-		"DIRE_MUX_THREAD_ID=thread",
-		"DIRE_MUX_PI_PATH="+fakePi,
-		"DIRE_MUX_TEST_PI_ARGS="+piArgsPath,
-		"DIRE_MUX_CLAUDE_STATE_DIR="+stateDirectory,
-		"DIRE_MUX_CODING_AGENT="+codingAgentClaudeGPT,
+		"KIWI_CODE_THREAD_ENDPOINT="+server.URL,
+		"KIWI_CODE_PROJECT_ID=project",
+		"KIWI_CODE_THREAD_ID=thread",
+		"KIWI_CODE_PI_PATH="+fakePi,
+		"KIWI_CODE_TEST_PI_ARGS="+piArgsPath,
+		"KIWI_CODE_CLAUDE_STATE_DIR="+stateDirectory,
+		"KIWI_CODE_CODING_AGENT="+codingAgentClaudeGPT,
 	)
-	command := exec.Command(nodePath, filepath.Join(pluginRoot, "scripts", "dire-mux-hook.mjs"), "title")
+	command := exec.Command(nodePath, filepath.Join(pluginRoot, "scripts", "kiwi-code-hook.mjs"), "title")
 	command.Stdin = strings.NewReader(input)
 	command.Env = hookEnvironment
 	output, err := command.CombinedOutput()
@@ -520,7 +502,7 @@ func TestClaudePluginNamesThreadWithPiFromFirstPrompt(t *testing.T) {
 	}
 	mu.Unlock()
 
-	command = exec.Command(nodePath, filepath.Join(pluginRoot, "scripts", "dire-mux-hook.mjs"), "finished")
+	command = exec.Command(nodePath, filepath.Join(pluginRoot, "scripts", "kiwi-code-hook.mjs"), "finished")
 	command.Stdin = strings.NewReader(input)
 	command.Env = hookEnvironment
 	if output, err = command.CombinedOutput(); err != nil {

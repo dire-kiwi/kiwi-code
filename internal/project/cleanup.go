@@ -553,7 +553,7 @@ func discoverManagedOrphanedWorktrees(
 				continue
 			}
 			threadID := filepath.Base(path)
-			if filepath.Base(filepath.Dir(path)) != item.ID || !looksLikeThreadID(threadID) || !strings.HasPrefix(candidate.branch, "dire-mux/") {
+			if filepath.Base(filepath.Dir(path)) != item.ID || !looksLikeThreadID(threadID) || !strings.HasPrefix(candidate.branch, "kiwi-code/") {
 				continue
 			}
 			if _, active := activeThreads[worktreeThreadKey(item.ID, threadID)]; active {

@@ -995,12 +995,12 @@ func TestProjectMutationsAreSerializedAcrossProcesses(t *testing.T) {
 		readyPaths[index] = filepath.Join(dataDirectory, fmt.Sprintf("ready-%d", index))
 		command := exec.Command(os.Args[0], "-test.run=^TestProjectMutationHelperProcess$")
 		command.Env = append(os.Environ(),
-			"DIRE_MUX_PROJECT_STORE_HELPER=1",
-			"DIRE_MUX_PROJECT_STORE_FILE="+dataFile,
-			"DIRE_MUX_PROJECT_STORE_ID="+item.ID,
-			"DIRE_MUX_PROJECT_STORE_TITLE="+title,
-			"DIRE_MUX_PROJECT_STORE_READY="+readyPaths[index],
-			"DIRE_MUX_PROJECT_STORE_START="+startPath,
+			"KIWI_CODE_PROJECT_STORE_HELPER=1",
+			"KIWI_CODE_PROJECT_STORE_FILE="+dataFile,
+			"KIWI_CODE_PROJECT_STORE_ID="+item.ID,
+			"KIWI_CODE_PROJECT_STORE_TITLE="+title,
+			"KIWI_CODE_PROJECT_STORE_READY="+readyPaths[index],
+			"KIWI_CODE_PROJECT_STORE_START="+startPath,
 		)
 		if err := command.Start(); err != nil {
 			t.Fatal(err)
@@ -1039,17 +1039,17 @@ func TestProjectMutationsAreSerializedAcrossProcesses(t *testing.T) {
 }
 
 func TestProjectMutationHelperProcess(t *testing.T) {
-	if os.Getenv("DIRE_MUX_PROJECT_STORE_HELPER") != "1" {
+	if os.Getenv("KIWI_CODE_PROJECT_STORE_HELPER") != "1" {
 		return
 	}
-	store, err := NewStore(os.Getenv("DIRE_MUX_PROJECT_STORE_FILE"))
+	store, err := NewStore(os.Getenv("KIWI_CODE_PROJECT_STORE_FILE"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(os.Getenv("DIRE_MUX_PROJECT_STORE_READY"), []byte("ready"), 0o600); err != nil {
+	if err := os.WriteFile(os.Getenv("KIWI_CODE_PROJECT_STORE_READY"), []byte("ready"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	startPath := os.Getenv("DIRE_MUX_PROJECT_STORE_START")
+	startPath := os.Getenv("KIWI_CODE_PROJECT_STORE_START")
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		if _, err := os.Stat(startPath); err == nil {
@@ -1063,8 +1063,8 @@ func TestProjectMutationHelperProcess(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	if _, err := store.AddThread(
-		os.Getenv("DIRE_MUX_PROJECT_STORE_ID"),
-		os.Getenv("DIRE_MUX_PROJECT_STORE_TITLE"),
+		os.Getenv("KIWI_CODE_PROJECT_STORE_ID"),
+		os.Getenv("KIWI_CODE_PROJECT_STORE_TITLE"),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -1974,7 +1974,7 @@ func TestStoreCreatesGitWorktreeThreads(t *testing.T) {
 	if !thread.Worktree || thread.WorktreePath != wantWorktreePath || thread.Cwd != thread.WorktreePath {
 		t.Fatalf("unexpected worktree thread: %#v", thread)
 	}
-	if !strings.HasPrefix(thread.Branch, "dire-mux/ship-worktrees-") {
+	if !strings.HasPrefix(thread.Branch, "kiwi-code/ship-worktrees-") {
 		t.Fatalf("worktree branch = %q", thread.Branch)
 	}
 	if _, err := os.Stat(filepath.Join(thread.Cwd, "README.md")); err != nil {
@@ -1998,7 +1998,7 @@ func TestStoreCreatesGitWorktreeFromSelectedBaseBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	runGit(t, repositoryPath, "add", "BASE_BRANCH.md")
-	runGit(t, repositoryPath, "-c", "user.name=Dire Mux", "-c", "user.email=dire-mux@example.invalid", "commit", "-m", "Add base branch file")
+	runGit(t, repositoryPath, "-c", "user.name=Kiwi Code", "-c", "user.email=kiwi-code@example.invalid", "commit", "-m", "Add base branch file")
 	baseRevision := strings.TrimSpace(runGit(t, repositoryPath, "rev-parse", "HEAD"))
 	runGit(t, repositoryPath, "switch", initialBranch)
 
@@ -2572,7 +2572,7 @@ func TestStorePinsGitWorktreeToFullBaseRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	runGit(t, repositoryPath, "add", "LATER.md")
-	runGit(t, repositoryPath, "-c", "user.name=Dire Mux", "-c", "user.email=dire-mux@example.invalid", "commit", "-m", "Advance branch")
+	runGit(t, repositoryPath, "-c", "user.name=Kiwi Code", "-c", "user.email=kiwi-code@example.invalid", "commit", "-m", "Advance branch")
 	baseBranch := strings.TrimSpace(runGit(t, repositoryPath, "branch", "--show-current"))
 
 	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
@@ -2627,7 +2627,7 @@ func TestStoreLazilyNamesGitWorktreeThreads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialBranch := "dire-mux/thread-" + thread.ID[:8]
+	initialBranch := "kiwi-code/thread-" + thread.ID[:8]
 	if thread.Title != defaultThreadTitle || thread.Branch != initialBranch || thread.AutoNamed {
 		t.Fatalf("unexpected provisional worktree thread: %#v", thread)
 	}
@@ -2636,7 +2636,7 @@ func TestStoreLazilyNamesGitWorktreeThreads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantBranch := "dire-mux/name-worktree-from-prompt-" + thread.ID[:8]
+	wantBranch := "kiwi-code/name-worktree-from-prompt-" + thread.ID[:8]
 	if thread.Title != "Name worktree from prompt" || thread.Branch != wantBranch || !thread.AutoNamed {
 		t.Fatalf("unexpected named worktree thread: %#v", thread)
 	}
@@ -2698,7 +2698,7 @@ func createGitRepository(t *testing.T) string {
 		t.Fatal(err)
 	}
 	runGit(t, repositoryPath, "add", "README.md")
-	runGit(t, repositoryPath, "-c", "user.name=Dire Mux", "-c", "user.email=dire-mux@example.invalid", "commit", "-m", "Initial commit")
+	runGit(t, repositoryPath, "-c", "user.name=Kiwi Code", "-c", "user.email=kiwi-code@example.invalid", "commit", "-m", "Initial commit")
 	return repositoryPath
 }
 

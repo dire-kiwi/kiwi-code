@@ -15,7 +15,7 @@ const help = `Usage:
   archive-thread.mjs <thread-id> [--project <project-id>]
   archive-thread.mjs <thread-id> --restore [--project <project-id>]
 
-Archive a Dire Mux thread, or restore it with --restore. Archiving keeps the
+Archive a Kiwi Code thread, or restore it with --restore. Archiving keeps the
 thread and its tmux sessions but starts its configured archive-retention period.`;
 
 run(async () => {

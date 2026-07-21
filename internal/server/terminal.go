@@ -21,15 +21,14 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 	"github.com/gorilla/websocket"
-	"github.com/ivan/dire-mux/internal/project"
 )
 
 type terminalHandler struct {
 	projects                *project.Store
 	tmuxPath                string
 	tmuxSocket              string
-	tmuxSocketMigration     *tmuxSocketMigration
 	piExtensionPaths        []string
 	piExtensionErr          error
 	piModelMu               sync.Mutex
@@ -77,9 +76,7 @@ type terminalHandler struct {
 
 const (
 	tmuxSocketName            = "kiwi-code"
-	legacyTmuxSocketName      = "dire-mux"
 	tmuxSessionNamePrefix     = "kiwi-code-"
-	legacyTmuxSessionPrefix   = "dire-mux-"
 	terminalWriteTimeout      = 10 * time.Second
 	terminalPongTimeout       = 45 * time.Second
 	terminalPingInterval      = 15 * time.Second
@@ -343,7 +340,7 @@ func (h *terminalHandler) startCodingAgent(w http.ResponseWriter, r *http.Reques
 	}
 
 	if h.tmuxPath == "" {
-		writeError(w, http.StatusServiceUnavailable, "tmux is required for terminal coding agents. Install tmux and restart dire-mux.")
+		writeError(w, http.StatusServiceUnavailable, "tmux is required for terminal coding agents. Install tmux and restart kiwi-code.")
 		return
 	}
 	sessionName, _, sessionCreated, err := h.ensureTmuxSessionWithCodingAgentOptions(
@@ -759,7 +756,7 @@ func (h *terminalHandler) tmuxThread(w http.ResponseWriter, r *http.Request) (pr
 		return project.Project{}, project.Thread{}, false
 	}
 	if h.tmuxPath == "" {
-		writeError(w, http.StatusServiceUnavailable, "tmux is required for persistent terminal sessions. Install tmux and restart dire-mux.")
+		writeError(w, http.StatusServiceUnavailable, "tmux is required for persistent terminal sessions. Install tmux and restart kiwi-code.")
 		return project.Project{}, project.Thread{}, false
 	}
 	return item, thread, true
@@ -836,14 +833,7 @@ func (h *terminalHandler) ensureTmuxSessionWithCodingAgentOptions(
 			err = errors.Join(err, fenceErr)
 		}
 	}()
-	if tool == "terminal" {
-		if err := h.adoptPreviousTmuxSessionLocked(item.ID, thread.ID, tool, sessionName); err != nil {
-			return "", "", false, err
-		}
-		if err := h.adoptLegacyTerminalSessionLocked(item, thread, sessionName); err != nil {
-			return "", "", false, err
-		}
-	} else {
+	if tool != "terminal" {
 		if err := h.reconcileThreadTmuxStateLocked(item, thread); err != nil {
 			return "", "", false, err
 		}
@@ -860,9 +850,6 @@ func (h *terminalHandler) ensureTmuxSessionWithCodingAgentOptions(
 	}
 	if tool == "terminal" {
 		if exists {
-			if err := h.ensurePreviousTmuxCompatibilityAliasLocked(item.ID, thread.ID, tool, sessionName); err != nil {
-				return "", "", false, err
-			}
 			return sessionName, "", false, nil
 		}
 		command, args, notice, err := commandFor(tool)
@@ -873,14 +860,8 @@ func (h *terminalHandler) ensureTmuxSessionWithCodingAgentOptions(
 			// A newly restarted server may briefly overlap the old handler and
 			// lose the race to create the persistent session.
 			if exists, checkErr := h.tmuxSessionExists(sessionName); checkErr == nil && exists {
-				if aliasErr := h.ensurePreviousTmuxCompatibilityAliasLocked(item.ID, thread.ID, tool, sessionName); aliasErr != nil {
-					return "", "", false, aliasErr
-				}
 				return sessionName, "", false, nil
 			}
-			return "", "", false, err
-		}
-		if err := h.ensurePreviousTmuxCompatibilityAliasLocked(item.ID, thread.ID, tool, sessionName); err != nil {
 			return "", "", false, err
 		}
 		return sessionName, notice, true, nil
@@ -944,9 +925,6 @@ func (h *terminalHandler) ensureTmuxSessionWithCodingAgentOptions(
 					}
 				}
 			}
-			if aliasErr := h.ensurePreviousTmuxCompatibilityAliasLocked(item.ID, thread.ID, tool, sessionName); aliasErr != nil {
-				return "", "", false, aliasErr
-			}
 			return sessionName, notice, true, nil
 		}
 		// A newly restarted server may briefly overlap the old handler. If it
@@ -968,9 +946,6 @@ func (h *terminalHandler) ensureTmuxSessionWithCodingAgentOptions(
 		restartCodingAgent,
 	)
 	if err != nil {
-		return "", "", false, err
-	}
-	if err := h.ensurePreviousTmuxCompatibilityAliasLocked(item.ID, thread.ID, tool, sessionName); err != nil {
 		return "", "", false, err
 	}
 	return sessionName, notice, created, nil
@@ -1072,11 +1047,10 @@ func (h *terminalHandler) confirmStartedCodingAgentRestart(projectID, threadID, 
 	return errors.New("replacement coding agent pane was not found")
 }
 
-// reconcileThreadTmuxStateLocked adopts live windows created by older Dire Mux
-// layouts before the normal existence check is allowed to create replacements.
-// The caller must hold sessionMu and the thread mutation lease so browser
-// requests in this server and overlapping backend processes cannot race
-// migration with fixed-window creation.
+// reconcileThreadTmuxStateLocked recovers stale linked views before the normal
+// existence check is allowed to create replacement fixed windows. The caller
+// must hold sessionMu and the thread mutation lease so browser requests in this
+// server and overlapping backend processes cannot race recovery with creation.
 func (h *terminalHandler) reconcileThreadTmuxStateLocked(item project.Project, thread project.Thread) (err error) {
 	if err := h.ensureTerminalThreadActiveLocked(item.ID, thread.ID); err != nil {
 		return err
@@ -1085,12 +1059,6 @@ func (h *terminalHandler) reconcileThreadTmuxStateLocked(item project.Project, t
 		err = errors.Join(err, h.finishTerminalThreadMutationLocked(item, thread))
 	}()
 	canonicalSession := tmuxSessionName(item.ID, thread.ID, "process")
-	if err := h.adoptPreviousTmuxSessionLocked(item.ID, thread.ID, "process", canonicalSession); err != nil {
-		return err
-	}
-	if err := h.adoptLegacyToolSessionsLocked(item, thread, canonicalSession); err != nil {
-		return err
-	}
 	if err := h.reconcileStaleTmuxViewsLocked(item.ID, thread.ID, canonicalSession); err != nil {
 		return err
 	}
@@ -1301,387 +1269,6 @@ func (h *terminalHandler) prepareCanonicalCodingAgentWindowsLocked(projectID, th
 	return nil
 }
 
-// adoptPreviousTmuxSessionLocked exposes a session created under the previous
-// canonical name through the current name without moving or restarting any
-// window. Keeping the previous session as a grouped compatibility alias is
-// required because processes that are already running may still target it via
-// DIRE_MUX_TMUX_SESSION.
-func (h *terminalHandler) adoptPreviousTmuxSessionLocked(projectID, threadID, tool, canonicalSession string) error {
-	previousSession := previousTmuxSessionName(projectID, threadID, tool)
-	if previousSession == canonicalSession {
-		return nil
-	}
-	previousExists, err := h.tmuxSessionExists(previousSession)
-	if err != nil || !previousExists {
-		return err
-	}
-	previousWindows, err := h.tmuxDetailedWindows(previousSession)
-	if err != nil {
-		return err
-	}
-	canonicalExists, err := h.tmuxSessionExists(canonicalSession)
-	if err != nil {
-		return err
-	}
-	if !canonicalExists {
-		output, groupErr := h.tmuxCommand(
-			"new-session", "-d",
-			"-s", canonicalSession,
-			"-t", exactTmuxSessionTarget(previousSession),
-		).CombinedOutput()
-		if groupErr != nil {
-			if exists, checkErr := h.tmuxSessionExists(canonicalSession); checkErr != nil || !exists {
-				return tmuxCommandError("adopt previous canonical tmux session", output, groupErr)
-			}
-		}
-	}
-
-	canonicalWindows, err := h.tmuxDetailedWindows(canonicalSession)
-	if err != nil {
-		return err
-	}
-	canonicalWindowIDs := make(map[string]struct{}, len(canonicalWindows))
-	canonicalTools := make(map[string]string)
-	for _, window := range canonicalWindows {
-		canonicalWindowIDs[window.Target.ID] = struct{}{}
-		if fixedTool := fixedTmuxTool(window); fixedTool != "" {
-			canonicalTools[fixedTool] = window.Target.ID
-		}
-	}
-
-	for _, window := range previousWindows {
-		fixedTool := fixedTmuxTool(window)
-		if _, linked := canonicalWindowIDs[window.Target.ID]; !linked {
-			if conflictingWindow := canonicalTools[fixedTool]; fixedTool != "" && conflictingWindow != "" && conflictingWindow != window.Target.ID {
-				log.Printf("preserve previous canonical tmux window: previous_session=%q canonical_session=%q tool=%q window=%q canonical_window=%q reason=conflicting canonical window", previousSession, canonicalSession, fixedTool, window.Target.ID, conflictingWindow)
-				if fixedTool == "pi" {
-					if prepareErr := h.prepareCodingAgentWindowForReconciliation(projectID, threadID, previousSession, window.Target.ID); prepareErr != nil {
-						return prepareErr
-					}
-				}
-				continue
-			}
-			destination, destinationErr := h.nextTmuxWindowIndex(canonicalSession)
-			if destinationErr != nil {
-				return destinationErr
-			}
-			output, linkErr := h.tmuxCommand(
-				"link-window",
-				"-s", window.Target.ID,
-				"-t", exactTmuxWindowTarget(canonicalSession, destination),
-			).CombinedOutput()
-			if linkErr != nil {
-				linkedAfterRace := false
-				if current, checkErr := h.tmuxDetailedWindows(canonicalSession); checkErr == nil {
-					for _, existing := range current {
-						if existing.Target.ID == window.Target.ID {
-							linkedAfterRace = true
-							break
-						}
-					}
-				}
-				if !linkedAfterRace {
-					return tmuxCommandError("link previous canonical tmux window", output, linkErr)
-				}
-			}
-			canonicalWindowIDs[window.Target.ID] = struct{}{}
-			if fixedTool != "" {
-				canonicalTools[fixedTool] = window.Target.ID
-			}
-		}
-		if fixedTool == "" {
-			continue
-		}
-		if err := h.configureSharedToolWindow(canonicalSession, window.Target, fixedTool); err != nil {
-			return err
-		}
-		if fixedTool == "pi" {
-			if err := h.prepareCodingAgentWindowForReconciliation(projectID, threadID, canonicalSession, window.Target.ID); err != nil {
-				return err
-			}
-		}
-	}
-	if output, optionErr := h.tmuxCommand("set-option", "-t", exactTmuxCurrentWindowTarget(canonicalSession), "status", "off").CombinedOutput(); optionErr != nil {
-		return tmuxCommandError("configure adopted previous tmux session", output, optionErr)
-	}
-	return h.rewriteAdoptedTmuxViewSourcesLocked(previousSession, canonicalSession, previousWindows)
-}
-
-func (h *terminalHandler) ensurePreviousTmuxCompatibilityAliasLocked(projectID, threadID, tool, canonicalSession string) error {
-	if h.tmuxSocketMigration == nil || !h.tmuxSocketMigration.active() {
-		return nil
-	}
-	previousSession := previousTmuxSessionName(projectID, threadID, tool)
-	previousExists, err := h.tmuxSessionExists(previousSession)
-	if err != nil {
-		return err
-	}
-	if previousExists {
-		return h.adoptPreviousTmuxSessionLocked(projectID, threadID, tool, canonicalSession)
-	}
-	output, err := h.tmuxCommand(
-		"new-session", "-d",
-		"-s", previousSession,
-		"-t", exactTmuxSessionTarget(canonicalSession),
-	).CombinedOutput()
-	if err != nil {
-		if exists, checkErr := h.tmuxSessionExists(previousSession); checkErr != nil || !exists {
-			return tmuxCommandError("create previous tmux compatibility session", output, err)
-		}
-	}
-	if output, optionErr := h.tmuxCommand("set-option", "-t", exactTmuxCurrentWindowTarget(previousSession), "status", "off").CombinedOutput(); optionErr != nil {
-		return tmuxCommandError("configure previous tmux compatibility session", output, optionErr)
-	}
-	return h.adoptPreviousTmuxSessionLocked(projectID, threadID, tool, canonicalSession)
-}
-
-func (h *terminalHandler) adoptLegacyToolSessionsLocked(item project.Project, thread project.Thread, canonicalSession string) error {
-	for _, tool := range []string{"nvim", "lazygit", "pi"} {
-		legacyNames := []string{legacyThreadTmuxSessionName(item.ID, thread.ID, tool)}
-		if len(item.Threads) > 0 && item.Threads[0].ID == thread.ID {
-			legacyNames = append(legacyNames, legacyProjectTmuxSessionName(item.ID, tool))
-		}
-		for _, legacySession := range legacyNames {
-			if legacySession == canonicalSession {
-				continue
-			}
-			exists, err := h.tmuxSessionExists(legacySession)
-			if err != nil {
-				return err
-			}
-			if !exists {
-				continue
-			}
-			if err := h.adoptLegacyToolSessionLocked(item.ID, thread.ID, legacySession, canonicalSession, tool); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (h *terminalHandler) adoptLegacyTerminalSessionLocked(item project.Project, thread project.Thread, canonicalSession string) error {
-	if len(item.Threads) == 0 || item.Threads[0].ID != thread.ID {
-		return nil
-	}
-	legacySession := legacyProjectTmuxSessionName(item.ID, "terminal")
-	if legacySession == canonicalSession {
-		return nil
-	}
-	legacyExists, err := h.tmuxSessionExists(legacySession)
-	if err != nil || !legacyExists {
-		return err
-	}
-	legacyWindows, err := h.tmuxDetailedWindows(legacySession)
-	if err != nil {
-		return err
-	}
-	canonicalExists, err := h.tmuxSessionExists(canonicalSession)
-	if err != nil {
-		return err
-	}
-	if !canonicalExists {
-		output, renameErr := h.tmuxCommand("rename-session", "-t", exactTmuxSessionTarget(legacySession), canonicalSession).CombinedOutput()
-		if renameErr == nil {
-			if output, optionErr := h.tmuxCommand("set-option", "-t", exactTmuxCurrentWindowTarget(canonicalSession), "status", "off").CombinedOutput(); optionErr != nil {
-				return tmuxCommandError("configure adopted terminal session", output, optionErr)
-			}
-			return h.rewriteAdoptedTmuxViewSourcesLocked(legacySession, canonicalSession, legacyWindows)
-		}
-		if exists, checkErr := h.tmuxSessionExists(canonicalSession); checkErr != nil || !exists {
-			return tmuxCommandError("adopt legacy terminal session", output, renameErr)
-		}
-	}
-
-	var preservedMigrationErr error
-	for _, window := range legacyWindows {
-		canonicalWindows, listErr := h.tmuxDetailedWindows(canonicalSession)
-		if listErr != nil {
-			return listErr
-		}
-		alreadyLinked := false
-		for _, existing := range canonicalWindows {
-			if existing.Target.ID == window.Target.ID {
-				alreadyLinked = true
-				break
-			}
-		}
-		sourceTarget := exactTmuxWindowTarget(legacySession, window.Target.Index)
-		if alreadyLinked {
-			output, unlinkErr := h.tmuxCommand("unlink-window", "-t", sourceTarget).CombinedOutput()
-			if unlinkErr != nil {
-				log.Printf("preserve legacy terminal link: legacy_session=%q canonical_session=%q window=%q error=%v output=%q", legacySession, canonicalSession, window.Target.ID, unlinkErr, strings.TrimSpace(string(output)))
-				if preservedMigrationErr == nil {
-					preservedMigrationErr = tmuxCommandError("unlink adopted legacy terminal window", output, unlinkErr)
-				}
-			}
-			continue
-		}
-		destination, destinationErr := h.nextTmuxWindowIndex(canonicalSession)
-		if destinationErr != nil {
-			return destinationErr
-		}
-		output, moveErr := h.tmuxCommand(
-			"move-window",
-			"-s", sourceTarget,
-			"-t", exactTmuxWindowTarget(canonicalSession, destination),
-		).CombinedOutput()
-		if moveErr != nil {
-			adopted := false
-			if current, checkErr := h.tmuxDetailedWindows(canonicalSession); checkErr == nil {
-				for _, existing := range current {
-					if existing.Target.ID == window.Target.ID {
-						adopted = true
-						break
-					}
-				}
-			}
-			if !adopted {
-				log.Printf("preserve conflicting legacy terminal window: legacy_session=%q canonical_session=%q window=%q error=%v output=%q", legacySession, canonicalSession, window.Target.ID, moveErr, strings.TrimSpace(string(output)))
-				if preservedMigrationErr == nil {
-					preservedMigrationErr = tmuxCommandError("move legacy terminal window", output, moveErr)
-				}
-			}
-		}
-	}
-	if output, optionErr := h.tmuxCommand("set-option", "-t", exactTmuxCurrentWindowTarget(canonicalSession), "status", "off").CombinedOutput(); optionErr != nil {
-		return tmuxCommandError("configure merged terminal session", output, optionErr)
-	}
-	if err := h.rewriteAdoptedTmuxViewSourcesLocked(legacySession, canonicalSession, legacyWindows); err != nil {
-		return err
-	}
-	return preservedMigrationErr
-}
-
-func (h *terminalHandler) adoptLegacyToolSessionLocked(projectID, threadID, legacySession, canonicalSession, tool string) error {
-	legacyWindows, err := h.tmuxDetailedWindows(legacySession)
-	if err != nil {
-		return err
-	}
-	canonicalExists, err := h.tmuxSessionExists(canonicalSession)
-	if err != nil {
-		return err
-	}
-	if !canonicalExists {
-		output, renameErr := h.tmuxCommand("rename-session", "-t", exactTmuxSessionTarget(legacySession), canonicalSession).CombinedOutput()
-		if renameErr != nil {
-			if exists, checkErr := h.tmuxSessionExists(canonicalSession); checkErr != nil || !exists {
-				return tmuxCommandError("adopt legacy tmux session", output, renameErr)
-			}
-		} else {
-			canonicalExists = true
-		}
-	}
-
-	if !canonicalExists {
-		return errors.New("adopt legacy tmux session: canonical session is unavailable")
-	}
-	for index, window := range legacyWindows {
-		prepareLegacyPi := tool == "pi" && (index == 0 || fixedTmuxTool(window) == "pi")
-		if windowSession, findErr := h.tmuxWindowSession(window.Target.ID); findErr != nil {
-			return findErr
-		} else if windowSession == legacySession {
-			conflict, conflictErr := h.tmuxFixedToolWindowConflict(canonicalSession, tool, window.Target.ID)
-			if conflictErr != nil {
-				return conflictErr
-			}
-			if conflict {
-				log.Printf("preserve legacy tmux window: legacy_session=%q canonical_session=%q tool=%q window=%q reason=conflicting canonical window", legacySession, canonicalSession, tool, window.Target.ID)
-				if prepareLegacyPi {
-					if prepareErr := h.prepareCodingAgentWindowForReconciliation(projectID, threadID, legacySession, window.Target.ID); prepareErr != nil {
-						return prepareErr
-					}
-				}
-				continue
-			}
-			destination, destinationErr := h.nextTmuxWindowIndex(canonicalSession)
-			if destinationErr != nil {
-				return destinationErr
-			}
-			output, moveErr := h.tmuxCommand(
-				"move-window",
-				"-s", window.Target.ID,
-				"-t", exactTmuxWindowTarget(canonicalSession, destination),
-			).CombinedOutput()
-			if moveErr != nil {
-				return tmuxCommandError("adopt legacy tmux window", output, moveErr)
-			}
-		}
-		if prepareLegacyPi {
-			windowSession, sessionErr := h.tmuxWindowSession(window.Target.ID)
-			if sessionErr != nil {
-				return sessionErr
-			}
-			if windowSession == "" {
-				windowSession = canonicalSession
-			}
-			if prepareErr := h.prepareCodingAgentWindowForReconciliation(projectID, threadID, windowSession, window.Target.ID); prepareErr != nil {
-				return prepareErr
-			}
-		}
-		if index > 0 {
-			log.Printf("preserve additional legacy tmux window: canonical_session=%q tool=%q window=%q", canonicalSession, tool, window.Target.ID)
-			continue
-		}
-		if err := h.configureSharedToolWindow(canonicalSession, window.Target, tool); err != nil {
-			return err
-		}
-	}
-	return h.rewriteAdoptedTmuxViewSourcesLocked(legacySession, canonicalSession, legacyWindows)
-}
-
-func (h *terminalHandler) rewriteAdoptedTmuxViewSourcesLocked(legacySession, canonicalSession string, legacyWindows []tmuxDetailedWindow) error {
-	canonicalWindows, err := h.tmuxDetailedWindows(canonicalSession)
-	if err != nil {
-		return err
-	}
-	legacyIDs := make(map[string]struct{}, len(legacyWindows))
-	for _, window := range legacyWindows {
-		legacyIDs[window.Target.ID] = struct{}{}
-	}
-	adoptedIDs := make(map[string]struct{}, len(legacyWindows))
-	for _, window := range canonicalWindows {
-		if _, wasLegacy := legacyIDs[window.Target.ID]; wasLegacy {
-			adoptedIDs[window.Target.ID] = struct{}{}
-		}
-	}
-	if len(adoptedIDs) == 0 {
-		return nil
-	}
-	views, err := h.tmuxViewSessions()
-	if err != nil {
-		return err
-	}
-	for _, view := range views {
-		windows, windowErr := h.tmuxDetailedWindows(view.Name)
-		if windowErr != nil {
-			if exists, checkErr := h.tmuxSessionExists(view.Name); checkErr == nil && !exists {
-				continue
-			}
-			return windowErr
-		}
-		linkedToAdoptedWindow := false
-		for _, window := range windows {
-			if _, adopted := adoptedIDs[window.Target.ID]; adopted {
-				linkedToAdoptedWindow = true
-				break
-			}
-		}
-		if !linkedToAdoptedWindow {
-			continue
-		}
-		output, optionErr := h.tmuxCommand(
-			"set-option",
-			"-t", exactTmuxCurrentWindowTarget(view.Name),
-			"@dire-mux-source-session", canonicalSession,
-		).CombinedOutput()
-		if optionErr != nil {
-			return tmuxCommandError("rewrite adopted tmux view source", output, optionErr)
-		}
-	}
-	return nil
-}
-
 func (h *terminalHandler) reconcileStaleTmuxViewsLocked(projectID, threadID, canonicalSession string) error {
 	views, err := h.tmuxViewSessions()
 	if err != nil {
@@ -1714,7 +1301,7 @@ func (h *terminalHandler) reconcileStaleTmuxViewsLocked(projectID, threadID, can
 				output, optionErr := h.tmuxCommand(
 					"set-option",
 					"-t", exactTmuxCurrentWindowTarget(view.Name),
-					"@dire-mux-source-session", canonicalSession,
+					"@kiwi-code-source-session", canonicalSession,
 				).CombinedOutput()
 				if optionErr != nil {
 					return tmuxCommandError("repair adopted tmux view source", output, optionErr)
@@ -1749,8 +1336,8 @@ func (h *terminalHandler) adoptStaleTmuxViewLocked(projectID, threadID, viewSess
 				return tmuxCommandError("adopt stale tmux terminal view", output, renameErr)
 			}
 		} else {
-			_ = h.tmuxCommand("set-option", "-u", "-t", exactTmuxCurrentWindowTarget(canonicalSession), "@dire-mux-source-session").Run()
-			_ = h.tmuxCommand("set-option", "-u", "-t", exactTmuxCurrentWindowTarget(canonicalSession), "@dire-mux-owner-pid").Run()
+			_ = h.tmuxCommand("set-option", "-u", "-t", exactTmuxCurrentWindowTarget(canonicalSession), "@kiwi-code-source-session").Run()
+			_ = h.tmuxCommand("set-option", "-u", "-t", exactTmuxCurrentWindowTarget(canonicalSession), "@kiwi-code-owner-pid").Run()
 			h.configureAdoptedTmuxWindow(canonicalSession, window)
 			if fixedTmuxTool(window) == "pi" {
 				if prepareErr := h.prepareCodingAgentWindowForReconciliation(projectID, threadID, canonicalSession, window.Target.ID); prepareErr != nil {
@@ -1855,7 +1442,7 @@ func (h *terminalHandler) removeStaleTmuxView(viewSession, canonicalSession, win
 func (h *terminalHandler) tmuxViewSessions() ([]tmuxViewSession, error) {
 	output, err := h.tmuxCommand(
 		"list-sessions",
-		"-F", "#{session_name}\t#{session_attached}\t#{@dire-mux-source-session}",
+		"-F", "#{session_name}\t#{session_attached}\t#{@kiwi-code-source-session}",
 	).CombinedOutput()
 	if err != nil {
 		var exitError *exec.ExitError
@@ -1867,7 +1454,7 @@ func (h *terminalHandler) tmuxViewSessions() ([]tmuxViewSession, error) {
 	var views []tmuxViewSession
 	for _, line := range strings.FieldsFunc(string(output), func(r rune) bool { return r == '\n' || r == '\r' }) {
 		parts := strings.SplitN(line, "\t", 3)
-		if len(parts) != 3 || !strings.HasPrefix(parts[0], "dire-mux-view-") {
+		if len(parts) != 3 || !strings.HasPrefix(parts[0], "kiwi-code-view-") {
 			continue
 		}
 		if parts[1] != "0" && parts[1] != "1" {
@@ -1882,7 +1469,7 @@ func (h *terminalHandler) tmuxDetailedWindows(sessionName string) ([]tmuxDetaile
 	output, err := h.tmuxCommand(
 		"list-windows",
 		"-t", exactTmuxSessionTarget(sessionName),
-		"-F", "#{window_index}\t#{window_id}\t#{window_name}\t#{@dire-mux-tool}\t#{pane_start_command}",
+		"-F", "#{window_index}\t#{window_id}\t#{window_name}\t#{@kiwi-code-tool}\t#{pane_start_command}",
 	).CombinedOutput()
 	if err != nil {
 		return nil, tmuxCommandError("list detailed tmux windows", output, err)
@@ -1973,7 +1560,7 @@ func fixedTmuxTool(window tmuxDetailedWindow) string {
 }
 
 func tmuxSessionFromStartCommand(command string) string {
-	const marker = "DIRE_MUX_TMUX_SESSION="
+	const marker = "KIWI_CODE_TMUX_SESSION="
 	index := strings.Index(command, marker)
 	if index < 0 {
 		return ""
@@ -1992,7 +1579,7 @@ func tmuxSessionFromStartCommand(command string) string {
 }
 
 func tmuxViewIdentity(sessionName string) (int, time.Time, bool) {
-	remainder := strings.TrimPrefix(sessionName, "dire-mux-view-")
+	remainder := strings.TrimPrefix(sessionName, "kiwi-code-view-")
 	rawPID, remainder, ok := strings.Cut(remainder, "-")
 	if !ok {
 		return 0, time.Time{}, false
@@ -2029,16 +1616,8 @@ func tmuxViewHasLiveCreationGrace(sessionName string, now time.Time) bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
-func legacyThreadTmuxSessionName(projectID, threadID, tool string) string {
-	return legacyTmuxSessionPrefix + projectID + "-" + threadID + "-" + tool
-}
-
-func legacyProjectTmuxSessionName(projectID, tool string) string {
-	return legacyTmuxSessionPrefix + projectID + "-" + tool
-}
-
 const codingAgentLaunchScript = `set -eu
-"$1" set-option -p -t "$TMUX_PANE" @dire-mux-agent "$2"
+"$1" set-option -p -t "$TMUX_PANE" @kiwi-code-agent "$2"
 "$1" set-option -p -t "$TMUX_PANE" remain-on-exit on
 shift 2
 exec "$@"`
@@ -2048,7 +1627,7 @@ func (h *terminalHandler) codingAgentLaunchCommand(agent, command string, args [
 	launchArgs = append(launchArgs,
 		"-c",
 		codingAgentLaunchScript,
-		"dire-mux-agent-launch",
+		"kiwi-code-agent-launch",
 		h.tmuxPath,
 		agent,
 		command,
@@ -2083,7 +1662,7 @@ func (h *terminalHandler) startCodingAgentPane(
 	paneID string,
 	agent string,
 ) error {
-	if err := h.setTmuxPaneOption(paneID, "@dire-mux-agent", agent); err != nil {
+	if err := h.setTmuxPaneOption(paneID, "@kiwi-code-agent", agent); err != nil {
 		return err
 	}
 	ended, err := h.prepareExistingCodingAgentPane(item.ID, thread.ID, sessionName, windowID, tmuxAgentPane{ID: paneID, Agent: agent})
@@ -2141,7 +1720,7 @@ func (h *terminalHandler) prepareCodingAgentWindow(projectID, threadID, sessionN
 			if panes[index].Agent != "" {
 				continue
 			}
-			if err := h.setTmuxPaneOption(panes[index].ID, "@dire-mux-agent", codingAgentPi); err != nil {
+			if err := h.setTmuxPaneOption(panes[index].ID, "@kiwi-code-agent", codingAgentPi); err != nil {
 				return nil, nil, err
 			}
 			panes[index].Agent = codingAgentPi
@@ -3111,7 +2690,7 @@ func (h *terminalHandler) tmuxAgentPanes(windowID string) ([]tmuxAgentPane, erro
 	output, err := h.tmuxCommand(
 		"list-panes",
 		"-t", windowID,
-		"-F", "#{pane_id}\t#{@dire-mux-agent}\t#{pane_active}",
+		"-F", "#{pane_id}\t#{@kiwi-code-agent}\t#{pane_active}",
 	).CombinedOutput()
 	if err != nil {
 		return nil, tmuxCommandError("list coding agent panes", output, err)
@@ -3347,22 +2926,22 @@ func (h *terminalHandler) commandForTmuxTarget(
 	}
 
 	environment := []string{
-		"DIRE_MUX_TMUX_SESSION=" + sessionName,
-		"DIRE_MUX_TMUX_WINDOW=" + windowName,
+		"KIWI_CODE_TMUX_SESSION=" + sessionName,
+		"KIWI_CODE_TMUX_WINDOW=" + windowName,
 	}
 	if (tool == "pi" || isClaudeCodingAgent(tool)) && threadEndpoint != "" {
-		environment = append(environment, direMuxThreadEnvironment(threadEndpoint, item.ID, thread.ID)...)
+		environment = append(environment, kiwiCodeThreadEnvironment(threadEndpoint, item.ID, thread.ID)...)
 	}
-	// Dire Mux child and workflow execution is deliberately Pi Native. Do not
+	// Kiwi Code child and workflow execution is deliberately Pi Native. Do not
 	// pass the broad managed-agent capability or relationship metadata to other
 	// coding harnesses. Claude's browser MCP reads its capability from the
 	// protected data directory.
 	if tool == codingAgentPi && threadEndpoint != "" {
 		if h.agentToken != "" {
-			environment = append(environment, "DIRE_MUX_AGENT_TOKEN="+h.agentToken)
+			environment = append(environment, "KIWI_CODE_AGENT_TOKEN="+h.agentToken)
 		}
 		if thread.ParentThreadID != "" {
-			environment = append(environment, "DIRE_MUX_PARENT_THREAD_ID="+thread.ParentThreadID)
+			environment = append(environment, "KIWI_CODE_PARENT_THREAD_ID="+thread.ParentThreadID)
 		}
 	}
 	if isClaudeCodingAgent(tool) && notice == "" {
@@ -3371,8 +2950,8 @@ func (h *terminalHandler) commandForTmuxTarget(
 			piPath = resolvedPiPath
 		}
 		environment = append(environment,
-			"DIRE_MUX_PI_PATH="+piPath,
-			"DIRE_MUX_CODING_AGENT="+tool,
+			"KIWI_CODE_PI_PATH="+piPath,
+			"KIWI_CODE_CODING_AGENT="+tool,
 		)
 	}
 	if tool == codingAgentClaudeGPT && notice == "" {
@@ -3522,7 +3101,7 @@ func (h *terminalHandler) configureSharedToolWindow(sessionName string, target t
 		{"remain-on-exit", "off"},
 		{"automatic-rename", "off"},
 		{"allow-rename", "off"},
-		{"@dire-mux-tool", tool},
+		{"@kiwi-code-tool", tool},
 	}
 	for _, option := range options {
 		if err := h.setTmuxWindowOption(targetName, option[0], option[1]); err != nil {
@@ -3548,7 +3127,7 @@ func (h *terminalHandler) tmuxToolWindow(sessionName, tool string) (tmuxWindowTa
 	output, err := h.tmuxCommand(
 		"list-windows",
 		"-t", exactTmuxSessionTarget(sessionName),
-		"-F", "#{window_index}\t#{window_id}\t#{window_name}\t#{@dire-mux-tool}",
+		"-F", "#{window_index}\t#{window_id}\t#{window_name}\t#{@kiwi-code-tool}",
 	).CombinedOutput()
 	if err != nil {
 		return tmuxWindowTarget{}, false, tmuxCommandError("find tmux window", output, err)
@@ -3607,7 +3186,7 @@ func (h *terminalHandler) createTmuxViewSession(item project.Project, thread pro
 }
 
 // createTmuxBrowserViewSession creates a temporary view for an arbitrary tmux
-// session that may not belong to a Dire Mux project. Managed project views use
+// session that may not belong to a Kiwi Code project. Managed project views use
 // createTmuxViewSession so their durable deletion fence remains authoritative.
 func (h *terminalHandler) createTmuxBrowserViewSession(sourceSession string, sourceWindow tmuxWindowTarget) (string, error) {
 	h.sessionMu.Lock()
@@ -3674,8 +3253,8 @@ func (h *terminalHandler) createTmuxViewSessionLocked(sourceSession string, sour
 			return "", "", fmt.Errorf("finish tmux terminal view: %w", err)
 		}
 		for option, value := range map[string]string{
-			"@dire-mux-source-session": sourceSession,
-			"@dire-mux-owner-pid":      strconv.Itoa(os.Getpid()),
+			"@kiwi-code-source-session": sourceSession,
+			"@kiwi-code-owner-pid":      strconv.Itoa(os.Getpid()),
 		} {
 			output, optionErr := h.tmuxCommand("set-option", "-t", exactTmuxCurrentWindowTarget(viewName), option, value).CombinedOutput()
 			if optionErr != nil {
@@ -3756,33 +3335,18 @@ func (h *terminalHandler) tmuxWindows(sessionName string) ([]tmuxWindow, error) 
 }
 
 func threadTmuxSessionNameSet(item project.Project, threadID string) map[string]struct{} {
-	sessionNames := map[string]struct{}{
-		tmuxSessionName(item.ID, threadID, "terminal"):         {},
-		tmuxSessionName(item.ID, threadID, "process"):          {},
-		previousTmuxSessionName(item.ID, threadID, "terminal"): {},
-		previousTmuxSessionName(item.ID, threadID, "process"):  {},
+	return map[string]struct{}{
+		tmuxSessionName(item.ID, threadID, "terminal"): {},
+		tmuxSessionName(item.ID, threadID, "process"):  {},
 	}
-	if len(item.Threads) > 0 && item.Threads[0].ID == threadID {
-		sessionNames[legacyProjectTmuxSessionName(item.ID, "terminal")] = struct{}{}
-	}
-	for _, tool := range []string{"nvim", "lazygit", "pi"} {
-		sessionNames[legacyThreadTmuxSessionName(item.ID, threadID, tool)] = struct{}{}
-		if len(item.Threads) > 0 && item.Threads[0].ID == threadID {
-			sessionNames[legacyProjectTmuxSessionName(item.ID, tool)] = struct{}{}
-		}
-	}
-	return sessionNames
 }
 
 func projectTmuxSessionNameSet(item project.Project) map[string]struct{} {
-	sessionNames := make(map[string]struct{}, len(item.Threads)*5+len(threadSessionTools))
+	sessionNames := make(map[string]struct{}, len(item.Threads)*2)
 	for _, thread := range item.Threads {
 		for sessionName := range threadTmuxSessionNameSet(item, thread.ID) {
 			sessionNames[sessionName] = struct{}{}
 		}
-	}
-	for _, tool := range threadSessionTools {
-		sessionNames[legacyProjectTmuxSessionName(item.ID, tool)] = struct{}{}
 	}
 	return sessionNames
 }
@@ -4282,11 +3846,6 @@ func (h *terminalHandler) tmuxExactSessionExists(sessionName string) (bool, erro
 }
 
 func (h *terminalHandler) createTmuxSession(sessionName, directory, windowName, command string, args []string) (tmuxWindowTarget, error) {
-	if h.tmuxSocketMigration != nil {
-		if err := h.tmuxSocketMigration.prepareServerStart(); err != nil {
-			return tmuxWindowTarget{}, err
-		}
-	}
 	output, err := h.tmuxCommand(
 		"new-session",
 		"-d",
@@ -4346,10 +3905,6 @@ func tmuxSessionName(projectID, threadID, tool string) string {
 	return tmuxSessionNamePrefix + projectID + "-" + threadID + "-" + tmuxSessionSuffix(tool)
 }
 
-func previousTmuxSessionName(projectID, threadID, tool string) string {
-	return legacyTmuxSessionPrefix + projectID + "-" + threadID + "-" + tmuxSessionSuffix(tool)
-}
-
 func tmuxSessionSuffix(tool string) string {
 	switch tool {
 	case "", "terminal":
@@ -4377,11 +3932,11 @@ func threadEndpointURL(r *http.Request, projectID, threadID string) string {
 	return scheme + "://" + host + path
 }
 
-func direMuxThreadEnvironment(threadEndpoint, projectID, threadID string) []string {
+func kiwiCodeThreadEnvironment(threadEndpoint, projectID, threadID string) []string {
 	environment := []string{
-		"DIRE_MUX_THREAD_ENDPOINT=" + threadEndpoint,
-		"DIRE_MUX_PROJECT_ID=" + projectID,
-		"DIRE_MUX_THREAD_ID=" + threadID,
+		"KIWI_CODE_THREAD_ENDPOINT=" + threadEndpoint,
+		"KIWI_CODE_PROJECT_ID=" + projectID,
+		"KIWI_CODE_THREAD_ID=" + threadID,
 	}
 	if endpoint, err := url.Parse(threadEndpoint); err == nil {
 		port := endpoint.Port()
@@ -4394,10 +3949,10 @@ func direMuxThreadEnvironment(threadEndpoint, projectID, threadID string) []stri
 			}
 		}
 		if port != "" {
-			environment = append(environment, "DIRE_MUX_PORT="+port)
+			environment = append(environment, "KIWI_CODE_PORT="+port)
 		}
 		if endpoint.Scheme != "" {
-			environment = append(environment, "DIRE_MUX_SCHEME="+endpoint.Scheme)
+			environment = append(environment, "KIWI_CODE_SCHEME="+endpoint.Scheme)
 		}
 	}
 	return environment
@@ -4538,7 +4093,7 @@ func terminalEnvironment() []string {
 	overrides := map[string]string{
 		"COLORTERM":    "truecolor",
 		"TERM":         "xterm-256color",
-		"TERM_PROGRAM": "dire-mux",
+		"TERM_PROGRAM": "kiwi-code",
 	}
 	environment := make([]string, 0, len(os.Environ())+len(overrides))
 	for _, entry := range os.Environ() {

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/broadcast"
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/broadcast"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 func TestContextStatusAPITracksEachPresentation(t *testing.T) {

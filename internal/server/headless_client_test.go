@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/headless"
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/headless"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 func TestHeadlessClientExercisesMultipleClientsEndToEnd(t *testing.T) {

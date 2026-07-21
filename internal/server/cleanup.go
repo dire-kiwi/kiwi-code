@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 const defaultCleanupInterval = time.Hour

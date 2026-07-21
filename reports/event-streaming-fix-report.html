@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Dire Mux event-streaming fix report</title>
+  <title>Kiwi Code event-streaming fix report</title>
   <style>
     :root { color-scheme:dark; --bg:#090c0f; --panel:#12171c; --raised:#182028; --line:#29343e; --text:#edf3f8; --muted:#9aaab8; --green:#b5bd68; --green2:#d7df88; --blue:#81a2be; --cyan:#8abeb7; --yellow:#f0c674; }
     * { box-sizing:border-box; }
@@ -55,7 +55,7 @@
     <div>
       <div class="eyebrow">Implementation report · after changes</div>
       <h1>Reliable global events, scoped terminal streams</h1>
-      <p class="subtitle">Dire Mux now preserves ordered status snapshots for healthy subscribers, bounds stalled-client memory, keeps project and Pi domains independently ordered on one browser stream, and verifies tmux fan-out, isolation, liveness, and cleanup end to end.</p>
+      <p class="subtitle">Kiwi Code now preserves ordered status snapshots for healthy subscribers, bounds stalled-client memory, keeps project and Pi domains independently ordered on one browser stream, and verifies tmux fan-out, isolation, liveness, and cleanup end to end.</p>
     </div>
     <div class="result">STATUS: PASS<br />DATE: 2026-07-15<br />REGRESSIONS: 0</div>
   </header>
@@ -142,7 +142,7 @@ Vite production build: complete</div>
 
   <section>
     <h2>How to rerun</h2>
-    <div class="console"># Start Dire Mux, then run:
+    <div class="console"># Start Kiwi Code, then run:
 make headless-test
 
 # More clients or a remote server-visible path:

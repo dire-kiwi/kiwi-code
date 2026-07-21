@@ -20,24 +20,24 @@ func TestMaterializePiExtensions(t *testing.T) {
 		name     string
 		contents []byte
 	}{
-		{name: "dire-mux-thread-title.ts", contents: piThreadTitleExtension},
-		{name: "dire-mux-thread-activity.ts", contents: piThreadActivityExtension},
-		{name: "dire-mux-thread-context.ts", contents: piThreadContextExtension},
-		{name: "dire-mux-child-threads.ts", contents: piChildThreadsExtension},
-		{name: "dire-mux-workflows.ts", contents: piWorkflowsExtension},
+		{name: "kiwi-code-thread-title.ts", contents: piThreadTitleExtension},
+		{name: "kiwi-code-thread-activity.ts", contents: piThreadActivityExtension},
+		{name: "kiwi-code-thread-context.ts", contents: piThreadContextExtension},
+		{name: "kiwi-code-child-threads.ts", contents: piChildThreadsExtension},
+		{name: "kiwi-code-workflows.ts", contents: piWorkflowsExtension},
 	}
 	if len(paths) != len(tests) {
 		t.Fatalf("materialized %d extensions, want %d", len(paths), len(tests))
 	}
-	usageContents, err := os.ReadFile(filepath.Join(directory, "extensions", "dire-mux-thread-usage.ts"))
+	usageContents, err := os.ReadFile(filepath.Join(directory, "extensions", "kiwi-code-thread-usage.ts"))
 	if err != nil || !bytes.Equal(usageContents, piThreadUsageExtension) {
 		t.Fatalf("materialized usage extension differs from embedded source: %v", err)
 	}
-	browserContents, err := os.ReadFile(filepath.Join(directory, "extensions", "dire-mux-browser.ts"))
+	browserContents, err := os.ReadFile(filepath.Join(directory, "extensions", "kiwi-code-browser.ts"))
 	if err != nil || !bytes.Equal(browserContents, piBrowserExtension) {
 		t.Fatalf("materialized browser extension differs from embedded source: %v", err)
 	}
-	skillForksContents, err := os.ReadFile(filepath.Join(directory, "extensions", "dire-mux-skill-forks.ts"))
+	skillForksContents, err := os.ReadFile(filepath.Join(directory, "extensions", "kiwi-code-skill-forks.ts"))
 	if err != nil || !bytes.Equal(skillForksContents, piSkillForksExtension) {
 		t.Fatalf("materialized skill-forks extension differs from embedded source: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestMaterializePiExtensions(t *testing.T) {
 		}
 	}
 
-	skillPath := filepath.Join(directory, "skills", "dire-mux-in-app-browser", "SKILL.md")
+	skillPath := filepath.Join(directory, "skills", "kiwi-code-in-app-browser", "SKILL.md")
 	skillContents, err := os.ReadFile(skillPath)
 	if err != nil {
 		t.Fatal(err)
@@ -128,23 +128,23 @@ if (major < 22 || (major === 22 && minor < 19)) process.exit(1);
 	if len(paths) == 0 {
 		t.Fatal("materialized extension paths are missing")
 	}
-	browserExtensionPath := filepath.Join(directory, "extensions", "dire-mux-browser.ts")
+	browserExtensionPath := filepath.Join(directory, "extensions", "kiwi-code-browser.ts")
 	if _, err := os.Stat(browserExtensionPath); err != nil {
 		t.Fatalf("materialized browser extension path is missing: %v", err)
 	}
-	childThreadsExtensionPath := filepath.Join(directory, "extensions", "dire-mux-child-threads.ts")
+	childThreadsExtensionPath := filepath.Join(directory, "extensions", "kiwi-code-child-threads.ts")
 	if _, err := os.Stat(childThreadsExtensionPath); err != nil {
 		t.Fatalf("materialized child-thread extension path is missing: %v", err)
 	}
-	workflowsExtensionPath := filepath.Join(directory, "extensions", "dire-mux-workflows.ts")
+	workflowsExtensionPath := filepath.Join(directory, "extensions", "kiwi-code-workflows.ts")
 	if _, err := os.Stat(workflowsExtensionPath); err != nil {
 		t.Fatalf("materialized workflow extension path is missing: %v", err)
 	}
-	skillForksExtensionPath := filepath.Join(directory, "extensions", "dire-mux-skill-forks.ts")
+	skillForksExtensionPath := filepath.Join(directory, "extensions", "kiwi-code-skill-forks.ts")
 	if _, err := os.Stat(skillForksExtensionPath); err != nil {
 		t.Fatalf("materialized skill-forks extension path is missing: %v", err)
 	}
-	browserSkillPath := filepath.Join(directory, "skills", "dire-mux-in-app-browser")
+	browserSkillPath := filepath.Join(directory, "skills", "kiwi-code-in-app-browser")
 	plannerSkillPath := filepath.Join(directory, "skills", "kiwi-code-planner")
 
 	nodeModules := filepath.Join(directory, "node_modules")
@@ -172,8 +172,8 @@ if (major < 22 || (major === 22 && minor < 19)) process.exit(1);
 	}
 	command := exec.Command(nodePath, "--unhandled-rejections=strict", harnessPath)
 	command.Env = append(os.Environ(),
-		"DIRE_MUX_THREAD_ENDPOINT=http://127.0.0.1:43210/api/projects/project/threads/thread",
-		"DIRE_MUX_AGENT_TOKEN=browser-agent-capability",
+		"KIWI_CODE_THREAD_ENDPOINT=http://127.0.0.1:43210/api/projects/project/threads/thread",
+		"KIWI_CODE_AGENT_TOKEN=browser-agent-capability",
 		"PI_BROWSER_EXTENSION="+browserExtensionPath,
 		"PI_BROWSER_SKILL="+browserSkillPath,
 		"PI_PLANNER_SKILL="+plannerSkillPath,
@@ -218,7 +218,7 @@ func TestPiContextExtensionReportsSerializedTerminalUsage(t *testing.T) {
 		}
 		extensionSource = strings.Replace(extensionSource, replacement[0], replacement[1], 1)
 	}
-	extensionPath := filepath.Join(t.TempDir(), "dire-mux-thread-context.mjs")
+	extensionPath := filepath.Join(t.TempDir(), "kiwi-code-thread-context.mjs")
 	if err := os.WriteFile(extensionPath, []byte(extensionSource), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ process.stdout.write("context reported\n");
 
 	command := exec.Command(nodePath, "--unhandled-rejections=strict", harnessPath)
 	command.Env = append(os.Environ(),
-		"DIRE_MUX_THREAD_ENDPOINT=http://127.0.0.1:4001/api/projects/project/threads/thread",
+		"KIWI_CODE_THREAD_ENDPOINT=http://127.0.0.1:4001/api/projects/project/threads/thread",
 		"PI_CONTEXT_EXTENSION="+extensionPath,
 	)
 	output, err := command.CombinedOutput()
@@ -292,16 +292,16 @@ func TestPiActivityFetchFailureIsHandled(t *testing.T) {
 		t.Skip("node is not installed")
 	}
 
-	// The application loads this TypeScript directly through Pi, but Dire Mux
+	// The application loads this TypeScript directly through Pi, but Kiwi Code
 	// supports Node 20, before Node's built-in type stripping. Remove the small,
 	// known set of type-only fragments so the lifecycle test can run everywhere
 	// the project's JavaScript hook tests run.
 	extensionSource := string(piThreadActivityExtension)
 	for _, replacement := range [][2]string{
 		{`import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";`, ""},
-		{`import threadUsageExtension from "./dire-mux-thread-usage.ts";`, `const threadUsageExtension = () => {};`},
-		{`import browserExtension from "./dire-mux-browser.ts";`, `const browserExtension = () => {};`},
-		{`import skillForksExtension from "./dire-mux-skill-forks.ts";`, `const skillForksExtension = () => {};`},
+		{`import threadUsageExtension from "./kiwi-code-thread-usage.ts";`, `const threadUsageExtension = () => {};`},
+		{`import browserExtension from "./kiwi-code-browser.ts";`, `const browserExtension = () => {};`},
+		{`import skillForksExtension from "./kiwi-code-skill-forks.ts";`, `const skillForksExtension = () => {};`},
 		{`type ActivityState = "working" | "finished" | "idle";`, ""},
 		{`export default function (pi: ExtensionAPI) {`, `export default function (pi) {`},
 		{`let activePromptStartedAt: string | undefined;`, `let activePromptStartedAt;`},
@@ -315,7 +315,7 @@ func TestPiActivityFetchFailureIsHandled(t *testing.T) {
 		}
 		extensionSource = strings.Replace(extensionSource, replacement[0], replacement[1], 1)
 	}
-	extensionPath := filepath.Join(t.TempDir(), "dire-mux-thread-activity.mjs")
+	extensionPath := filepath.Join(t.TempDir(), "kiwi-code-thread-activity.mjs")
 	if err := os.WriteFile(extensionPath, []byte(extensionSource), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ globalThis.fetch = async (_url, init) => {
 	maxInFlight = Math.max(maxInFlight, inFlight);
 	await new Promise((resolve) => setImmediate(resolve));
 	inFlight -= 1;
-	throw new Error("dire-mux is unreachable");
+	throw new Error("kiwi-code is unreachable");
 };
 
 const handlers = new Map();
@@ -378,7 +378,7 @@ process.stdout.write("activity failures handled\n");
 
 	command := exec.Command(nodePath, "--unhandled-rejections=strict", harnessPath)
 	command.Env = append(os.Environ(),
-		"DIRE_MUX_THREAD_ENDPOINT=http://127.0.0.1:1/api/projects/project/threads/thread",
+		"KIWI_CODE_THREAD_ENDPOINT=http://127.0.0.1:1/api/projects/project/threads/thread",
 		"PI_ACTIVITY_EXTENSION="+extensionPath,
 	)
 	output, err := command.CombinedOutput()

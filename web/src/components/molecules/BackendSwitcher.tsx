@@ -12,11 +12,11 @@ import { Button } from '../atoms/Button'
 import { TextInput } from '../atoms/Input'
 import { Select, type SelectOption } from '../atoms/Select'
 
-const addBackendValue = '__dire_mux_add_backend__'
-const forgetBackendValue = '__dire_mux_forget_backend__'
+const addBackendValue = '__kiwi_code_add_backend__'
+const forgetBackendValue = '__kiwi_code_forget_backend__'
 
 function reportDesktopBackend(origin: string) {
-  const result = window.direMuxDesktopBrowser?.setBackendOrigin?.(origin)
+  const result = window.kiwiCodeDesktopBrowser?.setBackendOrigin?.(origin)
   if (result && typeof result.then === 'function') {
     void result.catch((error) => console.warn('Could not update the desktop backend origin.', error))
   }
@@ -107,7 +107,7 @@ export function BackendSwitcher() {
               </h2>
             </div>
             <p className="mt-2 text-[10px] leading-4 text-ghost-muted">
-              Enter another Dire Mux server URL. Bare machine names use HTTP port 4000.
+              Enter another Kiwi Code server URL. Bare machine names use HTTP port 4000.
             </p>
             <label className="mt-4 block">
               <span className="sr-only">Backend URL</span>

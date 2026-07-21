@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/browsercontrol"
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/browsercontrol"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 const (
@@ -57,7 +57,7 @@ type browserProviderErrorResponse struct {
 
 var browserProviderErrorResponses = map[string]browserProviderErrorResponse{
 	"blocked_command":        {Status: http.StatusForbidden, Message: "That browser command is blocked by the page security boundary."},
-	"blocked_origin":         {Status: http.StatusForbidden, Message: "Navigation to a protected Dire Mux origin is blocked."},
+	"blocked_origin":         {Status: http.StatusForbidden, Message: "Navigation to a protected Kiwi Code origin is blocked."},
 	"element_not_found":      {Status: http.StatusNotFound, Message: "Browser element not found. Take a new snapshot or check the selector."},
 	"invalid_params":         {Status: http.StatusBadRequest, Message: "Invalid browser action parameters."},
 	"invalid_url":            {Status: http.StatusBadRequest, Message: "Invalid browser URL."},

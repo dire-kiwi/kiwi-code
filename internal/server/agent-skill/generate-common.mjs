@@ -6,11 +6,11 @@ import { fileURLToPath } from "node:url";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const check = process.argv.includes("--check");
-const marker = "/* DIRE_MUX_SHARED_COMMON */";
+const marker = "/* KIWI_CODE_SHARED_COMMON */";
 const shared = (await readFile(join(root, "common.shared.mjs"), "utf8")).trim();
 const targets = [
   ["common.processes.mjs.tmpl", "kiwi-code-processes/scripts/common.mjs"],
-  ["common.threads.mjs.tmpl", "dire-mux-threads/scripts/common.mjs"],
+  ["common.threads.mjs.tmpl", "kiwi-code-threads/scripts/common.mjs"],
 ];
 
 let stale = false;

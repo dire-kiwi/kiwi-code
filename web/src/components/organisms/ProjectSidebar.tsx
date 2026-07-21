@@ -273,7 +273,7 @@ export function ProjectSidebar({
   }
 
   async function handleRestart() {
-    if (restarting || !window.confirm('Restart dire/mux?\n\nThe application will fully exit before a fresh instance starts. Your tmux sessions and running tools will keep running.')) return
+    if (restarting || !window.confirm('Restart Kiwi Code?\n\nThe application will fully exit before a fresh instance starts. Your tmux sessions and running tools will keep running.')) return
 
     setRestarting(true)
     try {
@@ -282,7 +282,7 @@ export function ProjectSidebar({
       window.location.reload()
     } catch (reason) {
       setRestarting(false)
-      window.alert(reason instanceof Error ? reason.message : 'Could not restart dire/mux.')
+      window.alert(reason instanceof Error ? reason.message : 'Could not restart Kiwi Code.')
     }
   }
 
@@ -1068,8 +1068,8 @@ export function ProjectSidebar({
               onClick={() => void handleRestart()}
               disabled={restarting}
               className="grid size-8 shrink-0 place-items-center rounded-md disabled:cursor-wait disabled:opacity-60"
-              aria-label={restarting ? 'Restarting dire/mux' : 'Restart dire/mux'}
-              title={restarting ? 'Restarting dire/mux…' : 'Restart dire/mux'}
+              aria-label={restarting ? 'Restarting Kiwi Code' : 'Restart Kiwi Code'}
+              title={restarting ? 'Restarting Kiwi Code…' : 'Restart Kiwi Code'}
             >
               {restarting
                 ? <LoaderCircle size={13} className="animate-spin text-ghost-green" />

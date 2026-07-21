@@ -76,7 +76,7 @@ export async function waitForApplicationRestart(instanceId: string, timeoutMs = 
       // the replacement.
     }
   }
-  throw new Error('Timed out waiting for dire/mux to restart.')
+  throw new Error('Timed out waiting for Kiwi Code to restart.')
 }
 
 export function getSettings(signal?: AbortSignal) {

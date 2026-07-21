@@ -11,10 +11,10 @@ const MAX_REQUEST_BYTES = 2 * 1024 * 1024
 const MAX_RESPONSE_BYTES = 24 * 1024 * 1024
 
 function configPathFor(app, environment = process.env) {
-  if (environment.DIRE_MUX_BROWSER_PROVIDER_CONFIG) {
-    return path.resolve(environment.DIRE_MUX_BROWSER_PROVIDER_CONFIG)
+  if (environment.KIWI_CODE_BROWSER_PROVIDER_CONFIG) {
+    return path.resolve(environment.KIWI_CODE_BROWSER_PROVIDER_CONFIG)
   }
-  const dataDirectory = environment.DIRE_MUX_DATA_DIR || app.getPath('userData')
+  const dataDirectory = environment.KIWI_CODE_DATA_DIR || app.getPath('userData')
   return path.join(dataDirectory, 'browser-provider.json')
 }
 

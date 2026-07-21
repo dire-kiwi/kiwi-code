@@ -97,7 +97,7 @@ const codingAgents: Array<{ id: CodingAgentSelection; label: string }> = [
 ]
 
 function codingAgentStorageKey(projectId: string, threadId: string) {
-  return `dire-mux:coding-agent:${projectId}:${threadId}`
+  return `kiwi-code:coding-agent:${projectId}:${threadId}`
 }
 
 function rememberedCodingAgent(projectId: string, threadId: string): CodingAgent {
@@ -111,11 +111,11 @@ function rememberedCodingAgent(projectId: string, threadId: string): CodingAgent
 }
 
 function piPresentationStorageKey(projectId: string, threadId: string) {
-  return `dire-mux:pi-presentation:${projectId}:${threadId}`
+  return `kiwi-code:pi-presentation:${projectId}:${threadId}`
 }
 
 function claudePresentationStorageKey(projectId: string, threadId: string) {
-  return `dire-mux:claude-presentation:${projectId}:${threadId}`
+  return `kiwi-code:claude-presentation:${projectId}:${threadId}`
 }
 
 function rememberedPresentation(storageKey: string, fallback: PiPresentation): PiPresentation {
@@ -744,7 +744,7 @@ export function TerminalWorkspace({
                     {processesLoading ? 'Loading process shells' : 'No process shells'}
                   </p>
                   <p className="mt-1.5 text-[11px] leading-5 text-ghost-muted">
-                    Agents create a shell when they start a long-running command. Install the Dire Mux skill in Settings; new shells appear here automatically.
+                    Agents create a shell when they start a long-running command. Install the Kiwi Code skill in Settings; new shells appear here automatically.
                   </p>
                 </div>
               </div>

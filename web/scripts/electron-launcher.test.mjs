@@ -8,29 +8,29 @@ import {
 
 test('Electron launcher resolves an exact provider override consistently', () => {
   assert.equal(
-    browserProviderConfigPath({ DIRE_MUX_BROWSER_PROVIDER_CONFIG: '/tmp/dire-mux/provider.json' }),
-    '/tmp/dire-mux/provider.json',
+    browserProviderConfigPath({ KIWI_CODE_BROWSER_PROVIDER_CONFIG: '/tmp/kiwi-code/provider.json' }),
+    '/tmp/kiwi-code/provider.json',
   )
 })
 
 test('Electron launcher resolves relative overrides from the Go project root', () => {
   assert.equal(
-    browserProviderConfigPath({ DIRE_MUX_BROWSER_PROVIDER_CONFIG: 'data/provider.json' }, 'linux', '/srv/dire-mux'),
-    path.join('/srv/dire-mux', 'data/provider.json'),
+    browserProviderConfigPath({ KIWI_CODE_BROWSER_PROVIDER_CONFIG: 'data/provider.json' }, 'linux', '/srv/kiwi-code'),
+    path.join('/srv/kiwi-code', 'data/provider.json'),
   )
   assert.equal(
-    browserProviderConfigPath({ DIRE_MUX_DATA_DIR: 'data' }, 'linux', '/srv/dire-mux'),
-    path.join('/srv/dire-mux', 'data/browser-provider.json'),
+    browserProviderConfigPath({ KIWI_CODE_DATA_DIR: 'data' }, 'linux', '/srv/kiwi-code'),
+    path.join('/srv/kiwi-code', 'data/browser-provider.json'),
   )
 })
 
 test('Electron launcher follows data-dir and user-data provider defaults', () => {
   assert.equal(
-    browserProviderConfigPath({ DIRE_MUX_DATA_DIR: '/tmp/dire-mux-data' }),
-    path.join('/tmp/dire-mux-data', 'browser-provider.json'),
+    browserProviderConfigPath({ KIWI_CODE_DATA_DIR: '/tmp/kiwi-code-data' }),
+    path.join('/tmp/kiwi-code-data', 'browser-provider.json'),
   )
   assert.equal(
-    browserProviderConfigPath({ DIRE_MUX_ELECTRON_USER_DATA: '/tmp/electron-data' }),
+    browserProviderConfigPath({ KIWI_CODE_ELECTRON_USER_DATA: '/tmp/electron-data' }),
     path.join('/tmp/electron-data', 'browser-provider.json'),
   )
 })
@@ -38,10 +38,10 @@ test('Electron launcher follows data-dir and user-data provider defaults', () =>
 test('Electron launcher derives platform user-data directories', () => {
   assert.equal(
     defaultElectronUserData({ XDG_CONFIG_HOME: '/tmp/xdg' }, 'linux'),
-    path.join('/tmp/xdg', 'dire-mux'),
+    path.join('/tmp/xdg', 'kiwi-code'),
   )
   assert.equal(
     defaultElectronUserData({ APPDATA: 'C:\\Users\\dire\\AppData\\Roaming' }, 'win32'),
-    path.join('C:\\Users\\dire\\AppData\\Roaming', 'dire-mux'),
+    path.join('C:\\Users\\dire\\AppData\\Roaming', 'kiwi-code'),
   )
 })

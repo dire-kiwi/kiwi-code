@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/broadcast"
-	"github.com/ivan/dire-mux/internal/browsercontrol"
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/broadcast"
+	"github.com/dire-kiwi/kiwi-code/internal/browsercontrol"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 //go:embed static
@@ -52,7 +52,7 @@ const childThreadCreationEnabled = false
 
 const (
 	maxPiImageBytes   int64 = 50 << 20
-	piImageTempPrefix       = "dire-mux-pi-clipboard-"
+	piImageTempPrefix       = "kiwi-code-pi-clipboard-"
 )
 
 func New(projects *project.Store) (http.Handler, error) {
@@ -67,13 +67,6 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	tmuxSocket, err := configuredTmuxSocketName(options)
 	if err != nil {
 		return nil, err
-	}
-	var tmuxMigration *tmuxSocketMigration
-	if tmuxSocket == tmuxSocketName {
-		tmuxMigration, err = prepareDefaultTmuxSocketMigration(projects.DataDirectory(), tmuxSocketName, legacyTmuxSocketName)
-		if err != nil {
-			return nil, err
-		}
 	}
 	assets, err := frontendAssets(staticFiles)
 	if err != nil {
@@ -96,7 +89,6 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 		return nil, err
 	}
 	terminal := newTerminalHandlerUnreconciledWithOptions(projects, originPolicy, tmuxSocket)
-	terminal.tmuxSocketMigration = tmuxMigration
 	if err := terminal.reconcileTerminalStops(); err != nil {
 		log.Printf("reconcile durable terminal stops: error=%v", err)
 	}

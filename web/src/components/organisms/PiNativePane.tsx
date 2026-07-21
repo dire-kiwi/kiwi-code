@@ -207,7 +207,7 @@ const RECONNECT_STABLE_AFTER_MS = 5_000
 const PI_INSPECTION_INTERVAL_MS = 4_000
 const PI_RESPONSE_STALE_AFTER_MS = 12_000
 const PI_ACTIVITY_LOG_LIMIT = 24
-const WORKFLOW_DISMISS_MARKER = '\u2063dire-mux-no-ultracode\u2063'
+const WORKFLOW_DISMISS_MARKER = '\u2063kiwi-code-no-ultracode\u2063'
 const ULTRACODE_KEYWORD_PATTERN = /\bultracode\b/i
 
 const NATIVE_SLASH_COMMANDS: PiSlashCommand[] = [
@@ -859,7 +859,7 @@ export function PiNativePane({
         updateConnectionStatus('error')
         return
       }
-      appendActivity('connection_closed', 'Connection lost; Dire Mux is reconnecting.')
+      appendActivity('connection_closed', 'Connection lost; Kiwi Code is reconnecting.')
       onContextStatusChangeRef.current(null)
       updateConnectionStatus('connecting')
       const delay = Math.min(250 * 2 ** reconnectAttemptsRef.current, 2_000)

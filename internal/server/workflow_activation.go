@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 const (
@@ -43,7 +43,7 @@ type workflowActivationSnapshot struct {
 }
 
 func workflowDisabledByEnvironment() bool {
-	for _, name := range []string{"DIRE_MUX_DISABLE_WORKFLOWS", "CLAUDE_CODE_DISABLE_WORKFLOWS"} {
+	for _, name := range []string{"KIWI_CODE_DISABLE_WORKFLOWS", "CLAUDE_CODE_DISABLE_WORKFLOWS"} {
 		value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
 		if value == "1" || value == "true" || value == "yes" || value == "on" {
 			return true
@@ -268,7 +268,7 @@ func (s *Server) activateWorkflows(w http.ResponseWriter, r *http.Request) {
 		s.workflows.clearActivation(projectID, root.ID)
 		reason := "The current prompt did not explicitly opt in to a workflow. Use “ultracode”, ask to use/run a workflow, or invoke a saved workflow command."
 		if !humanSource {
-			reason = "Only a human interactive or Dire Mux RPC prompt can activate workflows."
+			reason = "Only a human interactive or Kiwi Code RPC prompt can activate workflows."
 		}
 		writeJSON(w, http.StatusOK, workflowActivationSnapshot{Reason: reason})
 		return

@@ -14,7 +14,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 func TestTerminalStopMarkerIsDurableExactAndPathSafe(t *testing.T) {
@@ -22,7 +22,7 @@ func TestTerminalStopMarkerIsDurableExactAndPathSafe(t *testing.T) {
 	first := newTerminalStopManager(dataDirectory)
 	projectID := "../project / ☃"
 	threadID := "thread/../../two"
-	wantSessions := []string{"dire-mux-exact-terminal", "dire-mux-exact-tools"}
+	wantSessions := []string{"kiwi-code-exact-terminal", "kiwi-code-exact-tools"}
 
 	lease, err := first.beginThread(projectID, threadID, []string{
 		wantSessions[1],

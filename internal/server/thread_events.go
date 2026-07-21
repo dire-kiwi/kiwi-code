@@ -10,7 +10,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 const (
@@ -43,8 +43,8 @@ type threadStatusSnapshot struct {
 }
 
 // notifyThreadStatusChanged wakes active thread streams after a mutation made
-// through Dire Mux or a tmux control-mode notification. Git changes made
-// outside Dire Mux are handled by a separate repository reconciliation.
+// through Kiwi Code or a tmux control-mode notification. Git changes made
+// outside Kiwi Code are handled by a separate repository reconciliation.
 func (s *Server) notifyThreadStatusChanged(projectID, threadID string) {
 	if s.threadStatusChanges == nil {
 		return
@@ -227,7 +227,7 @@ func readThreadGitStatus(ctx context.Context, thread project.Thread) (*gitBranch
 		return &branches, ""
 	}
 	if errors.Is(err, exec.ErrNotFound) {
-		return nil, "git is required for branch controls. Install git and restart dire-mux."
+		return nil, "git is required for branch controls. Install git and restart kiwi-code."
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil, ""

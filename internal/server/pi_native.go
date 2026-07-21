@@ -20,9 +20,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/dire-kiwi/kiwi-code/internal/broadcast"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 	"github.com/gorilla/websocket"
-	"github.com/ivan/dire-mux/internal/broadcast"
-	"github.com/ivan/dire-mux/internal/project"
 )
 
 const (
@@ -565,12 +565,12 @@ func (m *piNativeManager) startProcess(
 	}
 	command := exec.Command(piPath, piNativeArguments(sessionDirectory, m.extensionPaths, launchOptions)...)
 	command.Dir = thread.Cwd
-	threadEnvironment := direMuxThreadEnvironment(threadEndpoint, key.ProjectID, key.ThreadID)
+	threadEnvironment := kiwiCodeThreadEnvironment(threadEndpoint, key.ProjectID, key.ThreadID)
 	if m.agentToken != "" {
-		threadEnvironment = append(threadEnvironment, "DIRE_MUX_AGENT_TOKEN="+m.agentToken)
+		threadEnvironment = append(threadEnvironment, "KIWI_CODE_AGENT_TOKEN="+m.agentToken)
 	}
 	if thread.ParentThreadID != "" {
-		threadEnvironment = append(threadEnvironment, "DIRE_MUX_PARENT_THREAD_ID="+thread.ParentThreadID)
+		threadEnvironment = append(threadEnvironment, "KIWI_CODE_PARENT_THREAD_ID="+thread.ParentThreadID)
 	}
 	command.Env = append(
 		os.Environ(),
@@ -630,7 +630,7 @@ func (h *terminalHandler) withSubAgentNestingPrompt(
 		return codingAgentLaunchOptions{}, err
 	}
 	nestingPrompt := fmt.Sprintf(
-		"You are a sub-agent at nesting depth %d. The effective maximum sub-agent nesting depth for this thread tree is %d after applying project and ancestor limits. Root agents are at depth 0. Delegate further work only through an available context: fork skill or an explicitly activated Dire Mux workflow, and only while your current depth is below the effective maximum.",
+		"You are a sub-agent at nesting depth %d. The effective maximum sub-agent nesting depth for this thread tree is %d after applying project and ancestor limits. Root agents are at depth 0. Delegate further work only through an available context: fork skill or an explicitly activated Kiwi Code workflow, and only while your current depth is below the effective maximum.",
 		context.CurrentDepth,
 		context.MaxDepth,
 	)
@@ -1043,7 +1043,7 @@ func truncatePiNativeTrackedOutput(output string) string {
 	for len(contents) > 0 && !utf8.Valid(contents) {
 		contents = contents[:len(contents)-1]
 	}
-	return string(contents) + "\n\n[Output truncated by Dire Mux.]"
+	return string(contents) + "\n\n[Output truncated by Kiwi Code.]"
 }
 
 func (p *piNativeProcess) finishRun(runID uint64, state, output, errorText string) {
@@ -1119,12 +1119,12 @@ func (p *piNativeProcess) send(command piNativeRPCCommand) error {
 }
 
 func (p *piNativeProcess) requestSnapshot(command string) error {
-	id := fmt.Sprintf("dire-mux-%s-%d", strings.TrimPrefix(command, "get_"), p.request.Add(1))
+	id := fmt.Sprintf("kiwi-code-%s-%d", strings.TrimPrefix(command, "get_"), p.request.Add(1))
 	return p.send(piNativeRPCCommand{ID: id, Type: command})
 }
 
 func (p *piNativeProcess) sendClientCommand(command piNativeRPCCommand) error {
-	command.ID = fmt.Sprintf("dire-mux-client-%s-%d", strings.ReplaceAll(command.Type, "_", "-"), p.request.Add(1))
+	command.ID = fmt.Sprintf("kiwi-code-client-%s-%d", strings.ReplaceAll(command.Type, "_", "-"), p.request.Add(1))
 	return p.send(command)
 }
 

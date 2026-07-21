@@ -31,7 +31,7 @@ const BrowserBackend = StringEnum(["in-app"] as const);
 
 const BROWSER_BACKEND = "in-app" as const;
 const BROWSER_SKILL_PATH = fileURLToPath(
-  new URL("../skills/dire-mux-in-app-browser", import.meta.url),
+  new URL("../skills/kiwi-code-in-app-browser", import.meta.url),
 );
 const BROWSER_TOOL_LOADER = "browser_tool_search";
 const BROWSER_TOOL_NAMES = [
@@ -157,10 +157,10 @@ function errorMessage(error: unknown): string {
 }
 
 function browserActionsEndpoint(): string {
-  const rawEndpoint = process.env.DIRE_MUX_THREAD_ENDPOINT?.trim().replace(/\/+$/, "");
+  const rawEndpoint = process.env.KIWI_CODE_THREAD_ENDPOINT?.trim().replace(/\/+$/, "");
   if (!rawEndpoint) {
     throw new Error(
-      "DIRE_MUX_THREAD_ENDPOINT is not set. Browser tools must run inside a Dire Mux agent session.",
+      "KIWI_CODE_THREAD_ENDPOINT is not set. Browser tools must run inside a Kiwi Code agent session.",
     );
   }
   try {
@@ -170,7 +170,7 @@ function browserActionsEndpoint(): string {
     }
     return endpoint.toString();
   } catch {
-    throw new Error("DIRE_MUX_THREAD_ENDPOINT is not a valid HTTP URL.");
+    throw new Error("KIWI_CODE_THREAD_ENDPOINT is not a valid HTTP URL.");
   }
 }
 
@@ -321,10 +321,10 @@ async function browserAction<T>(
   params: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<T> {
-  const token = process.env.DIRE_MUX_AGENT_TOKEN?.trim();
+  const token = process.env.KIWI_CODE_AGENT_TOKEN?.trim();
   if (!token) {
     throw new Error(
-      "DIRE_MUX_AGENT_TOKEN is not set. Browser tools require a Dire Mux agent capability.",
+      "KIWI_CODE_AGENT_TOKEN is not set. Browser tools require a Kiwi Code agent capability.",
     );
   }
 
@@ -334,14 +334,14 @@ async function browserAction<T>(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Dire-Mux-Agent-Token": token,
+        "X-Kiwi-Code-Agent-Token": token,
       },
       body: JSON.stringify({ operation, params }),
       signal,
     });
   } catch (error) {
     if (signal?.aborted) throw error;
-    throw new Error(`Could not reach the Dire Mux browser service: ${errorMessage(error)}`);
+    throw new Error(`Could not reach the Kiwi Code browser service: ${errorMessage(error)}`);
   }
 
   let payload: unknown;
@@ -354,17 +354,17 @@ async function browserAction<T>(
   const detail = responseErrorMessage(payload);
   if (response.status === 404 && !detail) {
     throw new Error(
-      "Dire Mux's browser actions endpoint is unavailable (HTTP 404). Update or restart Dire Mux.",
+      "Kiwi Code's browser actions endpoint is unavailable (HTTP 404). Update or restart Kiwi Code.",
     );
   }
   if (response.status === 503) {
     throw new Error(
-      "Dire Mux's in-app browser provider is unavailable (HTTP 503). Start or reconnect the Dire Mux desktop app.",
+      "Kiwi Code's in-app browser provider is unavailable (HTTP 503). Start or reconnect the Kiwi Code desktop app.",
     );
   }
   if (!response.ok) {
     throw new Error(
-      `Dire Mux browser action ${operation} failed (HTTP ${response.status})${detail ? `: ${detail}` : "."}`,
+      `Kiwi Code browser action ${operation} failed (HTTP ${response.status})${detail ? `: ${detail}` : "."}`,
     );
   }
   const result = (payload as { result?: unknown } | undefined)?.result;
@@ -377,7 +377,7 @@ async function browserAction<T>(
     !validBrowserActionResult(operation, result)
   ) {
     throw new Error(
-      `Dire Mux browser action ${operation} returned an invalid response; expected {result: ...}.`,
+      `Kiwi Code browser action ${operation} returned an invalid response; expected {result: ...}.`,
     );
   }
   return result as T;
@@ -398,10 +398,10 @@ function validateElementTarget(params: { ref?: string; selector?: string }): voi
 
 async function prepareScreenshot(data: unknown, mimeType: unknown) {
   if (typeof data !== "string" || (mimeType !== "image/png" && mimeType !== "image/jpeg")) {
-    throw new Error("Dire Mux browser action screenshot returned an invalid image response.");
+    throw new Error("Kiwi Code browser action screenshot returned an invalid image response.");
   }
   if (data.length === 0 || data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) {
-    throw new Error("Dire Mux browser action screenshot returned invalid base64 data.");
+    throw new Error("Kiwi Code browser action screenshot returned invalid base64 data.");
   }
   const bytes = Buffer.from(data, "base64");
   const png = bytes.length >= 8 && bytes.subarray(0, 8).equals(
@@ -409,7 +409,7 @@ async function prepareScreenshot(data: unknown, mimeType: unknown) {
   );
   const jpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
   if ((mimeType === "image/png" && !png) || (mimeType === "image/jpeg" && !jpeg)) {
-    throw new Error("Dire Mux browser action screenshot bytes do not match its MIME type.");
+    throw new Error("Kiwi Code browser action screenshot bytes do not match its MIME type.");
   }
   const resized = await resizeImage(bytes, mimeType, {
     maxBytes: 4_500_000,
@@ -506,7 +506,7 @@ export default function chromeDevtoolsExtension(pi: ExtensionAPI): void {
     name: "browser_session",
     label: "Browser Session",
     description:
-      "Inspect or control Dire Mux's in-app browser. The only supported backend is in-app; existing-profile and external providers are unavailable. disconnect releases control while leaving the thread session running; stop destroys the session.",
+      "Inspect or control Kiwi Code's in-app browser. The only supported backend is in-app; existing-profile and external providers are unavailable. disconnect releases control while leaving the thread session running; stop destroys the session.",
     parameters: Type.Object(
       {
         action: Type.Unsafe<"status" | "start" | "disconnect" | "stop">({
@@ -516,7 +516,7 @@ export default function chromeDevtoolsExtension(pi: ExtensionAPI): void {
         backend: Type.Optional(
           Type.Unsafe<"in-app">({
             ...BrowserBackend,
-            description: "Select Dire Mux's in-app browser backend.",
+            description: "Select Kiwi Code's in-app browser backend.",
           }),
         ),
       },
@@ -1171,7 +1171,7 @@ export default function chromeDevtoolsExtension(pi: ExtensionAPI): void {
     if (conflicts.length > 0) {
       const sources = [...new Set(conflicts.map((tool) => tool.sourceInfo?.path).filter(Boolean))];
       const message = [
-        "Dire Mux's first-party in-app browser tools are disabled because another browser extension is installed.",
+        "Kiwi Code's first-party in-app browser tools are disabled because another browser extension is installed.",
         ...(sources.length > 0 ? [`Conflicting extension: ${sources.join(", ")}`] : []),
         "Remove or disable @dire-pi/chrome-devtools (or the conflicting browser_* extension), then run /reload to migrate to the in-app backend.",
       ].join("\n");

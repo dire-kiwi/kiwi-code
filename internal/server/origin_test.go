@@ -34,15 +34,15 @@ func TestConfiguredTmuxSocketName(t *testing.T) {
 		t.Fatalf("default tmux socket = %q, want %q", name, tmuxSocketName)
 	}
 
-	name, err = configuredTmuxSocketName(Options{TmuxSocketName: "dmv-validation-a1"})
+	name, err = configuredTmuxSocketName(Options{TmuxSocketName: "kcv-validation-a1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if name != "dmv-validation-a1" {
+	if name != "kcv-validation-a1" {
 		t.Fatalf("configured tmux socket = %q", name)
 	}
 
-	for _, invalid := range []string{".", "..", "has a space", "../dire-mux", strings.Repeat("a", 65)} {
+	for _, invalid := range []string{".", "..", "has a space", "../kiwi-code", strings.Repeat("a", 65)} {
 		if _, err := configuredTmuxSocketName(Options{TmuxSocketName: invalid}); err == nil {
 			t.Fatalf("configuredTmuxSocketName(%q) succeeded, want an error", invalid)
 		}
@@ -169,7 +169,7 @@ func TestOriginPolicyAddsDevelopmentCORSHeaders(t *testing.T) {
 	preflight := httptest.NewRequest(http.MethodOptions, "http://127.0.0.1:8080/api/projects", nil)
 	preflight.Header.Set("Origin", "http://127.0.0.1:5173")
 	preflight.Header.Set("Access-Control-Request-Method", http.MethodPost)
-	preflight.Header.Set("Access-Control-Request-Headers", "content-type, x-dire-mux-agent-token")
+	preflight.Header.Set("Access-Control-Request-Headers", "content-type, x-kiwi-code-agent-token")
 	preflightResponse := httptest.NewRecorder()
 	handler.ServeHTTP(preflightResponse, preflight)
 
@@ -179,7 +179,7 @@ func TestOriginPolicyAddsDevelopmentCORSHeaders(t *testing.T) {
 	if got := preflightResponse.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, http.MethodPost) {
 		t.Fatalf("Access-Control-Allow-Methods = %q", got)
 	}
-	if got := preflightResponse.Header().Get("Access-Control-Allow-Headers"); got != "Content-Type, X-Dire-Mux-Agent-Token" {
+	if got := preflightResponse.Header().Get("Access-Control-Allow-Headers"); got != "Content-Type, X-Kiwi-Code-Agent-Token" {
 		t.Fatalf("Access-Control-Allow-Headers = %q", got)
 	}
 	if calls != 1 {

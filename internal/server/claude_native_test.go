@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 	"github.com/gorilla/websocket"
-	"github.com/ivan/dire-mux/internal/project"
 )
 
 func TestStartClaudeNativeProcessRejectsRollbackPendingThread(t *testing.T) {
@@ -107,9 +107,9 @@ func TestNormalizeClaudeNativeClientMessage(t *testing.T) {
 		},
 		{
 			name:    "prompt with images only",
-			payload: `{"type":"prompt","images":[{"path":"/tmp/dire-mux-pi-clipboard-1.png"}]}`,
+			payload: `{"type":"prompt","images":[{"path":"/tmp/kiwi-code-pi-clipboard-1.png"}]}`,
 			action:  claudeNativeClientPrompt,
-			message: claudeNativeClientMessage{Images: []piNativeClientImage{{Path: "/tmp/dire-mux-pi-clipboard-1.png"}}},
+			message: claudeNativeClientMessage{Images: []piNativeClientImage{{Path: "/tmp/kiwi-code-pi-clipboard-1.png"}}},
 		},
 		{name: "empty prompt", payload: `{"type":"prompt","message":"   "}`, wantErr: true},
 		{name: "prompt with NUL", payload: `{"type":"prompt","message":"a\u0000b"}`, wantErr: true},
@@ -206,12 +206,12 @@ func TestClaudeNativeManagerStreamsEventsPersistsSessionAndResumes(t *testing.T)
 	agentLog := filepath.Join(directory, "claude-agent.log")
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> ` + argumentLog + `
-printf '%s\n' "$DIRE_MUX_CODING_AGENT" > ` + agentLog + `
+printf '%s\n' "$KIWI_CODE_CODING_AGENT" > ` + agentLog + `
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"session-abc","model":"claude-test-1","slash_commands":["compact","review"],"uuid":"evt-init"}'
 while IFS= read -r line; do
   case "$line" in
     *'"subtype":"interrupt"'*)
-      printf '%s\n' '{"type":"control_response","response":{"subtype":"success","request_id":"dire-mux-interrupt-1"}}'
+      printf '%s\n' '{"type":"control_response","response":{"subtype":"success","request_id":"kiwi-code-interrupt-1"}}'
       ;;
     *'"type":"user"'*)
       printf '%s\n' '{"type":"assistant","message":{"id":"msg-1","role":"assistant","content":[{"type":"text","text":"Done"}]},"session_id":"session-abc","uuid":"evt-assistant"}'
@@ -462,7 +462,7 @@ done
 		t.Fatal(err)
 	}
 
-	handler := newTerminalHandlerUnreconciledWithOptions(store, originPolicy{}, "dmv-claude-native-test")
+	handler := newTerminalHandlerUnreconciledWithOptions(store, originPolicy{}, "kcv-claude-native-test")
 	// This flow must never reach tmux; fail loudly if it tries.
 	handler.tmuxPath = ""
 	handler.nativeClaude.claudePath = fakeClaude

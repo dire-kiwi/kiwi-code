@@ -11,11 +11,11 @@ const pollIntervalMs = 750;
 const inboxIntervalMs = 1_000;
 const perChildOutputBytes = 50 * 1024;
 
-const threadEndpoint = process.env.DIRE_MUX_THREAD_ENDPOINT?.replace(/\/+$/, "") ?? "";
-const agentToken = process.env.DIRE_MUX_AGENT_TOKEN ?? "";
-const currentProjectID = process.env.DIRE_MUX_PROJECT_ID ?? "";
-const currentThreadID = process.env.DIRE_MUX_THREAD_ID ?? "";
-const parentThreadID = process.env.DIRE_MUX_PARENT_THREAD_ID ?? "";
+const threadEndpoint = process.env.KIWI_CODE_THREAD_ENDPOINT?.replace(/\/+$/, "") ?? "";
+const agentToken = process.env.KIWI_CODE_AGENT_TOKEN ?? "";
+const currentProjectID = process.env.KIWI_CODE_PROJECT_ID ?? "";
+const currentThreadID = process.env.KIWI_CODE_THREAD_ID ?? "";
+const parentThreadID = process.env.KIWI_CODE_PARENT_THREAD_ID ?? "";
 
 type Thread = {
 	id: string;
@@ -93,7 +93,7 @@ type ChildTaskValidation = {
 
 function ensureAvailable(): void {
 	if (!threadEndpoint || !agentToken || !currentProjectID || !currentThreadID) {
-		throw new Error("Child threads are only available inside a Dire Mux-managed Pi session.");
+		throw new Error("Child threads are only available inside a Kiwi Code-managed Pi session.");
 	}
 }
 
@@ -150,13 +150,13 @@ async function request<T>(url: string, init: RequestInit = {}, signal?: AbortSig
 		...init,
 		headers: {
 			"Content-Type": "application/json",
-			"X-Dire-Mux-Agent-Token": agentToken,
+			"X-Kiwi-Code-Agent-Token": agentToken,
 			...init.headers,
 		},
 		signal,
 	});
 	if (!response.ok) {
-		let message = `Dire Mux returned ${response.status}`;
+		let message = `Kiwi Code returned ${response.status}`;
 		try {
 			const body = await response.json() as {
 				error?: unknown;
@@ -249,7 +249,7 @@ function formatResults(results: ChildResult[], heading: string): string {
 			? `${result.thread.cwd}${result.thread.branch ? `\nBranch: ${result.thread.branch}` : ""}`
 			: result.thread.cwd;
 		const lifecycle = result.closed
-			? "Closed and retained in Dire Mux for review."
+			? "Closed and retained in Kiwi Code for review."
 			: "Thread remains open.";
 		const output = run?.output
 			? truncateOutput(run.output)
@@ -285,7 +285,7 @@ function registerChildCreationTool(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "create_child_threads",
 		label: "Create Child Threads",
-		description: "Create one or more Dire Mux child threads and start Pi agents concurrently. The complete batch is validated against Pi's authenticated models and model-specific reasoning levels before any child starts. Wait for all results by default, or run them in the background. Child prompts define the work; this tool does not assign fixed roles.",
+		description: "Create one or more Kiwi Code child threads and start Pi agents concurrently. The complete batch is validated against Pi's authenticated models and model-specific reasoning levels before any child starts. Wait for all results by default, or run them in the background. Child prompts define the work; this tool does not assign fixed roles.",
 		promptSnippet: "Create isolated child threads for parallel, background, or chained delegated work",
 		promptGuidelines: [
 			"Use create_child_threads when delegated work needs isolated context or parallel implementations; put independent tasks in one call so they start concurrently.",
@@ -381,7 +381,7 @@ function registerChildOrchestrationTools(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "list_child_threads",
 		label: "List Child Threads",
-		description: "List direct child threads of the current Dire Mux thread and their latest Pi run state.",
+		description: "List direct child threads of the current Kiwi Code thread and their latest Pi run state.",
 		parameters: Type.Object({}),
 		async execute(_toolCallID, _params, signal) {
 			const children = await request<ListedChild[]>(`${threadEndpoint}/children`, {}, signal);
@@ -483,8 +483,8 @@ export default function (pi: ExtensionAPI) {
 			if (!Array.isArray(messages)) return;
 			for (const message of messages) {
 				pi.sendMessage({
-					customType: "dire-mux-thread-message",
-					content: `[Dire Mux message from thread ${message.fromThreadTitle} (${message.fromThreadId})]\n${message.message}`,
+					customType: "kiwi-code-thread-message",
+					content: `[Kiwi Code message from thread ${message.fromThreadTitle} (${message.fromThreadId})]\n${message.message}`,
 					display: true,
 					details: message,
 				}, { deliverAs: "steer", triggerTurn: true });

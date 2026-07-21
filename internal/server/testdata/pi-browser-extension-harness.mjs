@@ -73,7 +73,7 @@ assert.deepEqual([...workflowCommands.keys()], ["effort", "workflows"]);
 assert.deepEqual([...workflowShortcuts.keys()], ["alt+w"]);
 assert.match(workflowTools[0].description, /current human-authored prompt/);
 
-const skillRoot = await mkdtemp(join(tmpdir(), "dire-mux-skill-forks-"));
+const skillRoot = await mkdtemp(join(tmpdir(), "kiwi-code-skill-forks-"));
 const forkedSkillDirectory = join(skillRoot, "deep-research");
 const manualSkillDirectory = join(skillRoot, "manual-fork");
 const regularSkillDirectory = join(skillRoot, "regular-skill");
@@ -115,7 +115,7 @@ const browserSkillFile = join(process.env.PI_BROWSER_SKILL, "SKILL.md");
 const plannerSkillFile = join(process.env.PI_PLANNER_SKILL, "SKILL.md");
 const skillCommands = [
   {
-    name: "skill:dire-mux-in-app-browser",
+    name: "skill:kiwi-code-in-app-browser",
     description: "Control the in-app browser from a forked agent context",
     source: "skill",
     sourceInfo: { path: browserSkillFile, baseDir: process.env.PI_BROWSER_SKILL },
@@ -160,7 +160,7 @@ assert.deepEqual(
   skillForkTools.map((tool) => tool.name),
   ["run_forked_skill", "publish_thread_plan", "list_thread_plans", "download_thread_plan"],
 );
-assert.match(skillForkTools[0].description, /does not start or require activation of a Dire Mux workflow/);
+assert.match(skillForkTools[0].description, /does not start or require activation of a Kiwi Code workflow/);
 assert.match(skillForkTools[3].description, /then carry out the returned plan in the parent thread/);
 assert.deepEqual([...skillForkHandlers.keys()], ["input", "before_agent_start", "resources_discover"]);
 assert.deepEqual(skillForkHandlers.get("resources_discover")[0](), { skillPaths: [process.env.PI_PLANNER_SKILL] });
@@ -174,15 +174,15 @@ const piSkillBlock = `Base prompt
   </skill>`;
 const guidance = beforeAgentStart({ prompt: "Research this", systemPrompt: piSkillBlock }, {});
 assert.match(guidance.systemPrompt, /context: fork/);
-assert.match(guidance.systemPrompt, /does not start or require activation of a Dire Mux workflow/);
+assert.match(guidance.systemPrompt, /does not start or require activation of a Kiwi Code workflow/);
 assert.doesNotMatch(guidance.systemPrompt, new RegExp(`<location>${forkedSkillPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
 assert.match(guidance.systemPrompt, /<name>deep-research<\/name>/);
-assert.match(guidance.systemPrompt, /<name>dire-mux-in-app-browser<\/name>/);
+assert.match(guidance.systemPrompt, /<name>kiwi-code-in-app-browser<\/name>/);
 assert.match(guidance.systemPrompt, /<name>kiwi-code-planner<\/name>/);
 assert.doesNotMatch(guidance.systemPrompt, /<name>manual-fork<\/name>/);
 assert.doesNotMatch(guidance.systemPrompt, /<name>regular-skill<\/name>/);
 const childGuidance = beforeAgentStart({
-  prompt: `<dire_mux_forked_skill name="deep-research">\nTask\n</dire_mux_forked_skill>`,
+  prompt: `<kiwi_code_forked_skill name="deep-research">\nTask\n</kiwi_code_forked_skill>`,
   systemPrompt: "Child base prompt",
 }, {});
 assert.match(childGuidance.systemPrompt, /already executing/);
@@ -193,7 +193,7 @@ const transformed = inputHandler({ text: `/skill:deep-research "alpha beta" "src
 assert.equal(transformed.action, "transform");
 assert.match(transformed.text, /run_forked_skill/);
 assert.match(transformed.text, /alpha beta/);
-const browserSkillInvocation = inputHandler({ text: "/skill:dire-mux-in-app-browser inspect example.com" }, {});
+const browserSkillInvocation = inputHandler({ text: "/skill:kiwi-code-in-app-browser inspect example.com" }, {});
 assert.equal(browserSkillInvocation.action, "transform");
 assert.match(browserSkillInvocation.text, /run_forked_skill/);
 assert.deepEqual(inputHandler({ text: "/skill:regular-skill request" }, {}), { action: "continue" });
@@ -274,10 +274,10 @@ const publishResult = await skillForkTools[1].execute(
 );
 assert.match(publishResult.content[0].text, /plan-1/);
 assert.equal(publishResult.details.plan.threadId, "thread");
-assert.equal(planRequests[0].url, `${process.env.DIRE_MUX_THREAD_ENDPOINT}/plans`);
+assert.equal(planRequests[0].url, `${process.env.KIWI_CODE_THREAD_ENDPOINT}/plans`);
 assert.equal(planRequests[0].init.method, "POST");
 assert.equal(JSON.parse(planRequests[0].init.body).title, "Implementation plan");
-assert.equal(new Headers(planRequests[0].init.headers).get("x-dire-mux-agent-token"), process.env.DIRE_MUX_AGENT_TOKEN);
+assert.equal(new Headers(planRequests[0].init.headers).get("x-kiwi-code-agent-token"), process.env.KIWI_CODE_AGENT_TOKEN);
 
 const listedPlans = await skillForkTools[2].execute("list-plans", {}, undefined);
 assert.match(listedPlans.content[0].text, /Saved plan — plan-1/);
@@ -286,7 +286,7 @@ assert.equal(listedPlans.details.plans.length, 1);
 const downloadedPlan = await skillForkTools[3].execute("download-plan", {}, undefined);
 assert.equal(downloadedPlan.content[0].text, "# Saved plan\n\n1. Implement it.\n");
 assert.equal(downloadedPlan.details.plan.id, "plan-1");
-assert.equal(planRequests.at(-1).url, `${process.env.DIRE_MUX_THREAD_ENDPOINT}/plans/plan-1`);
+assert.equal(planRequests.at(-1).url, `${process.env.KIWI_CODE_THREAD_ENDPOINT}/plans/plan-1`);
 
 const skillUpdates = [];
 const skillResult = await skillForkTools[0].execute(
@@ -303,10 +303,10 @@ assert.equal(skillResult.details.thread.id, "skill-child");
 assert.equal(skillResult.details.closed, true);
 assert.equal(skillUpdates.at(-1).details.run.state, "finished");
 assert.equal(skillForkRequests.length, 3);
-assert.equal(skillForkRequests[0].url, `${process.env.DIRE_MUX_THREAD_ENDPOINT}/skill-forks`);
+assert.equal(skillForkRequests[0].url, `${process.env.KIWI_CODE_THREAD_ENDPOINT}/skill-forks`);
 assert.equal(skillForkRequests[0].init.method, "POST");
 const skillHeaders = new Headers(skillForkRequests[0].init.headers);
-assert.equal(skillHeaders.get("x-dire-mux-agent-token"), process.env.DIRE_MUX_AGENT_TOKEN);
+assert.equal(skillHeaders.get("x-kiwi-code-agent-token"), process.env.KIWI_CODE_AGENT_TOKEN);
 const skillRequest = JSON.parse(skillForkRequests[0].init.body);
 assert.equal(skillRequest.model, "openai-codex/gpt-test");
 assert.equal(skillRequest.thinkingLevel, "high");
@@ -319,8 +319,8 @@ assert.match(skillRequest.prompt, /First argument: alpha beta\./);
 assert.match(skillRequest.prompt, /Indexed scope: src files\./);
 assert.match(skillRequest.prompt, /Explore agent profile/);
 assert.match(skillRequest.prompt, new RegExp(forkedSkillDirectory.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-assert.equal(skillForkRequests[1].url, `${process.env.DIRE_MUX_THREAD_ENDPOINT}/children/skill-child/runs/7`);
-assert.equal(skillForkRequests[2].url, `${process.env.DIRE_MUX_THREAD_ENDPOINT}/children/skill-child/close`);
+assert.equal(skillForkRequests[1].url, `${process.env.KIWI_CODE_THREAD_ENDPOINT}/children/skill-child/runs/7`);
+assert.equal(skillForkRequests[2].url, `${process.env.KIWI_CODE_THREAD_ENDPOINT}/children/skill-child/close`);
 
 skillForkRequests.length = 0;
 skillForkCreateState = "finished";
@@ -352,7 +352,7 @@ await assert.rejects(
   /cancelled/,
 );
 assert.equal(skillForkRequests.length, 2);
-assert.equal(skillForkRequests[1].url, `${process.env.DIRE_MUX_THREAD_ENDPOINT}/skill-forks/skill-child/stop`);
+assert.equal(skillForkRequests[1].url, `${process.env.KIWI_CODE_THREAD_ENDPOINT}/skill-forks/skill-child/stop`);
 
 await assert.rejects(
   skillForkTools[0].execute("missing-skill", { skill: "missing" }, undefined, undefined, {}),
@@ -485,11 +485,11 @@ globalThis.fetch = async (url, init) => {
 
 responses.push(Response.json({ activated: false, reason: "dismissed" }));
 const transformedWorkflowInput = await workflowHandlers.get("input")[0](
-  { text: "\u2063dire-mux-no-ultracode\u2063ultracode audit", source: "rpc", images: [] },
+  { text: "\u2063kiwi-code-no-ultracode\u2063ultracode audit", source: "rpc", images: [] },
   { mode: "rpc" },
 );
 assert.deepEqual(transformedWorkflowInput, { action: "transform", text: "ultracode audit", images: [] });
-assert.equal(requests[0].url, `${process.env.DIRE_MUX_THREAD_ENDPOINT}/workflows/activation`);
+assert.equal(requests[0].url, `${process.env.KIWI_CODE_THREAD_ENDPOINT}/workflows/activation`);
 assert.equal(JSON.parse(requests[0].init.body).keywordDismissed, true);
 requests.length = 0;
 
@@ -517,11 +517,11 @@ const navigation = await tool("browser_navigate").execute(
   undefined,
   {},
 );
-assert.equal(requests[0].url, `${process.env.DIRE_MUX_THREAD_ENDPOINT}/browser/actions`);
+assert.equal(requests[0].url, `${process.env.KIWI_CODE_THREAD_ENDPOINT}/browser/actions`);
 assert.equal(requests[0].init.method, "POST");
 assert.equal(requests[0].init.signal, controller.signal);
 const requestHeaders = new Headers(requests[0].init.headers);
-assert.equal(requestHeaders.get("x-dire-mux-agent-token"), process.env.DIRE_MUX_AGENT_TOKEN);
+assert.equal(requestHeaders.get("x-kiwi-code-agent-token"), process.env.KIWI_CODE_AGENT_TOKEN);
 assert.equal(requestHeaders.get("content-type"), "application/json");
 assert.deepEqual(JSON.parse(requests[0].init.body), {
   operation: "navigate.goto",
@@ -542,7 +542,7 @@ responses.push(
     result: {
       message: "Released the browser control connection; the session remains running.",
       status: {
-        endpoint: "dire-mux://electron",
+        endpoint: "kiwi-code://electron",
         owned: true,
         pages: 1,
         reachable: true,
@@ -677,13 +677,13 @@ await assert.rejects(
 );
 
 const requestCountBeforeMissingToken = requests.length;
-const token = process.env.DIRE_MUX_AGENT_TOKEN;
-delete process.env.DIRE_MUX_AGENT_TOKEN;
+const token = process.env.KIWI_CODE_AGENT_TOKEN;
+delete process.env.KIWI_CODE_AGENT_TOKEN;
 await assert.rejects(
   tool("browser_tabs").execute("tabs-no-token", { action: "list" }, undefined, undefined, {}),
-  /DIRE_MUX_AGENT_TOKEN is not set/,
+  /KIWI_CODE_AGENT_TOKEN is not set/,
 );
-process.env.DIRE_MUX_AGENT_TOKEN = token;
+process.env.KIWI_CODE_AGENT_TOKEN = token;
 assert.equal(requests.length, requestCountBeforeMissingToken);
 assert.equal(responses.length, 0);
 

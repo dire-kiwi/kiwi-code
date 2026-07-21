@@ -7,11 +7,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/headless"
+	"github.com/dire-kiwi/kiwi-code/internal/headless"
 )
 
 func main() {
-	serverURL := flag.String("url", "http://127.0.0.1:4000", "Dire Mux server URL")
+	serverURL := flag.String("url", "http://127.0.0.1:4000", "Kiwi Code server URL")
 	clients := flag.Int("clients", 3, "number of simultaneous global and shared-terminal clients")
 	projectPath := flag.String("project-path", "", "existing server-visible directory to use; defaults to a local temporary directory")
 	skipTerminal := flag.Bool("skip-terminal", false, "test HTTP and status streams without tmux WebSockets")

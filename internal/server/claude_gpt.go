@@ -23,8 +23,8 @@ const (
 	claudeSettingsFileName        = "settings.json"
 	claudeSandboxPluginID         = "sandbox-exec@dire-agent-extensions"
 	maxCLIProxyAPIModelsResponse  = 1 << 20
-	cliProxyAPIBaseURLEnvironment = "DIRE_MUX_CLIPROXY_BASE_URL"
-	cliProxyAPIKeyEnvironment     = "DIRE_MUX_CLIPROXY_API_KEY"
+	cliProxyAPIBaseURLEnvironment = "KIWI_CODE_CLIPROXY_BASE_URL"
+	cliProxyAPIKeyEnvironment     = "KIWI_CODE_CLIPROXY_API_KEY"
 )
 
 var claudeGPTUnsetEnvironment = []string{
@@ -306,7 +306,7 @@ func filterClaudeGPTSettings(contents []byte) ([]byte, error) {
 	}
 
 	// The GPT profile inherits the user's behavior and plugin choices, while
-	// Dire Mux remains authoritative for model selection and proxy routing.
+	// Kiwi Code remains authoritative for model selection and proxy routing.
 	for _, key := range claudeGPTExcludedSettings {
 		delete(settings, key)
 	}
@@ -332,7 +332,7 @@ func filterClaudeGPTSettings(contents []byte) ([]byte, error) {
 		// The sandbox plugin is loaded explicitly with --plugin-dir below. Do
 		// not also present its installed-plugin enablement to the isolated GPT
 		// profile: resolving it through both paths can prevent Claude from
-		// loading session plugin hooks, including Dire Mux's title and activity
+		// loading session plugin hooks, including Kiwi Code's title and activity
 		// hooks.
 		delete(plugins, claudeSandboxPluginID)
 		encoded, err := json.Marshal(plugins)

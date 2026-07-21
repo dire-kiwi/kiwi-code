@@ -306,7 +306,7 @@ async function main() {
   const runPath = `/workflows/${encodeURIComponent(manifest.runId)}`;
   const headers = {
     "Content-Type": "application/json",
-    "X-Dire-Mux-Workflow-Token": manifest.token,
+    "X-Kiwi-Code-Workflow-Token": manifest.token,
   };
 
   async function api(path, init = {}, retryMilliseconds = 0) {
@@ -326,7 +326,7 @@ async function main() {
         if (!response.ok) {
           const message = isRecord(payload) && typeof payload.error === "string"
             ? payload.error
-            : `Dire Mux returned HTTP ${response.status}.`;
+            : `Kiwi Code returned HTTP ${response.status}.`;
           const error = new Error(message);
           error.status = response.status;
           throw error;
@@ -387,7 +387,7 @@ async function main() {
       let childPrompt = prompt;
       const schema = isRecord(options.schema) ? options.schema : undefined;
       if (schema) {
-        childPrompt += `\n\n[Dire Mux workflow return contract]\nYour final response is a machine-consumed value. Return only JSON, without a Markdown fence or commentary, matching this JSON Schema:\n${safeJSON(schema, "Agent schema", 128 * 1024)}`;
+        childPrompt += `\n\n[Kiwi Code workflow return contract]\nYour final response is a machine-consumed value. Return only JSON, without a Markdown fence or commentary, matching this JSON Schema:\n${safeJSON(schema, "Agent schema", 128 * 1024)}`;
       }
       const request = {
         title: label,
@@ -506,24 +506,24 @@ async function main() {
   }
 
   const sandbox = vm.createContext({
-    __direMuxAgent: bridgeAgent,
-    __direMuxLog: bridgeLog,
-    __direMuxPhase: bridgePhase,
-    __direMuxArgsJSON: manifest.hasArgs ? safeJSON(manifest.args, "Workflow args", 1024 * 1024) : "",
+    __kiwiCodeAgent: bridgeAgent,
+    __kiwiCodeLog: bridgeLog,
+    __kiwiCodePhase: bridgePhase,
+    __kiwiCodeArgsJSON: manifest.hasArgs ? safeJSON(manifest.args, "Workflow args", 1024 * 1024) : "",
   }, {
-    name: `dire-mux-workflow-${manifest.runId}`,
+    name: `kiwi-code-workflow-${manifest.runId}`,
     codeGeneration: { strings: false, wasm: false },
   });
 
   const bootstrap = `
-const __agentBridge = globalThis.__direMuxAgent;
-const __logBridge = globalThis.__direMuxLog;
-const __phaseBridge = globalThis.__direMuxPhase;
-const __argsJSON = globalThis.__direMuxArgsJSON;
-delete globalThis.__direMuxAgent;
-delete globalThis.__direMuxLog;
-delete globalThis.__direMuxPhase;
-delete globalThis.__direMuxArgsJSON;
+const __agentBridge = globalThis.__kiwiCodeAgent;
+const __logBridge = globalThis.__kiwiCodeLog;
+const __phaseBridge = globalThis.__kiwiCodePhase;
+const __argsJSON = globalThis.__kiwiCodeArgsJSON;
+delete globalThis.__kiwiCodeAgent;
+delete globalThis.__kiwiCodeLog;
+delete globalThis.__kiwiCodePhase;
+delete globalThis.__kiwiCodeArgsJSON;
 globalThis.constructor = undefined;
 const __bridgePromise = (operation) => new Promise((resolve, reject) => {
   try {
@@ -565,7 +565,7 @@ Object.defineProperty(Math, 'random', { value: () => { throw new Error('Math.ran
 Object.defineProperty(Date, 'now', { value: () => { throw new Error('Date.now() is unavailable in workflow scripts'); } });
 Object.freeze(agent); Object.freeze(parallel); Object.freeze(pipeline); Object.freeze(log); Object.freeze(phase);
 `;
-  new vm.Script(bootstrap, { filename: "dire-mux-workflow-bootstrap.js" }).runInContext(sandbox, { timeout: 1_000 });
+  new vm.Script(bootstrap, { filename: "kiwi-code-workflow-bootstrap.js" }).runInContext(sandbox, { timeout: 1_000 });
 
   const transformed = source.replace(META_PREFIX, "const meta = ");
   const execution = new vm.Script(`(async () => {\n${transformed}\n})()`, {
@@ -600,7 +600,7 @@ main().catch(async (error) => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-Dire-Mux-Workflow-Token": manifest.token,
+            "X-Kiwi-Code-Workflow-Token": manifest.token,
           },
           body: JSON.stringify({
             eventId: `attempt-${Math.max(1, Number(manifest.attempt) || 1)}-terminal-failure`,

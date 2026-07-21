@@ -21,7 +21,7 @@ import (
 
 const (
 	ConfigFileName       = "browser-provider.json"
-	ConfigPathEnv        = "DIRE_MUX_BROWSER_PROVIDER_CONFIG"
+	ConfigPathEnv        = "KIWI_CODE_BROWSER_PROVIDER_CONFIG"
 	maxConfigBytes int64 = 4 << 10
 
 	// MaxRequestBytes bounds the JSON sent to the provider. Public action

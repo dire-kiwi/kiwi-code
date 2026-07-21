@@ -1,16 +1,16 @@
 ---
 name: kiwi-code-processes
-description: Starts, inspects, interacts with, and stops long-running development processes in Dire Mux process shells. Use for dev servers, file watchers, test loops, builds, or any command that must keep running while Claude continues working.
-compatibility: Requires Node.js 20+ and a Dire Mux-managed Claude Code session with DIRE_MUX_THREAD_ENDPOINT set.
+description: Starts, inspects, interacts with, and stops long-running development processes in Kiwi Code process shells. Use for dev servers, file watchers, test loops, builds, or any command that must keep running while Claude continues working.
+compatibility: Requires Node.js 20+ and a Kiwi Code-managed Claude Code session with KIWI_CODE_THREAD_ENDPOINT set.
 context: fork
 metadata:
-  author: dire-mux
+  author: kiwi-code
   version: "1.1"
 ---
 
 # Kiwi Code processes
 
-Use the bundled scripts to manage long-running commands through the Dire Mux API. Each started command gets its own persistent tmux shell and appears in the **Process** workspace. There may be zero, one, or many process shells.
+Use the bundled scripts to manage long-running commands through the Kiwi Code API. Each started command gets its own persistent tmux shell and appears in the **Process** workspace. There may be zero, one, or many process shells.
 
 ## Rules
 
@@ -23,7 +23,7 @@ Use the bundled scripts to manage long-running commands through the Dire Mux API
 - For a web server, publish every browser-reachable HTTP(S) URL after its readiness log appears. Update the published URLs if its address changes.
 - Stop processes that are no longer needed unless the user asked to leave them running.
 
-Claude Code substitutes `${CLAUDE_PLUGIN_ROOT}` below with the materialized Dire Mux plugin directory. Do not replace it with a global `~/.agents/skills` path.
+Claude Code substitutes `${CLAUDE_PLUGIN_ROOT}` below with the materialized Kiwi Code plugin directory. Do not replace it with a global `~/.agents/skills` path.
 
 ## Start a process
 
@@ -93,4 +93,4 @@ Stopping removes the tmux window and its captured history. Read any needed final
 
 ## Recovery
 
-If a helper reports that `DIRE_MUX_THREAD_ENDPOINT` is missing, it is not running inside a Dire Mux-managed Claude Code session. Do not guess an API URL. If an ID is not found, list processes and match by name before deciding whether to start a replacement.
+If a helper reports that `KIWI_CODE_THREAD_ENDPOINT` is missing, it is not running inside a Kiwi Code-managed Claude Code session. Do not guess an API URL. If an ID is not found, list processes and match by name before deciding whether to start a replacement.

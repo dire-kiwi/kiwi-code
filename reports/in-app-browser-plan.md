@@ -6,13 +6,13 @@ _Last updated: implementation handoff for the draft pull request_
 
 The first production-shaped vertical slice is implemented on this branch:
 
-- Electron owns one ephemeral, sandboxed `WebContentsView` browser session per Dire Mux thread.
+- Electron owns one ephemeral, sandboxed `WebContentsView` browser session per Kiwi Code thread.
 - Go proxies a private, authenticated loopback provider and exposes thread-scoped status, action, and JPEG-preview routes.
 - React provides the sixth Browser workspace with tabs, navigation, native-view bounds synchronization, and a projected preview for ordinary web/LAN clients.
 - Terminal Pi and Pi Native materialize the same first-party `browser_*` tools and progressive loader, sharing the thread's session.
 - Thread/project deletion and application shutdown clean up browser sessions without changing the stable tmux identity contract.
-- The provider blocks privileged schemes, host files, downloads, permissions, dangerous CDP methods, and navigation back into Dire Mux's trusted renderer/control plane.
-- An installed legacy `browser_*` extension no longer crashes Pi with duplicate registrations; Dire Mux leaves it active and prints a migration warning.
+- The provider blocks privileged schemes, host files, downloads, permissions, dangerous CDP methods, and navigation back into Kiwi Code's trusted renderer/control plane.
+- An installed legacy `browser_*` extension no longer crashes Pi with duplicate registrations; Kiwi Code leaves it active and prints a migration warning.
 
 Validation completed before opening the draft:
 
@@ -22,15 +22,15 @@ Validation completed before opening the draft:
 - `cd web && npm run build`
 - isolated Electron stack using fresh loopback Go/Vite/fixture ports, a temporary data directory, and a unique non-production tmux socket;
 - real provider navigation, accessibility snapshot, fill, click, JavaScript evaluation, JPEG preview, blocked dangerous CDP, tabless-session state, and session stop;
-- a one-off Pi launched with `--no-extensions` plus the explicit Dire Mux extension used `browser_tool_search`/`browser_snapshot` against the shared in-app page and returned the expected title and heading.
+- a one-off Pi launched with `--no-extensions` plus the explicit Kiwi Code extension used `browser_tool_search`/`browser_snapshot` against the shared in-app page and returned the expected title and heading.
 
 ### Work remaining before the feature should leave draft
 
-1. **Choose and implement the HTTP trust boundary.** Dire Mux currently documents its all-interface listener as unauthenticated terminal access intended only for trusted networks. JSON content-type enforcement prevents ordinary cross-site form CSRF, and the private Electron provider plus agent routes require capabilities, but the user-facing browser mutation routes inherit the app's trusted-LAN model. Decide whether this release accepts that documented boundary or adds an app-wide/per-launch trusted-renderer capability. CORS alone must not be treated as authorization.
+1. **Choose and implement the HTTP trust boundary.** Kiwi Code currently documents its all-interface listener as unauthenticated terminal access intended only for trusted networks. JSON content-type enforcement prevents ordinary cross-site form CSRF, and the private Electron provider plus agent routes require capabilities, but the user-facing browser mutation routes inherit the app's trusted-LAN model. Decide whether this release accepts that documented boundary or adds an app-wide/per-launch trusted-renderer capability. CORS alone must not be treated as authorization.
 2. **Complete hands-on native-view validation.** Visually verify the actual Electron guest (not only the projected Chrome preview), focus transfer, typing, IME/clipboard behavior, `Cmd+L`, `Cmd+R`, workspace shortcuts, overlays, resize/scale behavior, and hide/show while automation continues. The validation agent could not inspect the native window because macOS Accessibility permission was unavailable.
 3. **Automate the real Electron fixture smoke test.** Cover hidden/occluded `capturePage`, snapshot/fill/click, background-tab close, tabless sessions, disconnect, provider restart, and guest crash in an integration test so compositor regressions are not detectable only by manual validation.
 4. **Run Linux validation.** Exercise WebContentsView geometry, capture, input, cleanup, and packaging on the supported Linux display stacks. Current runtime validation was on macOS.
-5. **Finish legacy-extension migration UX.** Add a scoped way to disable only an installed `@dire-pi/chrome-devtools` package for managed Dire Mux Pi sessions, or provide a guided settings migration. The current safe fallback keeps the legacy tools active and requires the user to disable that package and run `/reload` before the in-app tools take over.
+5. **Finish legacy-extension migration UX.** Add a scoped way to disable only an installed `@dire-pi/chrome-devtools` package for managed Kiwi Code Pi sessions, or provide a guided settings migration. The current safe fallback keeps the legacy tools active and requires the user to disable that package and run `/reload` before the in-app tools take over.
 6. **Validate packaged production lifecycle.** Test the signed/packaged desktop launcher, Go restart, Electron reconnect, provider-config rotation/removal, application quit, and cleanup of every ephemeral partition and helper process.
 
 ### Follow-up product work
@@ -47,14 +47,14 @@ The remainder of this document preserves the original research and longer-term a
 
 ## User goal
 
-Dire Mux should provide a first-party browser-control experience that:
+Kiwi Code should provide a first-party browser-control experience that:
 
 - works from its web-based UI;
 - lets Pi choose between an in-app browser and an existing Chrome profile;
 - does not require the user to watch or switch to a separate browser for normal automation;
 - exposes controls and a preview so the user can see and, when needed, take over;
 - works cross-platform where possible;
-- vendors the successful `dire-pi-ext` Chrome DevTools implementation, skill, and Chrome companion extension into Dire Mux;
+- vendors the successful `dire-pi-ext` Chrome DevTools implementation, skill, and Chrome companion extension into Kiwi Code;
 - moves browser ownership into the Go backend or a subprocess supervised by Go.
 
 ## Primary feasibility conclusion
@@ -64,7 +64,7 @@ A hidden, real-sized `<iframe>` is **not a viable general browser backend**.
 Reasons:
 
 - Arbitrary sites can reject framing with CSP `frame-ancestors` or `X-Frame-Options`.
-- A Dire Mux page cannot inspect or manipulate a successfully loaded cross-origin iframe because of the same-origin policy.
+- A Kiwi Code page cannot inspect or manipulate a successfully loaded cross-origin iframe because of the same-origin policy.
 - A normal web page cannot access the Chrome DevTools Protocol (CDP).
 - An iframe is not reliably its own CDP target: same-process frames are execution contexts/frame IDs, while out-of-process frames may be child targets requiring session-aware recursive attachment.
 - Transparent, offscreen, or `display:none` content is not contractually guaranteed to keep foreground layout, paint, timing, or Page Visibility behavior.
@@ -74,12 +74,12 @@ An iframe should only ever be an optional fast path for same-origin, trusted loc
 
 ## Recommended product architecture
 
-Use a runtime-neutral `BrowserSession` owned by Dire Mux:
+Use a runtime-neutral `BrowserSession` owned by Kiwi Code:
 
 ```text
 Pi first-party extension ------\
                                 \
-Dire Mux React Browser pane ----- Go browser API/session manager
+Kiwi Code React Browser pane ----- Go browser API/session manager
                                 /                |
 Chrome companion extension ----/       supervised browser host
                                                  |
@@ -92,7 +92,7 @@ Chrome companion extension ----/       supervised browser host
 ### User-visible backend choices
 
 1. **In app (default)**
-   - Isolated browser profile owned by Dire Mux.
+   - Isolated browser profile owned by Kiwi Code.
    - Explicit viewport such as 1280x800, independent of whether the preview pane is visible.
    - Browser frames projected into the React UI as screenshots/canvas frames.
    - Pointer and keyboard input forwarded through CDP.
@@ -109,14 +109,14 @@ A desktop runtime may implement the in-app backend with a native embedded guest 
 
 ## Recommended host ownership
 
-Dire Mux Go should own identity, authorization, lifecycle, APIs, cleanup, and event fan-out. Initially, Go should supervise a bundled Node browser-host subprocess rather than porting the mature TypeScript CDP implementation to Go.
+Kiwi Code Go should own identity, authorization, lifecycle, APIs, cleanup, and event fan-out. Initially, Go should supervise a bundled Node browser-host subprocess rather than porting the mature TypeScript CDP implementation to Go.
 
 Rationale:
 
 - `dire-pi-ext` already has working and tested CDP transport, browser management, accessibility snapshots, input, screenshots, dynamic Pi tools, and a Chrome-extension relay.
 - Porting it to Go would duplicate a substantial amount of protocol and browser behavior.
 - A supervised sidecar isolates browser crashes and can be upgraded independently.
-- The sidecar can be built into a pinned artifact; Dire Mux must not depend on the sibling `dire-pi-ext` checkout or runtime `npm install`.
+- The sidecar can be built into a pinned artifact; Kiwi Code must not depend on the sibling `dire-pi-ext` checkout or runtime `npm install`.
 
 Prefer private stdio RPC for commands/events where practical. Any required Chrome-extension or CDP listener must bind only to loopback, use a capability, and use isolated dynamic ports during development and tests.
 
@@ -140,7 +140,7 @@ Do not vendor `node_modules`. Bundle `ws`; externalize Pi-provided modules such 
 
 ## First-party Pi integration
 
-Dire Mux already materializes extensions in `internal/server/pi_extension.go` and passes them to terminal Pi and Pi Native from `internal/server/terminal.go` and `internal/server/pi_native.go`.
+Kiwi Code already materializes extensions in `internal/server/pi_extension.go` and passes them to terminal Pi and Pi Native from `internal/server/terminal.go` and `internal/server/pi_native.go`.
 
 The browser integration should:
 
@@ -158,9 +158,9 @@ The browser integration should:
   - `browser_screenshot`
   - `browser_cdp`
 - preserve additive dynamic tool loading and the current progressive-disclosure skill;
-- use a thin Pi adapter that calls the Dire Mux browser service through the existing thread endpoint and `X-Dire-Mux-Agent-Token`;
+- use a thin Pi adapter that calls the Kiwi Code browser service through the existing thread endpoint and `X-Kiwi-Code-Agent-Token`;
 - load the skill through `resources_discover` or an explicit `--skill` path, because passing only `--extension` does not load a package manifest's skills;
-- make terminal Pi and Pi Native in the same Dire Mux thread intentionally share one browser session;
+- make terminal Pi and Pi Native in the same Kiwi Code thread intentionally share one browser session;
 - give child threads separate sessions;
 - detect an already installed `@dire-pi/chrome-devtools` package and produce a clear migration warning instead of ambiguous duplicate tools;
 - provide a stable reload/import path so existing terminal Pi sessions can acquire the first-party extension with `/reload` where possible.
@@ -254,7 +254,7 @@ The React renderer should receive only a narrow typed IPC/preload API for guest 
 
 ## Chrome companion plan
 
-Move the Manifest V3 extension and its relay ownership into Dire Mux:
+Move the Manifest V3 extension and its relay ownership into Kiwi Code:
 
 - materialize a stable versioned extension directory;
 - add a Browser Control section to Settings;
@@ -285,7 +285,7 @@ The UI should call projected content a **browser preview**, not promise a perfec
 ## Recommended defaults
 
 - Backend: **In app**
-- Ownership: one browser session per Dire Mux thread
+- Ownership: one browser session per Kiwi Code thread
 - Terminal Pi and Pi Native: shared browser session
 - Child threads: isolated browser sessions
 - Storage: ephemeral per thread initially; persistent site data is explicit opt-in
@@ -300,7 +300,7 @@ The UI should call projected content a **browser preview**, not promise a perfec
 - Use random capabilities and constant-time comparison.
 - Never log pairing tokens or CDP credentials.
 - Treat URLs, page text, screenshots, cookies, browser logs, and profiles as sensitive.
-- Block access from guest pages to Dire Mux/browser control-plane endpoints.
+- Block access from guest pages to Kiwi Code/browser control-plane endpoints.
 - Decide explicitly how localhost/private-network navigation is approved, because local development browsing is useful but is also an SSRF/local-service risk.
 - Validate schemes and block or explicitly gate `file:`, `javascript:`, browser-extension, and custom schemes.
 - Constrain downloads to session-owned directories with traversal/symlink defenses.
@@ -328,11 +328,11 @@ Retain and extend the current `dire-pi-ext` tests. Add coverage for:
 - server restart behavior;
 - Chrome web UI and desktop runtime smoke tests.
 
-All application validation must use fresh loopback ports, a temporary data directory, and a unique non-production tmux socket. It must never inspect, connect to, create sessions in, or kill the canonical `kiwi-code` or legacy `dire-mux` production tmux server.
+All application validation must use fresh loopback ports, a temporary data directory, and a unique non-production tmux socket. It must never inspect, connect to, create sessions in, or kill the canonical `kiwi-code` production tmux server.
 
 ## Open questions for the next research phase
 
-The next requested investigation is whether Dire Mux should move away from Electron to another desktop/runtime framework that keeps the UI web-based while allowing a true embedded browser guest. Research should compare cross-platform and platform-specific options, including:
+The next requested investigation is whether Kiwi Code should move away from Electron to another desktop/runtime framework that keeps the UI web-based while allowing a true embedded browser guest. Research should compare cross-platform and platform-specific options, including:
 
 - frameworks with a web frontend plus multiple native WebViews;
 - the ability to embed an arbitrary remote browser surface separately from the trusted app UI;

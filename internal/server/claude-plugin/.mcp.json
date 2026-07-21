@@ -3,10 +3,10 @@
     "browser": {
       "type": "stdio",
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/servers/dire-mux-browser.mjs"],
+      "args": ["${CLAUDE_PLUGIN_ROOT}/servers/kiwi-code-browser.mjs"],
       "env": {
-        "DIRE_MUX_THREAD_ENDPOINT": "${DIRE_MUX_THREAD_ENDPOINT}",
-        "DIRE_MUX_AGENT_TOKEN_FILE": "${CLAUDE_PLUGIN_ROOT}/../agent-token"
+        "KIWI_CODE_THREAD_ENDPOINT": "${KIWI_CODE_THREAD_ENDPOINT}",
+        "KIWI_CODE_AGENT_TOKEN_FILE": "${CLAUDE_PLUGIN_ROOT}/../agent-token"
       }
     }
   }

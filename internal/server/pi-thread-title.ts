@@ -1,7 +1,7 @@
 import { complete } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-const markerType = "dire-mux-thread-title";
+const markerType = "kiwi-code-thread-title";
 const provider = "openai-codex";
 const modelId = "gpt-5.6-luna";
 const timeoutMs = 60_000;
@@ -51,11 +51,11 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		// Child threads are named explicitly by the parent that creates them.
 		// Avoid spending a second model call or replacing that orchestration name.
-		handled = Boolean(process.env.DIRE_MUX_PARENT_THREAD_ID) || hasUserMessage(ctx);
+		handled = Boolean(process.env.KIWI_CODE_PARENT_THREAD_ID) || hasUserMessage(ctx);
 	});
 
 	pi.on("before_agent_start", (event, ctx) => {
-		const endpoint = process.env.DIRE_MUX_THREAD_ENDPOINT;
+		const endpoint = process.env.KIWI_CODE_THREAD_ENDPOINT;
 		if (handled || !endpoint) return;
 		handled = true;
 
@@ -103,7 +103,7 @@ export default function (pi: ExtensionAPI) {
 			});
 			if (!updateResponse.ok) {
 				const detail = await updateResponse.text();
-				throw new Error(`dire/mux returned ${updateResponse.status}${detail ? `: ${detail}` : ""}`);
+				throw new Error(`Kiwi Code returned ${updateResponse.status}${detail ? `: ${detail}` : ""}`);
 			}
 			const updated = await updateResponse.json() as UpdatedThread;
 			const savedTitle = typeof updated.title === "string" ? updated.title : title;

@@ -12,8 +12,8 @@ func TestProductionHTTPAddressUsesReservedPortOnAllInterfaces(t *testing.T) {
 	if productionHTTPAddress != "0.0.0.0:4000" {
 		t.Fatalf("production HTTP address = %q, want all interfaces on reserved port %d", productionHTTPAddress, productionHTTPPort)
 	}
-	if productionTmuxSocket != "kiwi-code" || legacyProductionTmuxSocket != "dire-mux" {
-		t.Fatalf("production tmux sockets = canonical %q legacy %q", productionTmuxSocket, legacyProductionTmuxSocket)
+	if productionTmuxSocket != "kiwi-code" {
+		t.Fatalf("production tmux socket = %q", productionTmuxSocket)
 	}
 }
 
@@ -22,7 +22,7 @@ func TestValidateRuntimeConfigurationRejectsProductionResourcesInDevelopment(t *
 		Mode:              runtimeModeDevelopment,
 		Address:           "127.0.0.1:18080",
 		AllowedOriginPort: 15173,
-		TmuxSocket:        "dmv-test-a1",
+		TmuxSocket:        "kcv-test-a1",
 	}
 
 	tests := []struct {
@@ -41,13 +41,6 @@ func TestValidateRuntimeConfigurationRejectsProductionResourcesInDevelopment(t *
 			name: "explicit production tmux socket",
 			change: func(configuration *runtimeConfiguration) {
 				configuration.TmuxSocket = productionTmuxSocket
-			},
-			want: "production tmux socket",
-		},
-		{
-			name: "legacy production tmux socket",
-			change: func(configuration *runtimeConfiguration) {
-				configuration.TmuxSocket = legacyProductionTmuxSocket
 			},
 			want: "production tmux socket",
 		},
@@ -91,7 +84,7 @@ func TestValidateRuntimeConfigurationAllowsIsolatedDevelopment(t *testing.T) {
 		Mode:              runtimeModeDevelopment,
 		Address:           "127.0.0.1:18080",
 		AllowedOriginPort: 15173,
-		TmuxSocket:        "dmv-test-a1",
+		TmuxSocket:        "kcv-test-a1",
 	}, gitCheckout{Present: true, Branch: "feature"})
 	if err != nil {
 		t.Fatalf("isolated development configuration was rejected: %v", err)
@@ -133,7 +126,7 @@ func TestValidateRuntimeConfigurationRejectsInvalidModeAndAddress(t *testing.T) 
 	if err := validateRuntimeConfiguration(runtimeConfiguration{
 		Mode:       runtimeModeDevelopment,
 		Address:    "not-an-address",
-		TmuxSocket: "dmv-test-a1",
+		TmuxSocket: "kcv-test-a1",
 	}, gitCheckout{}); err == nil || !strings.Contains(err.Error(), "parse HTTP listen address") {
 		t.Fatalf("invalid development address error = %v", err)
 	}

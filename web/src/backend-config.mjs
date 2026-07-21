@@ -1,5 +1,5 @@
-const backendOriginsStorageKey = 'dire-mux-backend-origins-v1'
-const activeBackendStorageKey = 'dire-mux-active-backend-v1'
+const backendOriginsStorageKey = 'kiwi-code-backend-origins-v1'
+const activeBackendStorageKey = 'kiwi-code-active-backend-v1'
 
 export function normalizeBackendOrigin(value) {
   if (typeof value !== 'string' || !value.trim()) {

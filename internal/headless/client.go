@@ -1,4 +1,4 @@
-// Package headless exercises the Dire Mux HTTP, SSE, and terminal WebSocket
+// Package headless exercises the Kiwi Code HTTP, SSE, and terminal WebSocket
 // APIs without a browser.
 package headless
 
@@ -18,8 +18,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 	"github.com/gorilla/websocket"
-	"github.com/ivan/dire-mux/internal/project"
 )
 
 const (
@@ -40,7 +40,7 @@ type Options struct {
 }
 
 // Run verifies global status fan-out and terminal session scoping against a
-// running Dire Mux server. The test project and its tmux sessions are removed
+// running Kiwi Code server. The test project and its tmux sessions are removed
 // before Run returns.
 func Run(ctx context.Context, options Options) error {
 	started := time.Now()
@@ -68,7 +68,7 @@ func Run(ctx context.Context, options Options) error {
 	projectPath := strings.TrimSpace(options.ProjectPath)
 	removeProjectPath := func() {}
 	if projectPath == "" {
-		projectPath, err = os.MkdirTemp("", "dire-mux-headless-")
+		projectPath, err = os.MkdirTemp("", "kiwi-code-headless-")
 		if err != nil {
 			return fmt.Errorf("create test project directory: %w", err)
 		}

@@ -106,7 +106,7 @@ function assertAllowedGuestUrl(raw, protectedOrigins) {
     throw new BrowserProviderError('invalid_url', 'Only HTTP and HTTPS navigation is allowed.')
   }
   if (isProtectedUrl(url, protectedOrigins)) {
-    throw new BrowserProviderError('blocked_origin', 'Navigation to a protected Dire Mux origin is blocked.')
+    throw new BrowserProviderError('blocked_origin', 'Navigation to a protected Kiwi Code origin is blocked.')
   }
   return url.toString()
 }

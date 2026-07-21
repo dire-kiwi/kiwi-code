@@ -43,7 +43,7 @@ func run() int {
 		return 1
 	}
 
-	temporaryDir, err := os.MkdirTemp("", "dire-mux-dev-")
+	temporaryDir, err := os.MkdirTemp("", "kiwi-code-dev-")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create temporary directory: %v\n", err)
 		return 1
@@ -121,7 +121,7 @@ func startServer(root, temporaryDir string, args []string) *runningServer {
 }
 
 func buildServer(root, temporaryDir string) string {
-	binary := filepath.Join(temporaryDir, fmt.Sprintf("dire-mux-%d", time.Now().UnixNano()))
+	binary := filepath.Join(temporaryDir, fmt.Sprintf("kiwi-code-%d", time.Now().UnixNano()))
 	command := exec.Command("go", "build", "-o", binary, ".")
 	command.Dir = root
 	command.Stdout = os.Stdout

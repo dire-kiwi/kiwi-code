@@ -1,5 +1,5 @@
 {
-  "description": "Dire Mux thread activity and title integration",
+  "description": "Kiwi Code thread activity and title integration",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -7,16 +7,16 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/dire-mux-hook.mjs", "heartbeat"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/kiwi-code-hook.mjs", "heartbeat"],
             "async": true,
             "timeout": 86400
           },
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/dire-mux-hook.mjs", "title"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/kiwi-code-hook.mjs", "title"],
             "timeout": 30,
-            "statusMessage": "Naming Dire Mux thread…"
+            "statusMessage": "Naming Kiwi Code thread…"
           }
         ]
       }
@@ -27,7 +27,7 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/dire-mux-hook.mjs", "finished"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/kiwi-code-hook.mjs", "finished"],
             "timeout": 2
           }
         ]
@@ -39,7 +39,7 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/dire-mux-hook.mjs", "finished"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/kiwi-code-hook.mjs", "finished"],
             "timeout": 2
           }
         ]
@@ -52,7 +52,7 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/dire-mux-hook.mjs", "finished-if-active"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/kiwi-code-hook.mjs", "finished-if-active"],
             "async": true,
             "timeout": 10
           }
@@ -65,7 +65,7 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/dire-mux-hook.mjs", "session-end"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/kiwi-code-hook.mjs", "session-end"],
             "timeout": 1
           }
         ]

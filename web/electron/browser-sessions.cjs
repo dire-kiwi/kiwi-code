@@ -511,14 +511,14 @@ class BrowserSession {
         }
         const resolved = await debuggerSend(tab, 'DOM.resolveNode', {
           backendNodeId: stored.backendNodeId,
-          objectGroup: 'dire-mux-browser',
+          objectGroup: 'kiwi-code-browser',
         })
         objectId = resolved?.object?.objectId
       } else {
         requireString(selector, 'selector', 10_000)
         const response = await debuggerSend(tab, 'Runtime.evaluate', {
           expression: `document.querySelector(${JSON.stringify(selector)})`,
-          objectGroup: 'dire-mux-browser',
+          objectGroup: 'kiwi-code-browser',
           returnByValue: false,
         })
         const exception = exceptionMessage(response)
@@ -548,7 +548,7 @@ class BrowserSession {
     return {
       message: 'Electron browser session is running.',
       status: {
-        endpoint: 'dire-mux://electron',
+        endpoint: 'kiwi-code://electron',
         reachable: true,
         product: `Electron/${process.versions.electron || 'unknown'}`,
         protocolVersion: DEBUGGER_PROTOCOL_VERSION,
@@ -603,7 +603,7 @@ class BrowserSession {
       const wanted = action === 'back' ? index - 1 : index + 1
       const entry = history?.entries?.[wanted]
       if (!Number.isInteger(entry?.id)) throw new BrowserProviderError('navigation_unavailable', `Cannot navigate ${action}.`, 409)
-      if (isProtectedRequest(entry.url, this.protectedOrigins)) throw new BrowserProviderError('blocked_origin', 'Navigation to a protected Dire Mux origin is blocked.')
+      if (isProtectedRequest(entry.url, this.protectedOrigins)) throw new BrowserProviderError('blocked_origin', 'Navigation to a protected Kiwi Code origin is blocked.')
       await debuggerSend(tab, 'Page.navigateToHistoryEntry', { entryId: entry.id })
       await this.pause(50)
       await waitForDocumentReady(tab, timeoutMs)
@@ -975,7 +975,7 @@ class BrowserWorkspaceManager {
 
   partitionFor(key) {
     const nonce = randomBytes(16)
-    return `dire-mux-guest-${createHash('sha256').update(key).update(nonce).digest('hex').slice(0, 24)}`
+    return `kiwi-code-guest-${createHash('sha256').update(key).update(nonce).digest('hex').slice(0, 24)}`
   }
 
   async serialized(projectId, threadId, operation) {

@@ -1,7 +1,7 @@
 web/node_modules/
 internal/server/static/app/
 .DS_Store
-dire-mux
+kiwi-code
 bin/
 web/*.tsbuildinfo
 web/vite.config.js

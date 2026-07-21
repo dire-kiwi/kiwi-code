@@ -6,13 +6,13 @@ import { assertDevelopmentApiTarget, assertDevelopmentPort } from './scripts/dev
 export default defineConfig({
   plugins: [
     {
-      name: 'dire-mux-development-port-safety',
+      name: 'kiwi-code-development-port-safety',
       configResolved(config) {
         if (config.command === 'serve') {
           assertDevelopmentPort(config.server.port, 'Vite development server')
           assertDevelopmentApiTarget(
-            config.env.VITE_DIRE_MUX_API_PORT,
-            config.env.VITE_DIRE_MUX_API_URL,
+            config.env.VITE_KIWI_CODE_API_PORT,
+            config.env.VITE_KIWI_CODE_API_URL,
           )
         }
       },

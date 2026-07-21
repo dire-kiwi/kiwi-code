@@ -36,8 +36,8 @@ function sessionTotals(ctx: ExtensionContext): Totals {
 }
 
 export default function (pi: ExtensionAPI) {
-	const threadEndpoint = process.env.DIRE_MUX_THREAD_ENDPOINT;
-	const agentToken = process.env.DIRE_MUX_AGENT_TOKEN;
+	const threadEndpoint = process.env.KIWI_CODE_THREAD_ENDPOINT;
+	const agentToken = process.env.KIWI_CODE_AGENT_TOKEN;
 	if (!threadEndpoint || !agentToken) return;
 	let requests = Promise.resolve();
 
@@ -47,7 +47,7 @@ export default function (pi: ExtensionAPI) {
 		try {
 			return await fetch(`${threadEndpoint}${path}`, {
 				...init,
-				headers: { "Content-Type": "application/json", "X-Dire-Mux-Agent-Token": agentToken, ...init?.headers },
+				headers: { "Content-Type": "application/json", "X-Kiwi-Code-Agent-Token": agentToken, ...init?.headers },
 				signal: controller.signal,
 			});
 		} finally {
@@ -61,7 +61,7 @@ export default function (pi: ExtensionAPI) {
 		const body = JSON.stringify({ sessionId, ...sessionTotals(ctx) });
 		const scheduled = requests.then(async () => {
 			const response = await request("/usage", { method: "PUT", body });
-			if (!response.ok) throw new Error(`dire/mux returned ${response.status}`);
+			if (!response.ok) throw new Error(`Kiwi Code returned ${response.status}`);
 		});
 		requests = scheduled.catch(() => {});
 		return requests;

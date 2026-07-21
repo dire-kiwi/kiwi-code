@@ -22,19 +22,19 @@ async function readInput() {
 }
 
 function threadEndpoint() {
-  return (process.env.DIRE_MUX_THREAD_ENDPOINT || '').replace(/\/+$/, '')
+  return (process.env.KIWI_CODE_THREAD_ENDPOINT || '').replace(/\/+$/, '')
 }
 
 function stateDirectory() {
-  if (process.env.DIRE_MUX_CLAUDE_STATE_DIR) return process.env.DIRE_MUX_CLAUDE_STATE_DIR
+  if (process.env.KIWI_CODE_CLAUDE_STATE_DIR) return process.env.KIWI_CODE_CLAUDE_STATE_DIR
   const uid = typeof process.getuid === 'function' ? process.getuid() : 'user'
-  return path.join(os.tmpdir(), `dire-mux-claude-${uid}`)
+  return path.join(os.tmpdir(), `kiwi-code-claude-${uid}`)
 }
 
 function sessionKey(input) {
   return [
-    process.env.DIRE_MUX_PROJECT_ID,
-    process.env.DIRE_MUX_THREAD_ID,
+    process.env.KIWI_CODE_PROJECT_ID,
+    process.env.KIWI_CODE_THREAD_ID,
     input.session_id,
   ].map(safeSegment).join('-')
 }
@@ -72,7 +72,7 @@ async function request(url, init = {}, timeoutMs = requestTimeoutMs) {
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const response = await fetch(url, { ...init, signal: controller.signal })
-    if (!response.ok) throw new Error(`Dire Mux returned ${response.status}`)
+    if (!response.ok) throw new Error(`Kiwi Code returned ${response.status}`)
     return response
   } finally {
     clearTimeout(timeout)
@@ -87,7 +87,7 @@ async function sendActivity(state, timeoutMs = requestTimeoutMs, promptStartedAt
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       state,
-      agent: process.env.DIRE_MUX_CODING_AGENT || 'claude',
+      agent: process.env.KIWI_CODE_CODING_AGENT || 'claude',
       ...(promptStartedAt ? { promptStartedAt } : {}),
     }),
   }, timeoutMs)
@@ -179,7 +179,7 @@ function titlePrompt(firstMessage) {
 }
 
 async function generateTitle(prompt) {
-  const executable = process.env.DIRE_MUX_PI_PATH || 'pi'
+  const executable = process.env.KIWI_CODE_PI_PATH || 'pi'
   const environment = { ...process.env, PI_SKIP_VERSION_CHECK: '1' }
   delete environment.CLAUDECODE
   delete environment.CLAUDE_CODE_CHILD_SESSION
@@ -303,10 +303,10 @@ async function main() {
 }
 
 await main().catch((error) => {
-  // Dire Mux integration must never block or fail the user's Claude turn.
+  // Kiwi Code integration must never block or fail the user's Claude turn.
   if (process.argv[2] !== 'title') return
   const message = error instanceof Error ? error.message : String(error)
   process.stdout.write(JSON.stringify({
-    systemMessage: `Could not name Dire Mux thread: ${message}`,
+    systemMessage: `Could not name Kiwi Code thread: ${message}`,
   }))
 })

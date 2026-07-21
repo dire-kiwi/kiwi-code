@@ -19,9 +19,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dire-kiwi/kiwi-code/internal/broadcast"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 	"github.com/gorilla/websocket"
-	"github.com/ivan/dire-mux/internal/broadcast"
-	"github.com/ivan/dire-mux/internal/project"
 )
 
 const (
@@ -509,8 +509,8 @@ func (m *claudeNativeManager) startProcess(
 	}
 	command := exec.Command(claudePath, claudeNativeArguments(m.pluginPath, resumeSessionID, launchOptions)...)
 	command.Dir = thread.Cwd
-	threadEnvironment := direMuxThreadEnvironment(threadEndpoint, key.ProjectID, key.ThreadID)
-	// Match the terminal Claude launch: no Dire Mux agent token or child-thread
+	threadEnvironment := kiwiCodeThreadEnvironment(threadEndpoint, key.ProjectID, key.ThreadID)
+	// Match the terminal Claude launch: no Kiwi Code agent token or child-thread
 	// metadata. The Claude browser MCP server reads its capability from the
 	// protected data directory instead of the environment.
 	piPath := codingAgentPi
@@ -521,8 +521,8 @@ func (m *claudeNativeManager) startProcess(
 		os.Environ(),
 		append(
 			threadEnvironment,
-			"DIRE_MUX_PI_PATH="+piPath,
-			"DIRE_MUX_CODING_AGENT="+codingAgentClaude,
+			"KIWI_CODE_PI_PATH="+piPath,
+			"KIWI_CODE_CODING_AGENT="+codingAgentClaude,
 		)...,
 	)
 	stdin, err := command.StdinPipe()
@@ -699,7 +699,7 @@ func (p *claudeNativeProcess) publishClaudeEvent(payload []byte) {
 				"response": map[string]any{
 					"subtype":    "error",
 					"request_id": event.RequestID,
-					"error":      "Dire Mux does not support this control request.",
+					"error":      "Kiwi Code does not support this control request.",
 				},
 			})
 			_ = p.send(response)
@@ -918,7 +918,7 @@ func (p *claudeNativeProcess) sendPrompt(message string, images []piNativeClient
 func (p *claudeNativeProcess) sendInterrupt() error {
 	payload, err := json.Marshal(map[string]any{
 		"type":       "control_request",
-		"request_id": fmt.Sprintf("dire-mux-interrupt-%d", p.request.Add(1)),
+		"request_id": fmt.Sprintf("kiwi-code-interrupt-%d", p.request.Add(1)),
 		"request":    map[string]any{"subtype": "interrupt"},
 	})
 	if err != nil {

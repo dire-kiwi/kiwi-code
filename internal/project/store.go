@@ -17,7 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/ivan/dire-mux/internal/broadcast"
+	"github.com/dire-kiwi/kiwi-code/internal/broadcast"
 )
 
 var ErrNotFound = errors.New("project not found")
@@ -363,7 +363,7 @@ func (s *Store) ListProfiles() []Profile {
 }
 
 // ResolveSnapshot copies a committed event snapshot and refreshes status that
-// can change outside Dire Mux, such as whether a folder is now a Git repository.
+// can change outside Kiwi Code, such as whether a folder is now a Git repository.
 func (s *Store) ResolveSnapshot(projects []Project) []Project {
 	return resolveSnapshot(cloneProjects(projects))
 }
@@ -2177,13 +2177,13 @@ func (s *Store) createWorktreeThread(item Project, thread Thread, baseBranch, ba
 
 func initialWorktreeBranch(thread Thread) string {
 	if thread.Title == defaultThreadTitle {
-		return "dire-mux/thread-" + shortThreadID(thread.ID)
+		return "kiwi-code/thread-" + shortThreadID(thread.ID)
 	}
 	return namedWorktreeBranch(thread.Title, thread.ID)
 }
 
 func namedWorktreeBranch(title, threadID string) string {
-	return "dire-mux/" + branchSlug(title) + "-" + shortThreadID(threadID)
+	return "kiwi-code/" + branchSlug(title) + "-" + shortThreadID(threadID)
 }
 
 func shortThreadID(threadID string) string {

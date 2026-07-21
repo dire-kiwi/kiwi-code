@@ -19,7 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 const (
@@ -177,7 +177,7 @@ func (s *Server) requireAgentCapability(w http.ResponseWriter, r *http.Request) 
 	}
 	provided := r.Header.Get(agentTokenHeader)
 	if expected == "" || len(provided) != len(expected) || subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
-		writeError(w, http.StatusForbidden, "This endpoint is only available to Dire Mux-managed agents.")
+		writeError(w, http.StatusForbidden, "This endpoint is only available to Kiwi Code-managed agents.")
 		return false
 	}
 	return true
@@ -405,7 +405,7 @@ func (s *Server) stopSkillForkChild(w http.ResponseWriter, r *http.Request) {
 // not enter the workflow control plane.
 func (s *Server) createChildThreadAuthorized(w http.ResponseWriter, r *http.Request, source childThreadCreationSource) {
 	if source == childThreadCreationDirect && !s.allowChildThreadCreation {
-		writeError(w, http.StatusServiceUnavailable, "Direct sub-agent creation is temporarily disabled; use a context: fork skill or a Dire Mux workflow.")
+		writeError(w, http.StatusServiceUnavailable, "Direct sub-agent creation is temporarily disabled; use a context: fork skill or a Kiwi Code workflow.")
 		return
 	}
 	if source != childThreadCreationDirect && source != childThreadCreationWorkflow && source != childThreadCreationSkillFork {

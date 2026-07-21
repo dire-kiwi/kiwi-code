@@ -13,7 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 const (
@@ -24,9 +24,9 @@ const (
 	maxProcessWebServers     = 16
 	maxProcessWebServerBytes = 2048
 
-	tmuxProcessWebServersOption = "@dire-mux-web-servers"
-	tmuxProcessActionConfirmed  = "dire-mux-process-action-confirmed"
-	tmuxProcessActionRejected   = "dire-mux-process-action-rejected"
+	tmuxProcessWebServersOption = "@kiwi-code-web-servers"
+	tmuxProcessActionConfirmed  = "kiwi-code-process-action-confirmed"
+	tmuxProcessActionRejected   = "kiwi-code-process-action-rejected"
 )
 
 var (
@@ -317,9 +317,9 @@ func (h *terminalHandler) newProcessWindow(item project.Project, thread project.
 		return processWindow{}, err
 	}
 	environment := []string{
-		"DIRE_MUX_TMUX_SESSION=" + sessionName,
-		"DIRE_MUX_TMUX_WINDOW=" + name,
-		"DIRE_MUX_PROCESS_ID=" + processID,
+		"KIWI_CODE_TMUX_SESSION=" + sessionName,
+		"KIWI_CODE_TMUX_WINDOW=" + name,
+		"KIWI_CODE_PROCESS_ID=" + processID,
 		shellCommandPath,
 	}
 	envPath := h.envPath
@@ -365,10 +365,6 @@ func (h *terminalHandler) newProcessWindow(item project.Project, thread project.
 		cleanup()
 		return processWindow{}, errors.New("created process window was not found")
 	}
-	if err := h.ensurePreviousTmuxCompatibilityAliasLocked(item.ID, thread.ID, "process", sessionName); err != nil {
-		cleanup()
-		return processWindow{}, err
-	}
 	return window, nil
 }
 
@@ -376,9 +372,9 @@ func (h *terminalHandler) processCommandWithWebServerCleanup(commandText string)
 	// The login shell intentionally remains available for final logs and follow-up
 	// input. Clear published links as soon as its foreground command returns.
 	return commandText + "\n" +
-		"__dire_mux_status=$?\n" +
+		"__kiwi_code_status=$?\n" +
 		shellQuote(h.tmuxPath) + " set-option -w -t \"$TMUX_PANE\" " + tmuxProcessWebServersOption + " '[]'\n" +
-		"(exit \"$__dire_mux_status\")"
+		"(exit \"$__kiwi_code_status\")"
 }
 
 func normalizeProcessWebServers(values []string) ([]string, error) {
@@ -439,8 +435,8 @@ func (h *terminalHandler) configureProcessWindow(sessionName string, target tmux
 		{tmuxProcessWebServersOption, "[]"},
 		// Publish the process discriminator last. Readers ignore windows without
 		// it, so they cannot observe a process window before its identity exists.
-		{"@dire-mux-process-id", processID},
-		{"@dire-mux-tool", "process"},
+		{"@kiwi-code-process-id", processID},
+		{"@kiwi-code-tool", "process"},
 	}
 	for _, option := range options {
 		if err := h.setTmuxWindowOption(targetName, option[0], option[1]); err != nil {
@@ -560,7 +556,7 @@ func tmuxProcessIncarnationCondition(target tmuxWindowTarget) (string, error) {
 		return "", fmt.Errorf("invalid tmux process id %q", target.ProcessID)
 	}
 	return fmt.Sprintf(
-		"#{&&:%s,#{==:#{@dire-mux-process-id},%s}}",
+		"#{&&:%s,#{==:#{@kiwi-code-process-id},%s}}",
 		windowCondition,
 		target.ProcessID,
 	), nil
@@ -587,7 +583,7 @@ func (h *terminalHandler) tmuxProcessWindows(sessionName string) ([]processWindo
 	output, err := h.tmuxCommand(
 		"list-windows",
 		"-t", exactTmuxSessionTarget(sessionName),
-		"-F", "#{window_index}\t#{window_id}\t#{window_name}\t#{@dire-mux-tool}\t#{@dire-mux-process-id}\t#{pane_current_command}\t#{@dire-mux-web-servers}\t#{pid}",
+		"-F", "#{window_index}\t#{window_id}\t#{window_name}\t#{@kiwi-code-tool}\t#{@kiwi-code-process-id}\t#{pane_current_command}\t#{@kiwi-code-web-servers}\t#{pid}",
 	).CombinedOutput()
 	if err != nil {
 		return nil, tmuxCommandError("list process windows", output, err)

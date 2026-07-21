@@ -81,7 +81,7 @@ export function WorktreeBaseBranchField({
         </div>
       ) : (
         <p id="worktree-base-branch-help" className="mt-2 text-[9px] leading-4 text-ghost-faint">
-          <span className="font-mono text-ghost-muted">dire-mux/thread-…</span> starts from this branch and is renamed after the first coding-agent prompt.
+          <span className="font-mono text-ghost-muted">kiwi-code/thread-…</span> starts from this branch and is renamed after the first coding-agent prompt.
         </p>
       )}
     </div>

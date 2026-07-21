@@ -1,5 +1,5 @@
 {
-  "name": "dire-mux-web",
+  "name": "kiwi-code-web",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -12,7 +12,7 @@
     "dev:servers": "node scripts/dev-stack.mjs",
     "predev:desktop": "npm run generate:theme",
     "dev:desktop": "node scripts/dev-stack.mjs --desktop",
-    "run:desktop": "concurrently --kill-others --success command-desktop --names server,desktop \"cd .. && make run\" \"wait-on --timeout 30000 http-get://127.0.0.1:4000/api/health && DIRE_MUX_DESKTOP_URL=http://127.0.0.1:4000 node scripts/electron-launcher.mjs\"",
+    "run:desktop": "concurrently --kill-others --success command-desktop --names server,desktop \"cd .. && make run\" \"wait-on --timeout 30000 http-get://127.0.0.1:4000/api/health && KIWI_CODE_DESKTOP_URL=http://127.0.0.1:4000 node scripts/electron-launcher.mjs\"",
     "test": "node --test scripts/*.test.mjs electron/*.test.cjs",
     "prebuild": "npm run generate:theme",
     "build": "tsc --noEmit -p tsconfig.app.json && vite build",

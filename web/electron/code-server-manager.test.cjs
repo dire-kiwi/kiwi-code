@@ -113,14 +113,14 @@ function fakeHostWindow(appView) {
 }
 
 test('builds a private dynamic code-server launch and folder URL', () => {
-  const paths = codeServerPaths({ getPath: () => '/tmp/dire mux profile' }, 'nonce')
-  assert.equal(paths.config, '/tmp/dire mux profile/code-server/config.yaml')
+  const paths = codeServerPaths({ getPath: () => '/tmp/kiwi code profile' }, 'nonce')
+  assert.equal(paths.config, '/tmp/kiwi code profile/code-server/config.yaml')
   assert.deepEqual(codeServerArguments(paths).slice(0, 4), [
     '--bind-addr', '127.0.0.1:0', '--auth', 'password',
   ])
   assert.ok(codeServerArguments(paths).includes('--disable-telemetry'))
   assert.ok(codeServerArguments(paths).includes('--disable-update-check'))
-  assert.equal(codeServerCommand({ DIRE_MUX_CODE_SERVER_BIN: ' /custom/code-server ' }), '/custom/code-server')
+  assert.equal(codeServerCommand({ KIWI_CODE_CODE_SERVER_BIN: ' /custom/code-server ' }), '/custom/code-server')
   assert.equal(codeServerCommand({}), 'code-server')
 
   assert.equal(
@@ -135,7 +135,7 @@ test('builds a private dynamic code-server launch and folder URL', () => {
   assert.equal(workspaceUrl.searchParams.get('folder'), '/tmp/a folder')
 })
 
-test('blocks host files and Dire Mux control origins from the Code partition', () => {
+test('blocks host files and Kiwi Code control origins from the Code partition', () => {
   const protectedOrigins = new Set(['http://127.0.0.1:4000'])
   assert.equal(isBlockedCodeServerRequest('file:///Users/example/.ssh/id_ed25519', protectedOrigins), true)
   assert.equal(isBlockedCodeServerRequest('http://localhost:4000/api/projects', protectedOrigins), true)
@@ -145,7 +145,7 @@ test('blocks host files and Dire Mux control origins from the Code partition', (
 })
 
 test('starts, authenticates, embeds, reuses, and disposes code-server', async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'dire-mux-code-manager-'))
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'kiwi-code-code-manager-'))
   const electronSession = fakeElectronSession()
   const appView = {
     webContents: {
@@ -173,7 +173,7 @@ test('starts, authenticates, embeds, reuses, and disposes code-server', async ()
     appView,
     electronSession,
     protectedOrigins: ['http://127.0.0.1:4000'],
-    environment: { PATH: '/test', DIRE_MUX_CODE_SERVER_BIN: '/test/code-server' },
+    environment: { PATH: '/test', KIWI_CODE_CODE_SERVER_BIN: '/test/code-server' },
     spawn(command, args, options) {
       const child = new FakeChild()
       children.push(child)
@@ -236,7 +236,7 @@ test('starts, authenticates, embeds, reuses, and disposes code-server', async ()
     assert.equal((await fs.stat(manager.paths.config)).mode & 0o777, 0o600)
 
     const extensionDirectories = await fs.readdir(manager.paths.extensions)
-    const themeDirectory = extensionDirectories.find((name) => name.startsWith('dire-mux.kiwi-code-theme-'))
+    const themeDirectory = extensionDirectories.find((name) => name.startsWith('kiwi-code.kiwi-code-theme-'))
     assert.ok(themeDirectory, 'the Kiwi Code theme extension is installed')
     const installedTheme = JSON.parse(await fs.readFile(
       path.join(manager.paths.extensions, themeDirectory, 'themes', 'kiwi-code-color-theme.json'),
@@ -256,7 +256,7 @@ test('starts, authenticates, embeds, reuses, and disposes code-server', async ()
 })
 
 test('preparePaths keeps existing code-server user settings intact', async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'dire-mux-code-settings-'))
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'kiwi-code-code-settings-'))
   const electronSession = fakeElectronSession()
   const appView = { webContents: { isDestroyed: () => false, focus() {} } }
   const manager = new CodeServerWorkspaceManager({
@@ -286,7 +286,7 @@ test('preparePaths keeps existing code-server user settings intact', async () =>
 })
 
 test('reports a missing code-server executable without attaching a guest', async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'dire-mux-code-missing-'))
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'kiwi-code-code-missing-'))
   const electronSession = fakeElectronSession()
   const appView = { webContents: { isDestroyed: () => false, focus() {} } }
   const hostWindow = fakeHostWindow(appView)

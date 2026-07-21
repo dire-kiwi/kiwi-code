@@ -78,42 +78,42 @@ func materializePiExtensions(dataDirectory string) ([]string, error) {
 }
 
 func materializePiThreadTitleExtension(dataDirectory string) (string, error) {
-	return materializePiExtension(dataDirectory, "dire-mux-thread-title.ts", piThreadTitleExtension)
+	return materializePiExtension(dataDirectory, "kiwi-code-thread-title.ts", piThreadTitleExtension)
 }
 
 func materializePiThreadActivityExtension(dataDirectory string) (string, error) {
-	return materializePiExtension(dataDirectory, "dire-mux-thread-activity.ts", piThreadActivityExtension)
+	return materializePiExtension(dataDirectory, "kiwi-code-thread-activity.ts", piThreadActivityExtension)
 }
 
 func materializePiThreadUsageExtension(dataDirectory string) (string, error) {
-	return materializePiExtension(dataDirectory, "dire-mux-thread-usage.ts", piThreadUsageExtension)
+	return materializePiExtension(dataDirectory, "kiwi-code-thread-usage.ts", piThreadUsageExtension)
 }
 
 func materializePiThreadContextExtension(dataDirectory string) (string, error) {
-	return materializePiExtension(dataDirectory, "dire-mux-thread-context.ts", piThreadContextExtension)
+	return materializePiExtension(dataDirectory, "kiwi-code-thread-context.ts", piThreadContextExtension)
 }
 
 func materializePiChildThreadsExtension(dataDirectory string) (string, error) {
-	return materializePiExtension(dataDirectory, "dire-mux-child-threads.ts", piChildThreadsExtension)
+	return materializePiExtension(dataDirectory, "kiwi-code-child-threads.ts", piChildThreadsExtension)
 }
 
 func materializePiWorkflowsExtension(dataDirectory string) (string, error) {
-	return materializePiExtension(dataDirectory, "dire-mux-workflows.ts", piWorkflowsExtension)
+	return materializePiExtension(dataDirectory, "kiwi-code-workflows.ts", piWorkflowsExtension)
 }
 
 func materializePiSkillForksExtension(dataDirectory string) (string, error) {
-	return materializePiExtension(dataDirectory, "dire-mux-skill-forks.ts", piSkillForksExtension)
+	return materializePiExtension(dataDirectory, "kiwi-code-skill-forks.ts", piSkillForksExtension)
 }
 
 func materializePiBrowserExtension(dataDirectory string) (string, error) {
 	if err := materializePiBrowserSkill(dataDirectory); err != nil {
 		return "", err
 	}
-	return materializePiExtension(dataDirectory, "dire-mux-browser.ts", piBrowserExtension)
+	return materializePiExtension(dataDirectory, "kiwi-code-browser.ts", piBrowserExtension)
 }
 
 func materializePiBrowserSkill(dataDirectory string) error {
-	return materializePiSkill(dataDirectory, "dire-mux-in-app-browser", piBrowserSkill)
+	return materializePiSkill(dataDirectory, "kiwi-code-in-app-browser", piBrowserSkill)
 }
 
 func materializePiPlannerSkill(dataDirectory string) error {
