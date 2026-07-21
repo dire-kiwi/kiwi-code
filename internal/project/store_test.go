@@ -49,6 +49,46 @@ func TestStorePersistsProjects(t *testing.T) {
 	}
 }
 
+func TestStoreAddsNewProjectsAtTopOfProfile(t *testing.T) {
+	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
+	store, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	personalFirst, err := store.Add("Personal first", t.TempDir(), PersonalProfileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workFirst, err := store.Add("Work first", t.TempDir(), WorkProfileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	personalNewest, err := store.Add("Personal newest", t.TempDir(), PersonalProfileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workNewest, err := store.Add("Work newest", t.TempDir(), WorkProfileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects := reloaded.List()
+	want := []string{personalNewest.ID, workNewest.ID, personalFirst.ID, workFirst.ID}
+	if len(projects) != len(want) {
+		t.Fatalf("persisted project count = %d, want %d: %#v", len(projects), len(want), projects)
+	}
+	for index, projectID := range want {
+		if projects[index].ID != projectID {
+			t.Fatalf("persisted project order = %#v, want IDs %#v", projects, want)
+		}
+	}
+}
+
 func TestStorePersistsLatestThreadPromptTime(t *testing.T) {
 	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
 	store, err := NewStore(dataFile)
@@ -626,8 +666,8 @@ func TestReorderRebasesOnLatestPersistedProjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(projects) != 3 || projects[2].ID != third.ID {
-		t.Fatalf("stale reorder lost a concurrently added project: %#v", projects)
+	if len(projects) != 3 || projects[0].ID != third.ID {
+		t.Fatalf("stale reorder lost a concurrently added project at the top: %#v", projects)
 	}
 }
 

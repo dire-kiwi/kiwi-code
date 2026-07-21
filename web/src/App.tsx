@@ -172,6 +172,19 @@ function projectsWithProfileOrder(current: Project[], profileId: string, project
   )
 }
 
+function projectsWithNewProjectFirst(current: Project[], project: Project) {
+  if (current.some((item) => item.id === project.id)) return current
+
+  const updated = [...current, project]
+  const profileProjectIds = [
+    project.id,
+    ...current
+      .filter((item) => item.profileId === project.profileId)
+      .map((item) => item.id),
+  ]
+  return projectsWithProfileOrder(updated, project.profileId, profileProjectIds)
+}
+
 function projectsWithThreadOrder(current: Project[], projectId: string, threadIds: string[]) {
   return current.map((project) => {
     if (project.id !== projectId || project.threads.length !== threadIds.length) return project
@@ -595,9 +608,7 @@ export default function App() {
   }
 
   function handleCreated(project: Project) {
-    setProjects((current) => current.some((item) => item.id === project.id)
-      ? current
-      : [...current, project])
+    setProjects((current) => projectsWithNewProjectFirst(current, project))
     setSidebarOpen(false)
     const thread = project.threads.find((item) => !item.parentThreadId) ?? project.threads[0]
     navigate(thread ? workspacePath(project.id, thread.id, defaultWorkspaceTool) : newThreadPath(project.id))
