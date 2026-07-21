@@ -1296,6 +1296,12 @@ func (s *Store) Add(name, path string, profileIDs ...string) (result Project, er
 	}
 	absPath = filepath.Clean(absPath)
 	info, err := os.Stat(absPath)
+	if errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(absPath, 0o755); err != nil {
+			return Project{}, fmt.Errorf("create project path: %w", err)
+		}
+		info, err = os.Stat(absPath)
+	}
 	if err != nil {
 		return Project{}, fmt.Errorf("open project path: %w", err)
 	}
