@@ -1342,13 +1342,28 @@ func (s *Store) Add(name, path string, profileIDs ...string) (result Project, er
 		ID: id, Name: name, Path: absPath, ProfileID: profileID, Host: localHostname(), IsGitRepo: isGitRepository(absPath), CreatedAt: now,
 		Threads: []Thread{{ID: threadID, Title: defaultThreadTitle, Cwd: absPath, CreatedAt: now}},
 	}
-	s.projects = append(s.projects, item)
+	previous := s.projects
+	updated := make([]Project, len(previous)+1)
+	copy(updated, previous)
+	updated[len(previous)] = item
+
+	// Projects from different profiles keep their existing slots, while the
+	// new project moves ahead of every project in its own profile.
+	newProjectIndex := len(updated) - 1
+	for index := newProjectIndex - 1; index >= 0; index-- {
+		if updated[index].ProfileID != profileID {
+			continue
+		}
+		updated[index], updated[newProjectIndex] = updated[newProjectIndex], updated[index]
+		newProjectIndex = index
+	}
+	s.projects = updated
 	if err := s.saveLocked(); err != nil {
 		if projectSaveWasPublished(err) {
 			s.notifyChangesLocked()
 			return item, err
 		}
-		s.projects = s.projects[:len(s.projects)-1]
+		s.projects = previous
 		return Project{}, err
 	}
 	s.notifyChangesLocked()
