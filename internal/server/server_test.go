@@ -232,6 +232,25 @@ func TestProfileAPIAndProjectAssignment(t *testing.T) {
 		t.Fatalf("cleared project nesting = %#v", updated)
 	}
 
+	prefixResponse := httptest.NewRecorder()
+	handler.ServeHTTP(prefixResponse, httptest.NewRequest(http.MethodPatch, updatePath, bytes.NewBufferString(`{"worktreeBranchPrefix":"ivan/"}`)))
+	if prefixResponse.Code != http.StatusOK {
+		t.Fatalf("update project branch prefix status = %d, body = %s", prefixResponse.Code, prefixResponse.Body.String())
+	}
+	updated = project.Project{}
+	if err := json.NewDecoder(prefixResponse.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.WorktreeBranchPrefix != "ivan/" {
+		t.Fatalf("updated project branch prefix = %q", updated.WorktreeBranchPrefix)
+	}
+
+	invalidPrefixResponse := httptest.NewRecorder()
+	handler.ServeHTTP(invalidPrefixResponse, httptest.NewRequest(http.MethodPatch, updatePath, bytes.NewBufferString(`{"worktreeBranchPrefix":"bad prefix/"}`)))
+	if invalidPrefixResponse.Code != http.StatusBadRequest {
+		t.Fatalf("invalid project branch prefix status = %d, body = %s", invalidPrefixResponse.Code, invalidPrefixResponse.Body.String())
+	}
+
 	invalidDepthResponse := httptest.NewRecorder()
 	handler.ServeHTTP(invalidDepthResponse, httptest.NewRequest(http.MethodPatch, updatePath, bytes.NewBufferString(`{"subAgentNestingDepthOverride":5}`)))
 	if invalidDepthResponse.Code != http.StatusBadRequest {

@@ -139,7 +139,7 @@ export function createProject(input: { name: string; path: string; profileId: st
 
 export function updateProject(
   id: string,
-  input: { profileId?: string; subAgentNestingDepthOverride?: number | null },
+  input: { profileId?: string; subAgentNestingDepthOverride?: number | null; worktreeBranchPrefix?: string },
 ) {
   return request<Project>(`/api/projects/${encodeURIComponent(id)}`, {
     method: 'PATCH',
@@ -153,6 +153,10 @@ export function updateProjectProfile(id: string, profileId: string) {
 
 export function updateProjectSubAgentNestingDepth(id: string, depth: number | null) {
   return updateProject(id, { subAgentNestingDepthOverride: depth })
+}
+
+export function updateProjectWorktreeBranchPrefix(id: string, prefix: string) {
+  return updateProject(id, { worktreeBranchPrefix: prefix })
 }
 
 export function updateProjectOrder(profileId: string, projectIds: string[]) {

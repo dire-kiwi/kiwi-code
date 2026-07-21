@@ -18,6 +18,7 @@ export type Project = {
   createdAt: string
   threads: Thread[]
   subAgentNestingDepthOverride?: number | null
+  worktreeBranchPrefix: string
 }
 
 export type Thread = {

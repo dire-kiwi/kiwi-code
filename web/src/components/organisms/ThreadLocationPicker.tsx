@@ -86,6 +86,7 @@ export function ThreadLocationPicker({
               <WorktreeBaseBranchField
                 branchState={branchState}
                 value={baseBranch}
+                branchPrefix={project.worktreeBranchPrefix}
                 loading={branchesLoading}
                 error={branchLoadError}
                 disabled={disabled}

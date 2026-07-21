@@ -11,10 +11,16 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Pencil,
+  Save,
   SquareTerminal,
   X,
 } from 'lucide-react'
-import { updateProjectProfile, updateProjectSubAgentNestingDepth, updateThreadTitle } from '../../api'
+import {
+  updateProjectProfile,
+  updateProjectSubAgentNestingDepth,
+  updateProjectWorktreeBranchPrefix,
+  updateThreadTitle,
+} from '../../api'
 import { formatWhen } from '../../lib/formatWhen'
 import { MAX_SUB_AGENT_NESTING_DEPTH } from '../../lib/validation'
 import type { Profile, Project, Thread, ThreadPlan, ThreadUsageSnapshot, WorkflowRun } from '../../types'
@@ -83,6 +89,10 @@ export function ThreadProjectSidebar({
   const [profileError, setProfileError] = useState('')
   const [nestingSaving, setNestingSaving] = useState(false)
   const [nestingError, setNestingError] = useState('')
+  const [branchPrefix, setBranchPrefix] = useState(project.worktreeBranchPrefix)
+  const [branchPrefixSaving, setBranchPrefixSaving] = useState(false)
+  const [branchPrefixError, setBranchPrefixError] = useState('')
+  const [branchPrefixMessage, setBranchPrefixMessage] = useState('')
   const threadsById = new Map(project.threads.map((candidate) => [candidate.id, candidate]))
   let mainThread = thread
   const visitedAncestors = new Set<string>()
@@ -119,6 +129,12 @@ export function ThreadProjectSidebar({
   useEffect(() => {
     if (!editing) setTitle(thread.title)
   }, [editing, thread.title])
+
+  useEffect(() => {
+    setBranchPrefix(project.worktreeBranchPrefix)
+    setBranchPrefixError('')
+    setBranchPrefixMessage('')
+  }, [project.id, project.worktreeBranchPrefix])
 
   useEffect(() => {
     if (!editing || !expanded || tab !== 'thread') return
@@ -198,6 +214,26 @@ export function ThreadProjectSidebar({
       setNestingError(reason instanceof Error ? reason.message : 'Could not update sub-agent nesting.')
     } finally {
       setNestingSaving(false)
+    }
+  }
+
+  async function handleBranchPrefixSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const prefix = branchPrefix.trim()
+    if (!prefix || branchPrefixSaving || prefix === project.worktreeBranchPrefix) return
+
+    setBranchPrefixSaving(true)
+    setBranchPrefixError('')
+    setBranchPrefixMessage('')
+    try {
+      const updated = await updateProjectWorktreeBranchPrefix(project.id, prefix)
+      onProjectUpdated(updated)
+      setBranchPrefix(updated.worktreeBranchPrefix)
+      setBranchPrefixMessage('Branch prefix saved.')
+    } catch (reason) {
+      setBranchPrefixError(reason instanceof Error ? reason.message : 'Could not update the branch prefix.')
+    } finally {
+      setBranchPrefixSaving(false)
     }
   }
 
@@ -611,6 +647,60 @@ export function ThreadProjectSidebar({
                       </p>
                     )}
                   </div>
+                  <form
+                    className="mt-2 rounded-xl border border-ghost-border/55 bg-ghost-black/25 px-3 py-3"
+                    onSubmit={(event) => void handleBranchPrefixSubmit(event)}
+                  >
+                    <label
+                      htmlFor="project-worktree-branch-prefix"
+                      className="font-mono text-[8px] font-semibold uppercase tracking-[0.12em] text-ghost-faint"
+                    >
+                      Worktree branch prefix
+                    </label>
+                    <div className="mt-2 flex items-center gap-2">
+                      <TextInput
+                        id="project-worktree-branch-prefix"
+                        value={branchPrefix}
+                        onChange={(event) => {
+                          setBranchPrefix(event.target.value)
+                          setBranchPrefixError('')
+                          setBranchPrefixMessage('')
+                        }}
+                        maxLength={100}
+                        disabled={branchPrefixSaving}
+                        autoComplete="off"
+                        spellCheck={false}
+                        placeholder="kiwi-code/"
+                        aria-describedby={branchPrefixError
+                          ? 'project-worktree-branch-prefix-error'
+                          : 'project-worktree-branch-prefix-help'}
+                        className="min-w-0 flex-1 font-mono text-[10px]"
+                      />
+                      <IconButton
+                        type="submit"
+                        shrink
+                        variant="ghost"
+                        disabled={branchPrefixSaving || !branchPrefix.trim() || branchPrefix.trim() === project.worktreeBranchPrefix}
+                        aria-label="Save worktree branch prefix"
+                        title="Save branch prefix"
+                      >
+                        {branchPrefixSaving ? <LoaderCircle size={13} className="animate-spin" /> : <Save size={13} />}
+                      </IconButton>
+                    </div>
+                    <p id="project-worktree-branch-prefix-help" className="mt-2 text-[9px] leading-4 text-ghost-faint">
+                      Used for new managed worktree branches, including their automatic rename after the first prompt. Include separators such as <span className="font-mono text-ghost-muted">ivan/</span>.
+                    </p>
+                    {branchPrefixError && (
+                      <p id="project-worktree-branch-prefix-error" role="alert" className="mt-2 text-[10px] leading-4 text-ghost-bright-red">
+                        {branchPrefixError}
+                      </p>
+                    )}
+                    {branchPrefixMessage && (
+                      <p role="status" className="mt-2 text-[10px] leading-4 text-ghost-green">
+                        {branchPrefixMessage}
+                      </p>
+                    )}
+                  </form>
 
                   <p className="mt-4 font-mono text-[8px] font-semibold uppercase tracking-[0.16em] text-ghost-faint">
                     Paths

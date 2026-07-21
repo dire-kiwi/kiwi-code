@@ -37,6 +37,9 @@ func TestStorePersistsProjects(t *testing.T) {
 	if items[0].ProfileID != PersonalProfileID {
 		t.Fatalf("default profile = %q, want %q", items[0].ProfileID, PersonalProfileID)
 	}
+	if items[0].WorktreeBranchPrefix != DefaultWorktreeBranchPrefix {
+		t.Fatalf("default worktree branch prefix = %q, want %q", items[0].WorktreeBranchPrefix, DefaultWorktreeBranchPrefix)
+	}
 	if len(items[0].Threads) != 1 || items[0].Threads[0].Cwd != projectPath {
 		t.Fatalf("unexpected initial thread: %#v", items[0].Threads)
 	}
@@ -46,6 +49,53 @@ func TestStorePersistsProjects(t *testing.T) {
 	}
 	if _, err := reloaded.Get(created.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestStoreMigratesDefaultWorktreeBranchPrefix(t *testing.T) {
+	dataFile := filepath.Join(t.TempDir(), "projects.json")
+	store, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := store.Add("Legacy", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projects []map[string]any
+	if err := json.Unmarshal(contents, &projects); err != nil {
+		t.Fatal(err)
+	}
+	delete(projects[0], "worktreeBranchPrefix")
+	contents, err = json.Marshal(projects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dataFile, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrated, err := reloaded.Get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if migrated.WorktreeBranchPrefix != DefaultWorktreeBranchPrefix {
+		t.Fatalf("migrated worktree branch prefix = %q, want %q", migrated.WorktreeBranchPrefix, DefaultWorktreeBranchPrefix)
+	}
+	persisted, err := os.ReadFile(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(persisted), `"worktreeBranchPrefix": "kiwi-code/"`) {
+		t.Fatalf("migrated prefix was not persisted:\n%s", persisted)
 	}
 }
 
@@ -1790,6 +1840,11 @@ func TestStoreDiscoversPreviouslyUntrackedManagedWorktrees(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	customPrefix := "ivan/"
+	item, err = store.UpdateProject(item.ID, ProjectUpdate{WorktreeBranchPrefix: &customPrefix})
+	if err != nil {
+		t.Fatal(err)
+	}
 	thread, err := store.AddThread(item.ID, "Legacy orphan", true)
 	if err != nil {
 		t.Fatal(err)
@@ -2023,6 +2078,86 @@ func TestStoreCreatesGitWorktreeThreads(t *testing.T) {
 	branch := strings.TrimSpace(runGit(t, thread.Cwd, "branch", "--show-current"))
 	if branch != thread.Branch {
 		t.Fatalf("checked-out branch = %q, want %q", branch, thread.Branch)
+	}
+}
+
+func TestStoreUsesAndPersistsProjectWorktreeBranchPrefix(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+
+	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
+	store, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", createGitRepository(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := " ivan/ "
+	updated, err := store.UpdateProject(item.ID, ProjectUpdate{WorktreeBranchPrefix: &prefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.WorktreeBranchPrefix != "ivan/" {
+		t.Fatalf("normalized branch prefix = %q", updated.WorktreeBranchPrefix)
+	}
+
+	thread, err := store.AddThread(item.ID, defaultThreadTitle, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantInitial := "ivan/thread-" + shortThreadID(thread.ID)
+	if thread.Branch != wantInitial {
+		t.Fatalf("initial worktree branch = %q, want %q", thread.Branch, wantInitial)
+	}
+	thread, err = store.UpdateThreadTitle(item.ID, thread.ID, "Implement project prefix", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantNamed := "ivan/implement-project-prefix-" + shortThreadID(thread.ID)
+	if thread.Branch != wantNamed {
+		t.Fatalf("named worktree branch = %q, want %q", thread.Branch, wantNamed)
+	}
+	if current := strings.TrimSpace(runGit(t, thread.Cwd, "branch", "--show-current")); current != wantNamed {
+		t.Fatalf("checked-out branch = %q, want %q", current, wantNamed)
+	}
+
+	reloaded, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := reloaded.Get(item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.WorktreeBranchPrefix != "ivan/" {
+		t.Fatalf("persisted branch prefix = %q", persisted.WorktreeBranchPrefix)
+	}
+}
+
+func TestStoreRejectsInvalidProjectWorktreeBranchPrefixes(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, prefix := range []string{"", "-ivan/", "ivan//", "ivan.lock/", "ivan..team/", "ivan branch/", strings.Repeat("a", maxWorktreeBranchPrefixLength+1)} {
+		prefix := prefix
+		t.Run(prefix, func(t *testing.T) {
+			if _, err := store.UpdateProject(item.ID, ProjectUpdate{WorktreeBranchPrefix: &prefix}); err == nil {
+				t.Fatalf("expected branch prefix %q to be rejected", prefix)
+			}
+		})
+	}
+	if project, err := store.Get(item.ID); err != nil {
+		t.Fatal(err)
+	} else if project.WorktreeBranchPrefix != DefaultWorktreeBranchPrefix {
+		t.Fatalf("invalid updates changed branch prefix to %q", project.WorktreeBranchPrefix)
 	}
 }
 

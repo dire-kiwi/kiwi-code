@@ -553,7 +553,7 @@ func discoverManagedOrphanedWorktrees(
 				continue
 			}
 			threadID := filepath.Base(path)
-			if filepath.Base(filepath.Dir(path)) != item.ID || !looksLikeThreadID(threadID) || !strings.HasPrefix(candidate.branch, "kiwi-code/") {
+			if filepath.Base(filepath.Dir(path)) != item.ID || !looksLikeThreadID(threadID) || !managedWorktreeBranch(item, candidate.branch) {
 				continue
 			}
 			if _, active := activeThreads[worktreeThreadKey(item.ID, threadID)]; active {
@@ -572,6 +572,11 @@ func discoverManagedOrphanedWorktrees(
 		}
 	}
 	return discovered, errors.Join(discoveryErrors...)
+}
+
+func managedWorktreeBranch(item Project, branch string) bool {
+	return strings.HasPrefix(branch, worktreeBranchPrefix(item)) ||
+		(item.WorktreeBranchPrefix != DefaultWorktreeBranchPrefix && strings.HasPrefix(branch, DefaultWorktreeBranchPrefix))
 }
 
 type gitWorktreeEntry struct {

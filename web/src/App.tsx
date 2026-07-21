@@ -154,6 +154,7 @@ function sameProjects(current: Project[], next: Project[]) {
       && candidate.isGitRepo === project.isGitRepo
       && candidate.createdAt === project.createdAt
       && candidate.subAgentNestingDepthOverride === project.subAgentNestingDepthOverride
+      && candidate.worktreeBranchPrefix === project.worktreeBranchPrefix
       && sameThreads(project.threads, candidate.threads)
   })
 }

@@ -6,6 +6,7 @@ import { Select } from '../atoms/Select'
 type WorktreeBaseBranchFieldProps = {
   branchState: GitBranchState | null
   value: string
+  branchPrefix: string
   loading: boolean
   error: string
   disabled: boolean
@@ -16,6 +17,7 @@ type WorktreeBaseBranchFieldProps = {
 export function WorktreeBaseBranchField({
   branchState,
   value,
+  branchPrefix,
   loading,
   error,
   disabled,
@@ -81,7 +83,7 @@ export function WorktreeBaseBranchField({
         </div>
       ) : (
         <p id="worktree-base-branch-help" className="mt-2 text-[9px] leading-4 text-ghost-faint">
-          <span className="font-mono text-ghost-muted">kiwi-code/thread-…</span> starts from this branch and is renamed after the first coding-agent prompt.
+          <span className="font-mono text-ghost-muted">{branchPrefix}thread-…</span> starts from this branch and is renamed after the first coding-agent prompt.
         </p>
       )}
     </div>
