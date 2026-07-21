@@ -22,7 +22,7 @@ func TestProjectAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	projectPath := t.TempDir()
+	projectPath := filepath.Join(t.TempDir(), "new", "project")
 	body, err := json.Marshal(map[string]string{"name": "Demo", "path": projectPath})
 	if err != nil {
 		t.Fatal(err)
@@ -44,6 +44,11 @@ func TestProjectAPI(t *testing.T) {
 	}
 	if len(created.Threads) != 1 || created.Threads[0].Cwd != projectPath {
 		t.Fatalf("unexpected initial thread: %#v", created.Threads)
+	}
+	if info, err := os.Stat(projectPath); err != nil {
+		t.Fatalf("created project directory: %v", err)
+	} else if !info.IsDir() {
+		t.Fatalf("created project path is not a directory: %v", info.Mode())
 	}
 
 	listResponse := httptest.NewRecorder()

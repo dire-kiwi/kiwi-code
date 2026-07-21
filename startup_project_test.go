@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -50,12 +51,22 @@ func TestEnsureProjectPathAddsCurrentDirectoryOnce(t *testing.T) {
 	}
 }
 
-func TestEnsureProjectPathRejectsMissingDirectory(t *testing.T) {
+func TestEnsureProjectPathCreatesMissingDirectory(t *testing.T) {
 	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := ensureProjectPath(store, filepath.Join(t.TempDir(), "missing")); err == nil {
-		t.Fatal("missing current directory project was accepted")
+	projectPath := filepath.Join(t.TempDir(), "missing", "project")
+	created, added, err := ensureProjectPath(store, projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !added || created.Path != projectPath {
+		t.Fatalf("created project = %#v, added = %t", created, added)
+	}
+	if info, err := os.Stat(projectPath); err != nil {
+		t.Fatalf("created project directory: %v", err)
+	} else if !info.IsDir() {
+		t.Fatalf("created project path is not a directory: %v", info.Mode())
 	}
 }
