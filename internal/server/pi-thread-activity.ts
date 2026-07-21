@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import threadUsageExtension from "./dire-mux-thread-usage.ts";
-import browserExtension from "./dire-mux-browser.ts";
-import skillForksExtension from "./dire-mux-skill-forks.ts";
+import threadUsageExtension from "./kiwi-code-thread-usage.ts";
+import browserExtension from "./kiwi-code-browser.ts";
+import skillForksExtension from "./kiwi-code-skill-forks.ts";
 
 type ActivityState = "working" | "finished" | "idle";
 
@@ -12,7 +12,7 @@ export default function (pi: ExtensionAPI) {
 	threadUsageExtension(pi);
 	browserExtension(pi);
 	skillForksExtension(pi);
-	const threadEndpoint = process.env.DIRE_MUX_THREAD_ENDPOINT;
+	const threadEndpoint = process.env.KIWI_CODE_THREAD_ENDPOINT;
 	if (!threadEndpoint) return;
 
 	let working = false;
@@ -31,7 +31,7 @@ export default function (pi: ExtensionAPI) {
 				signal: controller.signal,
 			});
 			if (!response.ok) {
-				throw new Error(`dire/mux returned ${response.status}`);
+				throw new Error(`Kiwi Code returned ${response.status}`);
 			}
 		} finally {
 			clearTimeout(timeout);

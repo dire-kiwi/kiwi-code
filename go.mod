@@ -1,4 +1,4 @@
-module github.com/ivan/dire-mux
+module github.com/dire-kiwi/kiwi-code
 
 go 1.23.0
 

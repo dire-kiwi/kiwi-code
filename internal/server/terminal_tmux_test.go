@@ -17,12 +17,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 	"github.com/gorilla/websocket"
-	"github.com/ivan/dire-mux/internal/project"
 )
 
 type synchronizedBuffer struct {
@@ -87,7 +86,7 @@ func TestTmuxSessionPersistsAcrossHandlerRestart(t *testing.T) {
 
 	firstConnection := dialTerminal(t, firstServer.URL, item.ID, thread.ID)
 	readTerminalMessage(t, firstConnection)
-	token := fmt.Sprintf("dire-mux-persistence-%d", time.Now().UnixNano())
+	token := fmt.Sprintf("kiwi-code-persistence-%d", time.Now().UnixNano())
 	sessionName := tmuxSessionName(item.ID, thread.ID, "terminal")
 	output, err := firstHandler.tmuxCommand(
 		"send-keys",
@@ -347,7 +346,7 @@ func TestCodingAgentLaunchDoesNotExposeSleepPlaceholder(t *testing.T) {
 	output, err := handler.tmuxCommand(
 		"display-message", "-p",
 		"-t", target.ID,
-		"#{pane_start_command}\t#{pane_current_command}\t#{@dire-mux-agent}",
+		"#{pane_start_command}\t#{pane_current_command}\t#{@kiwi-code-agent}",
 	).CombinedOutput()
 	if err != nil {
 		t.Fatalf("inspect Pi launch: %v: %s", err, output)
@@ -1147,7 +1146,7 @@ func TestProcessActionsRejectReusedTmuxIncarnations(t *testing.T) {
 
 	retagged := replacement
 	retagged.ProcessID = processID
-	if err := handler.setTmuxWindowOption(replacement.ID, "@dire-mux-process-id", "replacement-process"); err != nil {
+	if err := handler.setTmuxWindowOption(replacement.ID, "@kiwi-code-process-id", "replacement-process"); err != nil {
 		t.Fatal(err)
 	}
 	assertStaleProcessActionsPreserveReplacement(t, handler, item, thread, sessionName, retagged, replacement, replacementReady, "process-retag")
@@ -1556,472 +1555,6 @@ func TestCodingAgentSignalExitIsLoggedBeforePaneRemoval(t *testing.T) {
 	}
 }
 
-func TestPreviousCanonicalTerminalSessionIsGroupedWithoutRestartingProcesses(t *testing.T) {
-	handler, item := newIsolatedTmuxHandler(t)
-	thread := item.Threads[0]
-	previousSession := previousTmuxSessionName(item.ID, thread.ID, "terminal")
-	first, err := handler.createTmuxSession(previousSession, thread.Cwd, "shell", "/bin/sleep", []string{"30"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := handler.createTmuxWindow(thread.Cwd, previousSession, "shell", "/bin/sleep", []string{"30"}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantPIDs := map[string]string{
-		first.ID:  tmuxPanePID(t, handler, first.ID),
-		second.ID: tmuxPanePID(t, handler, second.ID),
-	}
-
-	canonicalSession, _, created, err := handler.ensureTmuxSession(item, thread, "terminal")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if created || canonicalSession != tmuxSessionName(item.ID, thread.ID, "terminal") {
-		t.Fatalf("previous canonical adoption = (%q, created=%t)", canonicalSession, created)
-	}
-	for _, sessionName := range []string{canonicalSession, previousSession} {
-		if exists, err := handler.tmuxExactSessionExists(sessionName); err != nil || !exists {
-			t.Fatalf("compatibility session %q: exists=%t err=%v", sessionName, exists, err)
-		}
-		windows, err := handler.tmuxDetailedWindows(sessionName)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for windowID, wantPID := range wantPIDs {
-			found := false
-			for _, window := range windows {
-				if window.Target.ID == windowID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Fatalf("compatibility session %q windows %#v omit %q", sessionName, windows, windowID)
-			}
-			if gotPID := tmuxPanePID(t, handler, windowID); gotPID != wantPID {
-				t.Fatalf("adopted window %q pid = %q, want %q", windowID, gotPID, wantPID)
-			}
-		}
-	}
-	if owner, err := handler.tmuxWindowSession(first.ID); err != nil || owner != canonicalSession {
-		t.Fatalf("preferred session for grouped window = %q, %v; want %q", owner, err, canonicalSession)
-	}
-
-	before, err := handler.tmuxDetailedWindows(canonicalSession)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := handler.newShellWindow(item, thread); err != nil {
-		t.Fatal(err)
-	}
-	afterPrevious, err := handler.tmuxDetailedWindows(previousSession)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(afterPrevious) != len(before)+1 {
-		t.Fatalf("grouped previous session has %d windows after canonical creation, want %d", len(afterPrevious), len(before)+1)
-	}
-
-	if err := handler.stopThreadSessionsLocked(item, thread.ID); err != nil {
-		t.Fatal(err)
-	}
-	for _, sessionName := range []string{canonicalSession, previousSession} {
-		if exists, err := handler.tmuxExactSessionExists(sessionName); err != nil || exists {
-			t.Fatalf("compatibility cleanup for %q: exists=%t err=%v", sessionName, exists, err)
-		}
-	}
-}
-
-func TestPreviousCanonicalToolsSessionIsGroupedWithoutRestartingProcesses(t *testing.T) {
-	handler, item := newIsolatedTmuxHandler(t)
-	thread := item.Threads[0]
-	previousSession := previousTmuxSessionName(item.ID, thread.ID, "process")
-	window, err := handler.createTmuxSession(previousSession, thread.Cwd, "legacy-process", "/bin/sleep", []string{"30"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	beforePID := tmuxPanePID(t, handler, window.ID)
-
-	if err := handler.reconcileThreadTmuxState(item, thread); err != nil {
-		t.Fatal(err)
-	}
-	canonicalSession := tmuxSessionName(item.ID, thread.ID, "process")
-	for _, sessionName := range []string{canonicalSession, previousSession} {
-		windows, err := handler.tmuxDetailedWindows(sessionName)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(windows) != 1 || windows[0].Target.ID != window.ID {
-			t.Fatalf("grouped tools session %q windows = %#v", sessionName, windows)
-		}
-	}
-	if afterPID := tmuxPanePID(t, handler, window.ID); afterPID != beforePID {
-		t.Fatalf("tools migration restarted pid %q as %q", beforePID, afterPID)
-	}
-
-	if err := handler.stopThreadSessionsLocked(item, thread.ID); err != nil {
-		t.Fatal(err)
-	}
-	for _, sessionName := range []string{canonicalSession, previousSession} {
-		if exists, err := handler.tmuxExactSessionExists(sessionName); err != nil || exists {
-			t.Fatalf("tools compatibility cleanup for %q: exists=%t err=%v", sessionName, exists, err)
-		}
-	}
-}
-
-func TestProjectLegacyTerminalSessionIsAdoptedWithAllWindows(t *testing.T) {
-	handler, item := newIsolatedTmuxHandler(t)
-	thread := item.Threads[0]
-	legacySession := legacyProjectTmuxSessionName(item.ID, "terminal")
-	first, err := handler.createTmuxSession(legacySession, thread.Cwd, "shell", "/bin/sleep", []string{"30"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := handler.createTmuxWindow(thread.Cwd, legacySession, "shell", "/bin/sleep", []string{"30"}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantPIDs := map[string]string{
-		first.ID:  tmuxPanePID(t, handler, first.ID),
-		second.ID: tmuxPanePID(t, handler, second.ID),
-	}
-
-	canonicalSession, _, created, err := handler.ensureTmuxSession(item, thread, "terminal")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if created {
-		t.Fatal("legacy terminal session was replaced instead of adopted")
-	}
-	if canonicalSession != tmuxSessionName(item.ID, thread.ID, "terminal") {
-		t.Fatalf("canonical terminal session = %q", canonicalSession)
-	}
-	if exists, err := handler.tmuxSessionExists(legacySession); err != nil || exists {
-		t.Fatalf("legacy terminal session still exists: exists=%t err=%v", exists, err)
-	}
-	windows, err := handler.tmuxDetailedWindows(canonicalSession)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for windowID, wantPID := range wantPIDs {
-		found := false
-		for _, window := range windows {
-			if window.Target.ID == windowID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("adopted terminal windows %#v do not contain %q", windows, windowID)
-		}
-		if gotPID := tmuxPanePID(t, handler, windowID); gotPID != wantPID {
-			t.Fatalf("adopted terminal window %q pid = %q, want %q", windowID, gotPID, wantPID)
-		}
-	}
-}
-
-func TestProjectLegacyTerminalConflictPreservesCanonicalAndLegacyProcesses(t *testing.T) {
-	handler, item := newIsolatedTmuxHandler(t)
-	thread := item.Threads[0]
-	canonicalSession := tmuxSessionName(item.ID, thread.ID, "terminal")
-	canonical, err := handler.createTmuxSession(canonicalSession, thread.Cwd, "shell", "/bin/sleep", []string{"30"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacySession := legacyProjectTmuxSessionName(item.ID, "terminal")
-	legacy, err := handler.createTmuxSession(legacySession, thread.Cwd, "shell", "/bin/sleep", []string{"30"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantPIDs := map[string]string{
-		canonical.ID: tmuxPanePID(t, handler, canonical.ID),
-		legacy.ID:    tmuxPanePID(t, handler, legacy.ID),
-	}
-
-	gotSession, _, created, err := handler.ensureTmuxSession(item, thread, "terminal")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotSession != canonicalSession || created {
-		t.Fatalf("terminal ensure = (%q, created=%t), want existing %q", gotSession, created, canonicalSession)
-	}
-	windows, err := handler.tmuxDetailedWindows(canonicalSession)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for windowID, wantPID := range wantPIDs {
-		found := false
-		for _, window := range windows {
-			if window.Target.ID == windowID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("merged terminal windows %#v do not contain %q", windows, windowID)
-		}
-		if gotPID := tmuxPanePID(t, handler, windowID); gotPID != wantPID {
-			t.Fatalf("terminal conflict changed pid for %q from %q to %q", windowID, wantPID, gotPID)
-		}
-	}
-}
-
-func TestProjectLegacyTerminalIsNotAdoptedByNonDefaultThread(t *testing.T) {
-	handler, item := newIsolatedTmuxHandler(t)
-	secondThread, err := handler.projects.AddThread(item.ID, "Second thread", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	item, err = handler.projects.Get(item.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacySession := legacyProjectTmuxSessionName(item.ID, "terminal")
-	legacy, err := handler.createTmuxSession(legacySession, item.Threads[0].Cwd, "shell", "/bin/sleep", []string{"30"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacyPID := tmuxPanePID(t, handler, legacy.ID)
-
-	secondSession, _, created, err := handler.ensureTmuxSession(item, secondThread, "terminal")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !created || secondSession != tmuxSessionName(item.ID, secondThread.ID, "terminal") {
-		t.Fatalf("non-default terminal ensure = (%q, created=%t)", secondSession, created)
-	}
-	if exists, err := handler.tmuxSessionExists(legacySession); err != nil || !exists {
-		t.Fatalf("non-default thread adopted project legacy terminal: exists=%t err=%v", exists, err)
-	}
-	if gotPID := tmuxPanePID(t, handler, legacy.ID); gotPID != legacyPID {
-		t.Fatalf("non-default terminal changed legacy pid from %q to %q", legacyPID, gotPID)
-	}
-}
-
-func TestLegacyPiSessionIsAdoptedWithoutRestartingProcess(t *testing.T) {
-	handler, item := newIsolatedTmuxHandler(t)
-	thread := item.Threads[0]
-	legacySession := legacyThreadTmuxSessionName(item.ID, thread.ID, "pi")
-	target, err := handler.createTmuxSession(
-		legacySession,
-		thread.Cwd,
-		"pi",
-		"/bin/sh",
-		[]string{"-c", "exec /bin/sleep 30"},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	beforePID := tmuxPanePID(t, handler, target.ID)
-
-	canonicalSession, _, created, err := handler.ensureTmuxSession(item, thread, "pi")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if created {
-		t.Fatal("legacy Pi process was replaced instead of adopted")
-	}
-	if canonicalSession != tmuxSessionName(item.ID, thread.ID, "pi") {
-		t.Fatalf("canonical session = %q", canonicalSession)
-	}
-	if exists, err := handler.tmuxSessionExists(legacySession); err != nil || exists {
-		t.Fatalf("legacy session still exists: exists=%t err=%v", exists, err)
-	}
-	adopted, found, err := handler.tmuxToolWindow(canonicalSession, "pi")
-	if err != nil || !found {
-		t.Fatalf("find adopted Pi window: found=%t err=%v", found, err)
-	}
-	if adopted.ID != target.ID {
-		t.Fatalf("adopted window = %q, want original %q", adopted.ID, target.ID)
-	}
-	if afterPID := tmuxPanePID(t, handler, adopted.ID); afterPID != beforePID {
-		t.Fatalf("adopted Pi pid = %q, want original %q", afterPID, beforePID)
-	}
-}
-
-func TestProcessReconciliationWatchesMigratedLegacyPiWithoutTerminal(t *testing.T) {
-	handler, item := newIsolatedTmuxHandler(t)
-	thread := item.Threads[0]
-	legacySession := legacyThreadTmuxSessionName(item.ID, thread.ID, "pi")
-	target, err := handler.createTmuxSession(
-		legacySession,
-		thread.Cwd,
-		"pi",
-		"/bin/sleep",
-		[]string{"30"},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	beforePID := tmuxPanePID(t, handler, target.ID)
-
-	var logs synchronizedBuffer
-	previousOutput := log.Writer()
-	previousFlags := log.Flags()
-	log.SetOutput(&logs)
-	log.SetFlags(0)
-	t.Cleanup(func() {
-		log.SetOutput(previousOutput)
-		log.SetFlags(previousFlags)
-	})
-
-	processes, err := handler.processWindows(item, thread)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(processes) != 0 {
-		t.Fatalf("process reconciliation exposed migrated Pi as a process: %#v", processes)
-	}
-	canonicalSession := tmuxSessionName(item.ID, thread.ID, "pi")
-	adopted, found, err := handler.tmuxToolWindow(canonicalSession, "pi")
-	if err != nil || !found {
-		t.Fatalf("find status-reconciled Pi window: found=%t err=%v", found, err)
-	}
-	if adopted.ID != target.ID {
-		t.Fatalf("status reconciliation changed Pi window %q to %q", target.ID, adopted.ID)
-	}
-	if afterPID := tmuxPanePID(t, handler, adopted.ID); afterPID != beforePID {
-		t.Fatalf("status reconciliation restarted Pi pid %q as %q", beforePID, afterPID)
-	}
-	panes, err := handler.tmuxAgentPanes(adopted.ID)
-	if err != nil || len(panes) != 1 || panes[0].Agent != codingAgentPi {
-		t.Fatalf("reconciled Pi panes = %#v err=%v", panes, err)
-	}
-	paneID := panes[0].ID
-	output, err := handler.tmuxCommand(
-		"display-message", "-p", "-t", adopted.ID,
-		"#{@dire-mux-agent}\t#{remain-on-exit}",
-	).CombinedOutput()
-	if err != nil {
-		t.Fatalf("inspect reconciled Pi pane: %v: %s", err, output)
-	}
-	if got := strings.TrimSpace(string(output)); got != codingAgentPi+"\ton" {
-		t.Fatalf("reconciled Pi pane options = %q, want agent and retained exit", got)
-	}
-
-	pid, err := strconv.Atoi(beforePID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
-		t.Fatal(err)
-	}
-	waitForTmuxSessionGone(t, handler, canonicalSession)
-	exitLog := logs.String()
-	for _, expected := range []string{
-		"coding agent exited:",
-		"agent=\"pi\"",
-		"pane=\"" + paneID + "\"",
-		"signal=term",
-	} {
-		if !strings.Contains(exitLog, expected) {
-			t.Fatalf("migrated Pi exit log %q does not contain %q", exitLog, expected)
-		}
-	}
-}
-
-func TestProjectLegacyPiSessionIsAdoptedByDefaultThreadWithoutRestart(t *testing.T) {
-	handler, item := newIsolatedTmuxHandler(t)
-	thread := item.Threads[0]
-	legacySession := legacyProjectTmuxSessionName(item.ID, "pi")
-	target, err := handler.createTmuxSession(
-		legacySession,
-		thread.Cwd,
-		"pi",
-		"/bin/sh",
-		[]string{"-c", "exec /bin/sleep 30"},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	beforePID := tmuxPanePID(t, handler, target.ID)
-
-	canonicalSession, _, created, err := handler.ensureTmuxSession(item, thread, "pi")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if created {
-		t.Fatal("project-level legacy Pi process was replaced instead of adopted")
-	}
-	if exists, err := handler.tmuxSessionExists(legacySession); err != nil || exists {
-		t.Fatalf("project-level legacy session still exists: exists=%t err=%v", exists, err)
-	}
-	adopted, found, err := handler.tmuxToolWindow(canonicalSession, "pi")
-	if err != nil || !found {
-		t.Fatalf("find adopted Pi window: found=%t err=%v", found, err)
-	}
-	if adopted.ID != target.ID || tmuxPanePID(t, handler, adopted.ID) != beforePID {
-		t.Fatalf("project-level legacy Pi was restarted: target=%#v original=%#v", adopted, target)
-	}
-}
-
-func TestAdoptedLegacyPiViewRecoversAfterCanonicalSessionLoss(t *testing.T) {
-	handler, item := newIsolatedTmuxHandler(t)
-	thread := item.Threads[0]
-	legacySession := legacyProjectTmuxSessionName(item.ID, "pi")
-	target, err := handler.createTmuxSession(legacySession, thread.Cwd, "pi", "/bin/sleep", []string{"30"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	beforePID := tmuxPanePID(t, handler, target.ID)
-	viewName, err := handler.createTmuxViewSession(item, thread, legacySession, target)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	canonicalSession, _, created, err := handler.ensureTmuxSession(item, thread, "pi")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if created {
-		t.Fatal("legacy Pi was replaced during initial adoption")
-	}
-	views, err := handler.tmuxViewSessions()
-	if err != nil {
-		t.Fatal(err)
-	}
-	rewritten := false
-	for _, view := range views {
-		if view.Name == viewName {
-			rewritten = view.SourceSession == canonicalSession
-		}
-	}
-	if !rewritten {
-		t.Fatalf("legacy Pi view source was not rewritten to %q: %#v", canonicalSession, views)
-	}
-
-	staleView := fmt.Sprintf(
-		"dire-mux-view-%d-%x-legacy",
-		os.Getpid(),
-		time.Now().Add(-2*terminalViewCreationGrace).UnixNano(),
-	)
-	if output, err := handler.tmuxCommand("rename-session", "-t", viewName, staleView).CombinedOutput(); err != nil {
-		t.Fatalf("make adopted legacy view stale: %v: %s", err, output)
-	}
-	if output, err := handler.tmuxCommand("kill-session", "-t", canonicalSession).CombinedOutput(); err != nil {
-		t.Fatalf("remove adopted canonical session: %v: %s", err, output)
-	}
-
-	gotSession, _, created, err := handler.ensureTmuxSession(item, thread, "pi")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotSession != canonicalSession || created {
-		t.Fatalf("recovered legacy Pi = (%q, created=%t), want adopted %q", gotSession, created, canonicalSession)
-	}
-	if exists, err := handler.tmuxSessionExists(staleView); err != nil || exists {
-		t.Fatalf("stale adopted view survived recovery: exists=%t err=%v", exists, err)
-	}
-	adopted, found, err := handler.tmuxToolWindow(canonicalSession, "pi")
-	if err != nil || !found {
-		t.Fatalf("find twice-adopted Pi: found=%t err=%v", found, err)
-	}
-	if adopted.ID != target.ID || tmuxPanePID(t, handler, adopted.ID) != beforePID {
-		t.Fatalf("legacy-view recovery restarted Pi: adopted=%#v original=%#v", adopted, target)
-	}
-}
-
 func TestStaleViewOnlyPiIsRelinkedWithoutRestartingProcess(t *testing.T) {
 	handler, item := newIsolatedTmuxHandler(t)
 	thread := item.Threads[0]
@@ -2041,7 +1574,7 @@ func TestStaleViewOnlyPiIsRelinkedWithoutRestartingProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	staleView := fmt.Sprintf(
-		"dire-mux-view-%d-%x-1",
+		"kiwi-code-view-%d-%x-1",
 		os.Getpid(),
 		time.Now().Add(-2*terminalViewCreationGrace).UnixNano(),
 	)
@@ -2119,15 +1652,15 @@ func TestTmuxViewCreationGraceOnlyAppliesToFreshOtherProcess(t *testing.T) {
 	if otherPID <= 0 || otherPID == os.Getpid() {
 		t.Skip("no distinct live parent process")
 	}
-	freshOtherView := fmt.Sprintf("dire-mux-view-%d-%x-1", otherPID, now.UnixNano())
+	freshOtherView := fmt.Sprintf("kiwi-code-view-%d-%x-1", otherPID, now.UnixNano())
 	if !tmuxViewHasLiveCreationGrace(freshOtherView, now) {
 		t.Fatalf("fresh view from live process %d did not receive creation grace", otherPID)
 	}
-	oldOtherView := fmt.Sprintf("dire-mux-view-%d-%x-2", otherPID, now.Add(-2*terminalViewCreationGrace).UnixNano())
+	oldOtherView := fmt.Sprintf("kiwi-code-view-%d-%x-2", otherPID, now.Add(-2*terminalViewCreationGrace).UnixNano())
 	if tmuxViewHasLiveCreationGrace(oldOtherView, now) {
 		t.Fatal("old detached view received indefinite owner-liveness grace")
 	}
-	freshLocalView := fmt.Sprintf("dire-mux-view-%d-%x-3", os.Getpid(), now.UnixNano())
+	freshLocalView := fmt.Sprintf("kiwi-code-view-%d-%x-3", os.Getpid(), now.UnixNano())
 	if tmuxViewHasLiveCreationGrace(freshLocalView, now) {
 		t.Fatal("unregistered same-process view received creation grace")
 	}
@@ -2152,7 +1685,7 @@ func TestStaleViewConflictPreservesBothPiProcesses(t *testing.T) {
 		t.Fatal(err)
 	}
 	staleView := fmt.Sprintf(
-		"dire-mux-view-%d-%x-2",
+		"kiwi-code-view-%d-%x-2",
 		os.Getpid(),
 		time.Now().Add(-2*terminalViewCreationGrace).UnixNano(),
 	)
@@ -2348,7 +1881,7 @@ func TestIncompleteProcessWindowIsPreservedUntilMetadataCompletes(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := handler.setTmuxWindowOption(target.ID, "@dire-mux-tool", "process"); err != nil {
+	if err := handler.setTmuxWindowOption(target.ID, "@kiwi-code-tool", "process"); err != nil {
 		t.Fatal(err)
 	}
 	beforePID := tmuxPanePID(t, handler, target.ID)
@@ -2365,7 +1898,7 @@ func TestIncompleteProcessWindowIsPreservedUntilMetadataCompletes(t *testing.T) 
 	}
 
 	const processID = "finishing-process"
-	if err := handler.setTmuxWindowOption(target.ID, "@dire-mux-process-id", processID); err != nil {
+	if err := handler.setTmuxWindowOption(target.ID, "@kiwi-code-process-id", processID); err != nil {
 		t.Fatal(err)
 	}
 	processes, err = handler.processWindows(item, thread)
@@ -2459,78 +1992,6 @@ func TestDeleteThreadStopsTmuxSessions(t *testing.T) {
 	}
 	if exists, err := handler.tmuxSessionExists(secondSession); err != nil || !exists {
 		t.Fatalf("another thread's session was stopped: %v", err)
-	}
-}
-
-func TestDeleteThreadCleansProjectLegacySessionsOnlyForDefaultThread(t *testing.T) {
-	for _, testCase := range []struct {
-		name          string
-		deleteDefault bool
-		wantLegacy    bool
-	}{
-		{name: "default", deleteDefault: true, wantLegacy: false},
-		{name: "non-default", deleteDefault: false, wantLegacy: true},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			handler, item := newIsolatedTmuxHandler(t)
-			defaultThread := item.Threads[0]
-			secondThread, err := handler.projects.AddThread(item.ID, "Second thread", false)
-			if err != nil {
-				t.Fatal(err)
-			}
-			item, err = handler.projects.Get(item.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			legacySessions := make(map[string]string)
-			legacyViews := make(map[string]string)
-			for _, tool := range []string{"terminal", "pi"} {
-				legacySession := legacyProjectTmuxSessionName(item.ID, tool)
-				target, createErr := handler.createTmuxSession(
-					legacySession,
-					defaultThread.Cwd,
-					tool,
-					"/bin/sleep",
-					[]string{"30"},
-				)
-				if createErr != nil {
-					t.Fatal(createErr)
-				}
-				viewName, viewErr := handler.createTmuxViewSession(item, defaultThread, legacySession, target)
-				if viewErr != nil {
-					t.Fatal(viewErr)
-				}
-				legacySessions[tool] = legacySession
-				legacyViews[tool] = viewName
-			}
-
-			threadID := secondThread.ID
-			if testCase.deleteDefault {
-				threadID = defaultThread.ID
-			}
-			server := &Server{projects: handler.projects, terminal: handler, piActivity: newPiActivityTracker()}
-			mux := http.NewServeMux()
-			mux.HandleFunc("DELETE /api/projects/{id}/threads/{threadId}", server.deleteThread)
-			response := httptest.NewRecorder()
-			request := httptest.NewRequest(http.MethodDelete, "/api/projects/"+item.ID+"/threads/"+threadID, nil)
-			mux.ServeHTTP(response, request)
-			if response.Code != http.StatusNoContent {
-				t.Fatalf("delete thread status = %d, body = %s", response.Code, response.Body.String())
-			}
-
-			for tool, legacySession := range legacySessions {
-				if exists, err := handler.tmuxSessionExists(legacySession); err != nil || exists != testCase.wantLegacy {
-					t.Fatalf("project legacy %s after deletion: exists=%t err=%v want=%t", tool, exists, err, testCase.wantLegacy)
-				}
-				viewName := legacyViews[tool]
-				if exists, err := handler.tmuxSessionExists(viewName); err != nil || exists != testCase.wantLegacy {
-					t.Fatalf("project legacy %s view after deletion: exists=%t err=%v want=%t", tool, exists, err, testCase.wantLegacy)
-				}
-				if testCase.wantLegacy {
-					handler.closeTmuxViewSession(viewName)
-				}
-			}
-		})
 	}
 }
 
@@ -2789,11 +2250,11 @@ func TestThreadStopFinalSweepUsesExactPersistedNames(t *testing.T) {
 	if _, err := handler.createTmuxSession(decoySession, thread.Cwd, "decoy", "/bin/sleep", []string{"30"}); err != nil {
 		t.Fatal(err)
 	}
-	decoyView := "dire-mux-view-late-decoy"
+	decoyView := "kiwi-code-view-late-decoy"
 	if _, err := handler.createTmuxSession(decoyView, "/", "view", "/bin/sleep", []string{"30"}); err != nil {
 		t.Fatal(err)
 	}
-	if output, err := handler.tmuxCommand("set-option", "-t", decoyView, "@dire-mux-source-session", decoySession).CombinedOutput(); err != nil {
+	if output, err := handler.tmuxCommand("set-option", "-t", decoyView, "@kiwi-code-source-session", decoySession).CombinedOutput(); err != nil {
 		t.Fatalf("mark decoy view source: %v: %s", err, output)
 	}
 
@@ -2809,11 +2270,11 @@ func TestThreadStopFinalSweepUsesExactPersistedNames(t *testing.T) {
 	if _, err := handler.createTmuxSession(canonicalSession, thread.Cwd, "shell", "/bin/sleep", []string{"30"}); err != nil {
 		t.Fatal(err)
 	}
-	lateView := "dire-mux-view-late-final-sweep"
+	lateView := "kiwi-code-view-late-final-sweep"
 	if _, err := handler.createTmuxSession(lateView, "/", "view", "/bin/sleep", []string{"30"}); err != nil {
 		t.Fatal(err)
 	}
-	if output, err := handler.tmuxCommand("set-option", "-t", lateView, "@dire-mux-source-session", canonicalSession).CombinedOutput(); err != nil {
+	if output, err := handler.tmuxCommand("set-option", "-t", lateView, "@kiwi-code-source-session", canonicalSession).CombinedOutput(); err != nil {
 		t.Fatalf("mark late view source: %v: %s", err, output)
 	}
 
@@ -3021,11 +2482,11 @@ func TestReconcileTerminalStopsCleansCommittedExactRecipeAndPreservesDecoys(t *t
 	if _, err := first.createTmuxSession(decoySession, thread.Cwd, "decoy", "/bin/sleep", []string{"30"}); err != nil {
 		t.Fatal(err)
 	}
-	decoyView := "dire-mux-view-recovery-decoy"
+	decoyView := "kiwi-code-view-recovery-decoy"
 	if _, err := first.createTmuxSession(decoyView, "/", "view", "/bin/sleep", []string{"30"}); err != nil {
 		t.Fatal(err)
 	}
-	if output, err := first.tmuxCommand("set-option", "-t", decoyView, "@dire-mux-source-session", decoySession).CombinedOutput(); err != nil {
+	if output, err := first.tmuxCommand("set-option", "-t", decoyView, "@kiwi-code-source-session", decoySession).CombinedOutput(); err != nil {
 		t.Fatalf("mark recovery decoy view: %v: %s", err, output)
 	}
 

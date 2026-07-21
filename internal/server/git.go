@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 const maxGitBranchNameBytes = 255
@@ -261,7 +261,7 @@ func writeGitReadError(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 	if errors.Is(err, exec.ErrNotFound) {
-		writeError(w, http.StatusServiceUnavailable, "git is required for branch controls. Install git and restart dire-mux.")
+		writeError(w, http.StatusServiceUnavailable, "git is required for branch controls. Install git and restart kiwi-code.")
 		return
 	}
 	writeError(w, http.StatusInternalServerError, gitErrorMessage(err))

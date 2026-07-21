@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 type serverSentEvent struct {

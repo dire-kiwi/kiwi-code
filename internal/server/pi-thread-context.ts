@@ -36,7 +36,7 @@ function contextStatus(ctx: ExtensionContext): ContextStatusUpdate | undefined {
 }
 
 export default function (pi: ExtensionAPI) {
-	const threadEndpoint = process.env.DIRE_MUX_THREAD_ENDPOINT;
+	const threadEndpoint = process.env.KIWI_CODE_THREAD_ENDPOINT;
 	if (!threadEndpoint) return;
 
 	let requests = Promise.resolve();
@@ -52,7 +52,7 @@ export default function (pi: ExtensionAPI) {
 				body: JSON.stringify(status),
 				signal: controller.signal,
 			});
-			if (!response.ok) throw new Error(`dire/mux returned ${response.status}`);
+			if (!response.ok) throw new Error(`Kiwi Code returned ${response.status}`);
 		} finally {
 			clearTimeout(timeout);
 		}

@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/browsercontrol"
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/browsercontrol"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 const browserProviderTestToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

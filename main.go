@@ -11,18 +11,18 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/project"
-	"github.com/ivan/dire-mux/internal/server"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/server"
 )
 
 const restartShutdownTimeout = 5 * time.Second
 
 func main() {
-	addr := flag.String("addr", envOr("DIRE_MUX_ADDR", productionHTTPAddress), "HTTP listen address")
-	dataDir := flag.String("data-dir", envOr("DIRE_MUX_DATA_DIR", defaultDataDir()), "directory used for application data")
-	tmuxSocket := flag.String("tmux-socket", envOr("DIRE_MUX_TMUX_SOCKET", ""), "tmux socket name (default: kiwi-code; use a unique name for development and tests)")
+	addr := flag.String("addr", envOr("KIWI_CODE_ADDR", productionHTTPAddress), "HTTP listen address")
+	dataDir := flag.String("data-dir", envOr("KIWI_CODE_DATA_DIR", defaultDataDir()), "directory used for application data")
+	tmuxSocket := flag.String("tmux-socket", envOr("KIWI_CODE_TMUX_SOCKET", ""), "tmux socket name (default: kiwi-code; use a unique name for development and tests)")
 	allowedOriginPort := flag.Int("allowed-origin-port", 0, "allow API access from a same-host browser origin on this port")
-	mode := flag.String("mode", envOr("DIRE_MUX_MODE", runtimeModeProduction), "runtime mode: production or development")
+	mode := flag.String("mode", envOr("KIWI_CODE_MODE", runtimeModeProduction), "runtime mode: production or development")
 	addCurrentDirectory := flag.Bool("add-current-directory", false, "ensure the server working directory is a project (for isolated development and agent tests)")
 	flag.Parse()
 
@@ -89,14 +89,14 @@ func main() {
 		serverErrors <- httpServer.ListenAndServe()
 	}()
 
-	fmt.Printf("dire-mux is running at http://%s\n", *addr)
+	fmt.Printf("kiwi-code is running at http://%s\n", *addr)
 	select {
 	case err := <-serverErrors:
 		if err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)
 		}
 	case <-restartRequests:
-		fmt.Println("Restart requested; shutting down dire-mux completely...")
+		fmt.Println("Restart requested; shutting down kiwi-code completely...")
 		stopApplication()
 		shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), restartShutdownTimeout)
 		if err := httpServer.Shutdown(shutdownContext); err != nil {
@@ -111,9 +111,9 @@ func main() {
 
 func defaultDataDir() string {
 	if dir, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(dir, "dire-mux")
+		return filepath.Join(dir, "kiwi-code")
 	}
-	return ".dire-mux"
+	return ".kiwi-code"
 }
 
 func envOr(name, fallback string) string {

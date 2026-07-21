@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 func TestRollbackPendingThreadBlocksTmuxAndGitHelpersBeforeCommandsRun(t *testing.T) {
@@ -76,7 +76,7 @@ func TestGitBranchAPIListsCreatesAndSwitchesBranches(t *testing.T) {
 		t.Fatal(err)
 	}
 	serverGit(t, repositoryPath, "add", "README.md")
-	serverGit(t, repositoryPath, "-c", "user.name=Dire Mux", "-c", "user.email=dire-mux@example.invalid", "commit", "-m", "Initial commit")
+	serverGit(t, repositoryPath, "-c", "user.name=Kiwi Code", "-c", "user.email=kiwi-code@example.invalid", "commit", "-m", "Initial commit")
 	initialBranch := strings.TrimSpace(serverGit(t, repositoryPath, "branch", "--show-current"))
 
 	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
@@ -158,14 +158,14 @@ func TestThreadAPIUsesSelectedWorktreeBaseBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	serverGit(t, repositoryPath, "add", "README.md")
-	serverGit(t, repositoryPath, "-c", "user.name=Dire Mux", "-c", "user.email=dire-mux@example.invalid", "commit", "-m", "Initial commit")
+	serverGit(t, repositoryPath, "-c", "user.name=Kiwi Code", "-c", "user.email=kiwi-code@example.invalid", "commit", "-m", "Initial commit")
 	initialBranch := strings.TrimSpace(serverGit(t, repositoryPath, "branch", "--show-current"))
 	serverGit(t, repositoryPath, "switch", "-c", "release/base")
 	if err := os.WriteFile(filepath.Join(repositoryPath, "RELEASE.md"), []byte("release base\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	serverGit(t, repositoryPath, "add", "RELEASE.md")
-	serverGit(t, repositoryPath, "-c", "user.name=Dire Mux", "-c", "user.email=dire-mux@example.invalid", "commit", "-m", "Add release base")
+	serverGit(t, repositoryPath, "-c", "user.name=Kiwi Code", "-c", "user.email=kiwi-code@example.invalid", "commit", "-m", "Add release base")
 	baseRevision := strings.TrimSpace(serverGit(t, repositoryPath, "rev-parse", "HEAD"))
 	serverGit(t, repositoryPath, "switch", initialBranch)
 

@@ -13,7 +13,7 @@ async function requestURL(url, init = {}) {
   });
 
   if (!response.ok) {
-    let message = `Dire Mux API request failed (${response.status})`;
+    let message = `Kiwi Code API request failed (${response.status})`;
     try {
       const body = await response.json();
       if (typeof body?.error === "string" && body.error) message = body.error;

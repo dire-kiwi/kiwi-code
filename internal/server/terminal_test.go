@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 func TestTerminalEndpointDoesNotStartTmuxForPlainHTTP(t *testing.T) {
@@ -153,8 +153,8 @@ func TestSharedToolCommandExposesTmuxTargets(t *testing.T) {
 	}
 	joined := strings.Join(args, "\n")
 	for _, expected := range []string{
-		"DIRE_MUX_TMUX_SESSION=kiwi-code-project-thread-tools",
-		"DIRE_MUX_TMUX_WINDOW=nvim",
+		"KIWI_CODE_TMUX_SESSION=kiwi-code-project-thread-tools",
+		"KIWI_CODE_TMUX_WINDOW=nvim",
 		"/bin/test-shell",
 	} {
 		if !strings.Contains(joined, expected) {
@@ -192,8 +192,8 @@ func TestPiCommandReceivesChildThreadCapability(t *testing.T) {
 	for _, expected := range []string{
 		"--extension",
 		"/extension/child-threads.ts",
-		"DIRE_MUX_AGENT_TOKEN=agent-capability",
-		"DIRE_MUX_PARENT_THREAD_ID=parent",
+		"KIWI_CODE_AGENT_TOKEN=agent-capability",
+		"KIWI_CODE_PARENT_THREAD_ID=parent",
 		piPath,
 	} {
 		if !strings.Contains(joined, expected) {
@@ -212,7 +212,7 @@ func TestClaudeCommandUsesTheFixedPiWindow(t *testing.T) {
 		}
 	}
 	t.Setenv("PATH", directory)
-	handler := &terminalHandler{envPath: "/usr/bin/env", claudePluginPath: "/plugin/dire-mux", agentToken: "pi-only-token"}
+	handler := &terminalHandler{envPath: "/usr/bin/env", claudePluginPath: "/plugin/kiwi-code", agentToken: "pi-only-token"}
 	command, args, notice, err := handler.commandForCodingAgentPane(
 		project.Project{ID: "project"},
 		project.Thread{ID: "thread", ParentThreadID: "parent"},
@@ -229,23 +229,23 @@ func TestClaudeCommandUsesTheFixedPiWindow(t *testing.T) {
 	joined := strings.Join(args, "\n")
 	for _, expected := range []string{
 		"--plugin-dir",
-		"/plugin/dire-mux",
+		"/plugin/kiwi-code",
 		"--dangerously-skip-permissions",
 		"--settings",
 		`{"skipDangerousModePermissionPrompt":true}`,
-		"DIRE_MUX_TMUX_SESSION=kiwi-code-project-thread-tools",
-		"DIRE_MUX_TMUX_WINDOW=pi",
-		"DIRE_MUX_THREAD_ENDPOINT=http://127.0.0.1:8080/api/projects/project/threads/thread",
-		"DIRE_MUX_PROJECT_ID=project",
-		"DIRE_MUX_THREAD_ID=thread",
-		"DIRE_MUX_PI_PATH=" + piPath,
+		"KIWI_CODE_TMUX_SESSION=kiwi-code-project-thread-tools",
+		"KIWI_CODE_TMUX_WINDOW=pi",
+		"KIWI_CODE_THREAD_ENDPOINT=http://127.0.0.1:8080/api/projects/project/threads/thread",
+		"KIWI_CODE_PROJECT_ID=project",
+		"KIWI_CODE_THREAD_ID=thread",
+		"KIWI_CODE_PI_PATH=" + piPath,
 		claudePath,
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("Claude environment %q does not contain %q", joined, expected)
 		}
 	}
-	for _, forbidden := range []string{"DIRE_MUX_AGENT_TOKEN=", "DIRE_MUX_PARENT_THREAD_ID=", "DIRE_MUX_CLAUDE_PATH="} {
+	for _, forbidden := range []string{"KIWI_CODE_AGENT_TOKEN=", "KIWI_CODE_PARENT_THREAD_ID=", "KIWI_CODE_CLAUDE_PATH="} {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("Claude environment %q unexpectedly contains Pi-only child metadata %q", joined, forbidden)
 		}
@@ -295,9 +295,6 @@ func TestTmuxSessionNameAndShellCommand(t *testing.T) {
 	if tmuxSocketName != "kiwi-code" {
 		t.Fatalf("tmuxSocketName = %q, want kiwi-code", tmuxSocketName)
 	}
-	if legacyTmuxSocketName != "dire-mux" {
-		t.Fatalf("legacyTmuxSocketName = %q, want dire-mux", legacyTmuxSocketName)
-	}
 	if got := tmuxSessionName("abc123", "thread456", "terminal"); got != "kiwi-code-abc123-thread456-terminal" {
 		t.Fatalf("shell tmuxSessionName() = %q", got)
 	}
@@ -306,13 +303,6 @@ func TestTmuxSessionNameAndShellCommand(t *testing.T) {
 			t.Fatalf("%s tmuxSessionName() = %q", tool, got)
 		}
 	}
-	if got := previousTmuxSessionName("abc123", "thread456", "terminal"); got != "dire-mux-abc123-thread456-terminal" {
-		t.Fatalf("previous shell tmuxSessionName() = %q", got)
-	}
-	if got := previousTmuxSessionName("abc123", "thread456", "process"); got != "dire-mux-abc123-thread456-tools" {
-		t.Fatalf("previous tools tmuxSessionName() = %q", got)
-	}
-
 	command := shellCommand("/path with spaces/shell", []string{"-l", "quote'check"})
 	if want := "'/path with spaces/shell' '-l' 'quote'\"'\"'check'"; command != want {
 		t.Fatalf("shellCommand() = %q, want %q", command, want)
@@ -330,29 +320,23 @@ func TestTmuxSessionNameAndShellCommand(t *testing.T) {
 	if got, want := threadEndpointURL(request, "project", "thread"), "http://127.0.0.1:8080/api/projects/project/threads/thread"; got != want {
 		t.Fatalf("threadEndpointURL() = %q, want %q", got, want)
 	}
-	environment := strings.Join(direMuxThreadEnvironment("http://127.0.0.1:9090/api/projects/project/threads/thread", "project", "thread"), "\n")
-	for _, expected := range []string{"DIRE_MUX_PORT=9090", "DIRE_MUX_PROJECT_ID=project", "DIRE_MUX_THREAD_ID=thread"} {
+	environment := strings.Join(kiwiCodeThreadEnvironment("http://127.0.0.1:9090/api/projects/project/threads/thread", "project", "thread"), "\n")
+	for _, expected := range []string{"KIWI_CODE_PORT=9090", "KIWI_CODE_PROJECT_ID=project", "KIWI_CODE_THREAD_ID=thread"} {
 		if !strings.Contains(environment, expected) {
 			t.Fatalf("thread environment %q does not contain %q", environment, expected)
 		}
 	}
 }
 
-func TestTmuxCleanupNamesIncludeCurrentAndPreviousSchemas(t *testing.T) {
-	item := project.Project{
-		ID: "project",
-		Threads: []project.Thread{
-			{ID: "thread"},
-		},
-	}
+func TestTmuxCleanupNamesIncludeCanonicalSessions(t *testing.T) {
+	item := project.Project{ID: "project"}
 	names := threadTmuxSessionNameSet(item, "thread")
+	if len(names) != 2 {
+		t.Fatalf("cleanup names = %#v, want shell and tools sessions", names)
+	}
 	for _, name := range []string{
 		"kiwi-code-project-thread-terminal",
 		"kiwi-code-project-thread-tools",
-		"dire-mux-project-thread-terminal",
-		"dire-mux-project-thread-tools",
-		"dire-mux-project-thread-pi",
-		"dire-mux-project-terminal",
 	} {
 		if _, found := names[name]; !found {
 			t.Fatalf("cleanup names %#v omit %q", names, name)
@@ -407,7 +391,7 @@ func TestTerminalEnvironmentOverridesCapabilities(t *testing.T) {
 	wants := map[string]string{
 		"TERM":         "xterm-256color",
 		"COLORTERM":    "truecolor",
-		"TERM_PROGRAM": "dire-mux",
+		"TERM_PROGRAM": "kiwi-code",
 	}
 	for key, value := range wants {
 		prefix := key + "="
@@ -436,7 +420,7 @@ func TestTmuxEnvironmentDoesNotNestTheParentSession(t *testing.T) {
 }
 
 func TestTmuxLoggingDisabled(t *testing.T) {
-	handler := &terminalHandler{tmuxPath: "/test/tmux", tmuxSocket: "dmv-no-logging"}
+	handler := &terminalHandler{tmuxPath: "/test/tmux", tmuxSocket: "kcv-no-logging"}
 	for _, test := range []struct {
 		name     string
 		args     []string
@@ -445,17 +429,17 @@ func TestTmuxLoggingDisabled(t *testing.T) {
 		{
 			name:     "server creating client",
 			args:     []string{"new-session", "-d"},
-			wantArgs: "/test/tmux -L dmv-no-logging new-session -d",
+			wantArgs: "/test/tmux -L kcv-no-logging new-session -d",
 		},
 		{
 			name:     "attached client",
 			args:     []string{"attach-session", "-t", "=session"},
-			wantArgs: "/test/tmux -L dmv-no-logging attach-session -t =session",
+			wantArgs: "/test/tmux -L kcv-no-logging attach-session -t =session",
 		},
 		{
 			name:     "inspection client",
 			args:     []string{"has-session", "-t", "=session"},
-			wantArgs: "/test/tmux -L dmv-no-logging has-session -t =session",
+			wantArgs: "/test/tmux -L kcv-no-logging has-session -t =session",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

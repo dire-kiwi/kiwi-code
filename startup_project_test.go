@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 func TestEnsureProjectPathAddsCurrentDirectoryOnce(t *testing.T) {

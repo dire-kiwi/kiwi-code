@@ -3,61 +3,61 @@
 declare module '*.css'
 declare module '@fontsource-variable/jetbrains-mono'
 
-type DireMuxDesktopBrowserIdentity = {
+type KiwiCodeDesktopBrowserIdentity = {
   projectId: string
   threadId: string
 }
 
-type DireMuxDesktopBrowserBounds = {
+type KiwiCodeDesktopBrowserBounds = {
   x: number
   y: number
   width: number
   height: number
 }
 
-type DireMuxDesktopBrowserResult = void | Promise<unknown>
+type KiwiCodeDesktopBrowserResult = void | Promise<unknown>
 
-type DireMuxDesktopBrowserState = {
+type KiwiCodeDesktopBrowserState = {
   projectId: string | null
   threadId: string | null
   visible: boolean
   currentTargetId: string | null
 }
 
-interface DireMuxDesktopBrowserBridge {
-  show(input: DireMuxDesktopBrowserIdentity & { bounds: DireMuxDesktopBrowserBounds }): DireMuxDesktopBrowserResult
-  hide(input: DireMuxDesktopBrowserIdentity): DireMuxDesktopBrowserResult
-  setBounds(input: DireMuxDesktopBrowserIdentity & { bounds: DireMuxDesktopBrowserBounds }): DireMuxDesktopBrowserResult
-  setBackendOrigin(origin: string): DireMuxDesktopBrowserResult
-  onState(callback: (state: DireMuxDesktopBrowserState) => void): () => void
+interface KiwiCodeDesktopBrowserBridge {
+  show(input: KiwiCodeDesktopBrowserIdentity & { bounds: KiwiCodeDesktopBrowserBounds }): KiwiCodeDesktopBrowserResult
+  hide(input: KiwiCodeDesktopBrowserIdentity): KiwiCodeDesktopBrowserResult
+  setBounds(input: KiwiCodeDesktopBrowserIdentity & { bounds: KiwiCodeDesktopBrowserBounds }): KiwiCodeDesktopBrowserResult
+  setBackendOrigin(origin: string): KiwiCodeDesktopBrowserResult
+  onState(callback: (state: KiwiCodeDesktopBrowserState) => void): () => void
   onWorkspaceShortcut(callback: (index: number) => void): () => void
 }
 
-type DireMuxDesktopCodeServerStatus = 'idle' | 'starting' | 'loading' | 'ready' | 'error'
+type KiwiCodeDesktopCodeServerStatus = 'idle' | 'starting' | 'loading' | 'ready' | 'error'
 
-type DireMuxDesktopCodeServerState = {
+type KiwiCodeDesktopCodeServerState = {
   projectId: string
   threadId: string
   visible: boolean
-  status: DireMuxDesktopCodeServerStatus
+  status: KiwiCodeDesktopCodeServerStatus
   error: string
 }
 
-interface DireMuxDesktopCodeServerBridge {
-  show(input: DireMuxDesktopBrowserIdentity & {
-    bounds: DireMuxDesktopBrowserBounds
+interface KiwiCodeDesktopCodeServerBridge {
+  show(input: KiwiCodeDesktopBrowserIdentity & {
+    bounds: KiwiCodeDesktopBrowserBounds
     workspacePath: string
-  }): Promise<DireMuxDesktopCodeServerState>
-  hide(input: DireMuxDesktopBrowserIdentity): Promise<DireMuxDesktopCodeServerState>
-  setBounds(input: DireMuxDesktopBrowserIdentity & {
-    bounds: DireMuxDesktopBrowserBounds
-  }): Promise<DireMuxDesktopCodeServerState>
-  close(input: DireMuxDesktopBrowserIdentity): Promise<DireMuxDesktopCodeServerState>
-  onState(callback: (state: DireMuxDesktopCodeServerState) => void): () => void
+  }): Promise<KiwiCodeDesktopCodeServerState>
+  hide(input: KiwiCodeDesktopBrowserIdentity): Promise<KiwiCodeDesktopCodeServerState>
+  setBounds(input: KiwiCodeDesktopBrowserIdentity & {
+    bounds: KiwiCodeDesktopBrowserBounds
+  }): Promise<KiwiCodeDesktopCodeServerState>
+  close(input: KiwiCodeDesktopBrowserIdentity): Promise<KiwiCodeDesktopCodeServerState>
+  onState(callback: (state: KiwiCodeDesktopCodeServerState) => void): () => void
   onWorkspaceShortcut(callback: (index: number) => void): () => void
 }
 
 interface Window {
-  direMuxDesktopBrowser?: DireMuxDesktopBrowserBridge
-  direMuxDesktopCodeServer?: DireMuxDesktopCodeServerBridge
+  kiwiCodeDesktopBrowser?: KiwiCodeDesktopBrowserBridge
+  kiwiCodeDesktopCodeServer?: KiwiCodeDesktopCodeServerBridge
 }

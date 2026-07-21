@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/broadcast"
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/broadcast"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 func TestThreadEventStreamPushesMutationsAndReconcilesExternalChanges(t *testing.T) {
@@ -31,7 +31,7 @@ func TestThreadEventStreamPushesMutationsAndReconcilesExternalChanges(t *testing
 		t.Fatal(err)
 	}
 	serverGit(t, repositoryPath, "add", "README.md")
-	serverGit(t, repositoryPath, "-c", "user.name=Dire Mux", "-c", "user.email=dire-mux@example.invalid", "commit", "-m", "Initial commit")
+	serverGit(t, repositoryPath, "-c", "user.name=Kiwi Code", "-c", "user.email=kiwi-code@example.invalid", "commit", "-m", "Initial commit")
 	initialBranch := strings.TrimSpace(serverGit(t, repositoryPath, "branch", "--show-current"))
 
 	store, err := project.NewStore(filepath.Join(t.TempDir(), "data", "projects.json"))

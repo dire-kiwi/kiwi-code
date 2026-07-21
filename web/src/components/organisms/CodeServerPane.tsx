@@ -22,7 +22,7 @@ export type CodeServerPaneProps = {
   onWorkspaceShortcut?: (index: number) => void
 }
 
-function viewBounds(rect: DOMRect): DireMuxDesktopBrowserBounds | null {
+function viewBounds(rect: DOMRect): KiwiCodeDesktopBrowserBounds | null {
   const width = Math.round(rect.width)
   const height = Math.round(rect.height)
   if (width < 1 || height < 1) return null
@@ -41,8 +41,8 @@ function errorMessage(reason: unknown) {
 }
 
 function statusFor(
-  bridge: DireMuxDesktopCodeServerBridge | undefined,
-  state: DireMuxDesktopCodeServerState,
+  bridge: KiwiCodeDesktopCodeServerBridge | undefined,
+  state: KiwiCodeDesktopCodeServerState,
 ): ConnectionStatus {
   if (!bridge || state.status === 'idle') return 'closed'
   if (state.status === 'error') return 'error'
@@ -61,9 +61,9 @@ export function CodeServerPane({
   onWorkspaceShortcut,
 }: CodeServerPaneProps) {
   const localBackendActive = isDefaultBackendActive()
-  const desktopBridge = localBackendActive ? window.direMuxDesktopCodeServer : undefined
+  const desktopBridge = localBackendActive ? window.kiwiCodeDesktopCodeServer : undefined
   const surfaceRef = useRef<HTMLDivElement>(null)
-  const [viewState, setViewState] = useState<DireMuxDesktopCodeServerState>({
+  const [viewState, setViewState] = useState<KiwiCodeDesktopCodeServerState>({
     projectId,
     threadId,
     visible: false,
@@ -124,7 +124,7 @@ export function CodeServerPane({
       setBridgeError(errorMessage(reason))
     }
 
-    function applyState(result: DireMuxDesktopCodeServerState) {
+    function applyState(result: KiwiCodeDesktopCodeServerState) {
       if (disposed) return
       setViewState(result)
       setBridgeError(result.status === 'error' ? result.error : '')
@@ -208,8 +208,8 @@ export function CodeServerPane({
               ? 'Code is available in the desktop app'
               : 'Code is available for the desktop backend'}
             description={localBackendActive
-              ? 'Open this workspace with Dire Mux Desktop to run code-server in an isolated native view.'
-              : 'Switch to the backend paired with this Dire Mux Desktop app to open its workspace in code-server.'}
+              ? 'Open this workspace with Kiwi Code Desktop to run code-server in an isolated native view.'
+              : 'Switch to the backend paired with this Kiwi Code Desktop app to open its workspace in code-server.'}
             showInstallLink
           />
         )}
@@ -244,9 +244,9 @@ export function CodeServerPane({
 
         <p className="sr-only" aria-live="polite">
           {!localBackendActive
-            ? 'The Code workspace requires the backend paired with Dire Mux Desktop.'
+            ? 'The Code workspace requires the backend paired with Kiwi Code Desktop.'
             : !desktopBridge
-              ? 'The Code workspace requires Dire Mux Desktop.'
+              ? 'The Code workspace requires Kiwi Code Desktop.'
               : visibleError
               ? `Code workspace unavailable. ${visibleError}`
               : viewState.status === 'ready'

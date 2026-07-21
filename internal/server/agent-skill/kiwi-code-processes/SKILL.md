@@ -1,16 +1,16 @@
 ---
 name: kiwi-code-processes
-description: Starts, inspects, interacts with, and stops long-running development processes in Dire Mux process shells. Use for dev servers, file watchers, test loops, builds, or any command that must keep running while the agent continues working.
-compatibility: Requires Node.js 20+ and a Dire Mux agent session with DIRE_MUX_THREAD_ENDPOINT set.
+description: Starts, inspects, interacts with, and stops long-running development processes in Kiwi Code process shells. Use for dev servers, file watchers, test loops, builds, or any command that must keep running while the agent continues working.
+compatibility: Requires Node.js 20+ and a Kiwi Code agent session with KIWI_CODE_THREAD_ENDPOINT set.
 context: fork
 metadata:
-  author: dire-mux
+  author: kiwi-code
   version: "1.1"
 ---
 
 # Kiwi Code processes
 
-Use the scripts in `scripts/` to manage long-running commands through the Dire Mux API. Each started command gets its own persistent tmux shell and appears in the **Process** workspace. There may be zero, one, or many process shells.
+Use the scripts in `scripts/` to manage long-running commands through the Kiwi Code API. Each started command gets its own persistent tmux shell and appears in the **Process** workspace. There may be zero, one, or many process shells.
 
 ## Rules
 
@@ -97,4 +97,4 @@ Stopping removes the tmux window and its captured history. Read any needed final
 
 ## Recovery
 
-If a helper reports that `DIRE_MUX_THREAD_ENDPOINT` is missing, it is not running inside a Dire Mux-managed agent session. Do not guess an API URL. If an ID is not found, list processes and match by name before deciding whether to start a replacement.
+If a helper reports that `KIWI_CODE_THREAD_ENDPOINT` is missing, it is not running inside a Kiwi Code-managed agent session. Do not guess an API URL. If an ID is not found, list processes and match by name before deciding whether to start a replacement.

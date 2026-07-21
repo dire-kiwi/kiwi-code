@@ -11,12 +11,12 @@ import { fileURLToPath } from 'node:url'
 const require = createRequire(import.meta.url)
 
 export function defaultElectronUserData(environment = process.env, platform = process.platform) {
-  if (environment.DIRE_MUX_ELECTRON_USER_DATA) {
-    return path.resolve(environment.DIRE_MUX_ELECTRON_USER_DATA)
+  if (environment.KIWI_CODE_ELECTRON_USER_DATA) {
+    return path.resolve(environment.KIWI_CODE_ELECTRON_USER_DATA)
   }
-  if (platform === 'darwin') return path.join(os.homedir(), 'Library', 'Application Support', 'dire-mux')
-  if (platform === 'win32') return path.join(environment.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'dire-mux')
-  return path.join(environment.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'dire-mux')
+  if (platform === 'darwin') return path.join(os.homedir(), 'Library', 'Application Support', 'kiwi-code')
+  if (platform === 'win32') return path.join(environment.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'kiwi-code')
+  return path.join(environment.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'kiwi-code')
 }
 
 export function browserProviderConfigPath(
@@ -24,11 +24,11 @@ export function browserProviderConfigPath(
   platform = process.platform,
   baseDirectory = process.cwd(),
 ) {
-  if (environment.DIRE_MUX_BROWSER_PROVIDER_CONFIG) {
-    return path.resolve(baseDirectory, environment.DIRE_MUX_BROWSER_PROVIDER_CONFIG)
+  if (environment.KIWI_CODE_BROWSER_PROVIDER_CONFIG) {
+    return path.resolve(baseDirectory, environment.KIWI_CODE_BROWSER_PROVIDER_CONFIG)
   }
-  if (environment.DIRE_MUX_DATA_DIR) {
-    return path.join(path.resolve(baseDirectory, environment.DIRE_MUX_DATA_DIR), 'browser-provider.json')
+  if (environment.KIWI_CODE_DATA_DIR) {
+    return path.join(path.resolve(baseDirectory, environment.KIWI_CODE_DATA_DIR), 'browser-provider.json')
   }
   return path.join(defaultElectronUserData(environment, platform), 'browser-provider.json')
 }
@@ -76,7 +76,7 @@ async function main() {
   const configPath = browserProviderConfigPath(process.env, process.platform, rootDirectory)
   const childEnvironment = {
     ...process.env,
-    DIRE_MUX_BROWSER_PROVIDER_CONFIG: configPath,
+    KIWI_CODE_BROWSER_PROVIDER_CONFIG: configPath,
   }
   const child = spawn(electronPath, ['.'], { cwd: webDirectory, env: childEnvironment, stdio: 'inherit' })
   let expectedConfig = null

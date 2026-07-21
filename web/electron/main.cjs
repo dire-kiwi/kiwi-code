@@ -16,31 +16,31 @@ const {
 } = require('./browser-helpers.cjs')
 
 const desktopUrl = requireLoopbackHttpUrl(
-  process.env.DIRE_MUX_DESKTOP_URL || 'http://127.0.0.1:5173',
-  'DIRE_MUX_DESKTOP_URL',
+  process.env.KIWI_CODE_DESKTOP_URL || 'http://127.0.0.1:5173',
+  'KIWI_CODE_DESKTOP_URL',
 ).toString()
 const desktopOrigin = new URL(desktopUrl).origin
-const apiOrigin = process.env.DIRE_MUX_API_ORIGIN
-  ? requireLoopbackHttpUrl(process.env.DIRE_MUX_API_ORIGIN, 'DIRE_MUX_API_ORIGIN').origin
+const apiOrigin = process.env.KIWI_CODE_API_ORIGIN
+  ? requireLoopbackHttpUrl(process.env.KIWI_CODE_API_ORIGIN, 'KIWI_CODE_API_ORIGIN').origin
   : desktopOrigin
 const appIconPath = path.join(__dirname, 'icon.png')
 const preloadPath = path.join(__dirname, 'preload.cjs')
 
 const browserIpcChannels = {
-  show: 'dire-mux-desktop-browser:show',
-  hide: 'dire-mux-desktop-browser:hide',
-  setBounds: 'dire-mux-desktop-browser:set-bounds',
-  setBackendOrigin: 'dire-mux-desktop-browser:set-backend-origin',
-  state: 'dire-mux-desktop-browser:state',
-  workspaceShortcut: 'dire-mux-desktop-browser:workspace-shortcut',
+  show: 'kiwi-code-desktop-browser:show',
+  hide: 'kiwi-code-desktop-browser:hide',
+  setBounds: 'kiwi-code-desktop-browser:set-bounds',
+  setBackendOrigin: 'kiwi-code-desktop-browser:set-backend-origin',
+  state: 'kiwi-code-desktop-browser:state',
+  workspaceShortcut: 'kiwi-code-desktop-browser:workspace-shortcut',
 }
 const codeServerIpcChannels = {
-  show: 'dire-mux-desktop-code-server:show',
-  hide: 'dire-mux-desktop-code-server:hide',
-  setBounds: 'dire-mux-desktop-code-server:set-bounds',
-  close: 'dire-mux-desktop-code-server:close',
-  state: 'dire-mux-desktop-code-server:state',
-  workspaceShortcut: 'dire-mux-desktop-code-server:workspace-shortcut',
+  show: 'kiwi-code-desktop-code-server:show',
+  hide: 'kiwi-code-desktop-code-server:hide',
+  setBounds: 'kiwi-code-desktop-code-server:set-bounds',
+  close: 'kiwi-code-desktop-code-server:close',
+  state: 'kiwi-code-desktop-code-server:state',
+  workspaceShortcut: 'kiwi-code-desktop-code-server:workspace-shortcut',
 }
 
 let primaryWindow = null
@@ -51,9 +51,9 @@ let provider = null
 let cleanupPromise = Promise.resolve()
 let quitAfterCleanup = false
 
-app.setName('dire-mux')
-if (process.env.DIRE_MUX_ELECTRON_USER_DATA) {
-  app.setPath('userData', path.resolve(process.env.DIRE_MUX_ELECTRON_USER_DATA))
+app.setName('kiwi-code')
+if (process.env.KIWI_CODE_ELECTRON_USER_DATA) {
+  app.setPath('userData', path.resolve(process.env.KIWI_CODE_ELECTRON_USER_DATA))
 }
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
@@ -332,7 +332,7 @@ if (!hasSingleInstanceLock) {
       if (!primaryWindow || primaryWindow.isDestroyed()) void createWindow().catch((error) => console.error('Could not recreate desktop window:', error))
     })
   }).catch((error) => {
-    console.error('Could not start Dire Mux desktop:', error)
+    console.error('Could not start Kiwi Code desktop:', error)
     app.quit()
   })
 

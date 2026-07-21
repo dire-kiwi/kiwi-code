@@ -35,13 +35,13 @@ const providerInstance = createHash('sha256')
   .slice(0, 16)
 const providerConfig = path.resolve(
   rootDirectory,
-  process.env.DIRE_MUX_BROWSER_PROVIDER_CONFIG ||
-    path.join(os.tmpdir(), `dire-mux-browser-provider-${providerInstance}.json`),
+  process.env.KIWI_CODE_BROWSER_PROVIDER_CONFIG ||
+    path.join(os.tmpdir(), `kiwi-code-browser-provider-${providerInstance}.json`),
 )
 const sharedEnvironment = {
-  DIRE_MUX_BROWSER_PROVIDER_CONFIG: providerConfig,
-  DIRE_MUX_API_ORIGIN: goUrl,
-  DIRE_MUX_ELECTRON_USER_DATA: path.join(os.tmpdir(), `dire-mux-electron-${providerInstance}`),
+  KIWI_CODE_BROWSER_PROVIDER_CONFIG: providerConfig,
+  KIWI_CODE_API_ORIGIN: goUrl,
+  KIWI_CODE_ELECTRON_USER_DATA: path.join(os.tmpdir(), `kiwi-code-electron-${providerInstance}`),
 }
 
 console.log(`Vite: ${viteUrl}`)
@@ -60,7 +60,7 @@ const commands = [
     name: 'vite',
     command: `vite --host ${listenHost} --port ${options.vitePort} --strictPort`,
     cwd: webDirectory,
-    env: { VITE_DIRE_MUX_API_PORT: String(options.goPort) },
+    env: { VITE_KIWI_CODE_API_PORT: String(options.goPort) },
   },
 ]
 
@@ -69,7 +69,7 @@ if (options.desktop) {
     name: 'desktop',
     command: `wait-on --timeout 30000 http-get://${browserHost}:${options.vitePort}/ http-get://${browserHost}:${options.goPort}/api/health && node scripts/electron-launcher.mjs`,
     cwd: webDirectory,
-    env: { ...sharedEnvironment, DIRE_MUX_DESKTOP_URL: viteUrl },
+    env: { ...sharedEnvironment, KIWI_CODE_DESKTOP_URL: viteUrl },
   })
 }
 

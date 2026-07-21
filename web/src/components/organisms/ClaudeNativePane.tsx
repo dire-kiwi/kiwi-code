@@ -101,7 +101,7 @@ type ClaudeEvent = {
   usage?: ClaudeUsage
   total_cost_usd?: number
   num_turns?: number
-  // claude_native_* envelope fields from the Dire Mux bridge.
+  // claude_native_* envelope fields from the Kiwi Code bridge.
   isStreaming?: boolean
   sessionId?: string
   effort?: string
@@ -730,7 +730,7 @@ export function ClaudeNativePane({
         updateConnectionStatus('error')
         return
       }
-      appendActivity('connection_closed', 'Connection lost; Dire Mux is reconnecting.')
+      appendActivity('connection_closed', 'Connection lost; Kiwi Code is reconnecting.')
       onContextStatusChangeRef.current(null)
       updateConnectionStatus('connecting')
       const delay = Math.min(250 * 2 ** reconnectAttemptsRef.current, 2_000)

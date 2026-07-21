@@ -1,15 +1,15 @@
 ---
-name: dire-mux-mermaid
-description: Emits Mermaid diagrams that the Dire Mux Pi Native pane renders inline. Use when a flowchart, sequence, state, class, or entity-relationship diagram would explain architecture, control flow, data models, or timelines better than prose.
-compatibility: Requires the Dire Mux Pi Native pane; other frontends show the diagram source as a plain code block.
+name: kiwi-code-mermaid
+description: Emits Mermaid diagrams that the Kiwi Code Pi Native pane renders inline. Use when a flowchart, sequence, state, class, or entity-relationship diagram would explain architecture, control flow, data models, or timelines better than prose.
+compatibility: Requires the Kiwi Code Pi Native pane; other frontends show the diagram source as a plain code block.
 metadata:
-  author: dire-mux
+  author: kiwi-code
   version: "1.0"
 ---
 
-# Dire Mux Mermaid diagrams
+# Kiwi Code Mermaid diagrams
 
-The Dire Mux Pi Native pane renders fenced ```mermaid code blocks in assistant messages as diagrams. Write standard Mermaid syntax inside the fence; no tools, files, or extra setup are involved.
+The Kiwi Code Pi Native pane renders fenced ```mermaid code blocks in assistant messages as diagrams. Write standard Mermaid syntax inside the fence; no tools, files, or extra setup are involved.
 
 ````markdown
 ```mermaid

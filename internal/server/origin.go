@@ -18,9 +18,9 @@ type Options struct {
 	// unrelated cross-origin sites.
 	AllowedOriginPort int
 
-	// AllowRemoteOrigins permits Dire Mux frontends served by another HTTP(S)
+	// AllowRemoteOrigins permits Kiwi Code frontends served by another HTTP(S)
 	// origin to call this backend and open its WebSockets. The browser backend
-	// picker relies on this in both production and development. Dire Mux has no
+	// picker relies on this in both production and development. Kiwi Code has no
 	// authentication and this option is intended only for trusted LAN/Tailscale
 	// environments.
 	AllowRemoteOrigins bool

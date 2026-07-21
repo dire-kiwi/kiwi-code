@@ -69,7 +69,7 @@ func TestTmuxProcessIncarnationConditionRequiresCapturedIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, identity := range []string{"#{pid},456", "#{window_id},@12", "#{@dire-mux-process-id},abc123"} {
+	for _, identity := range []string{"#{pid},456", "#{window_id},@12", "#{@kiwi-code-process-id},abc123"} {
 		if !strings.Contains(condition, identity) {
 			t.Fatalf("process condition %q does not contain %q", condition, identity)
 		}

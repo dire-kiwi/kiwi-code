@@ -22,14 +22,14 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 const (
 	workflowRecordVersion           = 1
 	workflowManifestVersion         = 1
 	workflowDirectoryName           = "workflows-v1"
-	workflowRunnerMaterialized      = "dire-mux-workflow-runner.mjs"
+	workflowRunnerMaterialized      = "kiwi-code-workflow-runner.mjs"
 	workflowRecordFileName          = "run.json"
 	workflowManifestFileName        = "runner.json"
 	workflowScriptFileName          = "workflow.js"
@@ -52,7 +52,7 @@ const (
 	workflowProcessStartupGrace     = 15 * time.Second
 	maxActiveWorkflowsPerThread     = 4
 	maxRetainedWorkflowsPerThread   = 25
-	workflowTokenHeader             = "X-Dire-Mux-Workflow-Token"
+	workflowTokenHeader             = "X-Kiwi-Code-Workflow-Token"
 	workflowStateQueued             = "queued"
 	workflowStateRunning            = "running"
 	workflowStatePaused             = "paused"
@@ -1553,9 +1553,9 @@ func (s *Server) createWorkflowAgent(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusServiceUnavailable, "Could not recover the retained workflow child.")
 				return
 			}
-			recoveryPrompt := "[Dire Mux workflow recovery]\nContinue this retained workflow task from your saved conversation, preserve completed work, and return the requested final value.\n\nOriginal task:\n" + original.Prompt
+			recoveryPrompt := "[Kiwi Code workflow recovery]\nContinue this retained workflow task from your saved conversation, preserve completed work, and return the requested final value.\n\nOriginal task:\n" + original.Prompt
 			if resumingRetainedAgent {
-				recoveryPrompt = "[Dire Mux workflow resumed]\nThis workflow was paused by the user. Continue the retained task from your saved conversation, preserve completed work, and return the requested final value.\n\nOriginal task:\n" + original.Prompt
+				recoveryPrompt = "[Kiwi Code workflow resumed]\nThis workflow was paused by the user. Continue the retained task from your saved conversation, preserve completed work, and return the requested final value.\n\nOriginal task:\n" + original.Prompt
 			}
 			run, err = process.startPrompt(recoveryPrompt)
 			if err != nil {
@@ -1657,7 +1657,7 @@ func (s *Server) recoverWorkflowAgentRun(record workflowRunRecord, agentID strin
 	if err != nil {
 		return piNativeRunSnapshot{}, err
 	}
-	recoveryPrompt := "[Dire Mux workflow recovery]\nThe Dire Mux backend restarted while this workflow agent was running. Continue from your saved conversation, preserve completed work, and finish the original task. Return the requested final value again so the workflow can continue.\n\nOriginal task:\n" + original.Prompt
+	recoveryPrompt := "[Kiwi Code workflow recovery]\nThe Kiwi Code backend restarted while this workflow agent was running. Continue from your saved conversation, preserve completed work, and finish the original task. Return the requested final value again so the workflow can continue.\n\nOriginal task:\n" + original.Prompt
 	run, err := process.startPrompt(recoveryPrompt)
 	if err != nil {
 		_ = s.terminal.nativePi.stopThread(record.ProjectID, child.ID)

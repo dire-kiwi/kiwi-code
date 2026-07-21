@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 func TestForkedPlanningChildPublishesDownloadableParentPlan(t *testing.T) {

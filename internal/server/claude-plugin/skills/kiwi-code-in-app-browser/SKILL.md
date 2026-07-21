@@ -1,14 +1,14 @@
 ---
-name: dire-mux-in-app-browser
-description: Controls Dire Mux's in-app browser with browser_* MCP tools. Use when a task requires opening or interacting with websites, inspecting rendered pages, filling forms, taking screenshots, evaluating JavaScript in a page, managing tabs, or sending raw CDP commands.
-compatibility: Requires a Dire Mux-managed Claude Code session and the Dire Mux desktop in-app browser provider.
+name: kiwi-code-in-app-browser
+description: Controls Kiwi Code's in-app browser with browser_* MCP tools. Use when a task requires opening or interacting with websites, inspecting rendered pages, filling forms, taking screenshots, evaluating JavaScript in a page, managing tabs, or sending raw CDP commands.
+compatibility: Requires a Kiwi Code-managed Claude Code session and the Kiwi Code desktop in-app browser provider.
 license: MIT
 context: fork
 ---
 
-# Dire Mux in-app browser control
+# Kiwi Code in-app browser control
 
-Use the `browser_*` MCP tools bundled with the Dire Mux Claude Code plugin to operate the real browser surface embedded in the Dire Mux desktop app. Browser state belongs to the current Dire Mux thread and is shared with Pi and Pi Native sessions in that thread.
+Use the `browser_*` MCP tools bundled with the Kiwi Code Claude Code plugin to operate the real browser surface embedded in the Kiwi Code desktop app. Browser state belongs to the current Kiwi Code thread and is shared with Pi and Pi Native sessions in that thread.
 
 ## Tool discovery
 
@@ -34,7 +34,7 @@ Available tools:
 
 The only supported backend is `in-app`. Browser tools start or connect to it lazily, so most tasks do not need an explicit session call. Use `browser_session` with `action: "start"` only when explicit lifecycle control is useful.
 
-If an action reports that the in-app desktop provider is unavailable, ask the user to start or reconnect the Dire Mux desktop app. Do not silently switch to another browser, launch Chrome yourself, or install a separate browser-control package.
+If an action reports that the in-app desktop provider is unavailable, ask the user to start or reconnect the Kiwi Code desktop app. Do not silently switch to another browser, launch Chrome yourself, or install a separate browser-control package.
 
 ## Preferred workflow
 
@@ -71,7 +71,7 @@ Use `browser_screenshot` when the task depends on layout, canvas content, visual
 
 ## Lifecycle and safety
 
-- `browser_session` with `action: "disconnect"` releases the MCP server's control connection without asking Dire Mux to destroy the in-app browser session.
+- `browser_session` with `action: "disconnect"` releases the MCP server's control connection without asking Kiwi Code to destroy the in-app browser session.
 - `browser_session` with `action: "stop"` destroys the thread's in-app browser session and ephemeral profile; the next start uses fresh site data.
 - The profile can contain authenticated sessions and private page data. Treat snapshots, screenshots, evaluated values, and raw CDP results as sensitive.
-- Do not try to discover or expose Dire Mux's private browser transport or an unauthenticated CDP endpoint.
+- Do not try to discover or expose Kiwi Code's private browser transport or an unauthenticated CDP endpoint.

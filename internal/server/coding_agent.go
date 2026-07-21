@@ -81,7 +81,7 @@ func codingAgentThinkingLevels(defaultLabel string, includeOffAndMinimal bool) [
 var piThinkingLevels = codingAgentThinkingLevels("Use Pi default", true)
 
 // Claude's ultracode effort is passed through to Claude Code itself. It is
-// independent from the Pi-only Dire Mux workflow integration.
+// independent from the Pi-only Kiwi Code workflow integration.
 var claudeThinkingLevels = append(codingAgentThinkingLevels("Use Claude default", false), codingAgentChoice{ID: "ultracode", Label: "Ultracode (Claude built-in)"})
 var claudeGPTThinkingLevels = append(codingAgentThinkingLevels("Use model default", false), codingAgentChoice{ID: "ultracode", Label: "Ultracode (Claude built-in)"})
 

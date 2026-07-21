@@ -11,7 +11,7 @@ import (
 )
 
 const agentTokenFileName = "agent-token"
-const agentTokenHeader = "X-Dire-Mux-Agent-Token"
+const agentTokenHeader = "X-Kiwi-Code-Agent-Token"
 
 func loadOrCreateAgentToken(dataDirectory string) (string, error) {
 	if err := os.MkdirAll(dataDirectory, 0o700); err != nil {

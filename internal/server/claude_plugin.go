@@ -18,13 +18,13 @@ var claudePluginHooks []byte
 //go:embed claude-plugin/.mcp.json
 var claudePluginMCPConfig []byte
 
-//go:embed claude-plugin/scripts/dire-mux-hook.mjs
+//go:embed claude-plugin/scripts/kiwi-code-hook.mjs
 var claudePluginHookScript []byte
 
-//go:embed claude-plugin/servers/dire-mux-browser.mjs
+//go:embed claude-plugin/servers/kiwi-code-browser.mjs
 var claudePluginBrowserServer []byte
 
-//go:embed claude-plugin/skills/dire-mux-in-app-browser/SKILL.md
+//go:embed claude-plugin/skills/kiwi-code-in-app-browser/SKILL.md
 var claudePluginBrowserSkill []byte
 
 //go:embed claude-plugin/LICENSE
@@ -49,16 +49,6 @@ func materializeClaudePlugin(dataDirectory string) (string, error) {
 			return "", err
 		}
 	}
-	obsoletePaths := []string{
-		filepath.Join("skills", legacyProcessAgentSkillName),
-		filepath.Join("skills", "dire-mux-workflows"),
-		filepath.Join("servers", "dire-mux-workflows.mjs"),
-	}
-	for _, relativePath := range obsoletePaths {
-		if err := os.RemoveAll(filepath.Join(root, relativePath)); err != nil {
-			return "", fmt.Errorf("remove obsolete Claude plugin path %q: %w", relativePath, err)
-		}
-	}
 	return root, nil
 }
 
@@ -67,9 +57,9 @@ func claudePluginFiles() ([]claudePluginFile, error) {
 		{path: filepath.Join(".claude-plugin", "plugin.json"), contents: claudePluginManifest},
 		{path: ".mcp.json", contents: claudePluginMCPConfig},
 		{path: filepath.Join("hooks", "hooks.json"), contents: claudePluginHooks},
-		{path: filepath.Join("scripts", "dire-mux-hook.mjs"), contents: claudePluginHookScript},
-		{path: filepath.Join("servers", "dire-mux-browser.mjs"), contents: claudePluginBrowserServer},
-		{path: filepath.Join("skills", "dire-mux-in-app-browser", "SKILL.md"), contents: claudePluginBrowserSkill},
+		{path: filepath.Join("scripts", "kiwi-code-hook.mjs"), contents: claudePluginHookScript},
+		{path: filepath.Join("servers", "kiwi-code-browser.mjs"), contents: claudePluginBrowserServer},
+		{path: filepath.Join("skills", "kiwi-code-in-app-browser", "SKILL.md"), contents: claudePluginBrowserSkill},
 		{path: "LICENSE", contents: claudePluginBrowserLicense},
 		{path: filepath.Join("skills", agentSkillName, "SKILL.md"), contents: claudePluginProcessSkill},
 	}

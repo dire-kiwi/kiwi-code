@@ -59,13 +59,13 @@ func TestAgentSkillInstallerInstallsAndUpdatesBundle(t *testing.T) {
 			t.Fatalf("%s mode = %v, want executable", name, info.Mode())
 		}
 	}
-	threadsPath := filepath.Join(filepath.Dir(status.Path), "dire-mux-threads")
+	threadsPath := filepath.Join(filepath.Dir(status.Path), "kiwi-code-threads")
 	threadSkill, err := os.ReadFile(filepath.Join(threadsPath, "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"name: dire-mux-threads",
+		"name: kiwi-code-threads",
 		"scripts/create-thread.mjs",
 		"scripts/archive-thread.mjs",
 		"scripts/close-thread.mjs",
@@ -107,54 +107,6 @@ func TestAgentSkillInstallerInstallsAndUpdatesBundle(t *testing.T) {
 	}
 }
 
-func TestAgentSkillInstallerMigratesLegacyProcessSkill(t *testing.T) {
-	skillsDirectory := filepath.Join(t.TempDir(), ".agents", "skills")
-	legacyDirectory := filepath.Join(skillsDirectory, legacyProcessAgentSkillName)
-	if err := os.MkdirAll(filepath.Join(legacyDirectory, "notes"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(legacyDirectory, "SKILL.md"), []byte("---\nname: dire-mux-processes\n---\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(legacyDirectory, "notes", "keep.txt"), []byte("preserve me\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	installer := newAgentSkillInstaller(skillsDirectory)
-	status, err := installer.status()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(status.Skills) == 0 || status.Skills[0].Name != agentSkillName || !status.Skills[0].Installed || status.Skills[0].UpToDate {
-		t.Fatalf("legacy process skill status = %#v", status)
-	}
-
-	status, err = installer.install()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !status.Installed || !status.UpToDate {
-		t.Fatalf("migrated skill status = %#v", status)
-	}
-	if _, err := os.Stat(legacyDirectory); !os.IsNotExist(err) {
-		t.Fatalf("legacy skill directory still exists: %v", err)
-	}
-	contents, err := os.ReadFile(filepath.Join(skillsDirectory, agentSkillName, "SKILL.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(contents), "name: kiwi-code-processes") || !strings.Contains(string(contents), "context: fork") {
-		t.Fatalf("migrated process skill has unexpected contents: %s", contents)
-	}
-	preserved, err := os.ReadFile(filepath.Join(skillsDirectory, agentSkillName, "notes", "keep.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(preserved) != "preserve me\n" {
-		t.Fatalf("preserved legacy file = %q", preserved)
-	}
-}
-
 func TestBundledSkillCommonHelpersAreGenerated(t *testing.T) {
 	root := "agent-skill"
 	shared, err := os.ReadFile(filepath.Join(root, "common.shared.mjs"))
@@ -166,14 +118,14 @@ func TestBundledSkillCommonHelpersAreGenerated(t *testing.T) {
 		target   string
 	}{
 		{template: "common.processes.mjs.tmpl", target: "kiwi-code-processes/scripts/common.mjs"},
-		{template: "common.threads.mjs.tmpl", target: "dire-mux-threads/scripts/common.mjs"},
+		{template: "common.threads.mjs.tmpl", target: "kiwi-code-threads/scripts/common.mjs"},
 	} {
 		t.Run(item.target, func(t *testing.T) {
 			template, err := os.ReadFile(filepath.Join(root, item.template))
 			if err != nil {
 				t.Fatal(err)
 			}
-			const marker = "/* DIRE_MUX_SHARED_COMMON */"
+			const marker = "/* KIWI_CODE_SHARED_COMMON */"
 			if strings.Count(string(template), marker) != 1 {
 				t.Fatalf("%s must contain the shared marker exactly once", item.template)
 			}
@@ -224,7 +176,7 @@ func TestBundledCreateThreadHelperStartsSelectedAgent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	script, err := filepath.Abs(filepath.Join("agent-skill", "dire-mux-threads", "scripts", "create-thread.mjs"))
+	script, err := filepath.Abs(filepath.Join("agent-skill", "kiwi-code-threads", "scripts", "create-thread.mjs"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,9 +192,9 @@ func TestBundledCreateThreadHelperStartsSelectedAgent(t *testing.T) {
 		"--prompt", "Inspect and fix the cache.",
 	)
 	command.Env = append(os.Environ(),
-		"DIRE_MUX_THREAD_ENDPOINT="+server.URL+"/api/projects/current-project/threads/current-thread",
-		"DIRE_MUX_PROJECT_ID=",
-		"DIRE_MUX_THREAD_ID=",
+		"KIWI_CODE_THREAD_ENDPOINT="+server.URL+"/api/projects/current-project/threads/current-thread",
+		"KIWI_CODE_PROJECT_ID=",
+		"KIWI_CODE_THREAD_ID=",
 	)
 	output, runErr := command.CombinedOutput()
 	if ctx.Err() != nil {
@@ -306,7 +258,7 @@ func TestBundledArchiveThreadHelper(t *testing.T) {
 	}))
 	defer server.Close()
 
-	script, err := filepath.Abs(filepath.Join("agent-skill", "dire-mux-threads", "scripts", "archive-thread.mjs"))
+	script, err := filepath.Abs(filepath.Join("agent-skill", "kiwi-code-threads", "scripts", "archive-thread.mjs"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,9 +268,9 @@ func TestBundledArchiveThreadHelper(t *testing.T) {
 		defer cancel()
 		command := exec.CommandContext(ctx, node, append([]string{script}, args...)...)
 		command.Env = append(os.Environ(),
-			"DIRE_MUX_THREAD_ENDPOINT="+endpoint,
-			"DIRE_MUX_PROJECT_ID=",
-			"DIRE_MUX_THREAD_ID=",
+			"KIWI_CODE_THREAD_ENDPOINT="+endpoint,
+			"KIWI_CODE_PROJECT_ID=",
+			"KIWI_CODE_THREAD_ID=",
 		)
 		output, runErr := command.CombinedOutput()
 		if ctx.Err() != nil {
@@ -389,7 +341,7 @@ func TestBundledUpdateProcessHelperPublishesWebServers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, node, script, "web/process", "http://127.0.0.1:5173", "https://localhost:8443")
-	command.Env = append(os.Environ(), "DIRE_MUX_THREAD_ENDPOINT="+httpServer.URL+"/api/projects/project/threads/thread")
+	command.Env = append(os.Environ(), "KIWI_CODE_THREAD_ENDPOINT="+httpServer.URL+"/api/projects/project/threads/thread")
 	if output, runErr := command.CombinedOutput(); runErr != nil {
 		t.Fatalf("update process helper failed: %v\n%s", runErr, output)
 	}
@@ -429,9 +381,7 @@ func TestAgentSkillSettingsHandlers(t *testing.T) {
 }
 
 func TestAgentSkillInstallerRejectsSymlinkDestination(t *testing.T) {
-	names := append([]string{}, bundledAgentSkillNames[:]...)
-	names = append(names, legacyProcessAgentSkillName)
-	for _, name := range names {
+	for _, name := range bundledAgentSkillNames {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
 			skillsDirectory := filepath.Join(root, "skills")

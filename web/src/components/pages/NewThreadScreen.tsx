@@ -70,7 +70,7 @@ type NewThreadPreferences = {
 }
 
 function newThreadPreferencesStorageKey(projectId: string) {
-  return `dire-mux:new-thread-preferences:${projectId}`
+  return `kiwi-code:new-thread-preferences:${projectId}`
 }
 
 function rememberedNewThreadPreferences(projectId: string): NewThreadPreferences | null {

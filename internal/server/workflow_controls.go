@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 func (m *workflowManager) writeManifest(record workflowRunRecord, manifest workflowRunnerManifest) error {

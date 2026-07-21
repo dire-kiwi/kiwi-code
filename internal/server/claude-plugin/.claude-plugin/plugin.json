@@ -1,8 +1,8 @@
 {
-  "name": "dire-mux",
-  "displayName": "Dire Mux",
+  "name": "kiwi-code",
+  "displayName": "Kiwi Code",
   "version": "1.3.0",
-  "description": "Integrates Claude Code with Dire Mux activity, thread naming, process shells, and the in-app browser.",
+  "description": "Integrates Claude Code with Kiwi Code activity, thread naming, process shells, and the in-app browser.",
   "author": {
     "name": "Ivan Meredith"
   }

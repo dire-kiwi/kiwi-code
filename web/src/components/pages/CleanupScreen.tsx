@@ -178,7 +178,7 @@ function WorktreeRow({ item, generatedAt }: { item: WorktreeCleanupOverview; gen
               </>
             ) : item.hasUncommittedChanges ? (
               <p>
-                Uncommitted changes detected. Dire Mux will keep this worktree and check it again during later cleanup cycles.
+                Uncommitted changes detected. Kiwi Code will keep this worktree and check it again during later cleanup cycles.
               </p>
             ) : (
               <p>No staged, unstaged, or untracked changes were detected when this page was refreshed.</p>

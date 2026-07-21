@@ -4,7 +4,6 @@ import {
   assertDevelopmentApiTarget,
   assertDevelopmentPort,
   defaultDevelopmentTmuxSocket,
-  legacyProductionTmuxSocket,
   parseArgs,
   productionTmuxSocket,
   reservedProductionPort,
@@ -24,7 +23,7 @@ test('parseArgs uses the development defaults', () => {
 
 test('defaultDevelopmentTmuxSocket is stable and isolated per checkout', () => {
   const first = defaultDevelopmentTmuxSocket('/tmp/worktree-a')
-  assert.match(first, /^dmdev-[a-f0-9]{12}$/)
+  assert.match(first, /^kcdev-[a-f0-9]{12}$/)
   assert.notEqual(first, productionTmuxSocket)
   assert.equal(first, defaultDevelopmentTmuxSocket('/tmp/worktree-a'))
   assert.notEqual(first, defaultDevelopmentTmuxSocket('/tmp/worktree-b'))
@@ -57,7 +56,7 @@ test('parseArgs accepts custom ports and an isolated tmux socket', () => {
       '15173',
       '--go-port=18080',
       '--tmux-socket',
-      'dmv-agent-a1',
+      'kcv-agent-a1',
     ]),
     {
       desktop: true,
@@ -66,7 +65,7 @@ test('parseArgs accepts custom ports and an isolated tmux socket', () => {
       help: false,
       vitePort: 15173,
       goPort: 18080,
-      tmuxSocket: 'dmv-agent-a1',
+      tmuxSocket: 'kcv-agent-a1',
     },
   )
 })
@@ -86,9 +85,8 @@ test('parseArgs rejects invalid development options', () => {
     { args: ['--vite-port', String(reservedProductionPort)], message: /reserved production port 4000/ },
     { args: ['--go-port=4000'], message: /reserved production port 4000/ },
     { args: ['--tmux-socket', ''], message: /tmux-socket must be/ },
-    { args: ['--tmux-socket', '../dire-mux'], message: /tmux-socket must be/ },
+    { args: ['--tmux-socket', '../invalid'], message: /tmux-socket must be/ },
     { args: ['--tmux-socket', productionTmuxSocket], message: /production tmux server kiwi-code/ },
-    { args: ['--tmux-socket', legacyProductionTmuxSocket], message: /production tmux server dire-mux/ },
     { args: ['--unknown'], message: /unknown option/ },
   ]
 

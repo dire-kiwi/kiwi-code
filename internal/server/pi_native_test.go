@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/broadcast"
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/broadcast"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 func TestStartPiNativeProcessRejectsRollbackPendingThread(t *testing.T) {
@@ -82,7 +82,7 @@ func TestSubAgentNestingContextIsAppendedToPiSystemPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "You are a sub-agent at nesting depth 1. The effective maximum sub-agent nesting depth for this thread tree is 3 after applying project and ancestor limits. " +
-		"Root agents are at depth 0. Delegate further work only through an available context: fork skill or an explicitly activated Dire Mux workflow, and only while your current depth is below the effective maximum."
+		"Root agents are at depth 0. Delegate further work only through an available context: fork skill or an explicitly activated Kiwi Code workflow, and only while your current depth is below the effective maximum."
 	if options.AppendSystemPrompt != want {
 		t.Fatalf("sub-agent system prompt = %q, want %q", options.AppendSystemPrompt, want)
 	}
@@ -439,7 +439,7 @@ func TestPiNativeAutomaticCompactionRefreshesDisplayHistory(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace(writer.Bytes()), &command); err != nil {
 		t.Fatal(err)
 	}
-	if command.Type != "get_entries" || !strings.HasPrefix(command.ID, "dire-mux-entries-") {
+	if command.Type != "get_entries" || !strings.HasPrefix(command.ID, "kiwi-code-entries-") {
 		t.Fatalf("automatic compaction wrote %#v", command)
 	}
 
@@ -461,7 +461,7 @@ func TestPiNativeClientCommandsReceiveRequestIDs(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace(writer.Bytes()), &command); err != nil {
 		t.Fatal(err)
 	}
-	if command.Type != "get_commands" || !strings.HasPrefix(command.ID, "dire-mux-client-get-commands-") {
+	if command.Type != "get_commands" || !strings.HasPrefix(command.ID, "kiwi-code-client-get-commands-") {
 		t.Fatalf("sendClientCommand() wrote %#v", command)
 	}
 }

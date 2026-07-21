@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 func TestDiscoverCLIProxyAPIGPTModelsFiltersTheOpenAIModelList(t *testing.T) {
@@ -465,8 +465,8 @@ func TestDiscoverPiModelCapabilitiesLoadsAnApprovedProjectExtension(t *testing.T
 		t.Fatal(err)
 	}
 	extension := `export default function (pi) {
-  pi.registerProvider("dire-mux-project-test", {
-    name: "Dire Mux Project Test",
+  pi.registerProvider("kiwi-code-project-test", {
+    name: "Kiwi Code Project Test",
     baseUrl: "http://127.0.0.1:1",
     apiKey: "test-key",
     api: "openai-completions",
@@ -504,7 +504,7 @@ func TestDiscoverPiModelCapabilitiesLoadsAnApprovedProjectExtension(t *testing.T
 		t.Fatal(err)
 	}
 	for _, model := range unapprovedModels {
-		if model.ID == "dire-mux-project-test/project-model" {
+		if model.ID == "kiwi-code-project-test/project-model" {
 			t.Fatal("unapproved project extension executed during safe model discovery")
 		}
 	}
@@ -513,7 +513,7 @@ func TestDiscoverPiModelCapabilitiesLoadsAnApprovedProjectExtension(t *testing.T
 		t.Fatal(err)
 	}
 	for _, model := range models {
-		if model.ID == "dire-mux-project-test/project-model" {
+		if model.ID == "kiwi-code-project-test/project-model" {
 			if !reflect.DeepEqual(model.ReasoningLevels, []string{"off", "minimal", "low", "medium", "high", "max"}) {
 				t.Fatalf("project model reasoning levels = %#v", model.ReasoningLevels)
 			}
@@ -679,7 +679,7 @@ func TestClaudeGPTCommandLoadsItsDefaultModelFromCLIProxyAPI(t *testing.T) {
 
 	handler := &terminalHandler{
 		envPath:                 "/usr/bin/env",
-		claudePluginPath:        "/plugin/dire-mux",
+		claudePluginPath:        "/plugin/kiwi-code",
 		claudeSandboxPluginPath: "/plugin/sandbox-exec",
 		claudeGPTProfilePath:    filepath.Join(directory, "profile"),
 		cliProxyAPIBaseURL:      proxy.URL,
@@ -729,7 +729,7 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 	profilePath := filepath.Join(directory, "isolated-claude-gpt-profile")
 	handler := &terminalHandler{
 		envPath:                 "/usr/bin/env",
-		claudePluginPath:        "/plugin/dire-mux",
+		claudePluginPath:        "/plugin/kiwi-code",
 		claudeSandboxPluginPath: "/plugin/sandbox-exec",
 		claudeGPTProfilePath:    profilePath,
 		cliProxyAPIBaseURL:      "http://127.0.0.1:18317",
@@ -802,7 +802,7 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 					"ANTHROPIC_DEFAULT_OPUS_MODEL=gpt-5.6-sol",
 					"ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-5.6-terra",
 					"ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5.6-luna",
-					"DIRE_MUX_CODING_AGENT=" + codingAgentClaudeGPT,
+					"KIWI_CODE_CODING_AGENT=" + codingAgentClaudeGPT,
 					"/plugin/sandbox-exec",
 				} {
 					if !strings.Contains(joined, expected) {

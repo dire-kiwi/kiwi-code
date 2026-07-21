@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 	"github.com/gorilla/websocket"
-	"github.com/ivan/dire-mux/internal/project"
 )
 
 func TestTmuxBrowserListsAndAttachesWindows(t *testing.T) {
@@ -102,8 +102,7 @@ func TestTmuxBrowserOwnerUsesFreshStoreAndDurableStopRecipe(t *testing.T) {
 
 	for _, sessionName := range []string{
 		tmuxSessionName(item.ID, thread.ID, "terminal"),
-		previousTmuxSessionName(item.ID, thread.ID, "process"),
-		legacyThreadTmuxSessionName(item.ID, thread.ID, "pi"),
+		tmuxSessionName(item.ID, thread.ID, "process"),
 	} {
 		owner, ownerThread, managed, ownerErr := handler.tmuxBrowserSessionOwner(sessionName)
 		if ownerErr != nil || !managed || owner.ID != item.ID || ownerThread.ID != thread.ID {
@@ -172,7 +171,7 @@ func TestTmuxBrowserParsesSessionsAndHidesTemporaryViews(t *testing.T) {
 		"kiwi-code-project-thread-terminal\t1\t@2\t2\tshell two\t1\t1\tzsh\t421\t",
 		"kiwi-code-project-thread-terminal\t1\t@1\t1\tshell one\t0\t2\tbash\t421\t",
 		"kiwi-code-project-thread-tools\t0\t@3\t1\tpi\t1\t2\tnode\t421\tprocess-3",
-		"dire-mux-view-123\t1\t@3\t1\tpi\t1\t2\tnode\t421\tprocess-3",
+		"kiwi-code-view-123\t1\t@3\t1\tpi\t1\t2\tnode\t421\tprocess-3",
 	}, "\\n")
 	script := "#!/bin/sh\nprintf '%b\\n' " + shellQuote(output) + "\n"
 	if err := os.WriteFile(tmuxPath, []byte(script), 0o755); err != nil {

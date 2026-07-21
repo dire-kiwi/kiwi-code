@@ -18,7 +18,7 @@ func TestTmuxControlNotificationClassification(t *testing.T) {
 		{line: "%window-renamed @1 server", want: true},
 		{line: "%window-pane-changed @1 %2", want: true},
 		{line: "%session-window-changed $1 @2", want: true},
-		{line: "%subscription-changed dire-mux-status $1 @2 0 %3 : node", want: true},
+		{line: "%subscription-changed kiwi-code-status $1 @2 0 %3 : node", want: true},
 		{line: "%sessions-changed", want: false},
 		{line: "%output %3 ignored", want: false},
 		{line: "%begin 1 2 0", want: false},
@@ -48,7 +48,7 @@ case "$*" in
       printf '%s\n' "$line" >> "$TMUX_WATCH_INPUT_FILE"
     fi
     printf '%%window-add @1\n'
-    printf '%%subscription-changed dire-mux-status $1 @1 0 %%1 : node\n'
+    printf '%%subscription-changed kiwi-code-status $1 @1 0 %%1 : node\n'
     while IFS= read -r line; do :; done
     exit 0
     ;;
@@ -127,7 +127,7 @@ exit 1
 	if err != nil {
 		t.Fatal(err)
 	}
-	if count := strings.Count(string(input), "refresh-client -B 'dire-mux-status:%*:"); count != 2 {
+	if count := strings.Count(string(input), "refresh-client -B 'kiwi-code-status:%*:"); count != 2 {
 		t.Fatalf("format subscriptions = %d, want 2; input:\n%s", count, input)
 	}
 }
@@ -137,7 +137,7 @@ func waitForTmuxControlSubscriptions(t *testing.T, path string, want int) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		input, err := os.ReadFile(path)
-		if err == nil && strings.Count(string(input), "refresh-client -B 'dire-mux-status:%*:") >= want {
+		if err == nil && strings.Count(string(input), "refresh-client -B 'kiwi-code-status:%*:") >= want {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 func workflowRunnerTestCommand(t *testing.T, nodePath, manifestPath, scriptPath string) *exec.Cmd {
@@ -50,7 +50,7 @@ func workflowRunnerTestCommand(t *testing.T, nodePath, manifestPath, scriptPath 
 	return exec.Command(nodePath, arguments...)
 }
 
-func TestWorkflowRunnerPipelinesDireMuxAgentsAndReturnsStructuredResult(t *testing.T) {
+func TestWorkflowRunnerPipelinesKiwiCodeAgentsAndReturnsStructuredResult(t *testing.T) {
 	nodePath, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is not installed")
@@ -625,7 +625,7 @@ func TestWorkflowManagerRetainsOnlyRecentSettledRuns(t *testing.T) {
 func TestWorkflowDisableEnvironmentMatchesClaudeCode(t *testing.T) {
 	for _, value := range []string{"1", "true", "YES", "on"} {
 		t.Run(value, func(t *testing.T) {
-			t.Setenv("DIRE_MUX_DISABLE_WORKFLOWS", "")
+			t.Setenv("KIWI_CODE_DISABLE_WORKFLOWS", "")
 			t.Setenv("CLAUDE_CODE_DISABLE_WORKFLOWS", value)
 			if !workflowDisabledByEnvironment() {
 				t.Fatalf("CLAUDE_CODE_DISABLE_WORKFLOWS=%q was not honored", value)

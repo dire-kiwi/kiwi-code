@@ -142,7 +142,7 @@ export function WorkflowRunsPanel({
         <p
           id="workflow-runs-heading"
           className="flex items-center gap-1.5 font-mono text-[8px] font-semibold uppercase tracking-[0.16em] text-ghost-faint"
-          title="Pi prompts activate Dire Mux runs with “ultracode,” a direct workflow request, a saved /command, or session-scoped Ultracode effort."
+          title="Pi prompts activate Kiwi Code runs with “ultracode,” a direct workflow request, a saved /command, or session-scoped Ultracode effort."
         >
           <Workflow size={10} />
           Workflows

@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/broadcast"
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/broadcast"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 const threadUsageFileName = "thread-usage.json"

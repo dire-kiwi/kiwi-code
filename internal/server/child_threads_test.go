@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 func enableChildThreadCreationForTest(t *testing.T, handler http.Handler) *Server {
@@ -284,7 +284,7 @@ done
 	if strings.Count(worktrees, "worktree ") != 1 {
 		t.Fatalf("failed creation left a registered worktree:\n%s", worktrees)
 	}
-	if branches := strings.TrimSpace(serverGit(t, repository, "branch", "--list", "dire-mux/*")); branches != "" {
+	if branches := strings.TrimSpace(serverGit(t, repository, "branch", "--list", "kiwi-code/*")); branches != "" {
 		t.Fatalf("failed creation left a worktree branch: %s", branches)
 	}
 	orphanedPath := filepath.Join(filepath.Dir(dataFile), "orphaned-worktrees.json")

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 const projectSnapshotInterval = 30 * time.Second
@@ -41,7 +41,7 @@ func (s *Server) streamProjectsWithInterval(w http.ResponseWriter, r *http.Reque
 			flusher.Flush()
 		case <-ticker.C:
 			// Full snapshots reconcile a browser after a dropped notification and
-			// also pick up repository state that can change outside Dire Mux.
+			// also pick up repository state that can change outside Kiwi Code.
 			if err := writeProjectsEvent(w, clientProjects(s.projects.List())); err != nil {
 				return
 			}

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ivan/dire-mux/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 func usageForTest(input, output, read, write int64, cost float64) threadUsageTotals {

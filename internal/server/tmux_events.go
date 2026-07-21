@@ -31,7 +31,7 @@ type tmuxSessionWatch struct {
 
 // watchThreadTmux starts control-mode clients for the thread's two canonical
 // sessions. Missing sessions do not get polled: their watcher sleeps until a
-// Dire Mux session creation or a %sessions-changed notification wakes it.
+// Kiwi Code session creation or a %sessions-changed notification wakes it.
 func (h *terminalHandler) watchThreadTmux(projectID, threadID string) func() {
 	return h.watchThreadTmuxSessions(projectID, threadID, []string{
 		tmuxSessionName(projectID, threadID, "terminal"),
@@ -96,7 +96,7 @@ func (h *terminalHandler) watchThreadTmuxSessions(projectID, threadID string, se
 	}
 }
 
-// wakeThreadTmuxWatchers is called when Dire Mux may have created one of the
+// wakeThreadTmuxWatchers is called when Kiwi Code may have created one of the
 // sessions. An attached watcher simply consumes this signal; a watcher waiting
 // for a missing session attempts its control-mode attachment immediately.
 func (h *terminalHandler) wakeThreadTmuxWatchers(projectID, threadID string) {
@@ -207,7 +207,7 @@ func (h *terminalHandler) runTmuxControlClient(watch *tmuxSessionWatch) bool {
 	// subscription adds pane_current_command changes, which have no dedicated
 	// control notification. tmux evaluates subscriptions internally and emits
 	// only changes (at most once per second).
-	_, _ = io.WriteString(stdin, "refresh-client -B 'dire-mux-status:%*:#{pane_current_command}|#{window_name}|#{window_active}|#{@dire-mux-process-id}|#{@dire-mux-web-servers}'\n")
+	_, _ = io.WriteString(stdin, "refresh-client -B 'kiwi-code-status:%*:#{pane_current_command}|#{window_name}|#{window_active}|#{@kiwi-code-process-id}|#{@kiwi-code-web-servers}'\n")
 
 	done := make(chan struct{})
 	go func() {

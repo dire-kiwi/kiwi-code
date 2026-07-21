@@ -11,11 +11,11 @@ import (
 	"strings"
 
 	"github.com/creack/pty"
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 	"github.com/gorilla/websocket"
-	"github.com/ivan/dire-mux/internal/project"
 )
 
-const tmuxViewSessionPrefix = "dire-mux-view-"
+const tmuxViewSessionPrefix = "kiwi-code-view-"
 
 type tmuxBrowserWindow struct {
 	ID             string `json:"id"`
@@ -55,7 +55,7 @@ func (h *terminalHandler) listTmuxSessions(w http.ResponseWriter, _ *http.Reques
 func (h *terminalHandler) tmuxBrowserSessions() ([]tmuxBrowserSession, error) {
 	output, err := h.tmuxCommand(
 		"list-windows", "-a",
-		"-F", "#{session_name}\t#{?session_attached,1,0}\t#{window_id}\t#{window_index}\t#{window_name}\t#{window_active}\t#{window_panes}\t#{pane_current_command}\t#{pid}\t#{@dire-mux-process-id}",
+		"-F", "#{session_name}\t#{?session_attached,1,0}\t#{window_id}\t#{window_index}\t#{window_name}\t#{window_active}\t#{window_panes}\t#{pane_current_command}\t#{pid}\t#{@kiwi-code-process-id}",
 	).CombinedOutput()
 	if err != nil {
 		if isMissingTmuxServer(output, err) {
@@ -181,9 +181,7 @@ func tmuxBrowserSessionOwnerInProjects(sessionName string, projects []project.Pr
 }
 
 func tmuxBrowserSessionKind(item project.Project, thread project.Thread, sessionName string) string {
-	if sessionName == tmuxSessionName(item.ID, thread.ID, "terminal") ||
-		sessionName == legacyThreadTmuxSessionName(item.ID, thread.ID, "terminal") ||
-		(len(item.Threads) > 0 && item.Threads[0].ID == thread.ID && sessionName == legacyProjectTmuxSessionName(item.ID, "terminal")) {
+	if sessionName == tmuxSessionName(item.ID, thread.ID, "terminal") {
 		return "shell"
 	}
 	return "tools"

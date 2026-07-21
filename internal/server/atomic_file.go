@@ -16,7 +16,7 @@ type serverAtomicFileOptions struct {
 
 func writeFileAtomically(path string, contents []byte, options serverAtomicFileOptions) error {
 	directory := filepath.Dir(path)
-	file, err := os.CreateTemp(directory, ".dire-mux-atomic-*")
+	file, err := os.CreateTemp(directory, ".kiwi-code-atomic-*")
 	if err != nil {
 		return err
 	}

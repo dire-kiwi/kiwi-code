@@ -1,15 +1,15 @@
 ---
-name: dire-mux-in-app-browser
-description: Controls Dire Mux's in-app browser by dynamically loading browser_* tools with browser_tool_search. Use when a task requires opening or interacting with websites, inspecting rendered pages, filling forms, taking screenshots, evaluating JavaScript in a page, managing tabs, or sending raw CDP commands.
+name: kiwi-code-in-app-browser
+description: Controls Kiwi Code's in-app browser by dynamically loading browser_* tools with browser_tool_search. Use when a task requires opening or interacting with websites, inspecting rendered pages, filling forms, taking screenshots, evaluating JavaScript in a page, managing tabs, or sending raw CDP commands.
 license: MIT
-compatibility: Requires a Dire Mux-managed Pi session and the Dire Mux desktop in-app browser provider.
+compatibility: Requires a Kiwi Code-managed Pi session and the Kiwi Code desktop in-app browser provider.
 context: fork
 allowed-tools: browser_tool_search browser_session browser_tabs browser_navigate browser_snapshot browser_click browser_fill browser_key browser_wait browser_evaluate browser_screenshot browser_cdp
 ---
 
-# Dire Mux in-app browser control
+# Kiwi Code in-app browser control
 
-Use the `browser_*` tools to operate the real browser surface embedded in the Dire Mux desktop app. Browser state belongs to the current Dire Mux thread; terminal Pi and Pi Native in that thread share it. The first-party Pi extension sends semantic actions to Dire Mux rather than opening a separate Chrome process itself.
+Use the `browser_*` tools to operate the real browser surface embedded in the Kiwi Code desktop app. Browser state belongs to the current Kiwi Code thread; terminal Pi and Pi Native in that thread share it. The first-party Pi extension sends semantic actions to Kiwi Code rather than opening a separate Chrome process itself.
 
 ## Dynamic tool loading
 
@@ -36,7 +36,7 @@ The loaded definitions become available on the **next model turn**. Do not attem
 
 The only supported backend is `in-app`. Browsing tools start or connect to it lazily, so most tasks do not need an explicit session call. Use `browser_session({ action: "start", backend: "in-app" })` only when explicit lifecycle control is useful. Existing-profile, companion-extension, external-CDP, and standalone desktop-provider backends are not available through this bundled extension.
 
-If an action reports that the in-app desktop provider is unavailable (HTTP 503), ask the user to start or reconnect the Dire Mux desktop app. Do not silently switch to another browser, launch Chrome yourself, or install `@dire-pi/chrome-devtools`. A 404 with no Dire Mux error payload indicates that the running version does not expose the browser endpoint; page- or element-specific 404 errors are ordinary operation failures and should be handled as instructed.
+If an action reports that the in-app desktop provider is unavailable (HTTP 503), ask the user to start or reconnect the Kiwi Code desktop app. Do not silently switch to another browser, launch Chrome yourself, or install `@dire-pi/chrome-devtools`. A 404 with no Kiwi Code error payload indicates that the running version does not expose the browser endpoint; page- or element-specific 404 errors are ordinary operation failures and should be handled as instructed.
 
 ## Preferred workflow
 
@@ -159,7 +159,7 @@ Only the selected page target is available. Browser-wide, target-management, hos
 
 ## Lifecycle and safety
 
-- `browser_session({ action: "disconnect" })` releases the current browser connection without asking Dire Mux to destroy the in-app browser session.
+- `browser_session({ action: "disconnect" })` releases the current browser connection without asking Kiwi Code to destroy the in-app browser session.
 - `browser_session({ action: "stop" })` destroys the current thread's in-app browser session and its ephemeral profile; the next start uses fresh site data.
 - The in-app profile can contain authenticated sessions and private page data. Treat snapshots, screenshots, evaluated values, and raw CDP results as sensitive.
-- Do not try to discover or expose Dire Mux's private browser transport or an unauthenticated CDP endpoint.
+- Do not try to discover or expose Kiwi Code's private browser transport or an unauthenticated CDP endpoint.

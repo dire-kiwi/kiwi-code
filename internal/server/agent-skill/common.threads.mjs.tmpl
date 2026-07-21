@@ -1,24 +1,24 @@
-const rawThreadEndpoint = process.env.DIRE_MUX_THREAD_ENDPOINT?.replace(/\/+$/, "");
+const rawThreadEndpoint = process.env.KIWI_CODE_THREAD_ENDPOINT?.replace(/\/+$/, "");
 
-/* DIRE_MUX_SHARED_COMMON */
+/* KIWI_CODE_SHARED_COMMON */
 
 function context() {
   if (!rawThreadEndpoint) {
-    throw new Error("DIRE_MUX_THREAD_ENDPOINT is not set. Run this helper from a Dire Mux agent session.");
+    throw new Error("KIWI_CODE_THREAD_ENDPOINT is not set. Run this helper from a Kiwi Code agent session.");
   }
 
   let endpoint;
   try {
     endpoint = new URL(rawThreadEndpoint);
   } catch {
-    throw new Error("DIRE_MUX_THREAD_ENDPOINT is not a valid URL.");
+    throw new Error("KIWI_CODE_THREAD_ENDPOINT is not a valid URL.");
   }
 
   const match = endpoint.pathname.match(/\/api\/projects\/([^/]+)\/threads\/([^/]+)\/?$/);
   return {
     endpoint,
-    projectId: process.env.DIRE_MUX_PROJECT_ID || (match ? decodeURIComponent(match[1]) : ""),
-    threadId: process.env.DIRE_MUX_THREAD_ID || (match ? decodeURIComponent(match[2]) : ""),
+    projectId: process.env.KIWI_CODE_PROJECT_ID || (match ? decodeURIComponent(match[1]) : ""),
+    threadId: process.env.KIWI_CODE_THREAD_ID || (match ? decodeURIComponent(match[2]) : ""),
   };
 }
 

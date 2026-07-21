@@ -4,7 +4,7 @@ _Research pass following `reports/in-app-browser-plan.md`._
 
 ## Question
 
-Can Dire Mux move away from Electron while retaining its React/web UI and gaining a true second embedded browser surface on macOS and Linux?
+Can Kiwi Code move away from Electron while retaining its React/web UI and gaining a true second embedded browser surface on macOS and Linux?
 
 ## Executive conclusion
 
@@ -13,7 +13,7 @@ Yes, but changing runtime does not remove the central tradeoff:
 - Lightweight system-webview shells use **WKWebView on macOS** and **WebKitGTK on Linux**. They can display a real second top-level guest view, but they do not provide Chromium/CDP parity, reliable hidden rendering, or the same automation capabilities on both platforms.
 - Full Chromium embedding is available through **CEF**, **Qt WebEngine**, **NW.js**, or Electron itself. Those retain a Chromium-sized distribution and browser-update obligation.
 
-For Dire Mux, the recommended order is:
+For Kiwi Code, the recommended order is:
 
 1. **Keep Electron and prototype a separate `WebContentsView`.** It already provides the exact primitives required and is by far the lowest-risk path.
 2. If leaving Electron is a firm product requirement, use **CEF with a thin C++ host**. It is the strongest non-Electron fit for cross-platform Chromium, profiles, direct CDP, native views, and offscreen rendering.
@@ -25,7 +25,7 @@ The React application and Go backend do not need to be rewritten for any of thes
 
 ## Important product boundary
 
-A native embedded view exists only in the local desktop shell. It does **not** make an arbitrary browser embeddable in the normal Dire Mux web client opened in Chrome or over the LAN.
+A native embedded view exists only in the local desktop shell. It does **not** make an arbitrary browser embeddable in the normal Kiwi Code web client opened in Chrome or over the LAN.
 
 Therefore there are two separate product modes:
 
@@ -54,7 +54,7 @@ Changing Electron cannot bypass browser CSP, iframe, or same-origin restrictions
 ## Requirements used for comparison
 
 - React UI remains the primary application UI.
-- Trusted Dire Mux UI and arbitrary remote guest content are separate web contents.
+- Trusted Kiwi Code UI and arbitrary remote guest content are separate web contents.
 - Guest pages are top-level in their own browser context, not iframes.
 - macOS and Linux support.
 - Independent profiles or ephemeral sessions.
@@ -68,7 +68,7 @@ Changing Electron cannot bypass browser CSP, iframe, or same-origin restrictions
 
 ## Decision matrix
 
-| Option | True second view | macOS + Linux | Engine | Profiles | Trusted input | Screenshot/offscreen | CDP parity | Maturity | Dire Mux fit |
+| Option | True second view | macOS + Linux | Engine | Profiles | Trusted input | Screenshot/offscreen | CDP parity | Maturity | Kiwi Code fit |
 |---|---:|---:|---|---|---|---|---|---|---|
 | Electron `WebContentsView` | Yes | Yes | Chromium | Excellent | Excellent | Excellent | Excellent, in process | Very high | **Best near-term** |
 | CEF | Yes | Yes | Chromium | Excellent | Excellent | Best offscreen control | Excellent, in process | High upstream; host is low-level | **Best non-Electron** |
@@ -102,7 +102,7 @@ Recommended composition:
 
 ```text
 Electron native window
-├── trusted Dire Mux WebContentsView
+├── trusted Kiwi Code WebContentsView
 │   └── React UI, narrow preload/IPC only
 └── untrusted browser WebContentsView
     ├── separate Session partition
@@ -164,7 +164,7 @@ This would let the existing TypeScript browser-controller semantics be adapted w
 - macOS bundle/signing/helper-process complexity.
 - Linux sandbox and runtime packaging.
 - Manual Chromium/CEF security update cadence.
-- Browser lifecycle, IME, accessibility, downloads, popups, permissions, certificates, and crash recovery all become Dire Mux responsibilities.
+- Browser lifecycle, IME, accessibility, downloads, popups, permissions, certificates, and crash recovery all become Kiwi Code responsibilities.
 
 CEF is BSD-licensed, with Chromium third-party notices and codec obligations.
 
@@ -208,7 +208,7 @@ A React UI can run in one `QWebEngineView`, with a separate untrusted guest `QWe
 ### Language choices
 
 - **Thin C++/Qt shell:** recommended if choosing Qt.
-- **Go through MIQT:** possible and attractive because Dire Mux is Go. MIQT includes Qt 6 WebEngine bindings, but is young/pre-1.0 and requires careful ownership/threading/packaging validation.
+- **Go through MIQT:** possible and attractive because Kiwi Code is Go. MIQT includes Qt 6 WebEngine bindings, but is young/pre-1.0 and requires careful ownership/threading/packaging validation.
 - **Rust/CXX-Qt:** viable when Rust is strategic, but WebEngine should still be owned by Qt/C++ or QML.
 - **PySide6:** functional but adds a Python runtime and does not simplify deployment.
 
@@ -288,7 +288,7 @@ Tauri 2 can add multiple child webviews to one native window. Each child can loa
 
 Its capability model is strong: arbitrary remote guest origins can receive zero native permissions while only the trusted React view receives application capabilities.
 
-### Critical limitations for Dire Mux
+### Critical limitations for Kiwi Code
 
 - Multi-webview remains behind Tauri's `unstable` feature.
 - Linux child-view placement has known X11/Wayland/GTK-container complications, including open work around `gtk::Fixed` positioning and bounds.
@@ -432,7 +432,7 @@ The guest must not receive:
 - Node integration;
 - access to the browser-host control plane.
 
-Dire Mux currently has an unauthenticated all-interface production mode. Before embedding hostile pages locally, add a per-launch trusted-view capability and reject unauthorized HTTP mutations, EventSource access, and WebSocket upgrades. CORS alone is not authorization.
+Kiwi Code currently has an unauthenticated all-interface production mode. Before embedding hostile pages locally, add a per-launch trusted-view capability and reject unauthorized HTTP mutations, EventSource access, and WebSocket upgrades. CORS alone is not authorization.
 
 ## Recommended proof-of-concept sequence
 

@@ -59,8 +59,8 @@ test('browser control uses the WebContents debugger and real CDP input', () => {
 test('provider uses an authenticated dynamic loopback listener and secure atomic config', () => {
   assert.match(provider, /host: '127\.0\.0\.1', port: 0/)
   assert.match(provider, /randomBytes\(32\)\.toString\('hex'\)/)
-  assert.match(provider, /DIRE_MUX_BROWSER_PROVIDER_CONFIG/)
-  assert.match(provider, /DIRE_MUX_DATA_DIR/)
+  assert.match(provider, /KIWI_CODE_BROWSER_PROVIDER_CONFIG/)
+  assert.match(provider, /KIWI_CODE_DATA_DIR/)
   assert.match(provider, /'wx', 0o600/)
   assert.match(provider, /Authorization|authorization/)
   assert.match(provider, /requestUrl\.pathname !== '\/v1\/action'/)
@@ -84,7 +84,7 @@ test('Code uses a separately sandboxed WebContentsView and private loopback code
 })
 
 test('preload exposes only the narrow native view APIs', () => {
-  assert.match(preload, /exposeInMainWorld\('direMuxDesktopBrowser'/)
+  assert.match(preload, /exposeInMainWorld\('kiwiCodeDesktopBrowser'/)
   assert.match(preload, /show\(options\)/)
   assert.match(preload, /hide\(options\)/)
   assert.match(preload, /setBounds\(options\)/)
@@ -92,7 +92,7 @@ test('preload exposes only the narrow native view APIs', () => {
   assert.match(preload, /ipcRenderer\.invoke\(browserChannels\.setBackendOrigin, origin\)/)
   assert.match(preload, /onState\(callback\)/)
   assert.match(preload, /onWorkspaceShortcut\(callback\)/)
-  assert.match(preload, /exposeInMainWorld\('direMuxDesktopCodeServer'/)
+  assert.match(preload, /exposeInMainWorld\('kiwiCodeDesktopCodeServer'/)
   assert.match(preload, /close\(options\)/)
   assert.match(preload, /process\.isMainFrame/)
   assert.doesNotMatch(preload, /exposeInMainWorld\([^\n]+ipcRenderer/)

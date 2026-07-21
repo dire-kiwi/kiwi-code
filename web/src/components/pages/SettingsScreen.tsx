@@ -407,7 +407,7 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
       header={(
         <ScreenHeader
           title="Settings"
-          subtitle="dire/mux configuration"
+          subtitle="Kiwi Code configuration"
           backLabel="Back to workspace"
           backDisabled={Boolean(saving) || installingSkill}
           onOpenSidebar={onOpenSidebar}
@@ -601,7 +601,7 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
                 </label>
 
                 <InfoCallout>
-                  Cleanup runs when Dire Mux starts and then once per hour. A worktree becomes unattached when its thread or project is deleted.
+                  Cleanup runs when Kiwi Code starts and then once per hour. A worktree becomes unattached when its thread or project is deleted.
                 </InfoCallout>
 
                 {cleanupError && (
@@ -715,7 +715,7 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
               <SectionHeader
                 icon={<Workflow size={16} />}
                 title="Dynamic workflows · Pi"
-                description="Configure Dire Mux workflows exposed through Pi sessions."
+                description="Configure Kiwi Code workflows exposed through Pi sessions."
                 tone="green"
                 badge={(
                   <StatusBadge tone={disableWorkflows ? 'neutral' : 'success'}>
@@ -739,7 +739,7 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
                   <span>
                     <span className="block text-[10px] font-semibold text-ghost-bright-white">Enable dynamic workflows</span>
                     <span className="mt-1 block text-[9px] leading-4 text-ghost-faint">
-                      Disabling blocks new and resumed Dire Mux runs, saved commands, and Pi ultracode activation. Retained runs remain visible.
+                      Disabling blocks new and resumed Kiwi Code runs, saved commands, and Pi ultracode activation. Retained runs remain visible.
                     </span>
                   </span>
                 </label>
@@ -887,7 +887,7 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
                   <p className="truncate leading-relaxed">The quick brown fox jumps over the lazy dog.</p>
                   <p className="mt-1 truncate leading-relaxed">
                     <span style={{ color: theme.colors.green }}>➜</span>{' '}
-                    <span style={{ color: theme.colors.blue }}>~/dire-mux</span>{' '}
+                    <span style={{ color: theme.colors.blue }}>~/kiwi-code</span>{' '}
                     <span style={{ color: theme.colors.muted }}>git:(</span>
                     <span style={{ color: theme.colors.red }}>main</span>
                     <span style={{ color: theme.colors.muted }}>)</span>
@@ -967,7 +967,7 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
               <SectionHeader
                 icon={<Sparkles size={16} />}
                 title="Agent skills"
-                description="Install global Dire Mux thread-control and process-management skills for Agent Skills-compatible coding agents."
+                description="Install global Kiwi Code thread-control and process-management skills for Agent Skills-compatible coding agents."
                 tone="blue"
                 badge={agentSkill ? (
                   <StatusBadge tone={agentSkill.upToDate ? 'success' : agentSkill.installed ? 'warning' : 'neutral'}>
@@ -982,8 +982,8 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
                   <div className="mt-1.5 space-y-1">
                     {(bundledSkills.length ? bundledSkills : [
                       { name: 'kiwi-code-processes', path: '~/.agents/skills/kiwi-code-processes' },
-                      { name: 'dire-mux-threads', path: '~/.agents/skills/dire-mux-threads' },
-                      { name: 'dire-mux-mermaid', path: '~/.agents/skills/dire-mux-mermaid' },
+                      { name: 'kiwi-code-threads', path: '~/.agents/skills/kiwi-code-threads' },
+                      { name: 'kiwi-code-mermaid', path: '~/.agents/skills/kiwi-code-mermaid' },
                     ]).map((skill) => (
                       <p key={skill.name} className="break-all font-mono text-[10px] leading-4 text-ghost-muted">
                         {skill.path}
@@ -995,7 +995,7 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
                 <InfoCallout className="mt-4">
                   The dependency-free Node.js helpers can create, rename, archive, restore, inspect, and close threads; read Pi,
                   Claude, shell, tool, and process output; and manage persistent process shells. Claude Code launched through
-                  Dire Mux already receives the process skill from its bundled plugin. Use{' '}
+                  Kiwi Code already receives the process skill from its bundled plugin. Use{' '}
                   <span className="font-mono text-ghost-blue">/reload</span> in an existing Pi session after installation.
                 </InfoCallout>
 

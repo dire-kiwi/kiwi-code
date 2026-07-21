@@ -4,11 +4,10 @@ export const defaultVitePort = 5173
 export const defaultGoPort = 8080
 export const reservedProductionPort = 4000
 export const productionTmuxSocket = 'kiwi-code'
-export const legacyProductionTmuxSocket = 'dire-mux'
 
 export function defaultDevelopmentTmuxSocket(rootDirectory) {
   const checkoutID = createHash('sha256').update(rootDirectory).digest('hex').slice(0, 12)
-  return `dmdev-${checkoutID}`
+  return `kcdev-${checkoutID}`
 }
 
 export function assertDevelopmentPort(port, option) {
@@ -25,7 +24,7 @@ export function assertDevelopmentApiTarget(configuredPort, configuredUrl) {
 
   const value = String(configuredUrl ?? '').trim()
   if (!value) return
-  const url = new URL(value, 'http://dire-mux.invalid')
+  const url = new URL(value, 'http://kiwi-code.invalid')
   if (url.port) {
     assertDevelopmentPort(Number(url.port), 'Vite API target')
   }
@@ -46,7 +45,7 @@ Options:
   --help                 Show this help
 
 Development safety:
-  Port ${reservedProductionPort} and tmux sockets ${productionTmuxSocket} and ${legacyProductionTmuxSocket} are reserved for production.
+  Port ${reservedProductionPort} and tmux socket ${productionTmuxSocket} are reserved for production.
 `
 }
 
@@ -101,7 +100,7 @@ export function parseArgs(args) {
       if (!/^[A-Za-z0-9._-]{1,64}$/.test(value ?? '') || value === '.' || value === '..') {
         throw new Error('--tmux-socket must be 1-64 letters, numbers, dots, hyphens, or underscores')
       }
-      if (value === productionTmuxSocket || value === legacyProductionTmuxSocket) {
+      if (value === productionTmuxSocket) {
         throw new Error(`--tmux-socket may not use the production tmux server ${value}`)
       }
       options.tmuxSocket = value

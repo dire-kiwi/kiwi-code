@@ -46,7 +46,7 @@ import type {
 } from './types'
 
 const defaultWorkspaceTool: WorkspaceTool = 'pi'
-const activeProfileStorageKey = 'dire-mux-active-profile'
+const activeProfileStorageKey = 'kiwi-code-active-profile'
 
 type NewThreadStart = CodingAgentStart & {
   kind: 'new-thread-start'
@@ -697,7 +697,7 @@ export default function App() {
   }
 
   async function handleDelete(project: Project) {
-    if (deletingId || !window.confirm(`Remove “${project.name}” from dire/mux?\n\nIts tmux sessions and running tools will be stopped. The project folder will not be deleted. Clean managed worktrees may be removed later according to automatic cleanup settings; their Git branches will remain.`)) {
+    if (deletingId || !window.confirm(`Remove “${project.name}” from Kiwi Code?\n\nIts tmux sessions and running tools will be stopped. The project folder will not be deleted. Clean managed worktrees may be removed later according to automatic cleanup settings; their Git branches will remain.`)) {
       return
     }
 

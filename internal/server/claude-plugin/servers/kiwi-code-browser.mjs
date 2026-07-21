@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
-const SERVER_NAME = "dire-mux-browser";
+const SERVER_NAME = "kiwi-code-browser";
 const SERVER_VERSION = "1.0.0";
 const MAX_TEXT_BYTES = 50 * 1024;
 const MAX_TEXT_LINES = 2_000;
@@ -36,7 +36,7 @@ const tools = [
     name: "browser_session",
     title: "Browser Session",
     description:
-      "Inspect or control the current Dire Mux thread's in-app browser session. Most browser tools start or connect lazily; use this for explicit status, start, disconnect, or stop operations.",
+      "Inspect or control the current Kiwi Code thread's in-app browser session. Most browser tools start or connect lazily; use this for explicit status, start, disconnect, or stop operations.",
     inputSchema: object(
       {
         action: string("Session operation.", {
@@ -434,21 +434,21 @@ function actionForTool(name, args) {
 }
 
 function browserActionsEndpoint() {
-  const raw = process.env.DIRE_MUX_THREAD_ENDPOINT?.trim().replace(/\/+$/, "");
+  const raw = process.env.KIWI_CODE_THREAD_ENDPOINT?.trim().replace(/\/+$/, "");
   if (!raw) {
     throw new Error(
-      "DIRE_MUX_THREAD_ENDPOINT is not set. Browser tools must run inside a Dire Mux-managed Claude Code session.",
+      "KIWI_CODE_THREAD_ENDPOINT is not set. Browser tools must run inside a Kiwi Code-managed Claude Code session.",
     );
   }
   let endpoint;
   try {
     endpoint = new URL(`${raw}/browser/actions`);
   } catch {
-    throw new Error("DIRE_MUX_THREAD_ENDPOINT is not a valid HTTP URL.");
+    throw new Error("KIWI_CODE_THREAD_ENDPOINT is not a valid HTTP URL.");
   }
   if ((endpoint.protocol !== "http:" && endpoint.protocol !== "https:") ||
       endpoint.username || endpoint.password) {
-    throw new Error("DIRE_MUX_THREAD_ENDPOINT is not a supported HTTP URL.");
+    throw new Error("KIWI_CODE_THREAD_ENDPOINT is not a supported HTTP URL.");
   }
   return endpoint.toString();
 }
@@ -457,23 +457,23 @@ let cachedAgentToken;
 
 async function agentToken() {
   if (cachedAgentToken) return cachedAgentToken;
-  const tokenFile = process.env.DIRE_MUX_AGENT_TOKEN_FILE?.trim();
+  const tokenFile = process.env.KIWI_CODE_AGENT_TOKEN_FILE?.trim();
   if (tokenFile) {
     try {
       cachedAgentToken = (await readFile(tokenFile, "utf8")).trim();
     } catch {
-      throw new Error("Could not read the Dire Mux browser capability file.");
+      throw new Error("Could not read the Kiwi Code browser capability file.");
     }
     if (!cachedAgentToken) {
-      throw new Error("The Dire Mux browser capability file is empty.");
+      throw new Error("The Kiwi Code browser capability file is empty.");
     }
     return cachedAgentToken;
   }
 
-  const environmentToken = process.env.DIRE_MUX_AGENT_TOKEN?.trim();
+  const environmentToken = process.env.KIWI_CODE_AGENT_TOKEN?.trim();
   if (!environmentToken) {
     throw new Error(
-      "DIRE_MUX_AGENT_TOKEN_FILE is not set. Browser tools require a Dire Mux agent capability.",
+      "KIWI_CODE_AGENT_TOKEN_FILE is not set. Browser tools require a Kiwi Code agent capability.",
     );
   }
   cachedAgentToken = environmentToken;
@@ -497,14 +497,14 @@ async function browserAction(operation, params, signal) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Dire-Mux-Agent-Token": await agentToken(),
+        "X-Kiwi-Code-Agent-Token": await agentToken(),
       },
       body: JSON.stringify({ operation, params }),
       signal,
     });
   } catch (error) {
     if (signal?.aborted) throw new Error("Browser action was cancelled.");
-    throw new Error(`Could not reach the Dire Mux browser service: ${errorMessage(error)}`);
+    throw new Error(`Could not reach the Kiwi Code browser service: ${errorMessage(error)}`);
   }
 
   let payload;
@@ -516,23 +516,23 @@ async function browserAction(operation, params, signal) {
   const detail = responseMessage(payload);
   if (response.status === 404 && !detail) {
     throw new Error(
-      "Dire Mux's browser actions endpoint is unavailable (HTTP 404). Update or restart Dire Mux.",
+      "Kiwi Code's browser actions endpoint is unavailable (HTTP 404). Update or restart Kiwi Code.",
     );
   }
   if (response.status === 503) {
     throw new Error(
-      "Dire Mux's in-app browser provider is unavailable (HTTP 503). Start or reconnect the Dire Mux desktop app.",
+      "Kiwi Code's in-app browser provider is unavailable (HTTP 503). Start or reconnect the Kiwi Code desktop app.",
     );
   }
   if (!response.ok) {
     throw new Error(
-      `Dire Mux browser action ${operation} failed (HTTP ${response.status})${detail ? `: ${detail}` : "."}`,
+      `Kiwi Code browser action ${operation} failed (HTTP ${response.status})${detail ? `: ${detail}` : "."}`,
     );
   }
   if (!isRecord(payload) || !isRecord(payload.result) ||
       !validBrowserActionResult(operation, payload.result)) {
     throw new Error(
-      `Dire Mux browser action ${operation} returned an invalid response; expected {result: ...}.`,
+      `Kiwi Code browser action ${operation} returned an invalid response; expected {result: ...}.`,
     );
   }
   return payload.result;
@@ -566,7 +566,7 @@ async function limitText(text) {
   visible = truncateUtf8(visible, MAX_TEXT_BYTES);
   let saved = "";
   try {
-    const directory = await mkdtemp(join(tmpdir(), "dire-mux-claude-browser-"));
+    const directory = await mkdtemp(join(tmpdir(), "kiwi-code-claude-browser-"));
     const path = join(directory, "output.txt");
     await writeFile(path, text, "utf8");
     saved = ` Full output saved to: ${path}`;
@@ -612,7 +612,7 @@ async function toolContent(name, result) {
   }
   if (name === "browser_screenshot") {
     const bytes = validImage(result.data, result.mimeType);
-    if (!bytes) throw new Error("Dire Mux returned an invalid browser screenshot.");
+    if (!bytes) throw new Error("Kiwi Code returned an invalid browser screenshot.");
     if (bytes.length > MAX_IMAGE_BYTES) {
       throw new Error(
         `Browser screenshot is ${bytes.length} bytes; Claude Code accepts at most ${MAX_IMAGE_BYTES}. Retry with JPEG, lower quality, or fullPage false.`,
@@ -668,7 +668,7 @@ async function handleRequest(message) {
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
         instructions:
-          "Controls the in-app browser owned by the current Dire Mux thread. Use focused browser_* tools and inspect the page with browser_snapshot before interacting with refs.",
+          "Controls the in-app browser owned by the current Kiwi Code thread. Use focused browser_* tools and inspect the page with browser_snapshot before interacting with refs.",
       });
       return;
     }

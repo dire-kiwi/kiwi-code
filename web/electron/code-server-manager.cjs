@@ -12,13 +12,13 @@ const {
   validateBounds,
 } = require('./browser-helpers.cjs')
 
-const CODE_SERVER_PARTITION = 'dire-mux-code-server'
+const CODE_SERVER_PARTITION = 'kiwi-code-code-server'
 const THEME_EXTENSION_ROOT = path.join(__dirname, 'code-server-extension')
 const THEME_EXTENSION_MANIFEST = require('./code-server-extension/package.json')
 const THEME_EXTENSION_DIRECTORY = `${THEME_EXTENSION_MANIFEST.publisher}.${THEME_EXTENSION_MANIFEST.name}-${THEME_EXTENSION_MANIFEST.version}`
 const THEME_EXTENSION_FILES = ['package.json', path.join('themes', 'kiwi-code-color-theme.json')]
 const USER_SETTINGS_SEED = path.join(__dirname, 'code-server-user-settings.json')
-const CODE_SERVER_COOKIE_NAME = 'code-server-session-dire-mux'
+const CODE_SERVER_COOKIE_NAME = 'code-server-session-kiwi-code'
 const DEFAULT_START_TIMEOUT_MS = 30_000
 const DEFAULT_STOP_TIMEOUT_MS = 3_000
 const MAX_STARTUP_OUTPUT_BYTES = 16 * 1024
@@ -51,8 +51,8 @@ function codeServerArguments(paths) {
     '--user-data-dir', paths.userData,
     '--extensions-dir', paths.extensions,
     '--session-socket', paths.runtimeSocket,
-    '--cookie-suffix', 'dire-mux',
-    '--app-name', 'Dire Mux Code',
+    '--cookie-suffix', 'kiwi-code',
+    '--app-name', 'Kiwi Code',
     '--idle-timeout-seconds', '600',
     '--disable-telemetry',
     '--disable-update-check',
@@ -60,7 +60,7 @@ function codeServerArguments(paths) {
 }
 
 function codeServerCommand(environment = process.env) {
-  const configured = environment.DIRE_MUX_CODE_SERVER_BIN?.trim()
+  const configured = environment.KIWI_CODE_CODE_SERVER_BIN?.trim()
   return configured || 'code-server'
 }
 

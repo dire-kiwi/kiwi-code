@@ -11,8 +11,8 @@ import { Type } from "typebox";
 const pollIntervalMs = 750;
 const maxVisibleResultBytes = 50 * 1024;
 const maxThreadPlanContentBytes = 256 * 1024;
-const threadEndpoint = process.env.DIRE_MUX_THREAD_ENDPOINT?.replace(/\/+$/, "") ?? "";
-const agentToken = process.env.DIRE_MUX_AGENT_TOKEN ?? "";
+const threadEndpoint = process.env.KIWI_CODE_THREAD_ENDPOINT?.replace(/\/+$/, "") ?? "";
+const agentToken = process.env.KIWI_CODE_AGENT_TOKEN ?? "";
 const plannerSkillPath = fileURLToPath(new URL("../skills/kiwi-code-planner", import.meta.url));
 
 type ChildRun = {
@@ -68,7 +68,7 @@ type SkillFrontmatter = {
 
 function ensureAvailable(): void {
 	if (!threadEndpoint || !agentToken) {
-		throw new Error("Forked skills are only available inside a Dire Mux-managed Pi session.");
+		throw new Error("Forked skills are only available inside a Kiwi Code-managed Pi session.");
 	}
 }
 
@@ -80,17 +80,17 @@ async function requestResponse(path: string, init: RequestInit = {}, signal?: Ab
 			...init,
 			headers: {
 				"Content-Type": "application/json",
-				"X-Dire-Mux-Agent-Token": agentToken,
+				"X-Kiwi-Code-Agent-Token": agentToken,
 				...init.headers,
 			},
 			signal,
 		});
 	} catch (reason) {
-		if (signal?.aborted) throw new Error("The Dire Mux request was cancelled.");
-		throw new Error(`Could not reach Dire Mux: ${reason instanceof Error ? reason.message : String(reason)}`);
+		if (signal?.aborted) throw new Error("The Kiwi Code request was cancelled.");
+		throw new Error(`Could not reach Kiwi Code: ${reason instanceof Error ? reason.message : String(reason)}`);
 	}
 	if (!response.ok) {
-		let message = `Dire Mux returned HTTP ${response.status}.`;
+		let message = `Kiwi Code returned HTTP ${response.status}.`;
 		try {
 			const body = await response.json() as { error?: unknown };
 			if (typeof body.error === "string" && body.error.trim()) message = body.error.trim();
@@ -331,21 +331,21 @@ function agentProfileInstruction(agent: string): string {
 		case "plan":
 			return "The skill selected the Plan agent profile. Analyze and produce a plan without modifying files.";
 		default:
-			return `The skill requested the agent profile ${JSON.stringify(agent)}. Dire Mux runs Pi Native workers, so treat this name as a specialization hint; Claude custom-agent configuration is not loaded.`;
+			return `The skill requested the agent profile ${JSON.stringify(agent)}. Kiwi Code runs Pi Native workers, so treat this name as a specialization hint; Claude custom-agent configuration is not loaded.`;
 	}
 }
 
 function renderSkillPrompt(skill: ForkedSkill, rawArguments: string): string {
 	const profile = agentProfileInstruction(skill.agent);
 	return [
-		`<dire_mux_forked_skill name="${skill.name}">`,
+		`<kiwi_code_forked_skill name="${skill.name}">`,
 		`You are already the isolated child executing Agent Skill ${JSON.stringify(skill.name)}. Follow its instructions directly and do not invoke run_forked_skill for this same skill again.`,
 		profile,
 		`Skill file: ${skill.filePath}`,
 		`References in the skill are relative to ${skill.baseDir}.`,
 		"",
 		renderSkillBody(skill, rawArguments),
-		"</dire_mux_forked_skill>",
+		"</kiwi_code_forked_skill>",
 	].filter((line) => line !== "").join("\n");
 }
 
@@ -374,7 +374,7 @@ function xml(value: string): string {
 }
 
 function executingForkedSkill(prompt: string): string {
-	return prompt.match(/<dire_mux_forked_skill name="([a-z0-9-]+)">/)?.[1] ?? "";
+	return prompt.match(/<kiwi_code_forked_skill name="([a-z0-9-]+)">/)?.[1] ?? "";
 }
 
 function removePiSkillEntries(systemPrompt: string, skills: ForkedSkill[]): string {
@@ -397,15 +397,15 @@ function forkedSkillGuidance(skills: ForkedSkill[]): string {
 		...(skill.agent ? [`    <agent>${xml(skill.agent)}</agent>`] : []),
 		"  </skill>",
 	].join("\n"));
-	return `\n\nThe following skills declare \`context: fork\`. To execute one, do not read its SKILL.md into the parent context. Call \`run_forked_skill\` with its name and the relevant user request as \`arguments\`. The tool renders the skill and runs it in a visible, isolated Pi Native child thread. It does not start or require activation of a Dire Mux workflow.\n\n<forked_skills>\n${entries.join("\n")}\n</forked_skills>`;
+	return `\n\nThe following skills declare \`context: fork\`. To execute one, do not read its SKILL.md into the parent context. Call \`run_forked_skill\` with its name and the relevant user request as \`arguments\`. The tool renders the skill and runs it in a visible, isolated Pi Native child thread. It does not start or require activation of a Kiwi Code workflow.\n\n<forked_skills>\n${entries.join("\n")}\n</forked_skills>`;
 }
 
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "run_forked_skill",
 		label: "Run Forked Skill",
-		description: "Run a loaded Agent Skill whose SKILL.md frontmatter declares context: fork. The skill body becomes the task for one visible Pi Native child thread in the current workspace. Pass the user's relevant request as arguments; Claude-style $ARGUMENTS, indexed, positional, and named placeholders are rendered before execution. The child inherits the current Pi model and thinking level and is retained in Dire Mux for review. This direct skill fork does not start or require activation of a Dire Mux workflow.",
-		promptSnippet: "Run skills with context: fork in visible Dire Mux child threads",
+		description: "Run a loaded Agent Skill whose SKILL.md frontmatter declares context: fork. The skill body becomes the task for one visible Pi Native child thread in the current workspace. Pass the user's relevant request as arguments; Claude-style $ARGUMENTS, indexed, positional, and named placeholders are rendered before execution. The child inherits the current Pi model and thinking level and is retained in Kiwi Code for review. This direct skill fork does not start or require activation of a Kiwi Code workflow.",
+		promptSnippet: "Run skills with context: fork in visible Kiwi Code child threads",
 		promptGuidelines: [
 			"Use run_forked_skill instead of read when an available skill is listed under forked_skills or the user explicitly invokes such a skill.",
 			"Pass the complete relevant user request to run_forked_skill.arguments; do not execute a context: fork skill in the parent context.",
@@ -480,7 +480,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "publish_thread_plan",
 		label: "Publish Thread Plan",
-		description: "Publish a completed Markdown implementation plan from a context: fork planning child to its parent Dire Mux thread. The backend retains the plan and shows it in Thread details. This endpoint is only valid from a forked child; use it exactly once after the kiwi-code-planner skill has finished planning.",
+		description: "Publish a completed Markdown implementation plan from a context: fork planning child to its parent Kiwi Code thread. The backend retains the plan and shows it in Thread details. This endpoint is only valid from a forked child; use it exactly once after the kiwi-code-planner skill has finished planning.",
 		promptSnippet: "Publish a forked planning result to its parent thread",
 		promptGuidelines: [
 			"Call publish_thread_plan only while executing the kiwi-code-planner skill in its child thread.",
@@ -516,7 +516,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "list_thread_plans",
 		label: "List Thread Plans",
-		description: "List Markdown implementation plans retained for the current Dire Mux thread. Use this when the user refers to a saved plan ambiguously or wants to see which plans are available before execution.",
+		description: "List Markdown implementation plans retained for the current Kiwi Code thread. Use this when the user refers to a saved plan ambiguously or wants to see which plans are available before execution.",
 		promptSnippet: "List retained implementation plans for this thread",
 		parameters: Type.Object({}),
 		async execute(_toolCallID, _params, signal) {
