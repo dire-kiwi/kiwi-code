@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -42,6 +43,9 @@ func TestSettingsAPIUpdatesWorktreeBaseLocation(t *testing.T) {
 	}
 	if settings.DisableWorkflows || !settings.WorkflowKeywordTrigger || settings.WorkflowSizeGuideline != project.DefaultWorkflowSizeGuideline {
 		t.Fatalf("unexpected default workflow settings: %#v", settings)
+	}
+	if settings.ClaudeCodeProfiles == nil || len(settings.ClaudeCodeProfiles) != 0 {
+		t.Fatalf("unexpected default Claude Code profiles: %#v", settings.ClaudeCodeProfiles)
 	}
 	if !settings.UsingDefaultTheme || settings.Theme != project.DefaultTheme() || settings.DefaultTheme != project.DefaultTheme() {
 		t.Fatalf("unexpected default theme: %#v", settings)
@@ -142,6 +146,58 @@ func TestSettingsAPIUpdatesWorktreeBaseLocation(t *testing.T) {
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(`{"worktreeBasePath":"relative/path"}`)))
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("relative path status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestSettingsAPIUpdatesClaudeCodeProfiles(t *testing.T) {
+	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
+	store, err := project.NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := newIsolatedServerHandler(t, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	workDirectory := filepath.Join(t.TempDir(), "claude-work")
+	body, err := json.Marshal(map[string]any{"claudeCodeProfiles": []map[string]string{
+		{"id": "work", "name": "Work", "configDirectory": workDirectory},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewReader(body)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("update Claude Code profiles status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var settings project.Settings
+	if err := json.NewDecoder(response.Body).Decode(&settings); err != nil {
+		t.Fatal(err)
+	}
+	if len(settings.ClaudeCodeProfiles) != 1 || settings.ClaudeCodeProfiles[0].Name != "Work" || settings.ClaudeCodeProfiles[0].ConfigDirectory != workDirectory {
+		t.Fatalf("Claude Code profiles = %#v", settings.ClaudeCodeProfiles)
+	}
+	if info, err := os.Stat(workDirectory); err != nil || !info.IsDir() {
+		t.Fatalf("Claude Code config directory was not created: info=%v err=%v", info, err)
+	}
+	reloaded, err := project.NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profiles := reloaded.GetSettings().ClaudeCodeProfiles; len(profiles) != 1 || profiles[0] != settings.ClaudeCodeProfiles[0] {
+		t.Fatalf("persisted Claude Code profiles = %#v", profiles)
+	}
+
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(
+		http.MethodPut,
+		"/api/settings",
+		bytes.NewBufferString(`{"claudeCodeProfiles":[{"id":"one","name":"Work","configDirectory":"/tmp/one"},{"id":"two","name":"work","configDirectory":"/tmp/two"}]}`),
+	))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("duplicate Claude Code profile status = %d, body = %s", response.Code, response.Body.String())
 	}
 }
 

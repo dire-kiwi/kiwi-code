@@ -1,4 +1,35 @@
-import type { CodingAgentChoice, CodingAgentConfig } from './types'
+import type {
+  ClaudeCodeProfile,
+  ClaudeCodeProfileAgent,
+  CodingAgent,
+  CodingAgentChoice,
+  CodingAgentConfig,
+  CodingAgentSelection,
+} from './types'
+
+const claudeCodeProfileAgentPattern = /^claude-profile-[A-Za-z0-9_-]{1,64}$/
+
+export function claudeCodeProfileAgentId(profileId: string): ClaudeCodeProfileAgent {
+  return `claude-profile-${profileId}`
+}
+
+export function isCodingAgent(value: unknown): value is CodingAgent {
+  return value === 'pi'
+    || value === 'claude'
+    || value === 'claude-gpt'
+    || (typeof value === 'string' && claudeCodeProfileAgentPattern.test(value))
+}
+
+export function isCodingAgentSelection(value: unknown): value is CodingAgentSelection {
+  return value === 'pi-native' || value === 'claude-native' || isCodingAgent(value)
+}
+
+export function claudeCodeProfileChoices(profiles: ClaudeCodeProfile[]) {
+  return profiles.map((profile) => ({
+    id: claudeCodeProfileAgentId(profile.id),
+    label: `Claude Code · ${profile.name}`,
+  }))
+}
 
 export const piThinkingLevelIds = [
   'off',

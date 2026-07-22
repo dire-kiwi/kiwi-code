@@ -7,28 +7,46 @@ import {
 } from 'react'
 import { Folder, LoaderCircle } from 'lucide-react'
 import { listDirectorySuggestions } from '../../api'
+import { classNames } from '../../lib/classNames'
 import type { DirectorySuggestion } from '../../types'
 import { Button } from '../atoms/Button'
 import { TextInput } from '../atoms/Input'
 
 const suggestionDelay = 120
 
-type ProjectPathAutocompleteProps = {
+type DirectoryPathAutocompleteProps = {
   value: string
   disabled?: boolean
+  required?: boolean
+  autoFocus?: boolean
+  label?: string
+  placeholder?: string
+  className?: string
+  inputClassName?: string
   onChange: (value: string) => void
 }
+
+type ProjectPathAutocompleteProps = Pick<
+  DirectoryPathAutocompleteProps,
+  'value' | 'disabled' | 'onChange'
+>
 
 type SuggestionResult = {
   value: string
   suggestions: DirectorySuggestion[]
 }
 
-export function ProjectPathAutocomplete({
+export function DirectoryPathAutocomplete({
   value,
   disabled = false,
+  required = true,
+  autoFocus = false,
+  label = 'Directory path',
+  placeholder = '/Users/me/code',
+  className,
+  inputClassName,
   onChange,
-}: ProjectPathAutocompleteProps) {
+}: DirectoryPathAutocompleteProps) {
   const inputId = useId()
   const listboxId = useId()
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([])
@@ -38,7 +56,7 @@ export function ProjectPathAutocomplete({
   const [activeIndex, setActiveIndex] = useState(-1)
 
   const suggestions = result?.value === value ? result.suggestions : []
-  const open = expanded && suggestions.length > 0
+  const open = !disabled && expanded && suggestions.length > 0
 
   useEffect(() => {
     const controller = new AbortController()
@@ -114,8 +132,8 @@ export function ProjectPathAutocomplete({
   }
 
   return (
-    <div className="relative mt-2">
-      <label htmlFor={inputId} className="sr-only">Project path</label>
+    <div className={classNames('relative mt-2', className)}>
+      <label htmlFor={inputId} className="sr-only">{label}</label>
       <TextInput
         id={inputId}
         variant="compact-code"
@@ -130,8 +148,8 @@ export function ProjectPathAutocomplete({
           setActiveIndex(-1)
         }}
         onKeyDown={handleKeyDown}
-        required
-        autoFocus
+        required={required}
+        autoFocus={autoFocus}
         autoComplete="off"
         autoCapitalize="none"
         spellCheck={false}
@@ -143,8 +161,8 @@ export function ProjectPathAutocomplete({
         aria-expanded={open}
         aria-activedescendant={open && activeIndex >= 0 ? `${listboxId}-option-${activeIndex}` : undefined}
         aria-busy={loading}
-        className="pr-8"
-        placeholder="/Users/me/code/project"
+        className={classNames('pr-8', inputClassName)}
+        placeholder={placeholder}
       />
       {loading && (
         <LoaderCircle
@@ -156,7 +174,7 @@ export function ProjectPathAutocomplete({
 
       {open && (
         <div className="absolute inset-x-0 top-full z-50 mt-1 overflow-hidden rounded-lg border border-ghost-border bg-ghost-panel shadow-xl shadow-black/35">
-          <ul id={listboxId} role="listbox" aria-label="Directory suggestions" className="max-h-52 overflow-y-auto p-1">
+          <ul id={listboxId} role="listbox" aria-label={`${label} suggestions`} className="max-h-52 overflow-y-auto p-1">
             {suggestions.map((suggestion, index) => {
               const active = index === activeIndex
               return (
@@ -197,5 +215,16 @@ export function ProjectPathAutocomplete({
         </div>
       )}
     </div>
+  )
+}
+
+export function ProjectPathAutocomplete(props: ProjectPathAutocompleteProps) {
+  return (
+    <DirectoryPathAutocomplete
+      {...props}
+      label="Project path"
+      placeholder="/Users/me/code/project"
+      autoFocus
+    />
   )
 }

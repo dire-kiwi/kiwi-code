@@ -105,6 +105,12 @@ export type ThemeSettings = {
   colors: ThemeColors
 }
 
+export type ClaudeCodeProfile = {
+  id: string
+  name: string
+  configDirectory: string
+}
+
 export type AppSettings = {
   worktreeBasePath: string
   defaultWorktreeBasePath: string
@@ -116,6 +122,7 @@ export type AppSettings = {
   disableWorkflows: boolean
   workflowKeywordTriggerEnabled: boolean
   workflowSizeGuideline: 'unrestricted' | 'small' | 'medium' | 'large'
+  claudeCodeProfiles: ClaudeCodeProfile[]
   theme: ThemeSettings
   defaultTheme: ThemeSettings
   usingDefaultTheme: boolean
@@ -233,7 +240,11 @@ export type BrowserViewBounds = {
   height: number
 }
 
-export type CodingAgent = 'pi' | 'claude' | 'claude-gpt'
+export type BuiltInCodingAgent = 'pi' | 'claude' | 'claude-gpt'
+
+export type ClaudeCodeProfileAgent = `claude-profile-${string}`
+
+export type CodingAgent = BuiltInCodingAgent | ClaudeCodeProfileAgent
 
 export type PiPresentation = 'native' | 'terminal'
 

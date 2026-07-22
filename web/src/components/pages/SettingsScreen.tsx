@@ -8,10 +8,13 @@ import {
   LoaderCircle,
   Network,
   Palette,
+  Plus,
   RotateCcw,
   Save,
   Settings2,
   Sparkles,
+  Trash2,
+  UserRound,
   Workflow,
 } from 'lucide-react'
 import {
@@ -22,13 +25,14 @@ import {
 } from '../../api'
 import { isHexColor, MAX_CLEANUP_RETENTION_DAYS } from '../../lib/validation'
 import { DEFAULT_THEME, themesEqual, useTheme } from '../../theme'
-import type { AgentSkillStatus, AppSettings, ThemeColors, ThemeSettings } from '../../types'
+import type { AgentSkillStatus, AppSettings, ClaudeCodeProfile, ThemeColors, ThemeSettings } from '../../types'
 import { GhostButton, PrimaryButton } from '../atoms/Button'
 import { TextInput } from '../atoms/Input'
 import { Select } from '../atoms/Select'
 import { StatusBadge } from '../atoms/StatusBadge'
 import { Surface } from '../atoms/Surface'
 import { LoadErrorPanel, LoadingPanel } from '../molecules/AsyncStatePanel'
+import { DirectoryPathAutocomplete } from '../molecules/ProjectPathAutocomplete'
 import { FeedbackMessage } from '../molecules/FeedbackMessage'
 import { InfoCallout } from '../molecules/InfoCallout'
 import { PageIntro } from '../molecules/PageIntro'
@@ -42,12 +46,19 @@ type SettingsScreenProps = {
   onBack: () => void
 }
 
-type SavingAction = 'worktree-save' | 'worktree-reset' | 'cleanup-save' | 'nesting-save' | 'workflows-save' | 'theme-save' | 'theme-reset' | null
+type SavingAction = 'worktree-save' | 'worktree-reset' | 'claude-profiles-save' | 'cleanup-save' | 'nesting-save' | 'workflows-save' | 'theme-save' | 'theme-reset' | null
 
 type ThemeColorGroup = {
   title: string
   description: string
   colors: Array<{ key: keyof ThemeColors; label: string }>
+}
+
+const maxClaudeCodeProfiles = 16
+
+function newClaudeCodeProfileId() {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
 const themeColorGroups: ThemeColorGroup[] = [
@@ -116,6 +127,9 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
   const [disableWorkflows, setDisableWorkflows] = useState(false)
   const [workflowKeywordTrigger, setWorkflowKeywordTrigger] = useState(true)
   const [workflowSizeGuideline, setWorkflowSizeGuideline] = useState<AppSettings['workflowSizeGuideline']>('unrestricted')
+  const [claudeCodeProfiles, setClaudeCodeProfiles] = useState<ClaudeCodeProfile[]>([])
+  const [claudeProfilesError, setClaudeProfilesError] = useState('')
+  const [claudeProfilesMessage, setClaudeProfilesMessage] = useState('')
   const [theme, setTheme] = useState<ThemeSettings>(DEFAULT_THEME)
   const [loading, setLoading] = useState(true)
   const [loadKey, setLoadKey] = useState(0)
@@ -152,6 +166,7 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
         setDisableWorkflows(next.disableWorkflows)
         setWorkflowKeywordTrigger(next.workflowKeywordTriggerEnabled)
         setWorkflowSizeGuideline(next.workflowSizeGuideline)
+        setClaudeCodeProfiles(next.claudeCodeProfiles ?? [])
         setTheme(next.theme)
         applyTheme(next.theme)
         setAgentSkill(skill)
@@ -198,6 +213,55 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
       setSavedMessage('Worktree location reset to the default.')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not reset settings.')
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  function addClaudeCodeProfile() {
+    if (saving || claudeCodeProfiles.length >= maxClaudeCodeProfiles) return
+    setClaudeCodeProfiles((current) => [
+      ...current,
+      { id: newClaudeCodeProfileId(), name: '', configDirectory: '' },
+    ])
+    setClaudeProfilesError('')
+    setClaudeProfilesMessage('')
+  }
+
+  function updateClaudeCodeProfile(id: string, update: Partial<ClaudeCodeProfile>) {
+    setClaudeCodeProfiles((current) => current.map((profile) =>
+      profile.id === id ? { ...profile, ...update } : profile,
+    ))
+    setClaudeProfilesError('')
+    setClaudeProfilesMessage('')
+  }
+
+  function removeClaudeCodeProfile(id: string) {
+    if (saving) return
+    setClaudeCodeProfiles((current) => current.filter((profile) => profile.id !== id))
+    setClaudeProfilesError('')
+    setClaudeProfilesMessage('')
+  }
+
+  async function handleClaudeProfilesSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (saving) return
+    setSaving('claude-profiles-save')
+    setClaudeProfilesError('')
+    setClaudeProfilesMessage('')
+    try {
+      const next = await updateSettings({
+        claudeCodeProfiles: claudeCodeProfiles.map((profile) => ({
+          ...profile,
+          name: profile.name.trim(),
+          configDirectory: profile.configDirectory.trim(),
+        })),
+      })
+      setSettings(next)
+      setClaudeCodeProfiles(next.claudeCodeProfiles)
+      setClaudeProfilesMessage('Claude Code profiles saved.')
+    } catch (reason) {
+      setClaudeProfilesError(reason instanceof Error ? reason.message : 'Could not save Claude Code profiles.')
     } finally {
       setSaving(null)
     }
@@ -363,6 +427,21 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
   const dirty = settings !== null && normalizedInput !== settings.worktreeBasePath
   const canReset = settings !== null
     && (!settings.usingDefault || normalizedInput !== settings.defaultWorktreeBasePath)
+  const normalizedClaudeProfiles = claudeCodeProfiles.map((profile) => ({
+    ...profile,
+    name: profile.name.trim(),
+    configDirectory: profile.configDirectory.trim(),
+  }))
+  const claudeProfileNames = normalizedClaudeProfiles.map((profile) => profile.name.toLocaleLowerCase())
+  const claudeProfileDirectories = normalizedClaudeProfiles.map((profile) => profile.configDirectory)
+  const claudeProfilesValid = normalizedClaudeProfiles.length <= maxClaudeCodeProfiles
+    && normalizedClaudeProfiles.every((profile) => profile.name.length > 0
+      && profile.name.length <= 80
+      && profile.configDirectory.length > 0)
+    && new Set(claudeProfileNames).size === claudeProfileNames.length
+    && new Set(claudeProfileDirectories).size === claudeProfileDirectories.length
+  const claudeProfilesDirty = settings !== null
+    && JSON.stringify(normalizedClaudeProfiles) !== JSON.stringify(settings.claudeCodeProfiles)
   const parsedArchivedDays = Number(archivedThreadRetentionDays)
   const parsedOrphanedDays = Number(orphanedWorktreeRetentionDays)
   const cleanupValuesValid = archivedThreadRetentionDays.trim() !== ''
@@ -524,6 +603,123 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
                 >
                   {saving === 'worktree-save' ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
                   Save
+                </PrimaryButton>
+              </div>
+            </Surface>
+
+            <Surface
+              as="form"
+              variant="elevated-panel"
+              onSubmit={(event) => void handleClaudeProfilesSave(event)}
+              className="overflow-hidden"
+            >
+              <SectionHeader
+                icon={<UserRound size={16} />}
+                title="Claude Code profiles"
+                description="Add named Claude Code sessions backed by separate configuration directories."
+                tone="blue"
+                badge={(
+                  <StatusBadge tone={claudeCodeProfiles.length > 0 ? 'success' : 'neutral'}>
+                    {claudeCodeProfiles.length} configured
+                  </StatusBadge>
+                )}
+              />
+
+              <div className="space-y-3 p-4 sm:p-5">
+                {claudeCodeProfiles.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-ghost-border/70 bg-ghost-black/20 px-4 py-5 text-center">
+                    <p className="text-[10px] font-medium text-ghost-muted">No additional Claude Code profiles.</p>
+                    <p className="mt-1 text-[9px] leading-4 text-ghost-faint">
+                      The built-in Claude Code entry continues to use your default configuration directory.
+                    </p>
+                  </div>
+                ) : claudeCodeProfiles.map((profile, index) => (
+                  <div key={profile.id} className="rounded-xl border border-ghost-border/55 bg-ghost-black/25 p-3.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-faint">
+                        Profile {index + 1}
+                      </p>
+                      <GhostButton
+                        type="button"
+                        size="sm"
+                        onClick={() => removeClaudeCodeProfile(profile.id)}
+                        disabled={Boolean(saving)}
+                        className="flex items-center gap-1.5 text-ghost-bright-red disabled:opacity-40"
+                        aria-label={`Remove ${profile.name || `profile ${index + 1}`}`}
+                      >
+                        <Trash2 size={12} />
+                        Remove
+                      </GhostButton>
+                    </div>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)]">
+                      <label className="block text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-dim">
+                        Title
+                        <TextInput
+                          value={profile.name}
+                          onChange={(event) => updateClaudeCodeProfile(profile.id, { name: event.target.value })}
+                          maxLength={80}
+                          autoComplete="off"
+                          placeholder="Work"
+                          className="mt-1.5"
+                        />
+                      </label>
+                      <div className="block text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-dim">
+                        Config directory
+                        <DirectoryPathAutocomplete
+                          value={profile.configDirectory}
+                          disabled={Boolean(saving)}
+                          label={`${profile.name || `Profile ${index + 1}`} config directory`}
+                          placeholder="~/.claude-work"
+                          className="mt-1.5 normal-case tracking-normal"
+                          onChange={(configDirectory) => updateClaudeCodeProfile(profile.id, { configDirectory })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                <GhostButton
+                  type="button"
+                  size="md"
+                  onClick={addClaudeCodeProfile}
+                  disabled={Boolean(saving) || claudeCodeProfiles.length >= maxClaudeCodeProfiles}
+                  className="flex items-center gap-2 px-3 disabled:opacity-40"
+                >
+                  <Plus size={13} />
+                  Add Claude Code
+                </GhostButton>
+
+                <InfoCallout>
+                  Each entry appears as “Claude Code · Title” in the new-thread and workspace agent lists. Kiwi Code
+                  launches it with <span className="font-mono text-ghost-blue">CLAUDE_CONFIG_DIR</span> set to the selected
+                  directory, keeping login state and settings separate. Missing directories are created when you save.
+                </InfoCallout>
+
+                {!claudeProfilesValid && claudeCodeProfiles.length > 0 && (
+                  <FeedbackMessage role="alert" tone="error">
+                    Every profile needs a unique title and config directory.
+                  </FeedbackMessage>
+                )}
+                {claudeProfilesError && (
+                  <FeedbackMessage role="alert" tone="error">{claudeProfilesError}</FeedbackMessage>
+                )}
+                {claudeProfilesMessage && (
+                  <FeedbackMessage role="status" tone="success" size="status" className="flex items-center gap-2">
+                    <Check size={13} />
+                    {claudeProfilesMessage}
+                  </FeedbackMessage>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end border-t border-ghost-border/60 bg-ghost-black/15 px-4 py-3 sm:px-5">
+                <PrimaryButton
+                  type="submit"
+                  size="md"
+                  disabled={!claudeProfilesDirty || !claudeProfilesValid || Boolean(saving)}
+                  className="flex min-w-28 items-center justify-center gap-2"
+                >
+                  {saving === 'claude-profiles-save' ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
+                  Save profiles
                 </PrimaryButton>
               </div>
             </Surface>
