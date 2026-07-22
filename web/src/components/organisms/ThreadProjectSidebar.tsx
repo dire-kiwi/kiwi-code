@@ -7,44 +7,33 @@ import {
   FolderGit2,
   GitBranch,
   LoaderCircle,
-  Network,
   PanelRightClose,
   PanelRightOpen,
   Pencil,
-  Save,
   SquareTerminal,
   X,
 } from 'lucide-react'
-import {
-  updateProjectProfile,
-  updateProjectSubAgentNestingDepth,
-  updateProjectWorktreeBranchPrefix,
-  updateThreadTitle,
-} from '../../api'
+import { updateThreadTitle } from '../../api'
 import { formatWhen } from '../../lib/formatWhen'
-import { MAX_SUB_AGENT_NESTING_DEPTH } from '../../lib/validation'
-import type { Profile, Project, Thread, ThreadPlan, ThreadUsageSnapshot, WorkflowRun } from '../../types'
+import type { Project, Thread, ThreadPlan, ThreadUsageSnapshot, WorkflowRun } from '../../types'
 import { Button, GhostButton, PrimaryButton } from '../atoms/Button'
 import { IconButton } from '../atoms/IconButton'
 import { TextInput } from '../atoms/Input'
-import { Select } from '../atoms/Select'
 import { ThreadUsageLimits } from '../molecules/ThreadUsageLimits'
 import { ThreadPlansPanel } from './ThreadPlansPanel'
 import { WorkflowRunsPanel } from './WorkflowRunsPanel'
 
-type SidebarTab = 'thread' | 'activity' | 'project'
+type SidebarTab = 'thread' | 'activity'
 
 const sidebarTabs: ReadonlyArray<{ id: SidebarTab; label: string }> = [
   { id: 'thread', label: 'Thread' },
   { id: 'activity', label: 'Activity' },
-  { id: 'project', label: 'Project' },
 ]
 
 const liveWorkflowStates: ReadonlySet<WorkflowRun['state']> = new Set(['queued', 'running'])
 const activeWorkflowStates: ReadonlySet<WorkflowRun['state']> = new Set(['queued', 'running', 'paused'])
 
 type ThreadProjectSidebarProps = {
-  profiles: Profile[]
   project: Project
   thread: Thread
   usage?: ThreadUsageSnapshot
@@ -56,13 +45,11 @@ type ThreadProjectSidebarProps = {
   onWorkflowUpdated: (run: WorkflowRun) => void
   expanded: boolean
   onExpandedChange: (expanded: boolean) => void
-  onProjectUpdated: (project: Project) => void
   onThreadUpdated: (thread: Thread) => void
   onSelectThread: (thread: Thread) => void
 }
 
 export function ThreadProjectSidebar({
-  profiles,
   project,
   thread,
   usage,
@@ -74,7 +61,6 @@ export function ThreadProjectSidebar({
   onWorkflowUpdated,
   expanded,
   onExpandedChange,
-  onProjectUpdated,
   onThreadUpdated,
   onSelectThread,
 }: ThreadProjectSidebarProps) {
@@ -85,14 +71,6 @@ export function ThreadProjectSidebar({
   const [title, setTitle] = useState(thread.title)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [profileSaving, setProfileSaving] = useState(false)
-  const [profileError, setProfileError] = useState('')
-  const [nestingSaving, setNestingSaving] = useState(false)
-  const [nestingError, setNestingError] = useState('')
-  const [branchPrefix, setBranchPrefix] = useState(project.worktreeBranchPrefix)
-  const [branchPrefixSaving, setBranchPrefixSaving] = useState(false)
-  const [branchPrefixError, setBranchPrefixError] = useState('')
-  const [branchPrefixMessage, setBranchPrefixMessage] = useState('')
   const threadsById = new Map(project.threads.map((candidate) => [candidate.id, candidate]))
   let mainThread = thread
   const visitedAncestors = new Set<string>()
@@ -129,12 +107,6 @@ export function ThreadProjectSidebar({
   useEffect(() => {
     if (!editing) setTitle(thread.title)
   }, [editing, thread.title])
-
-  useEffect(() => {
-    setBranchPrefix(project.worktreeBranchPrefix)
-    setBranchPrefixError('')
-    setBranchPrefixMessage('')
-  }, [project.id, project.worktreeBranchPrefix])
 
   useEffect(() => {
     if (!editing || !expanded || tab !== 'thread') return
@@ -183,58 +155,6 @@ export function ThreadProjectSidebar({
     if (event.key !== 'Escape') return
     event.preventDefault()
     cancelEditing()
-  }
-
-  async function handleProfileChange(profileId: string) {
-    if (profileId === project.profileId || profileSaving) return
-    setProfileSaving(true)
-    setProfileError('')
-    try {
-      const updated = await updateProjectProfile(project.id, profileId)
-      onProjectUpdated(updated)
-    } catch (reason) {
-      setProfileError(reason instanceof Error ? reason.message : 'Could not move the project.')
-    } finally {
-      setProfileSaving(false)
-    }
-  }
-
-  async function handleNestingChange(value: string) {
-    if (nestingSaving) return
-    const depth = value === 'inherit' ? null : Number(value)
-    if (depth !== null && (!Number.isInteger(depth) || depth < 0 || depth > MAX_SUB_AGENT_NESTING_DEPTH)) return
-    if (depth === (project.subAgentNestingDepthOverride ?? null)) return
-
-    setNestingSaving(true)
-    setNestingError('')
-    try {
-      const updated = await updateProjectSubAgentNestingDepth(project.id, depth)
-      onProjectUpdated(updated)
-    } catch (reason) {
-      setNestingError(reason instanceof Error ? reason.message : 'Could not update sub-agent nesting.')
-    } finally {
-      setNestingSaving(false)
-    }
-  }
-
-  async function handleBranchPrefixSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const prefix = branchPrefix.trim()
-    if (!prefix || branchPrefixSaving || prefix === project.worktreeBranchPrefix) return
-
-    setBranchPrefixSaving(true)
-    setBranchPrefixError('')
-    setBranchPrefixMessage('')
-    try {
-      const updated = await updateProjectWorktreeBranchPrefix(project.id, prefix)
-      onProjectUpdated(updated)
-      setBranchPrefix(updated.worktreeBranchPrefix)
-      setBranchPrefixMessage('Branch prefix saved.')
-    } catch (reason) {
-      setBranchPrefixError(reason instanceof Error ? reason.message : 'Could not update the branch prefix.')
-    } finally {
-      setBranchPrefixSaving(false)
-    }
   }
 
   function handleTabListKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -561,160 +481,6 @@ export function ThreadProjectSidebar({
                 )}
               </div>
 
-              <div
-                role="tabpanel"
-                id="sidebar-panel-project"
-                aria-labelledby="sidebar-tab-project"
-                hidden={tab !== 'project'}
-                className="px-4 py-4"
-              >
-                <section>
-                  <div className="flex items-start gap-2.5 px-2 py-1">
-                    <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-ghost-raised text-ghost-white">
-                      <Folder size={16} />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="break-words text-xs font-semibold leading-5 text-ghost-bright-white">{project.name}</p>
-                      <p className="mt-0.5 truncate text-[9px] text-ghost-dim" title={project.host}>{project.host}</p>
-                    </div>
-                  </div>
-
-                  <p className="mt-4 font-mono text-[8px] font-semibold uppercase tracking-[0.16em] text-ghost-faint">
-                    Settings
-                  </p>
-                  <div className="mt-2 rounded-xl border border-ghost-border/55 bg-ghost-black/25 px-3 py-3">
-                    <label
-                      htmlFor="project-profile-select"
-                      className="font-mono text-[8px] font-semibold uppercase tracking-[0.12em] text-ghost-faint"
-                    >
-                      Profile
-                    </label>
-                    <div className="mt-2">
-                      <Select
-                        id="project-profile-select"
-                        value={project.profileId}
-                        options={profiles.map((profile) => ({ value: profile.id, label: profile.name }))}
-                        onChange={(profileId) => void handleProfileChange(profileId)}
-                        disabled={profileSaving}
-                        aria-describedby={profileError ? 'project-profile-error' : undefined}
-                        className="font-sans text-[10px]"
-                        menuClassName="font-sans text-[10px]"
-                        leadingIcon={<Folder size={12} />}
-                      />
-                    </div>
-                    {profileError && (
-                      <p id="project-profile-error" role="alert" className="mt-2 text-[10px] leading-4 text-ghost-bright-red">
-                        {profileError}
-                      </p>
-                    )}
-                  </div>
-                  <div className="mt-2 rounded-xl border border-ghost-border/55 bg-ghost-black/25 px-3 py-3">
-                    <label
-                      htmlFor="project-sub-agent-depth-select"
-                      className="font-mono text-[8px] font-semibold uppercase tracking-[0.12em] text-ghost-faint"
-                    >
-                      Sub-agent nesting
-                    </label>
-                    <div className="mt-2">
-                      <Select
-                        id="project-sub-agent-depth-select"
-                        value={project.subAgentNestingDepthOverride?.toString() ?? 'inherit'}
-                        options={[
-                          { value: 'inherit', label: 'Use global setting' },
-                          { value: '0', label: 'Disabled' },
-                          ...Array.from(
-                            { length: MAX_SUB_AGENT_NESTING_DEPTH },
-                            (_, index) => index + 1,
-                          ).map((depth) => ({
-                            value: String(depth),
-                            label: `${depth} ${depth === 1 ? 'child level' : 'child levels'}`,
-                          })),
-                        ]}
-                        onChange={(depth) => void handleNestingChange(depth)}
-                        disabled={nestingSaving}
-                        aria-describedby={nestingError ? 'project-sub-agent-depth-error' : 'project-sub-agent-depth-help'}
-                        className="font-sans text-[10px]"
-                        menuClassName="font-sans text-[10px]"
-                        leadingIcon={<Network size={12} />}
-                      />
-                    </div>
-                    <p id="project-sub-agent-depth-help" className="mt-2 text-[9px] leading-4 text-ghost-faint">
-                      Limits child-agent generations for this project; overrides the global setting.
-                    </p>
-                    {nestingError && (
-                      <p id="project-sub-agent-depth-error" role="alert" className="mt-2 text-[10px] leading-4 text-ghost-bright-red">
-                        {nestingError}
-                      </p>
-                    )}
-                  </div>
-                  <form
-                    className="mt-2 rounded-xl border border-ghost-border/55 bg-ghost-black/25 px-3 py-3"
-                    onSubmit={(event) => void handleBranchPrefixSubmit(event)}
-                  >
-                    <label
-                      htmlFor="project-worktree-branch-prefix"
-                      className="font-mono text-[8px] font-semibold uppercase tracking-[0.12em] text-ghost-faint"
-                    >
-                      Worktree branch prefix
-                    </label>
-                    <div className="mt-2 flex items-center gap-2">
-                      <TextInput
-                        id="project-worktree-branch-prefix"
-                        value={branchPrefix}
-                        onChange={(event) => {
-                          setBranchPrefix(event.target.value)
-                          setBranchPrefixError('')
-                          setBranchPrefixMessage('')
-                        }}
-                        maxLength={100}
-                        disabled={branchPrefixSaving}
-                        autoComplete="off"
-                        spellCheck={false}
-                        placeholder="kiwi-code/"
-                        aria-describedby={branchPrefixError
-                          ? 'project-worktree-branch-prefix-error'
-                          : 'project-worktree-branch-prefix-help'}
-                        className="min-w-0 flex-1 font-mono text-[10px]"
-                      />
-                      <IconButton
-                        type="submit"
-                        shrink
-                        variant="ghost"
-                        disabled={branchPrefixSaving || !branchPrefix.trim() || branchPrefix.trim() === project.worktreeBranchPrefix}
-                        aria-label="Save worktree branch prefix"
-                        title="Save branch prefix"
-                      >
-                        {branchPrefixSaving ? <LoaderCircle size={13} className="animate-spin" /> : <Save size={13} />}
-                      </IconButton>
-                    </div>
-                    <p id="project-worktree-branch-prefix-help" className="mt-2 text-[9px] leading-4 text-ghost-faint">
-                      Used for new managed worktree branches, including their automatic rename after the first prompt. Include separators such as <span className="font-mono text-ghost-muted">ivan/</span>.
-                    </p>
-                    {branchPrefixError && (
-                      <p id="project-worktree-branch-prefix-error" role="alert" className="mt-2 text-[10px] leading-4 text-ghost-bright-red">
-                        {branchPrefixError}
-                      </p>
-                    )}
-                    {branchPrefixMessage && (
-                      <p role="status" className="mt-2 text-[10px] leading-4 text-ghost-green">
-                        {branchPrefixMessage}
-                      </p>
-                    )}
-                  </form>
-
-                  <p className="mt-4 font-mono text-[8px] font-semibold uppercase tracking-[0.16em] text-ghost-faint">
-                    Paths
-                  </p>
-                  <div className="mt-2 rounded-xl border border-ghost-border/55 bg-ghost-black/25 px-3 py-3">
-                    <p className="font-mono text-[8px] font-semibold uppercase tracking-[0.12em] text-ghost-faint">
-                      Project root
-                    </p>
-                    <p className="mt-1.5 break-all font-mono text-[9px] leading-4 text-ghost-muted" title={project.path}>
-                      {project.path}
-                    </p>
-                  </div>
-                </section>
-              </div>
             </div>
           </div>
         )}

@@ -5,6 +5,7 @@ export const CLEANUP_ROUTE = '/cleanup'
 export const SETTINGS_ROUTE = '/settings'
 export const TMUX_ROUTE = '/tmux'
 export const PROJECT_ROUTE = '/projects/:projectId'
+export const PROJECT_SETTINGS_ROUTE = '/projects/:projectId/settings'
 export const NEW_THREAD_ROUTE = '/projects/:projectId/threads/new'
 export const THREAD_ROUTE = '/projects/:projectId/threads/:threadId'
 export const WORKSPACE_ROUTE = '/projects/:projectId/threads/:threadId/:tool'
@@ -37,4 +38,8 @@ export function workspacePath(projectId: string, threadId: string, tool: Workspa
 
 export function newThreadPath(projectId: string): string {
   return generatePath(NEW_THREAD_ROUTE, { projectId })
+}
+
+export function projectSettingsPath(projectId: string): string {
+  return generatePath(PROJECT_SETTINGS_ROUTE, { projectId })
 }

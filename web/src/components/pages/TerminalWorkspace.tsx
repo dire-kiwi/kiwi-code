@@ -21,7 +21,6 @@ import type {
   GitBranchState,
   PiPresentation,
   ProcessWindow,
-  Profile,
   Project,
   Thread,
   ThreadPlan,
@@ -45,7 +44,6 @@ import { ThreadProjectSidebar } from '../organisms/ThreadProjectSidebar'
 import { TmuxWindowTabs } from '../organisms/TmuxWindowTabs'
 
 type TerminalWorkspaceProps = {
-  profiles: Profile[]
   project: Project
   thread: Thread
   usage?: ThreadUsageSnapshot
@@ -55,7 +53,6 @@ type TerminalWorkspaceProps = {
   onDetailsExpandedChange: (expanded: boolean) => void
   onOpenSidebar: () => void
   onThreadInteraction: () => void
-  onProjectUpdated: (project: Project) => void
   onThreadUpdated: (thread: Thread) => void
   onSelectThread: (thread: Thread) => void
   initialCodingAgent?: CodingAgent
@@ -130,7 +127,6 @@ function rememberedPresentation(storageKey: string, fallback: PiPresentation): P
 }
 
 export function TerminalWorkspace({
-  profiles,
   project,
   thread,
   usage,
@@ -140,7 +136,6 @@ export function TerminalWorkspace({
   onDetailsExpandedChange,
   onOpenSidebar,
   onThreadInteraction,
-  onProjectUpdated,
   onThreadUpdated,
   onSelectThread,
   initialCodingAgent,
@@ -806,7 +801,6 @@ export function TerminalWorkspace({
       </div>
 
       <ThreadProjectSidebar
-        profiles={profiles}
         project={project}
         thread={thread}
         usage={usage}
@@ -818,7 +812,6 @@ export function TerminalWorkspace({
         onWorkflowUpdated={(updated) => setWorkflowRuns((current) => current.map((run) => run.id === updated.id ? updated : run))}
         expanded={detailsExpanded}
         onExpandedChange={onDetailsExpandedChange}
-        onProjectUpdated={onProjectUpdated}
         onThreadUpdated={onThreadUpdated}
         onSelectThread={onSelectThread}
       />
