@@ -277,6 +277,32 @@ func (h *terminalHandler) claudeGPTProfileDirectory() (string, error) {
 	return profilePath, nil
 }
 
+func syncClaudeCodeProfileSettings(profilePath, configDirectory string) error {
+	sourcePath := filepath.Join(configDirectory, claudeSettingsFileName)
+	destinationPath := filepath.Join(profilePath, claudeSettingsFileName)
+	if filepath.Clean(sourcePath) == filepath.Clean(destinationPath) {
+		return nil
+	}
+
+	contents, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return fmt.Errorf("read Claude settings: %w", err)
+	}
+	if sourceInfo, sourceErr := os.Stat(sourcePath); sourceErr == nil {
+		if destinationInfo, destinationErr := os.Stat(destinationPath); destinationErr == nil && os.SameFile(sourceInfo, destinationInfo) {
+			return nil
+		}
+	}
+	if err := writeFileAtomically(
+		destinationPath,
+		contents,
+		serverAtomicFileOptions{Mode: 0o600, SyncFile: true},
+	); err != nil {
+		return fmt.Errorf("write Claude Code profile settings: %w", err)
+	}
+	return nil
+}
+
 func syncClaudeGPTProfileSettings(profilePath, configDirectory string) error {
 	contents, err := os.ReadFile(filepath.Join(configDirectory, claudeSettingsFileName))
 	if err != nil {

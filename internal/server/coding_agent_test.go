@@ -117,6 +117,33 @@ func TestDiscoverClaudeSandboxPluginPathUsesTheExistingNonGPTProfile(t *testing.
 	}
 }
 
+func TestSyncClaudeCodeProfileSettingsMirrorsTheDefaultProfile(t *testing.T) {
+	configDirectory := t.TempDir()
+	profilePath := t.TempDir()
+	contents := []byte("{\n  \"theme\": \"dark\",\n  \"enabledPlugins\": {\"formatter@example\": true}\n}\n")
+	if err := os.WriteFile(filepath.Join(configDirectory, claudeSettingsFileName), contents, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profilePath, claudeSettingsFileName), []byte(`{"theme":"light"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := syncClaudeCodeProfileSettings(profilePath, configDirectory); err != nil {
+		t.Fatal(err)
+	}
+	copiedPath := filepath.Join(profilePath, claudeSettingsFileName)
+	copied, err := os.ReadFile(copiedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(copied) != string(contents) {
+		t.Fatalf("copied Claude Code profile settings = %q, want %q", copied, contents)
+	}
+	if info, err := os.Stat(copiedPath); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("copied Claude Code profile settings permissions: info=%v err=%v", info, err)
+	}
+}
+
 func TestSyncClaudeGPTProfileSettingsCopiesNonModelConfiguration(t *testing.T) {
 	configDirectory := t.TempDir()
 	profilePath, err := prepareClaudeGPTProfileDirectory(t.TempDir())
@@ -755,6 +782,88 @@ func TestClaudeCodeProfileCommandRequiresCurrentConfiguration(t *testing.T) {
 	}
 }
 
+func TestConfiguredClaudeCodeProfileUsesTheDefaultClaudeLaunchConfiguration(t *testing.T) {
+	directory := t.TempDir()
+	claudePath := filepath.Join(directory, codingAgentClaude)
+	if err := os.WriteFile(claudePath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", directory)
+
+	store, err := project.NewStore(filepath.Join(t.TempDir(), "data", "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	profileDirectory := filepath.Join(t.TempDir(), "claude-work")
+	profiles := []project.ClaudeCodeProfile{{ID: "work", Name: "Work", ConfigDirectory: profileDirectory}}
+	if _, err := store.UpdateSettingsValues(project.SettingsUpdate{ClaudeCodeProfiles: &profiles}); err != nil {
+		t.Fatal(err)
+	}
+	configDirectory := t.TempDir()
+	pluginDirectory := filepath.Join(configDirectory, "plugins")
+	if err := os.MkdirAll(pluginDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	settings := []byte(`{"theme":"dark","enabledPlugins":{"sandbox-exec@dire-agent-extensions":true,"formatter@example":true}}`)
+	if err := os.WriteFile(filepath.Join(configDirectory, claudeSettingsFileName), settings, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handler := &terminalHandler{
+		projects:                store,
+		envPath:                 "/usr/bin/env",
+		claudePluginPath:        "/plugin/kiwi-code",
+		claudeConfigPath:        configDirectory,
+		claudePluginRootPath:    pluginDirectory,
+		claudeSandboxPluginPath: "/plugin/sandbox-exec",
+	}
+	options := codingAgentLaunchOptions{Model: "sonnet", ThinkingLevel: "high", InitialPrompt: "Review this change"}
+	item := project.Project{ID: "project"}
+	thread := project.Thread{ID: "thread"}
+
+	_, defaultArgs, defaultNotice, err := handler.commandForCodingAgentPaneWithOptions(
+		item, thread, codingAgentClaude, "", "kiwi-code-project-thread-tools", options,
+	)
+	if err != nil || defaultNotice != "" {
+		t.Fatalf("default Claude launch notice=%q err=%v", defaultNotice, err)
+	}
+	_, profileArgs, profileNotice, err := handler.commandForCodingAgentPaneWithOptions(
+		item, thread, claudeCodeProfileAgentID("work"), "", "kiwi-code-project-thread-tools", options,
+	)
+	if err != nil || profileNotice != "" {
+		t.Fatalf("configured Claude launch notice=%q err=%v", profileNotice, err)
+	}
+
+	commandTail := func(arguments []string) []string {
+		t.Helper()
+		for index, argument := range arguments {
+			if argument == claudePath {
+				return arguments[index:]
+			}
+		}
+		t.Fatalf("Claude args %#v do not contain %q", arguments, claudePath)
+		return nil
+	}
+	if got, want := commandTail(profileArgs), commandTail(defaultArgs); !reflect.DeepEqual(got, want) {
+		t.Fatalf("configured Claude command tail = %#v, want default Claude tail %#v", got, want)
+	}
+	joined := strings.Join(profileArgs, "\n")
+	for _, expected := range []string{
+		"CLAUDE_CONFIG_DIR=" + profileDirectory,
+		"CLAUDE_CODE_PLUGIN_CACHE_DIR=" + pluginDirectory,
+		"--plugin-dir\n/plugin/kiwi-code",
+		"--dangerously-skip-permissions",
+		`{"skipDangerousModePermissionPrompt":true}`,
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("configured Claude args %#v do not contain %q", profileArgs, expected)
+		}
+	}
+	copiedSettings, err := os.ReadFile(filepath.Join(profileDirectory, claudeSettingsFileName))
+	if err != nil || string(copiedSettings) != string(settings) {
+		t.Fatalf("configured Claude settings = %q, want %q; err=%v", copiedSettings, settings, err)
+	}
+}
+
 func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) {
 	directory := t.TempDir()
 	for _, name := range []string{codingAgentPi, codingAgentClaude} {
@@ -847,12 +956,15 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 			if validClaudeCodeProfileAgent(test.agent) {
 				for _, expected := range []string{
 					"CLAUDE_CONFIG_DIR=" + workConfigDirectory,
+					"CLAUDE_CODE_PLUGIN_CACHE_DIR=" + pluginDirectory,
 					"KIWI_CODE_CODING_AGENT=" + test.agent,
-					"/plugin/sandbox-exec",
 				} {
 					if !strings.Contains(joined, expected) {
 						t.Fatalf("Claude Code profile args %#v do not contain %q", args, expected)
 					}
+				}
+				if strings.Contains(joined, "/plugin/sandbox-exec") {
+					t.Fatalf("Claude Code profile args %#v load the default sandbox plugin twice", args)
 				}
 			}
 			if test.agent == codingAgentClaudeGPT {
