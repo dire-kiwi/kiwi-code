@@ -117,14 +117,15 @@ type piNativeClientMessage struct {
 }
 
 type piNativeSessionEntry struct {
-	Type         string          `json:"type"`
-	ID           string          `json:"id"`
-	ParentID     *string         `json:"parentId"`
-	Timestamp    string          `json:"timestamp"`
-	Message      json.RawMessage `json:"message"`
-	Summary      string          `json:"summary"`
-	FromID       string          `json:"fromId"`
-	TokensBefore int64           `json:"tokensBefore"`
+	Type             string          `json:"type"`
+	ID               string          `json:"id"`
+	ParentID         *string         `json:"parentId"`
+	Timestamp        string          `json:"timestamp"`
+	Message          json.RawMessage `json:"message"`
+	Summary          string          `json:"summary"`
+	FromID           string          `json:"fromId"`
+	FirstKeptEntryID string          `json:"firstKeptEntryId"`
+	TokensBefore     int64           `json:"tokensBefore"`
 }
 
 type piNativeSessionEntriesSnapshot struct {
@@ -811,8 +812,54 @@ func piNativeDisplayHistoryEvent(data json.RawMessage) ([]byte, error) {
 		path[left], path[right] = path[right], path[left]
 	}
 
+	pathIndexByID := make(map[string]int, len(path))
+	for index, entry := range path {
+		pathIndexByID[entry.ID] = index
+	}
+	// A compaction entry is appended after the retained messages, even though
+	// its summary replaces the history before firstKeptEntryId in model context.
+	// Put the display card at that boundary so later retained work follows it.
+	compactionsBeforeEntry := make(map[string][]piNativeSessionEntry)
+	relocatedCompactions := make(map[string]struct{})
+	for index, entry := range path {
+		if entry.Type != "compaction" || entry.FirstKeptEntryID == "" {
+			continue
+		}
+		boundaryIndex, found := pathIndexByID[entry.FirstKeptEntryID]
+		if !found || boundaryIndex >= index {
+			continue
+		}
+		compactionsBeforeEntry[entry.FirstKeptEntryID] = append(compactionsBeforeEntry[entry.FirstKeptEntryID], entry)
+		relocatedCompactions[entry.ID] = struct{}{}
+	}
+
 	messages := make([]json.RawMessage, 0, len(path))
+	appendCompaction := func(entry piNativeSessionEntry) error {
+		message, err := json.Marshal(struct {
+			Role         string `json:"role"`
+			Summary      string `json:"summary"`
+			TokensBefore int64  `json:"tokensBefore"`
+			Timestamp    string `json:"timestamp"`
+		}{
+			Role:         "compactionSummary",
+			Summary:      entry.Summary,
+			TokensBefore: entry.TokensBefore,
+			Timestamp:    entry.Timestamp,
+		})
+		if err != nil {
+			return fmt.Errorf("encode compaction entry %q: %w", entry.ID, err)
+		}
+		messages = append(messages, message)
+		return nil
+	}
+
 	for _, entry := range path {
+		for _, compaction := range compactionsBeforeEntry[entry.ID] {
+			if err := appendCompaction(compaction); err != nil {
+				return nil, err
+			}
+		}
+
 		switch entry.Type {
 		case "message":
 			if len(entry.Message) == 0 || !json.Valid(entry.Message) {
@@ -820,21 +867,12 @@ func piNativeDisplayHistoryEvent(data json.RawMessage) ([]byte, error) {
 			}
 			messages = append(messages, bytes.Clone(entry.Message))
 		case "compaction":
-			message, err := json.Marshal(struct {
-				Role         string `json:"role"`
-				Summary      string `json:"summary"`
-				TokensBefore int64  `json:"tokensBefore"`
-				Timestamp    string `json:"timestamp"`
-			}{
-				Role:         "compactionSummary",
-				Summary:      entry.Summary,
-				TokensBefore: entry.TokensBefore,
-				Timestamp:    entry.Timestamp,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("encode compaction entry %q: %w", entry.ID, err)
+			if _, relocated := relocatedCompactions[entry.ID]; relocated {
+				continue
 			}
-			messages = append(messages, message)
+			if err := appendCompaction(entry); err != nil {
+				return nil, err
+			}
 		case "branch_summary":
 			message, err := json.Marshal(struct {
 				Role      string `json:"role"`
