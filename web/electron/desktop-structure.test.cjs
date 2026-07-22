@@ -56,6 +56,16 @@ test('browser control uses the WebContents debugger and real CDP input', () => {
   assert.doesNotMatch(main + sessions, /remote-debugging-port/)
 })
 
+test('desktop IPC remains compatible across the product rename', () => {
+  assert.match(main, /dire-mux-desktop-browser:hide/)
+  assert.match(main, /dire-mux-desktop-browser:set-backend-origin/)
+  assert.match(main, /for \(const channels of browserIpcChannelSets\)/)
+  assert.match(preload, /compatibleChannelSets/)
+  assert.match(preload, /No handler registered for/)
+  assert.match(preload, /exposeInMainWorld\('direMuxDesktopBrowser'/)
+  assert.match(preload, /exposeInMainWorld\('direMuxDesktopCodeServer'/)
+})
+
 test('provider uses an authenticated dynamic loopback listener and secure atomic config', () => {
   assert.match(provider, /host: '127\.0\.0\.1', port: 0/)
   assert.match(provider, /randomBytes\(32\)\.toString\('hex'\)/)
@@ -89,7 +99,7 @@ test('preload exposes only the narrow native view APIs', () => {
   assert.match(preload, /hide\(options\)/)
   assert.match(preload, /setBounds\(options\)/)
   assert.match(preload, /setBackendOrigin\(origin\)/)
-  assert.match(preload, /ipcRenderer\.invoke\(browserChannels\.setBackendOrigin, origin\)/)
+  assert.match(preload, /invokeCompatible\(browserChannelSets, 'setBackendOrigin', origin\)/)
   assert.match(preload, /onState\(callback\)/)
   assert.match(preload, /onWorkspaceShortcut\(callback\)/)
   assert.match(preload, /exposeInMainWorld\('kiwiCodeDesktopCodeServer'/)

@@ -34,6 +34,15 @@ const browserIpcChannels = {
   state: 'kiwi-code-desktop-browser:state',
   workspaceShortcut: 'kiwi-code-desktop-browser:workspace-shortcut',
 }
+const legacyBrowserIpcChannels = {
+  show: 'dire-mux-desktop-browser:show',
+  hide: 'dire-mux-desktop-browser:hide',
+  setBounds: 'dire-mux-desktop-browser:set-bounds',
+  setBackendOrigin: 'dire-mux-desktop-browser:set-backend-origin',
+  state: 'dire-mux-desktop-browser:state',
+  workspaceShortcut: 'dire-mux-desktop-browser:workspace-shortcut',
+}
+const browserIpcChannelSets = [browserIpcChannels, legacyBrowserIpcChannels]
 const codeServerIpcChannels = {
   show: 'kiwi-code-desktop-code-server:show',
   hide: 'kiwi-code-desktop-code-server:hide',
@@ -42,6 +51,15 @@ const codeServerIpcChannels = {
   state: 'kiwi-code-desktop-code-server:state',
   workspaceShortcut: 'kiwi-code-desktop-code-server:workspace-shortcut',
 }
+const legacyCodeServerIpcChannels = {
+  show: 'dire-mux-desktop-code-server:show',
+  hide: 'dire-mux-desktop-code-server:hide',
+  setBounds: 'dire-mux-desktop-code-server:set-bounds',
+  close: 'dire-mux-desktop-code-server:close',
+  state: 'dire-mux-desktop-code-server:state',
+  workspaceShortcut: 'dire-mux-desktop-code-server:workspace-shortcut',
+}
+const codeServerIpcChannelSets = [codeServerIpcChannels, legacyCodeServerIpcChannels]
 
 let primaryWindow = null
 let trustedView = null
@@ -145,25 +163,29 @@ function registerIpc() {
     handler,
   )
 
-  ipcMain.handle(browserIpcChannels.show, browserInvoke((current, payload) => {
-    codeServerWorkspace?.detachActiveView()
-    return current.show(validateSessionPayload(payload, true))
-  }))
-  ipcMain.handle(browserIpcChannels.hide, browserInvoke((current, payload) => current.hide(validateSessionPayload(payload, false))))
-  ipcMain.handle(browserIpcChannels.setBounds, browserInvoke((current, payload) => current.setBounds(validateSessionPayload(payload, true))))
-  ipcMain.handle(browserIpcChannels.setBackendOrigin, browserInvoke((current, payload) => {
-    const origin = validateBackendOrigin(payload)
-    codeServerWorkspace?.addProtectedOrigin(origin)
-    codeServerWorkspace?.detachActiveView()
-    return current.setRendererBackendOrigin(origin)
-  }))
-  ipcMain.handle(codeServerIpcChannels.show, codeServerInvoke((current, payload) => {
-    workspace?.detachActiveView()
-    return current.show(validateSessionPayload(payload, true, true))
-  }))
-  ipcMain.handle(codeServerIpcChannels.hide, codeServerInvoke((current, payload) => current.hide(validateSessionPayload(payload, false))))
-  ipcMain.handle(codeServerIpcChannels.setBounds, codeServerInvoke((current, payload) => current.setBounds(validateSessionPayload(payload, true))))
-  ipcMain.handle(codeServerIpcChannels.close, codeServerInvoke((current, payload) => current.close(validateSessionPayload(payload, false))))
+  for (const channels of browserIpcChannelSets) {
+    ipcMain.handle(channels.show, browserInvoke((current, payload) => {
+      codeServerWorkspace?.detachActiveView()
+      return current.show(validateSessionPayload(payload, true))
+    }))
+    ipcMain.handle(channels.hide, browserInvoke((current, payload) => current.hide(validateSessionPayload(payload, false))))
+    ipcMain.handle(channels.setBounds, browserInvoke((current, payload) => current.setBounds(validateSessionPayload(payload, true))))
+    ipcMain.handle(channels.setBackendOrigin, browserInvoke((current, payload) => {
+      const origin = validateBackendOrigin(payload)
+      codeServerWorkspace?.addProtectedOrigin(origin)
+      codeServerWorkspace?.detachActiveView()
+      return current.setRendererBackendOrigin(origin)
+    }))
+  }
+  for (const channels of codeServerIpcChannelSets) {
+    ipcMain.handle(channels.show, codeServerInvoke((current, payload) => {
+      workspace?.detachActiveView()
+      return current.show(validateSessionPayload(payload, true, true))
+    }))
+    ipcMain.handle(channels.hide, codeServerInvoke((current, payload) => current.hide(validateSessionPayload(payload, false))))
+    ipcMain.handle(channels.setBounds, codeServerInvoke((current, payload) => current.setBounds(validateSessionPayload(payload, true))))
+    ipcMain.handle(channels.close, codeServerInvoke((current, payload) => current.close(validateSessionPayload(payload, false))))
+  }
 }
 
 function showWhenReady(window, view) {
@@ -209,11 +231,13 @@ async function createWindow() {
     desktopOrigin,
     apiOrigin,
     onState: (state) => {
-      if (!appView.webContents.isDestroyed()) appView.webContents.send(browserIpcChannels.state, state)
+      if (!appView.webContents.isDestroyed()) {
+        for (const channels of browserIpcChannelSets) appView.webContents.send(channels.state, state)
+      }
     },
     onWorkspaceShortcut: (index) => {
       if (!appView.webContents.isDestroyed()) {
-        appView.webContents.send(browserIpcChannels.workspaceShortcut, index)
+        for (const channels of browserIpcChannelSets) appView.webContents.send(channels.workspaceShortcut, index)
       }
     },
   })
@@ -228,11 +252,13 @@ async function createWindow() {
     onBeforeAttach: () => currentWorkspace.detachActiveView(),
     onServiceOrigin: (origin) => currentWorkspace.addProtectedOrigin(origin),
     onState: (state) => {
-      if (!appView.webContents.isDestroyed()) appView.webContents.send(codeServerIpcChannels.state, state)
+      if (!appView.webContents.isDestroyed()) {
+        for (const channels of codeServerIpcChannelSets) appView.webContents.send(channels.state, state)
+      }
     },
     onWorkspaceShortcut: (index) => {
       if (!appView.webContents.isDestroyed()) {
-        appView.webContents.send(codeServerIpcChannels.workspaceShortcut, index)
+        for (const channels of codeServerIpcChannelSets) appView.webContents.send(channels.workspaceShortcut, index)
       }
     },
   })

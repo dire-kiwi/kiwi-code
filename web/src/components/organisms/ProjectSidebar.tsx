@@ -75,6 +75,7 @@ type ProjectSidebarProps = {
   onProfileCreated: (profile: Profile) => void
   onSelectThread: (projectId: string, threadId: string) => void
   onNewThread: (projectId: string) => void
+  onOpenProjectSettings: (projectId: string) => void
   onOpenCleanup: () => void
   onOpenTmux: () => void
   onOpenSettings: () => void
@@ -181,6 +182,7 @@ export function ProjectSidebar({
   onProfileCreated,
   onSelectThread,
   onNewThread,
+  onOpenProjectSettings,
   onOpenCleanup,
   onOpenTmux,
   onOpenSettings,
@@ -955,6 +957,18 @@ export function ProjectSidebar({
                       title="New thread"
                     >
                       <Plus size={12} />
+                    </IconButton>
+                    <IconButton
+                      type="button"
+                      size="xs"
+                      shrink
+                      variant="subtle-white"
+                      onClick={() => onOpenProjectSettings(project.id)}
+                      className="opacity-0 group-hover/project:opacity-100 focus:opacity-100"
+                      aria-label={`Settings for ${project.name}`}
+                      title="Project settings"
+                    >
+                      <Settings2 size={12} />
                     </IconButton>
                     <IconButton
                       type="button"

@@ -18,6 +18,7 @@ import { ProjectThreadFinder } from './components/organisms/ProjectThreadFinder'
 import { CleanupScreen } from './components/pages/CleanupScreen'
 import { EmptyWorkspace } from './components/pages/EmptyWorkspace'
 import { NewThreadScreen } from './components/pages/NewThreadScreen'
+import { ProjectSettingsScreen } from './components/pages/ProjectSettingsScreen'
 import { SettingsScreen } from './components/pages/SettingsScreen'
 import { TmuxScreen } from './components/pages/TmuxScreen'
 import { TerminalWorkspace } from './components/pages/TerminalWorkspace'
@@ -25,11 +26,13 @@ import {
   CLEANUP_ROUTE,
   NEW_THREAD_ROUTE,
   PROJECT_ROUTE,
+  PROJECT_SETTINGS_ROUTE,
   SETTINGS_ROUTE,
   THREAD_ROUTE,
   TMUX_ROUTE,
   WORKSPACE_ROUTE,
   newThreadPath,
+  projectSettingsPath,
   workspacePath,
   workspaceToolFromRoute,
 } from './routes'
@@ -242,6 +245,7 @@ export default function App() {
   const newThreadMatch = useMatch(NEW_THREAD_ROUTE)
   const threadMatch = useMatch(THREAD_ROUTE)
   const projectMatch = useMatch(PROJECT_ROUTE)
+  const projectSettingsMatch = useMatch(PROJECT_SETTINGS_ROUTE)
   const cleanupMatch = useMatch(CLEANUP_ROUTE)
   const settingsMatch = useMatch(SETTINGS_ROUTE)
   const tmuxMatch = useMatch(TMUX_ROUTE)
@@ -481,6 +485,11 @@ export default function App() {
     [projectMatch?.params.projectId, projects],
   )
 
+  const settingsProject = useMemo(
+    () => projects.find((project) => project.id === projectSettingsMatch?.params.projectId) ?? null,
+    [projectSettingsMatch?.params.projectId, projects],
+  )
+
   const activeProfile = useMemo(
     () => profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0] ?? null,
     [activeProfileId, profiles],
@@ -494,7 +503,7 @@ export default function App() {
     return processWebServers.filter((webServer) => projectIds.has(webServer.projectId))
   }, [activeProjects, processWebServers])
   const defaultWorkspacePath = useMemo(() => firstWorkspacePath(activeProjects), [activeProjects])
-  const routedProject = selectedProject ?? newThreadProject ?? legacyProject ?? landingProject
+  const routedProject = selectedProject ?? newThreadProject ?? legacyProject ?? landingProject ?? settingsProject
   const routedProfileId = routedProject?.profileId
   const routedProjectId = routedProject?.id ?? null
   const newThreadProjectId = newThreadProject?.id ?? null
@@ -838,6 +847,10 @@ export default function App() {
           navigate(newThreadPath(projectId))
           setSidebarOpen(false)
         }}
+        onOpenProjectSettings={(projectId) => {
+          navigate(projectSettingsPath(projectId))
+          setSidebarOpen(false)
+        }}
         onOpenCleanup={() => {
           navigate(CLEANUP_ROUTE)
           setSidebarOpen(false)
@@ -892,6 +905,21 @@ export default function App() {
               )}
             />
             <Route
+              path={PROJECT_SETTINGS_ROUTE}
+              element={settingsProject ? (
+                <ProjectSettingsScreen
+                  key={settingsProject.id}
+                  project={settingsProject}
+                  profiles={profiles}
+                  onOpenSidebar={() => setSidebarOpen(true)}
+                  onBack={() => navigate(workspaceReturnDestination(settingsProject.id), { replace: true })}
+                  onProjectUpdated={handleProjectUpdated}
+                />
+              ) : (
+                <Navigate to={defaultWorkspacePath ?? '/'} replace />
+              )}
+            />
+            <Route
               path={NEW_THREAD_ROUTE}
               element={newThreadProject ? (
                 <NewThreadScreen
@@ -911,7 +939,6 @@ export default function App() {
               element={selectedProject && selectedThread && activeTool ? (
                 <TerminalWorkspace
                   key={`${selectedProject.id}:${selectedThread.id}`}
-                  profiles={profiles}
                   project={selectedProject}
                   thread={selectedThread}
                   usage={usageSnapshots.find((snapshot) =>
@@ -922,7 +949,6 @@ export default function App() {
                   onDetailsExpandedChange={setDetailsSidebarExpanded}
                   onOpenSidebar={() => setSidebarOpen(true)}
                   onThreadInteraction={() => acknowledgeThreadActivity(selectedProject.id, selectedThread.id)}
-                  onProjectUpdated={handleProjectUpdated}
                   onThreadUpdated={(thread) => handleThreadUpdated(selectedProject.id, thread)}
                   onSelectThread={(thread) => handleThreadSelected(selectedProject.id, thread.id)}
                   initialCodingAgent={initialThreadStart?.agent}

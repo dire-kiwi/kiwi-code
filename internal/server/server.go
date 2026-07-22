@@ -105,7 +105,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	terminal.nativeClaude.stopOnContext(options.CleanupContext)
 	server := &Server{
 		projects:            projects,
-		browser:             browsercontrol.New(browsercontrol.ConfigPath(projects.DataDirectory())),
+		browser:             browsercontrol.New(browsercontrol.ConfigPaths(projects.DataDirectory())...),
 		terminal:            terminal,
 		piActivity:          newPiActivityTracker(),
 		threadUsage:         usage,

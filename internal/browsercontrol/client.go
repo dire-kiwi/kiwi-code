@@ -20,9 +20,11 @@ import (
 )
 
 const (
-	ConfigFileName       = "browser-provider.json"
-	ConfigPathEnv        = "KIWI_CODE_BROWSER_PROVIDER_CONFIG"
-	maxConfigBytes int64 = 4 << 10
+	ConfigFileName            = "browser-provider.json"
+	ConfigPathEnv             = "KIWI_CODE_BROWSER_PROVIDER_CONFIG"
+	LegacyConfigPathEnv       = "DIRE_MUX_BROWSER_PROVIDER_CONFIG"
+	LegacyDataDirEnv          = "DIRE_MUX_DATA_DIR"
+	maxConfigBytes      int64 = 4 << 10
 
 	// MaxRequestBytes bounds the JSON sent to the provider. Public action
 	// requests are bounded separately at 1 MiB; this leaves room for the
@@ -119,22 +121,48 @@ type providerError struct {
 // Client loads the provider configuration for each action so an Electron
 // restart can publish a new port and token without restarting the Go backend.
 type Client struct {
-	configPath string
-	httpClient *http.Client
-	timeout    time.Duration
+	configPaths []string
+	httpClient  *http.Client
+	timeout     time.Duration
 }
 
-// ConfigPath returns the provider configuration path. The environment override
-// is intended for isolated development stacks; production uses the data
-// directory by default.
-func ConfigPath(dataDirectory string) string {
+// ConfigPaths returns the provider configuration paths in preference order.
+// An explicit Kiwi Code override remains exclusive so isolated development and
+// validation stacks can never fall through to a production desktop provider.
+// The legacy path is retained only for a live pre-rename Electron process.
+func ConfigPaths(dataDirectory string) []string {
 	if override := os.Getenv(ConfigPathEnv); override != "" {
-		return override
+		return []string{override}
 	}
-	return filepath.Join(dataDirectory, ConfigFileName)
+
+	primary := filepath.Join(dataDirectory, ConfigFileName)
+	paths := []string{primary}
+	legacy := os.Getenv(LegacyConfigPathEnv)
+	if legacy == "" {
+		if legacyDataDirectory := os.Getenv(LegacyDataDirEnv); legacyDataDirectory != "" {
+			legacy = filepath.Join(legacyDataDirectory, ConfigFileName)
+		} else {
+			cleanDataDirectory := filepath.Clean(dataDirectory)
+			if filepath.Base(cleanDataDirectory) == "kiwi-code" {
+				legacy = filepath.Join(filepath.Dir(cleanDataDirectory), "dire-mux", ConfigFileName)
+			}
+		}
+	}
+	if legacy != "" && legacy != primary {
+		paths = append(paths, legacy)
+	}
+	return paths
 }
 
-func New(configPath string) *Client {
+// ConfigPath returns the preferred provider configuration path.
+func ConfigPath(dataDirectory string) string {
+	return ConfigPaths(dataDirectory)[0]
+}
+
+func New(configPaths ...string) *Client {
+	if len(configPaths) == 0 {
+		configPaths = []string{""}
+	}
 	transport := &http.Transport{
 		Proxy:                 nil,
 		DialContext:           (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
@@ -147,7 +175,7 @@ func New(configPath string) *Client {
 		ExpectContinueTimeout: time.Second,
 	}
 	return &Client{
-		configPath: configPath,
+		configPaths: append([]string(nil), configPaths...),
 		httpClient: &http.Client{
 			Transport: transport,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
@@ -161,8 +189,18 @@ func New(configPath string) *Client {
 // Action sends one operation to the configured provider and returns only the
 // raw JSON result, never the provider envelope or credentials.
 func (c *Client) Action(ctx context.Context, request Request) (json.RawMessage, error) {
-	config, err := loadConfig(c.configPath)
-	if err != nil {
+	var config providerConfig
+	configured := false
+	for _, configPath := range c.configPaths {
+		candidate, err := loadConfig(configPath)
+		if err != nil {
+			continue
+		}
+		config = candidate
+		configured = true
+		break
+	}
+	if !configured {
 		return nil, fmt.Errorf("%w: configuration is not available", ErrUnavailable)
 	}
 
