@@ -61,7 +61,9 @@ export function CodeServerPane({
   onWorkspaceShortcut,
 }: CodeServerPaneProps) {
   const localBackendActive = isDefaultBackendActive()
-  const desktopBridge = localBackendActive ? window.kiwiCodeDesktopCodeServer : undefined
+  const desktopBridge = localBackendActive
+    ? window.kiwiCodeDesktopCodeServer ?? window.direMuxDesktopCodeServer
+    : undefined
   const surfaceRef = useRef<HTMLDivElement>(null)
   const [viewState, setViewState] = useState<KiwiCodeDesktopCodeServerState>({
     projectId,

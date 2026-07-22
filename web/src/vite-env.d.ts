@@ -60,4 +60,8 @@ interface KiwiCodeDesktopCodeServerBridge {
 interface Window {
   kiwiCodeDesktopBrowser?: KiwiCodeDesktopBrowserBridge
   kiwiCodeDesktopCodeServer?: KiwiCodeDesktopCodeServerBridge
+  /** Compatibility bridge exposed by a desktop renderer loaded before the rename. */
+  direMuxDesktopBrowser?: KiwiCodeDesktopBrowserBridge
+  /** Compatibility bridge exposed by a desktop renderer loaded before the rename. */
+  direMuxDesktopCodeServer?: KiwiCodeDesktopCodeServerBridge
 }

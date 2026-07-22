@@ -16,7 +16,8 @@ const addBackendValue = '__kiwi_code_add_backend__'
 const forgetBackendValue = '__kiwi_code_forget_backend__'
 
 function reportDesktopBackend(origin: string) {
-  const result = window.kiwiCodeDesktopBrowser?.setBackendOrigin?.(origin)
+  const bridge = window.kiwiCodeDesktopBrowser ?? window.direMuxDesktopBrowser
+  const result = bridge?.setBackendOrigin?.(origin)
   if (result && typeof result.then === 'function') {
     void result.catch((error) => console.warn('Could not update the desktop backend origin.', error))
   }
