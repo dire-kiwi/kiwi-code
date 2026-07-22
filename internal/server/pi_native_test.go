@@ -181,7 +181,7 @@ func TestNormalizePiNativeClientMessage(t *testing.T) {
 	}
 }
 
-func TestPiNativeDisplayHistoryPreservesPreCompactionActiveBranch(t *testing.T) {
+func TestPiNativeDisplayHistoryPreservesActiveBranchAndPlacesCompactionAtBoundary(t *testing.T) {
 	data := json.RawMessage(`{
 		"entries": [
 			{"type":"message","id":"root","parentId":null,"timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"old question","timestamp":1}},
@@ -224,7 +224,44 @@ func TestPiNativeDisplayHistoryPreservesPreCompactionActiveBranch(t *testing.T) 
 			t.Fatalf("compaction display message = %#v", message)
 		}
 	}
-	wantRoles := []string{"user", "assistant", "user", "compactionSummary", "assistant"}
+	// The append-only compaction entry follows the retained question, but the
+	// display summary belongs at the retained-context boundary. This lets the
+	// subsequent transcript show work completed after the summarized snapshot.
+	wantRoles := []string{"user", "assistant", "compactionSummary", "user", "assistant"}
+	if !reflect.DeepEqual(roles, wantRoles) {
+		t.Fatalf("display history roles = %#v, want %#v", roles, wantRoles)
+	}
+}
+
+func TestPiNativeDisplayHistoryKeepsCompactionWithoutBoundaryAtAppendPosition(t *testing.T) {
+	data := json.RawMessage(`{
+		"entries": [
+			{"type":"message","id":"root","parentId":null,"message":{"role":"user","content":"question"}},
+			{"type":"compaction","id":"compact","parentId":"root","summary":"legacy summary","tokensBefore":100},
+			{"type":"message","id":"answer","parentId":"compact","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}
+		],
+		"leafId": "answer"
+	}`)
+
+	payload, err := piNativeDisplayHistoryEvent(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event piNativeHistoryEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		t.Fatal(err)
+	}
+	roles := make([]string, 0, len(event.Data.Messages))
+	for _, raw := range event.Data.Messages {
+		var message struct {
+			Role string `json:"role"`
+		}
+		if err := json.Unmarshal(raw, &message); err != nil {
+			t.Fatal(err)
+		}
+		roles = append(roles, message.Role)
+	}
+	wantRoles := []string{"user", "compactionSummary", "assistant"}
 	if !reflect.DeepEqual(roles, wantRoles) {
 		t.Fatalf("display history roles = %#v, want %#v", roles, wantRoles)
 	}
