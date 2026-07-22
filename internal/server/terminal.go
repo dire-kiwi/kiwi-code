@@ -2919,19 +2919,43 @@ func (h *terminalHandler) commandForTmuxTarget(
 		if h.claudePluginPath == "" {
 			return "", nil, "", errors.New("Claude plugin path is unavailable")
 		}
-		pluginArguments := []string{"--plugin-dir", h.claudePluginPath}
-		if tool == codingAgentClaudeGPT {
+		if tool == codingAgentClaudeGPT || profileAgent {
 			if h.claudePluginRootErr != nil {
 				return "", nil, "", h.claudePluginRootErr
 			}
 			if h.claudePluginRootPath == "" {
 				return "", nil, "", errors.New("Claude plugin root is unavailable")
 			}
+		}
+		if profileAgent {
+			// A named profile isolates Claude's account and session state, not its
+			// launch configuration. Mirror the default settings and use the default
+			// plugin registry below so installed-plugin skills, MCP servers, and the
+			// sandbox permission boundary load exactly as they do for the built-in
+			// Claude entry. Loading the sandbox again with --plugin-dir can make
+			// Claude resolve the same plugin through two sources and drop session
+			// plugin hooks.
+			if h.claudeSandboxPluginErr != nil {
+				return "", nil, "", h.claudeSandboxPluginErr
+			}
+			if h.claudeSandboxPluginPath == "" {
+				return "", nil, "", errors.New("Claude sandbox plugin path is unavailable")
+			}
+			if h.claudeConfigErr != nil {
+				return "", nil, "", h.claudeConfigErr
+			}
+			if h.claudeConfigPath == "" {
+				return "", nil, "", errors.New("Claude config directory is unavailable")
+			}
+			if err := syncClaudeCodeProfileSettings(claudeProfile.ConfigDirectory, h.claudeConfigPath); err != nil {
+				return "", nil, "", err
+			}
+		}
+		pluginArguments := []string{"--plugin-dir", h.claudePluginPath}
+		if tool == codingAgentClaudeGPT {
 			if launchOptions.Model == "" || !isCLIProxyAPIGPTModel(launchOptions.Model) {
 				return "", nil, "", errors.New("Claude Code (with gpt) requires a CLIProxyAPI GPT model")
 			}
-		}
-		if tool == codingAgentClaudeGPT || profileAgent {
 			if h.claudeSandboxPluginErr != nil {
 				return "", nil, "", h.claudeSandboxPluginErr
 			}
@@ -2968,7 +2992,10 @@ func (h *terminalHandler) commandForTmuxTarget(
 	}
 	if isClaudeCodingAgent(tool) && notice == "" {
 		if profileAgent {
-			environment = append(environment, "CLAUDE_CONFIG_DIR="+claudeProfile.ConfigDirectory)
+			environment = append(environment,
+				"CLAUDE_CONFIG_DIR="+claudeProfile.ConfigDirectory,
+				"CLAUDE_CODE_PLUGIN_CACHE_DIR="+h.claudePluginRootPath,
+			)
 		}
 		piPath := codingAgentPi
 		if resolvedPiPath, err := exec.LookPath(codingAgentPi); err == nil {

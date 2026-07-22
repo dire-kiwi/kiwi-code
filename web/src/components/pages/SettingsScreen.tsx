@@ -692,7 +692,8 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
                 <InfoCallout>
                   Each entry appears as “Claude Code · Title” in the new-thread and workspace agent lists. Kiwi Code
                   launches it with <span className="font-mono text-ghost-blue">CLAUDE_CONFIG_DIR</span> set to the selected
-                  directory, keeping login state and settings separate. Missing directories are created when you save.
+                  directory. Login and session state stay separate; before each launch, Kiwi Code mirrors the default Claude
+                  settings and uses the same installed plugins. Missing directories are created when you save.
                 </InfoCallout>
 
                 {!claudeProfilesValid && claudeCodeProfiles.length > 0 && (
