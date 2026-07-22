@@ -69,12 +69,39 @@ func TestLoadConfigValidation(t *testing.T) {
 
 func TestConfigPathUsesOptionalEnvironmentOverride(t *testing.T) {
 	t.Setenv(ConfigPathEnv, "")
+	t.Setenv(LegacyConfigPathEnv, "")
+	t.Setenv(LegacyDataDirEnv, "")
 	if got, want := ConfigPath("/data"), filepath.Join("/data", ConfigFileName); got != want {
 		t.Fatalf("ConfigPath() = %q, want %q", got, want)
 	}
 	t.Setenv(ConfigPathEnv, "/isolated/provider.json")
 	if got := ConfigPath("/data"); got != "/isolated/provider.json" {
 		t.Fatalf("ConfigPath() override = %q", got)
+	}
+	if got := ConfigPaths(filepath.Join("/config", "kiwi-code")); len(got) != 1 || got[0] != "/isolated/provider.json" {
+		t.Fatalf("ConfigPaths() with isolated override = %#v", got)
+	}
+}
+
+func TestConfigPathsRetainPreRenameDesktopCompatibility(t *testing.T) {
+	t.Setenv(ConfigPathEnv, "")
+	t.Setenv(LegacyConfigPathEnv, "")
+	t.Setenv(LegacyDataDirEnv, "")
+	dataDirectory := filepath.Join("/config", "kiwi-code")
+	got := ConfigPaths(dataDirectory)
+	want := []string{
+		filepath.Join(dataDirectory, ConfigFileName),
+		filepath.Join("/config", "dire-mux", ConfigFileName),
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("ConfigPaths() = %#v, want %#v", got, want)
+	}
+
+	t.Setenv(LegacyConfigPathEnv, "/legacy/provider.json")
+	got = ConfigPaths("/custom/current")
+	want = []string{filepath.Join("/custom/current", ConfigFileName), "/legacy/provider.json"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("ConfigPaths() with legacy override = %#v, want %#v", got, want)
 	}
 }
 
@@ -119,6 +146,34 @@ func TestClientForwardsAuthenticatedLoopbackAction(t *testing.T) {
 	if received.ProjectID != "project-a" || received.ThreadID != "thread-b" || received.Operation != "navigate.goto" ||
 		string(received.Params) != `{"url":"https://example.com"}` {
 		t.Fatalf("forwarded request = %#v", received)
+	}
+}
+
+func TestClientUsesLegacyConfigUntilCurrentDesktopPublishesOne(t *testing.T) {
+	legacyProvider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"source":"legacy"}}`))
+	}))
+	defer legacyProvider.Close()
+	currentProvider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"source":"current"}}`))
+	}))
+	defer currentProvider.Close()
+
+	directory := t.TempDir()
+	currentPath := filepath.Join(directory, "current.json")
+	legacyPath := filepath.Join(directory, "legacy.json")
+	copyProviderConfig(t, writeProviderConfig(t, legacyProvider.URL), legacyPath)
+	client := New(currentPath, legacyPath)
+
+	result, err := client.Action(context.Background(), Request{Operation: "session.status"})
+	if err != nil || string(result) != `{"source":"legacy"}` {
+		t.Fatalf("legacy Action() = %s, %v", result, err)
+	}
+
+	copyProviderConfig(t, writeProviderConfig(t, currentProvider.URL), currentPath)
+	result, err = client.Action(context.Background(), Request{Operation: "session.status"})
+	if err != nil || string(result) != `{"source":"current"}` {
+		t.Fatalf("current Action() = %s, %v", result, err)
 	}
 }
 
@@ -241,6 +296,17 @@ func TestClientErrorsDoNotExposeConfiguration(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), path) || strings.Contains(err.Error(), testProviderToken) || strings.Contains(err.Error(), "bad") {
 		t.Fatalf("Action() exposed provider configuration: %v", err)
+	}
+}
+
+func copyProviderConfig(t *testing.T, source, destination string) {
+	t.Helper()
+	contents, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(destination, contents, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -208,7 +208,9 @@ export function BrowserPane({
 }: BrowserPaneProps) {
   // The native guest provider is paired with the backend that launched this
   // desktop renderer. Remote backends use their own projected browser preview.
-  const desktopBridge = isDefaultBackendActive() ? window.kiwiCodeDesktopBrowser : undefined
+  const desktopBridge = isDefaultBackendActive()
+    ? window.kiwiCodeDesktopBrowser ?? window.direMuxDesktopBrowser
+    : undefined
   const guestRef = useRef<HTMLDivElement>(null)
   const addressRef = useRef<HTMLInputElement>(null)
   const statusAbortRef = useRef<AbortController | null>(null)
