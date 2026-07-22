@@ -16,7 +16,11 @@ import {
   X,
 } from 'lucide-react'
 import { createThread, getSettings, listCodingAgents, listProjectGitBranches, uploadPiImage } from '../../api'
-import { fallbackCodingAgentConfigs } from '../../codingAgents'
+import {
+  fallbackCodingAgentConfigs,
+  isCodingAgent,
+  isCodingAgentSelection,
+} from '../../codingAgents'
 import {
   formatImageSize,
   imageFilesFromClipboard,
@@ -82,11 +86,7 @@ function rememberedNewThreadPreferences(projectId: string): NewThreadPreferences
     const candidate = value as Partial<NewThreadPreferences> & Partial<AgentModelPreferences>
     if (
       (candidate.location !== 'project' && candidate.location !== 'worktree')
-      || (candidate.codingAgent !== 'pi'
-        && candidate.codingAgent !== 'pi-native'
-        && candidate.codingAgent !== 'claude'
-        && candidate.codingAgent !== 'claude-gpt'
-        && candidate.codingAgent !== 'claude-native')
+      || !isCodingAgentSelection(candidate.codingAgent)
       || typeof candidate.baseBranch !== 'string'
     ) {
       return null
@@ -94,10 +94,10 @@ function rememberedNewThreadPreferences(projectId: string): NewThreadPreferences
 
     const agentModels: Partial<Record<CodingAgent, AgentModelPreferences>> = {}
     if (candidate.agentModels && typeof candidate.agentModels === 'object') {
-      for (const agent of ['pi', 'claude', 'claude-gpt'] as const) {
-        const preferences = candidate.agentModels[agent]
+      for (const [agent, preferences] of Object.entries(candidate.agentModels)) {
         if (
-          preferences
+          isCodingAgent(agent)
+          && preferences
           && typeof preferences.model === 'string'
           && typeof preferences.thinkingLevel === 'string'
         ) {
@@ -204,6 +204,8 @@ export function NewThreadScreen({
       .then((configs) => {
         if (controller.signal.aborted || configs.length === 0) return
         setCodingAgents(configs)
+        setCodingAgent((current) => configs.some((config) =>
+          config.id === codingAgentIdForSelection(current)) ? current : 'pi-native')
       })
       .catch((reason) => {
         if (controller.signal.aborted) return
@@ -425,7 +427,7 @@ export function NewThreadScreen({
     const currentAgentId = codingAgentIdForSelection(codingAgent)
     const nextConfig = codingAgents.find((agent) => agent.id === nextAgentId)
       ?? fallbackCodingAgentConfigs.find((agent) => agent.id === nextAgentId)
-    const nextAgentModels = {
+    const nextAgentModels: Partial<Record<CodingAgent, AgentModelPreferences>> = {
       ...agentModels,
       [currentAgentId]: { model, thinkingLevel },
     }

@@ -154,7 +154,7 @@ func (h *terminalHandler) listCodingAgents(w http.ResponseWriter, r *http.Reques
 		claudeGPTModels = []codingAgentChoice{}
 	}
 
-	writeJSON(w, http.StatusOK, []codingAgentConfig{
+	configs := []codingAgentConfig{
 		{
 			ID:             codingAgentPi,
 			Label:          "Pi",
@@ -173,7 +173,18 @@ func (h *terminalHandler) listCodingAgents(w http.ResponseWriter, r *http.Reques
 			Models:         claudeGPTModels,
 			ThinkingLevels: claudeGPTThinkingLevels,
 		},
-	})
+	}
+	if h.projects != nil {
+		for _, profile := range h.projects.GetSettings().ClaudeCodeProfiles {
+			configs = append(configs, codingAgentConfig{
+				ID:             claudeCodeProfileAgentID(profile.ID),
+				Label:          "Claude Code · " + profile.Name,
+				Models:         claudeModels,
+				ThinkingLevels: claudeThinkingLevels,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, configs)
 }
 
 func clonePiModelCapabilities(models []piModelCapability) []piModelCapability {
@@ -480,7 +491,7 @@ func normalizeCodingAgentLaunchOptions(agent, model, thinkingLevel string) (codi
 	}
 	thinkingLevel = strings.TrimSpace(thinkingLevel)
 	levels := piThinkingLevels
-	if agent == codingAgentClaude {
+	if isClaudeCodingAgent(agent) {
 		levels = claudeThinkingLevels
 	}
 	if agent == codingAgentClaudeGPT {

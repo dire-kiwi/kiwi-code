@@ -75,16 +75,18 @@ type terminalHandler struct {
 }
 
 const (
-	tmuxSocketName            = "kiwi-code"
-	tmuxSessionNamePrefix     = "kiwi-code-"
-	terminalWriteTimeout      = 10 * time.Second
-	terminalPongTimeout       = 45 * time.Second
-	terminalPingInterval      = 15 * time.Second
-	terminalAgentPollInterval = time.Second
-	terminalViewCreationGrace = 2 * time.Second
-	codingAgentPi             = "pi"
-	codingAgentClaude         = "claude"
-	codingAgentClaudeGPT      = "claude-gpt"
+	tmuxSocketName                    = "kiwi-code"
+	tmuxSessionNamePrefix             = "kiwi-code-"
+	terminalWriteTimeout              = 10 * time.Second
+	terminalPongTimeout               = 45 * time.Second
+	terminalPingInterval              = 15 * time.Second
+	terminalAgentPollInterval         = time.Second
+	terminalViewCreationGrace         = 2 * time.Second
+	codingAgentPi                     = "pi"
+	codingAgentClaude                 = "claude"
+	codingAgentClaudeGPT              = "claude-gpt"
+	codingAgentClaudeProfilePrefix    = "claude-profile-"
+	maxClaudeCodeProfileAgentIDLength = 64
 )
 
 var threadSessionTools = [...]string{"terminal", "nvim", "lazygit", "pi"}
@@ -301,6 +303,10 @@ func (h *terminalHandler) startCodingAgent(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := h.validateCodingAgentConfiguration(agent); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	launchOptions.InitialPrompt = strings.TrimSpace(input.Prompt)
 	if strings.ContainsRune(launchOptions.InitialPrompt, '\x00') {
 		writeError(w, http.StatusBadRequest, "The initial prompt contains an invalid character.")
@@ -424,6 +430,10 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 			r.URL.Query().Get("thinking"),
 		)
 		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := h.validateCodingAgentConfiguration(codingAgent); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -2419,7 +2429,13 @@ func (h *terminalHandler) tmuxTargetServerPID(target string) (string, bool, erro
 }
 
 func (h *terminalHandler) removeCodingAgentExitMarkersForThread(projectID, threadID string) error {
-	for _, agent := range []string{codingAgentPi, codingAgentClaude, codingAgentClaudeGPT} {
+	agents := []string{codingAgentPi, codingAgentClaude, codingAgentClaudeGPT}
+	if h.projects != nil {
+		for _, profile := range h.projects.GetSettings().ClaudeCodeProfiles {
+			agents = append(agents, claudeCodeProfileAgentID(profile.ID))
+		}
+	}
+	for _, agent := range agents {
 		if err := h.removeCodingAgentExitMarker(projectID, threadID, agent); err != nil {
 			return err
 		}
@@ -2878,6 +2894,10 @@ func (h *terminalHandler) commandForTmuxTarget(
 	sessionName string,
 	launchOptions codingAgentLaunchOptions,
 ) (string, []string, string, error) {
+	claudeProfile, profileAgent := h.claudeCodeProfile(tool)
+	if validClaudeCodeProfileAgent(tool) && !profileAgent {
+		return "", nil, "", errors.New("Claude Code profile is not configured")
+	}
 	command, args, notice, err := commandFor(tool)
 	if err != nil {
 		return "", nil, "", err
@@ -2907,14 +2927,16 @@ func (h *terminalHandler) commandForTmuxTarget(
 			if h.claudePluginRootPath == "" {
 				return "", nil, "", errors.New("Claude plugin root is unavailable")
 			}
+			if launchOptions.Model == "" || !isCLIProxyAPIGPTModel(launchOptions.Model) {
+				return "", nil, "", errors.New("Claude Code (with gpt) requires a CLIProxyAPI GPT model")
+			}
+		}
+		if tool == codingAgentClaudeGPT || profileAgent {
 			if h.claudeSandboxPluginErr != nil {
 				return "", nil, "", h.claudeSandboxPluginErr
 			}
 			if h.claudeSandboxPluginPath == "" {
 				return "", nil, "", errors.New("Claude sandbox plugin path is unavailable")
-			}
-			if launchOptions.Model == "" || !isCLIProxyAPIGPTModel(launchOptions.Model) {
-				return "", nil, "", errors.New("Claude Code (with gpt) requires a CLIProxyAPI GPT model")
 			}
 			pluginArguments = append(pluginArguments, "--plugin-dir", h.claudeSandboxPluginPath)
 		}
@@ -2945,6 +2967,9 @@ func (h *terminalHandler) commandForTmuxTarget(
 		}
 	}
 	if isClaudeCodingAgent(tool) && notice == "" {
+		if profileAgent {
+			environment = append(environment, "CLAUDE_CONFIG_DIR="+claudeProfile.ConfigDirectory)
+		}
 		piPath := codingAgentPi
 		if resolvedPiPath, err := exec.LookPath(codingAgentPi); err == nil {
 			piPath = resolvedPiPath
@@ -4035,12 +4060,58 @@ func normalizeCodingAgent(agent string) (string, error) {
 	case codingAgentClaudeGPT:
 		return codingAgentClaudeGPT, nil
 	default:
+		if validClaudeCodeProfileAgent(agent) {
+			return agent, nil
+		}
 		return "", errors.New("unknown coding agent")
 	}
 }
 
+func claudeCodeProfileAgentID(profileID string) string {
+	return codingAgentClaudeProfilePrefix + profileID
+}
+
+func validClaudeCodeProfileAgent(agent string) bool {
+	profileID := strings.TrimPrefix(agent, codingAgentClaudeProfilePrefix)
+	if profileID == agent || profileID == "" || len(profileID) > maxClaudeCodeProfileAgentIDLength {
+		return false
+	}
+	for _, character := range profileID {
+		if (character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || character == '-' || character == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func isClaudeCodingAgent(agent string) bool {
-	return agent == codingAgentClaude || agent == codingAgentClaudeGPT
+	return agent == codingAgentClaude || agent == codingAgentClaudeGPT || validClaudeCodeProfileAgent(agent)
+}
+
+func (h *terminalHandler) claudeCodeProfile(agent string) (project.ClaudeCodeProfile, bool) {
+	if h == nil || h.projects == nil || !validClaudeCodeProfileAgent(agent) {
+		return project.ClaudeCodeProfile{}, false
+	}
+	profileID := strings.TrimPrefix(agent, codingAgentClaudeProfilePrefix)
+	for _, profile := range h.projects.GetSettings().ClaudeCodeProfiles {
+		if profile.ID == profileID {
+			return profile, true
+		}
+	}
+	return project.ClaudeCodeProfile{}, false
+}
+
+func (h *terminalHandler) validateCodingAgentConfiguration(agent string) error {
+	if !validClaudeCodeProfileAgent(agent) {
+		return nil
+	}
+	if _, configured := h.claudeCodeProfile(agent); !configured {
+		return errors.New("Claude Code profile is not configured")
+	}
+	return nil
 }
 
 func commandFor(tool string) (string, []string, string, error) {

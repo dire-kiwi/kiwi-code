@@ -9,7 +9,8 @@ import {
   Globe2,
   SquareTerminal,
 } from 'lucide-react'
-import { threadEventsPath } from '../../api'
+import { getSettings, threadEventsPath } from '../../api'
+import { claudeCodeProfileChoices, isCodingAgent } from '../../codingAgents'
 import { workspacePath } from '../../routes'
 import type {
   AgentContextStatus,
@@ -88,7 +89,7 @@ const statusCopy: Record<ConnectionStatus, string> = {
   error: 'Offline',
 }
 
-const codingAgents: Array<{ id: CodingAgentSelection; label: string }> = [
+const fallbackWorkspaceCodingAgents: Array<{ id: CodingAgentSelection; label: string }> = [
   { id: 'pi', label: 'Pi' },
   { id: 'claude', label: 'Claude Code' },
   { id: 'claude-gpt', label: 'Claude Code (with gpt)' },
@@ -103,7 +104,7 @@ function codingAgentStorageKey(projectId: string, threadId: string) {
 function rememberedCodingAgent(projectId: string, threadId: string): CodingAgent {
   try {
     const value = window.localStorage.getItem(codingAgentStorageKey(projectId, threadId))
-    if (value === 'pi' || value === 'claude' || value === 'claude-gpt') return value
+    if (isCodingAgent(value)) return value
   } catch {
     // Storage can be unavailable under restrictive browser policies.
   }
@@ -152,6 +153,16 @@ export function TerminalWorkspace({
 }: TerminalWorkspaceProps) {
   const navigate = useNavigate()
   const readOnlySubagent = Boolean(thread.parentThreadId)
+  const [codingAgentChoices, setCodingAgentChoices] = useState(() => {
+    if (!initialCodingAgent || fallbackWorkspaceCodingAgents.some((agent) => agent.id === initialCodingAgent)) {
+      return fallbackWorkspaceCodingAgents
+    }
+    return [
+      ...fallbackWorkspaceCodingAgents.slice(0, 3),
+      { id: initialCodingAgent, label: 'Claude Code' },
+      ...fallbackWorkspaceCodingAgents.slice(3),
+    ]
+  })
   const [codingAgent, setCodingAgent] = useState<CodingAgent>(() =>
     readOnlySubagent ? 'pi' : initialCodingAgent ?? rememberedCodingAgent(project.id, thread.id),
   )
@@ -206,6 +217,25 @@ export function TerminalWorkspace({
   const [statusReloadKey, setStatusReloadKey] = useState(0)
   const [branchOverlayOpen, setBranchOverlayOpen] = useState(false)
   const toolTabsRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    getSettings(controller.signal)
+      .then((settings) => {
+        if (controller.signal.aborted) return
+        const choices = [
+          ...fallbackWorkspaceCodingAgents.slice(0, 3),
+          ...claudeCodeProfileChoices(settings.claudeCodeProfiles),
+          ...fallbackWorkspaceCodingAgents.slice(3),
+        ]
+        setCodingAgentChoices(choices)
+        setCodingAgent((current) => choices.some((choice) => choice.id === current) ? current : 'pi')
+      })
+      .catch(() => {
+        // Keep the built-in choices when settings are temporarily unavailable.
+      })
+    return () => controller.abort()
+  }, [])
 
   const markToolOpened = useCallback((tool: WorkspaceTool) => {
     setOpenedTools((current) => (current.includes(tool) ? current : [...current, tool]))
@@ -396,8 +426,8 @@ export function TerminalWorkspace({
     ? openedTools
     : [...openedTools, activeTool]
   const availableCodingAgents = readOnlySubagent
-    ? codingAgents.filter((agent) => agent.id === 'pi-native')
-    : codingAgents
+    ? codingAgentChoices.filter((agent) => agent.id === 'pi-native')
+    : codingAgentChoices
   const codingAgentSelection: CodingAgentSelection = codingAgent === 'claude'
     ? claudePresentation === 'native' ? 'claude-native' : 'claude'
     : codingAgent === 'pi'
@@ -720,6 +750,7 @@ export function TerminalWorkspace({
                   threadTitle={thread.title}
                   tool={tool}
                   codingAgent={codingAgent}
+                  terminalLabel={tool === 'pi' ? selectedCodingAgent.label : undefined}
                   initialModel={tool === 'pi' && codingAgent === initialCodingAgent ? initialModel : undefined}
                   initialThinkingLevel={tool === 'pi' && codingAgent === initialCodingAgent ? initialThinkingLevel : undefined}
                   initialPrompt={tool === 'pi' && codingAgent === initialCodingAgent ? initialPrompt : undefined}

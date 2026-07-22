@@ -1942,6 +1942,107 @@ func TestStorePersistsWorktreeBaseLocation(t *testing.T) {
 	}
 }
 
+func TestStorePersistsClaudeCodeProfiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
+	store, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profiles := store.GetSettings().ClaudeCodeProfiles; profiles == nil || len(profiles) != 0 {
+		t.Fatalf("default Claude Code profiles = %#v, want an empty list", profiles)
+	}
+
+	profiles := []ClaudeCodeProfile{{
+		ID:              "work-account",
+		Name:            " Work ",
+		ConfigDirectory: "~/.claude-work",
+	}}
+	settings, err := store.UpdateSettingsValues(SettingsUpdate{ClaudeCodeProfiles: &profiles})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDirectory := filepath.Join(home, ".claude-work")
+	want := ClaudeCodeProfile{ID: "work-account", Name: "Work", ConfigDirectory: wantDirectory}
+	if len(settings.ClaudeCodeProfiles) != 1 || settings.ClaudeCodeProfiles[0] != want {
+		t.Fatalf("Claude Code profiles = %#v, want %#v", settings.ClaudeCodeProfiles, want)
+	}
+	if info, err := os.Stat(wantDirectory); err != nil || !info.IsDir() {
+		t.Fatalf("Claude Code config directory was not created: info=%v err=%v", info, err)
+	}
+
+	profiles[0].Name = "Changed input"
+	settings.ClaudeCodeProfiles[0].Name = "Changed output"
+	if current := store.GetSettings().ClaudeCodeProfiles; len(current) != 1 || current[0] != want {
+		t.Fatalf("Claude Code profiles were not defensively copied: %#v", current)
+	}
+
+	reloaded, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted := reloaded.GetSettings().ClaudeCodeProfiles; len(persisted) != 1 || persisted[0] != want {
+		t.Fatalf("persisted Claude Code profiles = %#v", persisted)
+	}
+
+	empty := []ClaudeCodeProfile{}
+	settings, err = reloaded.UpdateSettingsValues(SettingsUpdate{ClaudeCodeProfiles: &empty})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.ClaudeCodeProfiles == nil || len(settings.ClaudeCodeProfiles) != 0 {
+		t.Fatalf("cleared Claude Code profiles = %#v", settings.ClaudeCodeProfiles)
+	}
+}
+
+func TestStoreRejectsInvalidClaudeCodeProfiles(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "data", "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	valid := func(id, name, directory string) ClaudeCodeProfile {
+		return ClaudeCodeProfile{ID: id, Name: name, ConfigDirectory: filepath.Join(root, directory)}
+	}
+	tests := []struct {
+		name     string
+		profiles []ClaudeCodeProfile
+	}{
+		{name: "missing id", profiles: []ClaudeCodeProfile{valid("", "Work", "one")}},
+		{name: "invalid id", profiles: []ClaudeCodeProfile{valid("work/account", "Work", "one")}},
+		{name: "missing name", profiles: []ClaudeCodeProfile{valid("one", " ", "one")}},
+		{name: "relative directory", profiles: []ClaudeCodeProfile{{ID: "one", Name: "Work", ConfigDirectory: "relative"}}},
+		{name: "duplicate ids", profiles: []ClaudeCodeProfile{valid("one", "Work", "one"), valid("one", "Personal", "two")}},
+		{name: "duplicate names", profiles: []ClaudeCodeProfile{valid("one", "Work", "one"), valid("two", "work", "two")}},
+		{name: "duplicate directories", profiles: []ClaudeCodeProfile{valid("one", "Work", "same"), valid("two", "Personal", "same")}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := store.UpdateSettingsValues(SettingsUpdate{ClaudeCodeProfiles: &test.profiles}); err == nil {
+				t.Fatalf("accepted invalid Claude Code profiles: %#v", test.profiles)
+			}
+		})
+	}
+
+	tooMany := make([]ClaudeCodeProfile, MaxClaudeCodeProfiles+1)
+	for index := range tooMany {
+		tooMany[index] = valid(fmt.Sprintf("profile-%d", index), fmt.Sprintf("Profile %d", index), fmt.Sprintf("profile-%d", index))
+	}
+	if _, err := store.UpdateSettingsValues(SettingsUpdate{ClaudeCodeProfiles: &tooMany}); err == nil {
+		t.Fatalf("accepted %d Claude Code profiles", len(tooMany))
+	}
+
+	filePath := filepath.Join(root, "settings.json")
+	if err := os.WriteFile(filePath, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fileProfile := []ClaudeCodeProfile{{ID: "file", Name: "File", ConfigDirectory: filePath}}
+	if _, err := store.UpdateSettingsValues(SettingsUpdate{ClaudeCodeProfiles: &fileProfile}); err == nil {
+		t.Fatal("accepted a file as a Claude Code config directory")
+	}
+}
+
 func TestStoreRejectsRelativeWorktreeBaseLocation(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "projects.json"))
 	if err != nil {

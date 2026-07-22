@@ -41,6 +41,9 @@ const (
 	MaxSubAgentNestingDepth              = 4
 	DefaultWorkflowSizeGuideline         = "unrestricted"
 	DefaultWorktreeBranchPrefix          = "kiwi-code/"
+	MaxClaudeCodeProfiles                = 16
+	maxClaudeCodeProfileIDLength         = 64
+	maxClaudeCodeProfileNameLength       = 80
 	maxWorktreeBranchPrefixLength        = 100
 	PersonalProfileID                    = "personal"
 	WorkProfileID                        = "work"
@@ -153,20 +156,27 @@ func DefaultTheme() Theme {
 	return defaultTheme
 }
 
+type ClaudeCodeProfile struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	ConfigDirectory string `json:"configDirectory"`
+}
+
 type Settings struct {
-	WorktreeBasePath              string `json:"worktreeBasePath"`
-	DefaultWorktreeBasePath       string `json:"defaultWorktreeBasePath"`
-	UsingDefault                  bool   `json:"usingDefault"`
-	ArchivedThreadRetentionDays   int    `json:"archivedThreadRetentionDays"`
-	OrphanedWorktreeRetentionDays int    `json:"orphanedWorktreeRetentionDays"`
-	SubAgentNestingDepth          int    `json:"subAgentNestingDepth"`
-	MaxSubAgentNestingDepth       int    `json:"maxSubAgentNestingDepth"`
-	DisableWorkflows              bool   `json:"disableWorkflows"`
-	WorkflowKeywordTrigger        bool   `json:"workflowKeywordTriggerEnabled"`
-	WorkflowSizeGuideline         string `json:"workflowSizeGuideline"`
-	Theme                         Theme  `json:"theme"`
-	DefaultTheme                  Theme  `json:"defaultTheme"`
-	UsingDefaultTheme             bool   `json:"usingDefaultTheme"`
+	WorktreeBasePath              string              `json:"worktreeBasePath"`
+	DefaultWorktreeBasePath       string              `json:"defaultWorktreeBasePath"`
+	UsingDefault                  bool                `json:"usingDefault"`
+	ArchivedThreadRetentionDays   int                 `json:"archivedThreadRetentionDays"`
+	OrphanedWorktreeRetentionDays int                 `json:"orphanedWorktreeRetentionDays"`
+	SubAgentNestingDepth          int                 `json:"subAgentNestingDepth"`
+	MaxSubAgentNestingDepth       int                 `json:"maxSubAgentNestingDepth"`
+	DisableWorkflows              bool                `json:"disableWorkflows"`
+	WorkflowKeywordTrigger        bool                `json:"workflowKeywordTriggerEnabled"`
+	WorkflowSizeGuideline         string              `json:"workflowSizeGuideline"`
+	ClaudeCodeProfiles            []ClaudeCodeProfile `json:"claudeCodeProfiles"`
+	Theme                         Theme               `json:"theme"`
+	DefaultTheme                  Theme               `json:"defaultTheme"`
+	UsingDefaultTheme             bool                `json:"usingDefaultTheme"`
 }
 
 type SettingsUpdate struct {
@@ -177,18 +187,20 @@ type SettingsUpdate struct {
 	DisableWorkflows              *bool
 	WorkflowKeywordTrigger        *bool
 	WorkflowSizeGuideline         *string
+	ClaudeCodeProfiles            *[]ClaudeCodeProfile
 	Theme                         *Theme
 }
 
 type persistedSettings struct {
-	WorktreeBasePath              string  `json:"worktreeBasePath,omitempty"`
-	ArchivedThreadRetentionDays   *int    `json:"archivedThreadRetentionDays,omitempty"`
-	OrphanedWorktreeRetentionDays *int    `json:"orphanedWorktreeRetentionDays,omitempty"`
-	SubAgentNestingDepth          *int    `json:"subAgentNestingDepth,omitempty"`
-	DisableWorkflows              *bool   `json:"disableWorkflows,omitempty"`
-	WorkflowKeywordTrigger        *bool   `json:"workflowKeywordTriggerEnabled,omitempty"`
-	WorkflowSizeGuideline         *string `json:"workflowSizeGuideline,omitempty"`
-	Theme                         *Theme  `json:"theme,omitempty"`
+	WorktreeBasePath              string               `json:"worktreeBasePath,omitempty"`
+	ArchivedThreadRetentionDays   *int                 `json:"archivedThreadRetentionDays,omitempty"`
+	OrphanedWorktreeRetentionDays *int                 `json:"orphanedWorktreeRetentionDays,omitempty"`
+	SubAgentNestingDepth          *int                 `json:"subAgentNestingDepth,omitempty"`
+	DisableWorkflows              *bool                `json:"disableWorkflows,omitempty"`
+	WorkflowKeywordTrigger        *bool                `json:"workflowKeywordTriggerEnabled,omitempty"`
+	WorkflowSizeGuideline         *string              `json:"workflowSizeGuideline,omitempty"`
+	ClaudeCodeProfiles            *[]ClaudeCodeProfile `json:"claudeCodeProfiles,omitempty"`
+	Theme                         *Theme               `json:"theme,omitempty"`
 }
 
 type ProjectUpdate struct {
@@ -241,6 +253,7 @@ type Store struct {
 	disableWorkflows              bool
 	workflowKeywordTrigger        bool
 	workflowSizeGuideline         string
+	claudeCodeProfiles            []ClaudeCodeProfile
 	theme                         Theme
 	usingDefaultTheme             bool
 	profiles                      []Profile
@@ -1047,7 +1060,7 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 	if update.WorktreeBasePath == nil && update.ArchivedThreadRetentionDays == nil &&
 		update.OrphanedWorktreeRetentionDays == nil && update.SubAgentNestingDepth == nil &&
 		update.DisableWorkflows == nil && update.WorkflowKeywordTrigger == nil &&
-		update.WorkflowSizeGuideline == nil && update.Theme == nil {
+		update.WorkflowSizeGuideline == nil && update.ClaudeCodeProfiles == nil && update.Theme == nil {
 		return Settings{}, errors.New("at least one setting is required")
 	}
 
@@ -1095,6 +1108,27 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 		normalizedWorkflowSize = &value
 	}
 
+	var normalizedClaudeCodeProfiles *[]ClaudeCodeProfile
+	if update.ClaudeCodeProfiles != nil {
+		profiles, err := normalizeClaudeCodeProfiles(*update.ClaudeCodeProfiles)
+		if err != nil {
+			return Settings{}, err
+		}
+		for _, profile := range profiles {
+			if err := os.MkdirAll(profile.ConfigDirectory, 0o700); err != nil {
+				return Settings{}, fmt.Errorf("create Claude Code config directory: %w", err)
+			}
+			info, err := os.Stat(profile.ConfigDirectory)
+			if err != nil {
+				return Settings{}, fmt.Errorf("open Claude Code config directory: %w", err)
+			}
+			if !info.IsDir() {
+				return Settings{}, errors.New("Claude Code config path must be a directory")
+			}
+		}
+		normalizedClaudeCodeProfiles = &profiles
+	}
+
 	var normalizedTheme *Theme
 	if update.Theme != nil {
 		value, err := normalizeTheme(*update.Theme)
@@ -1113,6 +1147,7 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 	previousDisableWorkflows := s.disableWorkflows
 	previousWorkflowKeywordTrigger := s.workflowKeywordTrigger
 	previousWorkflowSizeGuideline := s.workflowSizeGuideline
+	previousClaudeCodeProfiles := s.claudeCodeProfiles
 	previousTheme := s.theme
 	previousUsingDefaultTheme := s.usingDefaultTheme
 	if normalizedPath != nil {
@@ -1140,6 +1175,9 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 	if normalizedWorkflowSize != nil {
 		s.workflowSizeGuideline = *normalizedWorkflowSize
 	}
+	if normalizedClaudeCodeProfiles != nil {
+		s.claudeCodeProfiles = append([]ClaudeCodeProfile{}, (*normalizedClaudeCodeProfiles)...)
+	}
 	if normalizedTheme != nil {
 		s.theme = *normalizedTheme
 		s.usingDefaultTheme = s.theme == DefaultTheme()
@@ -1152,6 +1190,7 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 		s.disableWorkflows = previousDisableWorkflows
 		s.workflowKeywordTrigger = previousWorkflowKeywordTrigger
 		s.workflowSizeGuideline = previousWorkflowSizeGuideline
+		s.claudeCodeProfiles = previousClaudeCodeProfiles
 		s.theme = previousTheme
 		s.usingDefaultTheme = previousUsingDefaultTheme
 		return Settings{}, err
@@ -1194,6 +1233,7 @@ func (s *Store) settingsLocked() Settings {
 		DisableWorkflows:              s.disableWorkflows,
 		WorkflowKeywordTrigger:        s.workflowKeywordTrigger,
 		WorkflowSizeGuideline:         s.workflowSizeGuideline,
+		ClaudeCodeProfiles:            append([]ClaudeCodeProfile{}, s.claudeCodeProfiles...),
 		Theme:                         s.theme,
 		DefaultTheme:                  DefaultTheme(),
 		UsingDefaultTheme:             s.usingDefaultTheme,
@@ -1208,6 +1248,10 @@ func (s *Store) effectiveWorktreeBasePathLocked() string {
 }
 
 func normalizeWorktreeBasePath(value string) (string, error) {
+	return normalizeAbsoluteDirectoryPath(value, "worktree base path")
+}
+
+func normalizeAbsoluteDirectoryPath(value, label string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", nil
@@ -1224,9 +1268,69 @@ func normalizeWorktreeBasePath(value string) (string, error) {
 		}
 	}
 	if !filepath.IsAbs(value) {
-		return "", errors.New("worktree base path must be absolute")
+		return "", fmt.Errorf("%s must be absolute", label)
 	}
 	return filepath.Clean(value), nil
+}
+
+func normalizeClaudeCodeProfiles(profiles []ClaudeCodeProfile) ([]ClaudeCodeProfile, error) {
+	if len(profiles) > MaxClaudeCodeProfiles {
+		return nil, fmt.Errorf("at most %d Claude Code profiles are allowed", MaxClaudeCodeProfiles)
+	}
+	normalized := make([]ClaudeCodeProfile, 0, len(profiles))
+	seenIDs := make(map[string]struct{}, len(profiles))
+	seenNames := make(map[string]struct{}, len(profiles))
+	seenDirectories := make(map[string]struct{}, len(profiles))
+	for _, profile := range profiles {
+		profile.ID = strings.TrimSpace(profile.ID)
+		if profile.ID == "" {
+			return nil, errors.New("Claude Code profile id is required")
+		}
+		if len(profile.ID) > maxClaudeCodeProfileIDLength {
+			return nil, fmt.Errorf("Claude Code profile id must be %d characters or fewer", maxClaudeCodeProfileIDLength)
+		}
+		for _, character := range profile.ID {
+			if (character >= 'a' && character <= 'z') ||
+				(character >= 'A' && character <= 'Z') ||
+				(character >= '0' && character <= '9') || character == '-' || character == '_' {
+				continue
+			}
+			return nil, errors.New("Claude Code profile id contains an invalid character")
+		}
+
+		profile.Name = strings.TrimSpace(profile.Name)
+		if profile.Name == "" {
+			return nil, errors.New("Claude Code profile name is required")
+		}
+		if utf8.RuneCountInString(profile.Name) > maxClaudeCodeProfileNameLength {
+			return nil, fmt.Errorf("Claude Code profile name must be %d characters or fewer", maxClaudeCodeProfileNameLength)
+		}
+
+		configDirectory, err := normalizeAbsoluteDirectoryPath(profile.ConfigDirectory, "Claude Code config directory")
+		if err != nil {
+			return nil, err
+		}
+		if configDirectory == "" {
+			return nil, errors.New("Claude Code config directory is required")
+		}
+		profile.ConfigDirectory = configDirectory
+
+		foldedName := strings.ToLower(profile.Name)
+		if _, duplicate := seenIDs[profile.ID]; duplicate {
+			return nil, errors.New("Claude Code profile ids must be unique")
+		}
+		if _, duplicate := seenNames[foldedName]; duplicate {
+			return nil, errors.New("Claude Code profile names must be unique")
+		}
+		if _, duplicate := seenDirectories[profile.ConfigDirectory]; duplicate {
+			return nil, errors.New("Claude Code profile config directories must be unique")
+		}
+		seenIDs[profile.ID] = struct{}{}
+		seenNames[foldedName] = struct{}{}
+		seenDirectories[profile.ConfigDirectory] = struct{}{}
+		normalized = append(normalized, profile)
+	}
+	return normalized, nil
 }
 
 func normalizeTheme(theme Theme) (Theme, error) {
@@ -2811,6 +2915,13 @@ func (s *Store) loadSettings() error {
 		}
 		s.workflowSizeGuideline = value
 	}
+	if settings.ClaudeCodeProfiles != nil {
+		profiles, err := normalizeClaudeCodeProfiles(*settings.ClaudeCodeProfiles)
+		if err != nil {
+			return fmt.Errorf("decode Claude Code profiles: %w", err)
+		}
+		s.claudeCodeProfiles = profiles
+	}
 	if settings.Theme != nil {
 		normalizedTheme, err := normalizeTheme(*settings.Theme)
 		if err != nil {
@@ -2976,6 +3087,7 @@ func (s *Store) saveSettingsLocked() error {
 	disableWorkflows := s.disableWorkflows
 	workflowKeywordTrigger := s.workflowKeywordTrigger
 	workflowSizeGuideline := s.workflowSizeGuideline
+	claudeCodeProfiles := append([]ClaudeCodeProfile{}, s.claudeCodeProfiles...)
 	settings := persistedSettings{
 		WorktreeBasePath:              s.worktreeBasePath,
 		ArchivedThreadRetentionDays:   &archivedDays,
@@ -2984,6 +3096,7 @@ func (s *Store) saveSettingsLocked() error {
 		DisableWorkflows:              &disableWorkflows,
 		WorkflowKeywordTrigger:        &workflowKeywordTrigger,
 		WorkflowSizeGuideline:         &workflowSizeGuideline,
+		ClaudeCodeProfiles:            &claudeCodeProfiles,
 	}
 	if !s.usingDefaultTheme {
 		theme := s.theme
