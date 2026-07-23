@@ -21,13 +21,15 @@ import { IconButton } from '../atoms/IconButton'
 import { TextInput } from '../atoms/Input'
 import { ThreadUsageLimits } from '../molecules/ThreadUsageLimits'
 import { ThreadPlansPanel } from './ThreadPlansPanel'
+import { ThreadRecordingsPanel } from './ThreadRecordingsPanel'
 import { WorkflowRunsPanel } from './WorkflowRunsPanel'
 
-type SidebarTab = 'thread' | 'activity'
+type SidebarTab = 'thread' | 'activity' | 'recordings'
 
 const sidebarTabs: ReadonlyArray<{ id: SidebarTab; label: string }> = [
   { id: 'thread', label: 'Thread' },
   { id: 'activity', label: 'Activity' },
+  { id: 'recordings', label: 'Recordings' },
 ]
 
 const liveWorkflowStates: ReadonlySet<WorkflowRun['state']> = new Set(['queued', 'running'])
@@ -479,6 +481,20 @@ export function ThreadProjectSidebar({
                     </section>
                   </>
                 )}
+              </div>
+
+              <div
+                role="tabpanel"
+                id="sidebar-panel-recordings"
+                aria-labelledby="sidebar-tab-recordings"
+                hidden={tab !== 'recordings'}
+                className="px-4 py-4"
+              >
+                <ThreadRecordingsPanel
+                  projectId={project.id}
+                  threadId={thread.id}
+                  active={tab === 'recordings'}
+                />
               </div>
 
             </div>

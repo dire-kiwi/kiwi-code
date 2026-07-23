@@ -40,11 +40,12 @@ type piModelCapability struct {
 }
 
 type codingAgentLaunchOptions struct {
-	Model                string
-	ThinkingLevel        string
-	InitialPrompt        string
-	AppendSystemPrompt   string
-	AllowPendingCreation bool
+	Model                 string
+	ThinkingLevel         string
+	InitialPrompt         string
+	AppendSystemPrompt    string
+	AllowPendingCreation  bool
+	BrowserThreadEndpoint string
 }
 
 type piModelCapabilityCacheEntry struct {

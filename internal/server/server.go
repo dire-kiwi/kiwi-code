@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -10,12 +11,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/dire-kiwi/kiwi-code/internal/broadcast"
 	"github.com/dire-kiwi/kiwi-code/internal/browsercontrol"
+	"github.com/dire-kiwi/kiwi-code/internal/browserhost"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
@@ -24,7 +27,9 @@ var staticFiles embed.FS
 
 type Server struct {
 	projects                  *project.Store
-	browser                   *browsercontrol.Client
+	browser                   browsercontrol.Provider
+	browserOriginPolicy       originPolicy
+	browserStreamLeases       browserStreamLeaseStore
 	terminal                  *terminalHandler
 	piActivity                *piActivityTracker
 	threadUsage               *threadUsageTracker
@@ -103,9 +108,14 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	}
 	terminal.nativePi.stopOnContext(options.CleanupContext)
 	terminal.nativeClaude.stopOnContext(options.CleanupContext)
+	browserProvider, err := configuredBrowserProvider(projects, options)
+	if err != nil {
+		return nil, err
+	}
 	server := &Server{
 		projects:            projects,
-		browser:             browsercontrol.New(browsercontrol.ConfigPaths(projects.DataDirectory())...),
+		browser:             browserProvider,
+		browserOriginPolicy: originPolicy,
 		terminal:            terminal,
 		piActivity:          newPiActivityTracker(),
 		threadUsage:         usage,
@@ -200,6 +210,8 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser", server.browserStatus)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/browser/actions", server.browserAction)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/frame", server.browserFrame)
+	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/stream", server.browserStream)
+	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/recordings/{recordingId}", server.browserRecording)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/pi/activity", server.updatePiActivity)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/claude/activity", server.updateClaudeActivity)
 	mux.HandleFunc("DELETE /api/projects/{id}/threads/{threadId}/pi/activity", server.acknowledgePiActivity)
@@ -228,11 +240,51 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	if !options.DisableCleanup {
 		server.startCleanupLoop(options.CleanupContext, options.CleanupInterval)
 	}
+	if options.CleanupContext != nil {
+		go func() {
+			<-options.CleanupContext.Done()
+			closeContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := server.browser.Close(closeContext); err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("close browser provider: %v", err)
+			}
+		}()
+	}
 	return server, nil
+}
+
+func configuredBrowserProvider(projects *project.Store, options Options) (browsercontrol.Provider, error) {
+	if options.BrowserProvider != nil {
+		return options.BrowserProvider, nil
+	}
+	backend := strings.ToLower(strings.TrimSpace(options.BrowserBackend))
+	if backend == "" {
+		backend = browsercontrol.BackendHeadless
+	}
+	switch backend {
+	case browsercontrol.BackendHeadless:
+		return browserhost.New(browserhost.Options{
+			ChromeBinary:        options.BrowserChromeBinary,
+			ProtectedOrigins:    append([]string(nil), options.BrowserProtectedOrigins...),
+			RecordingsDirectory: filepath.Join(projects.DataDirectory(), "browser-recordings", "headless"),
+		}), nil
+	case browsercontrol.BackendElectron:
+		return browsercontrol.New(browsercontrol.ConfigPaths(projects.DataDirectory())...), nil
+	default:
+		return nil, fmt.Errorf("browser backend must be %q or %q", browsercontrol.BackendHeadless, browsercontrol.BackendElectron)
+	}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
+}
+
+// Close shuts down server-owned browser processes and contexts.
+func (s *Server) Close(ctx context.Context) error {
+	if s.browser == nil {
+		return nil
+	}
+	return s.browser.Close(ctx)
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {

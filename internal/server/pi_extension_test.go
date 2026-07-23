@@ -173,6 +173,7 @@ if (major < 22 || (major === 22 && minor < 19)) process.exit(1);
 	command := exec.Command(nodePath, "--unhandled-rejections=strict", harnessPath)
 	command.Env = append(os.Environ(),
 		"KIWI_CODE_THREAD_ENDPOINT=http://127.0.0.1:43210/api/projects/project/threads/thread",
+		"KIWI_CODE_BROWSER_THREAD_ENDPOINT=http://127.0.0.1:43210/api/projects/project/threads/parent",
 		"KIWI_CODE_AGENT_TOKEN=browser-agent-capability",
 		"PI_BROWSER_EXTENSION="+browserExtensionPath,
 		"PI_BROWSER_SKILL="+browserSkillPath,
