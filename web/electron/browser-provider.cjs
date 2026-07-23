@@ -5,10 +5,15 @@ const fs = require('node:fs')
 const fsp = require('node:fs/promises')
 const http = require('node:http')
 const path = require('node:path')
+const { pipeline } = require('node:stream/promises')
 const { BrowserProviderError, validateActionBody } = require('./browser-helpers.cjs')
 
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024
 const MAX_RESPONSE_BYTES = 24 * 1024 * 1024
+const RECORDER_ASSETS = new Map([
+  ['index.html', { file: 'browser-recorder.html', contentType: 'text/html; charset=utf-8' }],
+  ['browser-recorder-renderer.js', { file: 'browser-recorder-renderer.js', contentType: 'text/javascript; charset=utf-8' }],
+])
 
 function configPathFor(app, environment = process.env) {
   if (environment.KIWI_CODE_BROWSER_PROVIDER_CONFIG) {
@@ -64,13 +69,15 @@ function removeMatchingConfigSync(configPath, expected) {
   }
 }
 
-function authorized(request, token) {
-  const supplied = request.headers.authorization
-  if (typeof supplied !== 'string') return false
-  const expected = `Bearer ${token}`
+function matchesSecret(supplied, expected) {
+  if (typeof supplied !== 'string' || typeof expected !== 'string') return false
   const left = Buffer.from(supplied)
   const right = Buffer.from(expected)
   return left.length === right.length && timingSafeEqual(left, right)
+}
+
+function authorized(request, token) {
+  return matchesSecret(request.headers.authorization, `Bearer ${token}`)
 }
 
 function sendJson(response, status, body) {
@@ -86,6 +93,22 @@ function sendJson(response, status, body) {
     'X-Content-Type-Options': 'nosniff',
   })
   response.end(encoded)
+}
+
+function validateRecordingBody(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new BrowserProviderError('invalid_request', 'Recording request must be an object.')
+  }
+  const allowed = new Set(['projectId', 'threadId', 'recordingId'])
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) throw new BrowserProviderError('invalid_request', `Unknown recording request field ${key}.`)
+  }
+  for (const key of allowed) {
+    if (typeof value[key] !== 'string' || value[key].length < 1 || value[key].length > 256 || value[key].includes('\u0000')) {
+      throw new BrowserProviderError('invalid_request', `${key} must be a nonempty string.`)
+    }
+  }
+  return value
 }
 
 async function readJsonBody(request) {
@@ -164,31 +187,105 @@ class BrowserProviderServer {
     return this.config
   }
 
-  async handle(request, response) {
-    if (!this.config || !authorized(request, this.config.token)) {
-      sendJson(response, 401, { ok: false, error: { code: 'unauthorized' } })
-      return
+  recorderPageURL() {
+    if (!this.config) throw new Error('Browser provider is not running.')
+    return `http://127.0.0.1:${this.config.port}/v1/recorder/${this.config.token}/index.html`
+  }
+
+  async serveRecorderAsset(request, response, requestUrl) {
+    if (!requestUrl.pathname.startsWith('/v1/recorder/')) return false
+    const parts = requestUrl.pathname.split('/')
+    const token = parts.length === 5 ? parts[3] : ''
+    // Expected shape: /v1/recorder/<token>/<asset>. Keep malformed and bad-token
+    // responses indistinguishable and never reflect the secret.
+    const expectedAsset = parts.length === 5 ? RECORDER_ASSETS.get(parts[4]) : undefined
+    if (
+      request.method !== 'GET' || requestUrl.search || !this.config ||
+      !matchesSecret(token, this.config.token) || !expectedAsset
+    ) {
+      sendJson(response, 404, { ok: false, error: { code: 'not_found' } })
+      return true
     }
+    const contents = await fsp.readFile(path.join(__dirname, expectedAsset.file))
+    response.writeHead(200, {
+      'Cache-Control': 'no-store',
+      'Content-Length': contents.length,
+      'Content-Security-Policy': "default-src 'none'; script-src 'self'; connect-src 'none'; img-src 'none'; media-src 'none'; style-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      'Content-Type': expectedAsset.contentType,
+      'Cross-Origin-Resource-Policy': 'same-origin',
+      'Referrer-Policy': 'no-referrer',
+      'X-Content-Type-Options': 'nosniff',
+    })
+    response.end(contents)
+    return true
+  }
+
+  async handle(request, response) {
     let requestUrl
     try { requestUrl = new URL(request.url, 'http://127.0.0.1') } catch {
       sendJson(response, 404, { ok: false, error: { code: 'not_found' } })
       return
     }
-    if (request.method !== 'POST' || requestUrl.pathname !== '/v1/action' || requestUrl.search) {
+    if (await this.serveRecorderAsset(request, response, requestUrl)) return
+    if (!this.config || !authorized(request, this.config.token)) {
+      sendJson(response, 401, { ok: false, error: { code: 'unauthorized' } })
+      return
+    }
+    if (request.method !== 'POST' || requestUrl.search) {
       sendJson(response, 404, { ok: false, error: { code: 'not_found' } })
       return
     }
-    const action = validateActionBody(await readJsonBody(request))
-    try {
-      const result = await this.workspace.perform(action)
-      sendJson(response, 200, { ok: true, result })
-    } catch (error) {
-      this.sendError(response, error)
+    if (requestUrl.pathname === '/v1/action') {
+      const action = validateActionBody(await readJsonBody(request))
+      try {
+        const result = await this.workspace.perform(action)
+        sendJson(response, 200, { ok: true, result })
+      } catch (error) {
+        this.sendError(response, error)
+      }
+      return
     }
+    if (requestUrl.pathname === '/v1/recording') {
+      const input = validateRecordingBody(await readJsonBody(request))
+      try {
+        const opened = await this.workspace.openRecording(
+          input.projectId,
+          input.threadId,
+          input.recordingId,
+          request.headers.range,
+        )
+        const headers = {
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'no-store',
+          'Content-Disposition': `attachment; filename="${opened.recording.filename}"`,
+          'Content-Length': opened.range?.length ?? opened.recording.bytes,
+          'Content-Type': opened.recording.mimeType,
+          'X-Content-Type-Options': 'nosniff',
+          'X-Kiwi-Code-Recording-Title': encodeURIComponent(opened.recording.title),
+        }
+        if (opened.range) {
+          headers['Content-Range'] = `bytes ${opened.range.start}-${opened.range.end}/${opened.range.totalBytes}`
+        }
+        response.writeHead(opened.range ? 206 : 200, headers)
+        await pipeline(opened.stream, response)
+      } catch (error) {
+        if (response.headersSent) throw error
+        this.sendError(response, error)
+      }
+      return
+    }
+    sendJson(response, 404, { ok: false, error: { code: 'not_found' } })
   }
 
   sendError(response, error) {
     if (error instanceof BrowserProviderError) {
+      if (
+        error.code === 'recording_range_not_satisfiable' &&
+        Number.isSafeInteger(error.totalBytes) && error.totalBytes > 0
+      ) {
+        response.setHeader('Accept-Ranges', 'bytes')
+        response.setHeader('Content-Range', `bytes */${error.totalBytes}`)
+      }
       sendJson(response, error.status, { ok: false, error: { code: error.code } })
       return
     }
@@ -233,4 +330,5 @@ module.exports = {
   configPathFor,
   matchesConfig,
   removeMatchingConfig,
+  validateRecordingBody,
 }

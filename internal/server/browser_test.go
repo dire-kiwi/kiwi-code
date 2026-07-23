@@ -128,12 +128,23 @@ func TestBrowserStatusAndActionForwarding(t *testing.T) {
 	}
 }
 
+func TestConfiguredBrowserProviderRejectsUnknownBackend(t *testing.T) {
+	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := configuredBrowserProvider(store, Options{BrowserBackend: "auto"}); err == nil || !strings.Contains(err.Error(), "headless") {
+		t.Fatalf("configuredBrowserProvider() error = %v", err)
+	}
+}
+
 func TestBrowserOperationAllowlist(t *testing.T) {
 	want := []string{
 		"session.status", "session.start", "session.disconnect", "session.stop",
 		"tabs.list", "tabs.new", "tabs.select", "tabs.close",
 		"navigate.goto", "navigate.back", "navigate.forward", "navigate.reload",
 		"snapshot", "click", "fill", "key", "wait", "evaluate", "screenshot", "cdp", "preview",
+		"recording.start", "recording.stop", "recording.status", "recording.delete",
 	}
 	got := make([]string, 0, len(allowedBrowserOperations))
 	for operation := range allowedBrowserOperations {
@@ -143,6 +154,13 @@ func TestBrowserOperationAllowlist(t *testing.T) {
 	sort.Strings(want)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("browser operation allowlist = %v, want %v", got, want)
+	}
+}
+
+func TestRecordingFilenameUsesPurposeTitleWithoutPathContent(t *testing.T) {
+	got := recordingFilename(" Demonstrate Checkout / Login Flow ", "rec-0123456789abcdef")
+	if got != "demonstrate-checkout-login-flow-456789abcdef.webm" {
+		t.Fatalf("recordingFilename() = %q", got)
 	}
 }
 
@@ -216,6 +234,7 @@ func TestBrowserRoutesValidateProjectAndThreadBeforeProvider(t *testing.T) {
 		"/api/projects/missing/threads/thread/browser",
 		"/api/projects/" + item.ID + "/threads/missing/browser/actions",
 		"/api/projects/" + item.ID + "/threads/missing/browser/frame",
+		"/api/projects/" + item.ID + "/threads/missing/browser/stream",
 	} {
 		method := http.MethodGet
 		var body *strings.Reader
@@ -544,7 +563,55 @@ func newBrowserHTTPFixture(t *testing.T, providerURL string) (*project.Store, pr
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser", application.browserStatus)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/browser/actions", application.browserAction)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/frame", application.browserFrame)
+	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/stream", application.browserStream)
 	return store, item, item.Threads[0], mux
+}
+
+func TestBrowserStreamInputValidation(t *testing.T) {
+	valid := []browserStreamInput{
+		{Type: "viewport", Width: 1280, Height: 800},
+		{Type: "focus"},
+		{Type: "blur"},
+		{Type: "pointer", Generation: 7, Event: "mousePressed", X: 10, Y: 20, Button: "left", Buttons: 1, ClickCount: 1},
+		{Type: "wheel", Generation: 7, X: 10, Y: 20, DeltaY: 100},
+		{Type: "key", Generation: 7, Event: "keyDown", Key: "a", Code: "KeyA", Text: "a"},
+		{Type: "text", Generation: 7, Text: "hello"},
+	}
+	for _, input := range valid {
+		if !validBrowserStreamInput(input, 7) {
+			t.Errorf("valid input rejected: %#v", input)
+		}
+	}
+	invalid := []browserStreamInput{
+		{Type: "viewport", Width: 100, Height: 100},
+		{Type: "pointer", Generation: 6, Event: "mousePressed", X: 1, Y: 1},
+		{Type: "pointer", Generation: 7, Event: "invalid", X: 1, Y: 1},
+		{Type: "wheel", Generation: 7, DeltaY: 10001},
+		{Type: "key", Generation: 7, Event: "keypress", Key: "a"},
+		{Type: "unknown", Generation: 7},
+	}
+	for _, input := range invalid {
+		if validBrowserStreamInput(input, 7) {
+			t.Errorf("invalid input accepted: %#v", input)
+		}
+	}
+}
+
+func TestDecodeBrowserStreamInputRejectsUnknownFields(t *testing.T) {
+	if _, err := decodeBrowserStreamInput([]byte(`{"type":"focus","token":"secret"}`)); err == nil {
+		t.Fatal("stream input accepted an unknown field")
+	}
+	input, err := decodeBrowserStreamInput([]byte(`{"type":"viewport","width":800,"height":600}`))
+	if err != nil || input.Type != "viewport" || input.Width != 800 || input.Height != 600 {
+		t.Fatalf("decoded stream input = %#v, %v", input, err)
+	}
+}
+
+func TestBrowserRequestProtectedOrigin(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "http://lan-host:4321/api/example", nil)
+	if got := browserRequestProtectedOrigins(request); len(got) != 1 || got[0] != "http://lan-host:4321" {
+		t.Fatalf("protected origins = %#v", got)
+	}
 }
 
 func TestBrowserCleanupTimeoutIsBounded(t *testing.T) {

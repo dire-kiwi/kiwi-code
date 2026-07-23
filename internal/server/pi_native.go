@@ -539,6 +539,27 @@ func (m *piNativeManager) restart(
 	return process, nil
 }
 
+func piNativeThreadEnvironment(
+	threadEndpoint string,
+	projectID string,
+	threadID string,
+	agentToken string,
+	parentThreadID string,
+	browserThreadEndpoint string,
+) []string {
+	environment := kiwiCodeThreadEnvironment(threadEndpoint, projectID, threadID)
+	if agentToken != "" {
+		environment = append(environment, "KIWI_CODE_AGENT_TOKEN="+agentToken)
+	}
+	if parentThreadID != "" {
+		environment = append(environment, "KIWI_CODE_PARENT_THREAD_ID="+parentThreadID)
+	}
+	if browserThreadEndpoint != "" {
+		environment = append(environment, "KIWI_CODE_BROWSER_THREAD_ENDPOINT="+browserThreadEndpoint)
+	}
+	return environment
+}
+
 func (m *piNativeManager) startProcess(
 	key piNativeProcessKey,
 	thread project.Thread,
@@ -566,13 +587,14 @@ func (m *piNativeManager) startProcess(
 	}
 	command := exec.Command(piPath, piNativeArguments(sessionDirectory, m.extensionPaths, launchOptions)...)
 	command.Dir = thread.Cwd
-	threadEnvironment := kiwiCodeThreadEnvironment(threadEndpoint, key.ProjectID, key.ThreadID)
-	if m.agentToken != "" {
-		threadEnvironment = append(threadEnvironment, "KIWI_CODE_AGENT_TOKEN="+m.agentToken)
-	}
-	if thread.ParentThreadID != "" {
-		threadEnvironment = append(threadEnvironment, "KIWI_CODE_PARENT_THREAD_ID="+thread.ParentThreadID)
-	}
+	threadEnvironment := piNativeThreadEnvironment(
+		threadEndpoint,
+		key.ProjectID,
+		key.ThreadID,
+		m.agentToken,
+		thread.ParentThreadID,
+		launchOptions.BrowserThreadEndpoint,
+	)
 	command.Env = append(
 		os.Environ(),
 		append(

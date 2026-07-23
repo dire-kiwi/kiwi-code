@@ -25,7 +25,7 @@ run: web
 	done
 
 run\:desktop: web
-	cd web && npm run run:desktop
+	cd web && KIWI_CODE_BROWSER_BACKEND=electron npm run run:desktop
 
 headless-test:
 	go run ./cmd/headless-client

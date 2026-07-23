@@ -53,6 +53,27 @@ func TestPiNativeArgumentsUseRPCAndPreserveLaunchChoices(t *testing.T) {
 	}
 }
 
+func TestPiNativeThreadEnvironmentCanRouteBrowserToolsToTheInvokingThread(t *testing.T) {
+	environment := piNativeThreadEnvironment(
+		"http://127.0.0.1:43210/api/projects/project/threads/child",
+		"project",
+		"child",
+		"token",
+		"parent",
+		"http://127.0.0.1:43210/api/projects/project/threads/parent",
+	)
+	joined := strings.Join(environment, "\n")
+	for _, want := range []string{
+		"KIWI_CODE_THREAD_ENDPOINT=http://127.0.0.1:43210/api/projects/project/threads/child",
+		"KIWI_CODE_PARENT_THREAD_ID=parent",
+		"KIWI_CODE_BROWSER_THREAD_ENDPOINT=http://127.0.0.1:43210/api/projects/project/threads/parent",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("Pi environment does not contain %q: %#v", want, environment)
+		}
+	}
+}
+
 func TestSubAgentNestingContextIsAppendedToPiSystemPrompt(t *testing.T) {
 	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
 	if err != nil {

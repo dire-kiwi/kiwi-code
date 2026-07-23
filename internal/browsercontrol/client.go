@@ -51,20 +51,26 @@ var (
 )
 
 var allowedOperationErrorCodes = map[string]struct{}{
-	"blocked_command":        {},
-	"blocked_origin":         {},
-	"element_not_found":      {},
-	"invalid_params":         {},
-	"invalid_url":            {},
-	"navigation_unavailable": {},
-	"operation_failed":       {},
-	"operation_timeout":      {},
-	"output_too_large":       {},
-	"page_not_found":         {},
-	"stale_ref":              {},
-	"tab_limit_reached":      {},
-	"unsupported_operation":  {},
-	"wait_timeout":           {},
+	"blocked_command":                 {},
+	"blocked_origin":                  {},
+	"element_not_found":               {},
+	"invalid_params":                  {},
+	"invalid_url":                     {},
+	"navigation_unavailable":          {},
+	"operation_failed":                {},
+	"operation_timeout":               {},
+	"output_too_large":                {},
+	"page_not_found":                  {},
+	"recording_active":                {},
+	"recording_failed":                {},
+	"recording_limit_reached":         {},
+	"recording_not_active":            {},
+	"recording_not_found":             {},
+	"recording_range_not_satisfiable": {},
+	"stale_ref":                       {},
+	"tab_limit_reached":               {},
+	"unsupported_operation":           {},
+	"wait_timeout":                    {},
 }
 
 // OperationError reports a provider error code from a fixed local allowlist.
@@ -86,6 +92,13 @@ func OperationErrorCode(err error) (string, bool) {
 	return operationError.Code, true
 }
 
+// SanitizedOperationError reports whether a provider error code may cross the
+// private provider boundary. Messages and unknown codes are never exposed.
+func SanitizedOperationError(code string) (string, bool) {
+	_, ok := allowedOperationErrorCodes[code]
+	return code, ok
+}
+
 type providerConfig struct {
 	Version int    `json:"version"`
 	PID     int    `json:"pid"`
@@ -95,10 +108,11 @@ type providerConfig struct {
 
 // Request is the authenticated action request sent to the desktop provider.
 type Request struct {
-	ProjectID string
-	ThreadID  string
-	Operation string
-	Params    json.RawMessage
+	ProjectID        string
+	ThreadID         string
+	Operation        string
+	Params           json.RawMessage
+	ProtectedOrigins []string
 }
 
 type providerRequest struct {
