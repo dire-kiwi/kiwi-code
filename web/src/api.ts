@@ -9,6 +9,8 @@ import type {
   CodingAgentConfig,
   DirectorySuggestion,
   GitBranchState,
+  LocalEnvironment,
+  ProcessWindow,
   Profile,
   Project,
   Thread,
@@ -139,7 +141,12 @@ export function createProject(input: { name: string; path: string; profileId: st
 
 export function updateProject(
   id: string,
-  input: { profileId?: string; subAgentNestingDepthOverride?: number | null; worktreeBranchPrefix?: string },
+  input: {
+    profileId?: string
+    subAgentNestingDepthOverride?: number | null
+    worktreeBranchPrefix?: string
+    environment?: LocalEnvironment
+  },
 ) {
   return request<Project>(`/api/projects/${encodeURIComponent(id)}`, {
     method: 'PATCH',
@@ -157,6 +164,17 @@ export function updateProjectSubAgentNestingDepth(id: string, depth: number | nu
 
 export function updateProjectWorktreeBranchPrefix(id: string, prefix: string) {
   return updateProject(id, { worktreeBranchPrefix: prefix })
+}
+
+export function updateProjectEnvironment(id: string, environment: LocalEnvironment) {
+  return updateProject(id, { environment })
+}
+
+export function runEnvironmentAction(projectId: string, threadId: string, actionId: string) {
+  return request<ProcessWindow>(
+    `${threadPath(projectId, threadId)}/environment/actions/${encodeURIComponent(actionId)}`,
+    { method: 'POST', body: '{}' },
+  )
 }
 
 export function updateProjectOrder(profileId: string, projectIds: string[]) {

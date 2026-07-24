@@ -7,9 +7,11 @@ import {
   Code2,
   GitBranch,
   Globe2,
+  LoaderCircle,
+  Play,
   SquareTerminal,
 } from 'lucide-react'
-import { getSettings, threadEventsPath } from '../../api'
+import { getSettings, runEnvironmentAction, threadEventsPath } from '../../api'
 import { claudeCodeProfileChoices, isCodingAgent } from '../../codingAgents'
 import { workspacePath } from '../../routes'
 import type {
@@ -211,6 +213,8 @@ export function TerminalWorkspace({
   const [selectedPlan, setSelectedPlan] = useState<ThreadPlan | null>(null)
   const [statusReloadKey, setStatusReloadKey] = useState(0)
   const [branchOverlayOpen, setBranchOverlayOpen] = useState(false)
+  const [runningEnvironmentAction, setRunningEnvironmentAction] = useState<string | null>(null)
+  const [environmentActionError, setEnvironmentActionError] = useState('')
   const toolTabsRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -241,6 +245,22 @@ export function TerminalWorkspace({
     markToolOpened(tool)
     navigate(workspacePath(project.id, thread.id, tool))
   }, [markToolOpened, navigate, project.id, thread.id])
+
+  async function handleEnvironmentAction(actionId: string) {
+    if (runningEnvironmentAction) return
+    setRunningEnvironmentAction(actionId)
+    setEnvironmentActionError('')
+    try {
+      const process = await runEnvironmentAction(project.id, thread.id, actionId)
+      setProcessWindows((current) => current.some((item) => item.id === process.id) ? current : [...current, process])
+      setSelectedProcessId(process.id)
+      activateTool('process')
+    } catch (reason) {
+      setEnvironmentActionError(reason instanceof Error ? reason.message : 'Could not run the environment action.')
+    } finally {
+      setRunningEnvironmentAction(null)
+    }
+  }
 
   function selectCodingAgent(selection: CodingAgentSelection) {
     if (readOnlySubagent) return
@@ -553,6 +573,26 @@ export function TerminalWorkspace({
             </div>
           </div>
 
+          {project.environment.actions.length > 0 && (
+            <div className="hidden max-w-[34%] shrink-0 items-center gap-1 overflow-x-auto md:flex" aria-label="Environment actions">
+              {project.environment.actions.map((action) => (
+                <button
+                  key={action.id}
+                  type="button"
+                  disabled={runningEnvironmentAction !== null}
+                  onClick={() => void handleEnvironmentAction(action.id)}
+                  className="flex h-7 shrink-0 items-center gap-1.5 rounded-lg border border-ghost-border/70 bg-ghost-background/70 px-2.5 text-[9px] font-medium text-ghost-muted transition hover:border-ghost-green/40 hover:text-ghost-bright-white disabled:cursor-wait disabled:opacity-55"
+                  title={`Run ${action.name} in a Process shell`}
+                >
+                  {runningEnvironmentAction === action.id
+                    ? <LoaderCircle size={11} className="animate-spin text-ghost-green" />
+                    : <Play size={10} className="text-ghost-green" />}
+                  {action.name}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className={`hidden shrink-0 items-center justify-end gap-2 ${detailsExpanded ? '2xl:flex' : 'lg:flex'}`}>
             <div className="flex items-center gap-2 rounded-full border border-ghost-border/70 bg-ghost-background/70 px-2.5 py-1.5">
               <span
@@ -572,6 +612,29 @@ export function TerminalWorkspace({
             </div>
           </div>
         </div>
+        {project.environment.actions.length > 0 && (
+          <div className="flex h-9 items-center gap-1 overflow-x-auto border-t border-ghost-border/55 bg-ghost-background px-3 md:hidden" aria-label="Environment actions">
+            {project.environment.actions.map((action) => (
+              <button
+                key={action.id}
+                type="button"
+                disabled={runningEnvironmentAction !== null}
+                onClick={() => void handleEnvironmentAction(action.id)}
+                className="flex h-7 shrink-0 items-center gap-1.5 rounded-lg border border-ghost-border/70 bg-ghost-panel px-2.5 text-[9px] font-medium text-ghost-muted disabled:opacity-55"
+              >
+                {runningEnvironmentAction === action.id
+                  ? <LoaderCircle size={11} className="animate-spin text-ghost-green" />
+                  : <Play size={10} className="text-ghost-green" />}
+                {action.name}
+              </button>
+            ))}
+          </div>
+        )}
+        {environmentActionError && (
+          <div className="border-t border-ghost-bright-red/20 bg-ghost-bright-red/10 px-4 py-1.5 text-center text-[9px] text-ghost-bright-red" role="alert">
+            {environmentActionError}
+          </div>
+        )}
         {activeTool === 'terminal' && (
           <TmuxWindowTabs
             projectId={project.id}

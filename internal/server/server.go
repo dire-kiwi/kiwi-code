@@ -193,6 +193,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}", server.getThread)
 	mux.HandleFunc("PATCH /api/projects/{id}/threads/{threadId}", server.updateThread)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/coding-agent", server.terminal.startCodingAgent)
+	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/environment/actions/{actionId}", server.runEnvironmentAction)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/limits", server.updateThreadLimits)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/usage", server.updateThreadUsage)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/budget", server.threadBudget)
@@ -408,8 +409,9 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 		ProfileID                    *string                     `json:"profileId"`
 		SubAgentNestingDepthOverride optionalProjectNestingDepth `json:"subAgentNestingDepthOverride"`
 		WorktreeBranchPrefix         *string                     `json:"worktreeBranchPrefix"`
+		Environment                  *project.LocalEnvironment   `json:"environment"`
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid project details.")
@@ -421,6 +423,7 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 		SubAgentNestingDepthOverride:       input.SubAgentNestingDepthOverride.value,
 		UpdateSubAgentNestingDepthOverride: input.SubAgentNestingDepthOverride.present,
 		WorktreeBranchPrefix:               input.WorktreeBranchPrefix,
+		Environment:                        input.Environment,
 	})
 	if errors.Is(err, project.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "Project not found.")
