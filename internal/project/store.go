@@ -90,6 +90,7 @@ type Project struct {
 	Threads                      []Thread  `json:"threads"`
 	SubAgentNestingDepthOverride *int      `json:"subAgentNestingDepthOverride,omitempty"`
 	WorktreeBranchPrefix         string    `json:"worktreeBranchPrefix"`
+	FigmaMCPEnabled              bool      `json:"figmaMCPEnabled"`
 }
 
 type SubAgentNestingContext struct {
@@ -208,6 +209,7 @@ type ProjectUpdate struct {
 	SubAgentNestingDepthOverride       *int
 	UpdateSubAgentNestingDepthOverride bool
 	WorktreeBranchPrefix               *string
+	FigmaMCPEnabled                    *bool
 }
 
 type AddThreadOptions struct {
@@ -1060,7 +1062,8 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 	if update.WorktreeBasePath == nil && update.ArchivedThreadRetentionDays == nil &&
 		update.OrphanedWorktreeRetentionDays == nil && update.SubAgentNestingDepth == nil &&
 		update.DisableWorkflows == nil && update.WorkflowKeywordTrigger == nil &&
-		update.WorkflowSizeGuideline == nil && update.ClaudeCodeProfiles == nil && update.Theme == nil {
+		update.WorkflowSizeGuideline == nil && update.ClaudeCodeProfiles == nil &&
+		update.Theme == nil {
 		return Settings{}, errors.New("at least one setting is required")
 	}
 
@@ -1197,6 +1200,12 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 	}
 	return s.settingsLocked(), nil
 }
+
+// DefaultFigmaMCPURL is the endpoint the Figma desktop app exposes for its
+// local Dev Mode MCP server. It runs on localhost with no authentication of its
+// own—the signed-in Figma desktop app owns the session—so every coding agent
+// can share it. Projects that enable Figma MCP support always use this endpoint.
+const DefaultFigmaMCPURL = "http://127.0.0.1:3845/mcp"
 
 func validateCleanupRetentionDays(days int) error {
 	if days < 0 || days > maxCleanupRetentionDays {
@@ -1524,7 +1533,8 @@ func (s *Store) UpdateProjectProfile(projectID, profileID string) (Project, erro
 }
 
 func (s *Store) UpdateProject(projectID string, update ProjectUpdate) (result Project, err error) {
-	if update.ProfileID == nil && !update.UpdateSubAgentNestingDepthOverride && update.WorktreeBranchPrefix == nil {
+	if update.ProfileID == nil && !update.UpdateSubAgentNestingDepthOverride &&
+		update.WorktreeBranchPrefix == nil && update.FigmaMCPEnabled == nil {
 		return Project{}, errors.New("at least one project setting is required")
 	}
 	var profileID string
@@ -1585,6 +1595,10 @@ func (s *Store) UpdateProject(projectID string, update ProjectUpdate) (result Pr
 	}
 	if update.WorktreeBranchPrefix != nil && s.projects[projectIndex].WorktreeBranchPrefix != branchPrefix {
 		s.projects[projectIndex].WorktreeBranchPrefix = branchPrefix
+		changed = true
+	}
+	if update.FigmaMCPEnabled != nil && s.projects[projectIndex].FigmaMCPEnabled != *update.FigmaMCPEnabled {
+		s.projects[projectIndex].FigmaMCPEnabled = *update.FigmaMCPEnabled
 		changed = true
 	}
 	if !changed {

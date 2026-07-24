@@ -29,7 +29,8 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 		input.ArchivedThreadRetentionDays == nil &&
 		input.OrphanedWorktreeRetentionDays == nil && input.SubAgentNestingDepth == nil &&
 		input.DisableWorkflows == nil && input.WorkflowKeywordTrigger == nil &&
-		input.WorkflowSizeGuideline == nil && input.ClaudeCodeProfiles == nil && input.Theme == nil) {
+		input.WorkflowSizeGuideline == nil && input.ClaudeCodeProfiles == nil &&
+		input.Theme == nil) {
 		writeError(w, http.StatusBadRequest, "Invalid settings.")
 		return
 	}

@@ -460,6 +460,7 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 		ProfileID                    *string                     `json:"profileId"`
 		SubAgentNestingDepthOverride optionalProjectNestingDepth `json:"subAgentNestingDepthOverride"`
 		WorktreeBranchPrefix         *string                     `json:"worktreeBranchPrefix"`
+		FigmaMCPEnabled              *bool                       `json:"figmaMCPEnabled"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
@@ -473,6 +474,7 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 		SubAgentNestingDepthOverride:       input.SubAgentNestingDepthOverride.value,
 		UpdateSubAgentNestingDepthOverride: input.SubAgentNestingDepthOverride.present,
 		WorktreeBranchPrefix:               input.WorktreeBranchPrefix,
+		FigmaMCPEnabled:                    input.FigmaMCPEnabled,
 	})
 	if errors.Is(err, project.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "Project not found.")

@@ -31,6 +31,8 @@ type terminalHandler struct {
 	tmuxSocket              string
 	piExtensionPaths        []string
 	piExtensionErr          error
+	piFigmaExtensionPath    string
+	piFigmaExtensionErr     error
 	piModelMu               sync.Mutex
 	piModelCache            map[string]piModelCapabilityCacheEntry
 	piModelInflight         map[string]*piModelCapabilityInflight
@@ -206,6 +208,9 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 	tmuxPath, _ := exec.LookPath("tmux")
 	envPath, _ := exec.LookPath("env")
 	extensionPaths, extensionErr := materializePiExtensions(projects.DataDirectory())
+	// The Figma bridge is materialized separately from the always-on extensions
+	// so it only loads for projects that enabled Figma MCP support.
+	figmaExtensionPath, figmaExtensionErr := materializePiFigmaMCPExtension(projects.DataDirectory())
 	agentToken, agentTokenErr := loadOrCreateAgentToken(projects.DataDirectory())
 	claudePluginPath, claudePluginErr := materializeClaudePlugin(projects.DataDirectory())
 	claudeConfigPath, claudeConfigErr := defaultClaudeConfigDirectory()
@@ -217,15 +222,23 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 	)
 	claudeGPTProfilePath, claudeGPTProfileErr := prepareClaudeGPTProfileDirectory(projects.DataDirectory())
 	cliProxyAPIBaseURL, cliProxyAPIKey, cliProxyAPIErr := configuredCLIProxyAPI()
-	return &terminalHandler{
+	handler := &terminalHandler{
 		projects:                projects,
 		tmuxPath:                tmuxPath,
 		tmuxSocket:              tmuxSocket,
 		piExtensionPaths:        extensionPaths,
 		piExtensionErr:          extensionErr,
+		piFigmaExtensionPath:    figmaExtensionPath,
+		piFigmaExtensionErr:     figmaExtensionErr,
 		agentToken:              agentToken,
 		agentTokenErr:           agentTokenErr,
-		nativePi:                newPiNativeManager(projects.DataDirectory(), extensionPaths, extensionErr, agentToken),
+		nativePi: newPiNativeManager(
+			projects.DataDirectory(),
+			extensionPaths,
+			extensionErr,
+			agentToken,
+			figmaExtensionPath,
+		),
 		nativeClaude:            newClaudeNativeManager(projects.DataDirectory(), claudePluginPath, claudePluginErr),
 		claudePluginPath:        claudePluginPath,
 		claudePluginErr:         claudePluginErr,
@@ -253,6 +266,9 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 			CheckOrigin:     policy.allows,
 		},
 	}
+	handler.nativePi.figmaMCPURL = handler.figmaMCPURLForProject
+	handler.nativeClaude.figmaMCPURL = handler.figmaMCPURLForProject
+	return handler
 }
 
 func (h *terminalHandler) startCodingAgent(w http.ResponseWriter, r *http.Request) {
@@ -2902,12 +2918,20 @@ func (h *terminalHandler) commandForTmuxTarget(
 	if err != nil {
 		return "", nil, "", err
 	}
+	figmaMCPURL := h.figmaMCPURLForProject(item)
 	if tool == "pi" && notice == "" {
 		if h.piExtensionErr != nil {
 			return "", nil, "", h.piExtensionErr
 		}
-		extensionArgs := make([]string, 0, len(h.piExtensionPaths)*2+len(args))
-		for _, extensionPath := range h.piExtensionPaths {
+		extensionPaths := h.piExtensionPaths
+		if figmaMCPURL != "" {
+			if h.piFigmaExtensionErr != nil {
+				return "", nil, "", h.piFigmaExtensionErr
+			}
+			extensionPaths = append(append([]string(nil), extensionPaths...), h.piFigmaExtensionPath)
+		}
+		extensionArgs := make([]string, 0, len(extensionPaths)*2+len(args))
+		for _, extensionPath := range extensionPaths {
 			extensionArgs = append(extensionArgs, "--extension", extensionPath)
 		}
 		args = append(extensionArgs, args...)
@@ -2964,6 +2988,15 @@ func (h *terminalHandler) commandForTmuxTarget(
 			}
 			pluginArguments = append(pluginArguments, "--plugin-dir", h.claudeSandboxPluginPath)
 		}
+		if figmaMCPURL != "" {
+			figmaConfig, err := figmaMCPConfigArgument(figmaMCPURL)
+			if err != nil {
+				return "", nil, "", err
+			}
+			// --mcp-config is variadic, so it must stay ahead of another flag and
+			// never trail the positional initial prompt appended by the caller.
+			pluginArguments = append(pluginArguments, "--mcp-config", figmaConfig)
+		}
 		pluginArguments = append(pluginArguments,
 			"--dangerously-skip-permissions",
 			"--settings", `{"skipDangerousModePermissionPrompt":true}`,
@@ -2982,6 +3015,9 @@ func (h *terminalHandler) commandForTmuxTarget(
 	// pass the broad managed-agent capability or relationship metadata to other
 	// coding harnesses. Claude's browser MCP reads its capability from the
 	// protected data directory.
+	if tool == codingAgentPi && figmaMCPURL != "" && notice == "" {
+		environment = append(environment, figmaMCPEnvironmentName+"="+figmaMCPURL)
+	}
 	if tool == codingAgentPi && threadEndpoint != "" {
 		if h.agentToken != "" {
 			environment = append(environment, "KIWI_CODE_AGENT_TOKEN="+h.agentToken)

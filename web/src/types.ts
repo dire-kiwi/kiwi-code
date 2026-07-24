@@ -19,6 +19,7 @@ export type Project = {
   threads: Thread[]
   subAgentNestingDepthOverride?: number | null
   worktreeBranchPrefix: string
+  figmaMCPEnabled: boolean
 }
 
 export type Thread = {
