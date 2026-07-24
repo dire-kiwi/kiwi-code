@@ -9,6 +9,9 @@ const main = fs.readFileSync(path.join(__dirname, 'main.cjs'), 'utf8')
 const sessions = fs.readFileSync(path.join(__dirname, 'browser-sessions.cjs'), 'utf8')
 const provider = fs.readFileSync(path.join(__dirname, 'browser-provider.cjs'), 'utf8')
 const codeServer = fs.readFileSync(path.join(__dirname, 'code-server-manager.cjs'), 'utf8')
+const recordings = fs.readFileSync(path.join(__dirname, 'browser-recordings.cjs'), 'utf8')
+const recorderPreload = fs.readFileSync(path.join(__dirname, 'browser-recorder-preload.cjs'), 'utf8')
+const recorderRenderer = fs.readFileSync(path.join(__dirname, 'browser-recorder-renderer.js'), 'utf8')
 const preload = fs.readFileSync(path.join(__dirname, 'preload.cjs'), 'utf8')
 
 test('desktop composes a secure trusted WebContentsView in a BaseWindow', () => {
@@ -73,7 +76,27 @@ test('provider uses an authenticated dynamic loopback listener and secure atomic
   assert.match(provider, /KIWI_CODE_DATA_DIR/)
   assert.match(provider, /'wx', 0o600/)
   assert.match(provider, /Authorization|authorization/)
-  assert.match(provider, /requestUrl\.pathname !== '\/v1\/action'/)
+  assert.match(provider, /requestUrl\.pathname === '\/v1\/action'/)
+  assert.match(provider, /requestUrl\.pathname === '\/v1\/recording'/)
+})
+
+test('browser recording uses a private sandboxed renderer and bounded streamed files', () => {
+  assert.match(main, /new BrowserRecordingManager\(/)
+  assert.match(recordings, /new this\.BaseWindow\(/)
+  assert.match(recordings, /new this\.WebContentsView\(/)
+  assert.match(recordings, /contextIsolation: true/)
+  assert.match(recordings, /nodeIntegration: false/)
+  assert.match(recordings, /sandbox: true/)
+  assert.match(recordings, /setPermissionRequestHandler/)
+  assert.match(recordings, /MAX_RECORDING_BYTES/)
+  assert.match(recordings, /0o600/)
+  assert.match(recorderPreload, /exposeInMainWorld\('kiwiCodeBrowserRecorder'/)
+  assert.doesNotMatch(recorderPreload, /exposeInMainWorld\([^\n]+ipcRenderer/)
+  assert.match(recordings, /sourceWebContents\.capturePage/)
+  assert.match(recorderRenderer, /canvas\.captureStream\(15\)/)
+  assert.match(recorderRenderer, /new MediaRecorder\(/)
+  assert.match(recorderRenderer, /dataavailable/)
+  assert.doesNotMatch(recordings + recorderRenderer, /desktopCapturer/)
 })
 
 test('Code uses a separately sandboxed WebContentsView and private loopback code-server', () => {

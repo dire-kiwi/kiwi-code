@@ -329,7 +329,7 @@ func TestChildRollbackDefersArtifactsAfterNativeRemoveFailureAndRecoversOnRestar
 	if err != nil {
 		t.Fatal(err)
 	}
-	native := newPiNativeManager(store.DataDirectory(), nil, nil, "token")
+	native := newPiNativeManager(store.DataDirectory(), nil, nil, "token", "")
 	native.removeThreadHook = func(string, string) error { return errors.New("injected native remove failure") }
 	server := &Server{projects: store, terminal: &terminalHandler{nativePi: native}, threadUsage: usage}
 	if err := server.rollbackCreatedChildThread(item, child, true, "injected failure"); err == nil || !strings.Contains(err.Error(), "injected native remove failure") {
@@ -359,7 +359,7 @@ func TestChildRollbackDefersArtifactsAfterNativeRemoveFailureAndRecoversOnRestar
 	}
 	restarted := &Server{
 		projects:    restartedStore,
-		terminal:    &terminalHandler{nativePi: newPiNativeManager(restartedStore.DataDirectory(), nil, nil, "token")},
+		terminal:    &terminalHandler{nativePi: newPiNativeManager(restartedStore.DataDirectory(), nil, nil, "token", "")},
 		threadUsage: restartedUsage,
 	}
 	if err := restarted.recoverPendingThreadCreationRollbacks(); err != nil {

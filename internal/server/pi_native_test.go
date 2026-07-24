@@ -33,6 +33,7 @@ func TestPiNativeArgumentsUseRPCAndPreserveLaunchChoices(t *testing.T) {
 	got := piNativeArguments(
 		"/tmp/sessions",
 		[]string{"/tmp/title.ts", "/tmp/activity.ts"},
+		"/tmp/figma.ts",
 		codingAgentLaunchOptions{
 			Model: "openai/gpt-5.6", ThinkingLevel: "high", AppendSystemPrompt: "Sub-agent depth context",
 		},
@@ -50,6 +51,27 @@ func TestPiNativeArgumentsUseRPCAndPreserveLaunchChoices(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("piNativeArguments() = %#v, want %#v", got, want)
+	}
+}
+
+func TestPiNativeThreadEnvironmentCanRouteBrowserToolsToTheInvokingThread(t *testing.T) {
+	environment := piNativeThreadEnvironment(
+		"http://127.0.0.1:43210/api/projects/project/threads/child",
+		"project",
+		"child",
+		"token",
+		"parent",
+		"http://127.0.0.1:43210/api/projects/project/threads/parent",
+	)
+	joined := strings.Join(environment, "\n")
+	for _, want := range []string{
+		"KIWI_CODE_THREAD_ENDPOINT=http://127.0.0.1:43210/api/projects/project/threads/child",
+		"KIWI_CODE_PARENT_THREAD_ID=parent",
+		"KIWI_CODE_BROWSER_THREAD_ENDPOINT=http://127.0.0.1:43210/api/projects/project/threads/parent",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("Pi environment does not contain %q: %#v", want, environment)
+		}
 	}
 }
 
@@ -517,7 +539,7 @@ func TestPiNativeCommandChangesSession(t *testing.T) {
 }
 
 func TestPiNativeManagerTracksTheLastReviewClient(t *testing.T) {
-	manager := newPiNativeManager(t.TempDir(), nil, nil, "")
+	manager := newPiNativeManager(t.TempDir(), nil, nil, "", "")
 	manager.addReviewClient("project", "thread")
 	manager.addReviewClient("project", "thread")
 	if manager.removeReviewClient("project", "thread") {
@@ -567,7 +589,7 @@ done
 		t.Fatal(err)
 	}
 
-	manager := newPiNativeManager(filepath.Join(directory, "data"), nil, nil, "test-agent-token")
+	manager := newPiNativeManager(filepath.Join(directory, "data"), nil, nil, "test-agent-token", "")
 	manager.piPath = fakePi
 	item := project.Project{ID: "project-a"}
 	thread := project.Thread{ID: "thread-a", Cwd: directory}

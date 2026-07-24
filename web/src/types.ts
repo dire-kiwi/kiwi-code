@@ -46,6 +46,7 @@ export type Project = {
   subAgentNestingDepthOverride?: number | null
   worktreeBranchPrefix: string
   environment: LocalEnvironment
+  figmaMCPEnabled: boolean
 }
 
 export type Thread = {
@@ -224,13 +225,39 @@ export type BrowserCurrentPage = BrowserPage & {
   loading?: boolean
 }
 
+export type BrowserCapabilities = {
+  nativeView?: boolean
+  interactiveStream?: boolean
+  preview?: boolean
+  recording?: boolean
+}
+
+export type BrowserRecording = {
+  id: string
+  state: 'starting' | 'recording' | 'finalizing' | 'completed'
+  targetId: string
+  title: string
+  startedAt: string
+  finishedAt?: string
+  durationMs?: number
+  bytes?: number
+  mimeType?: string
+  filename?: string
+  idleTimeoutMs?: number
+  idleDeadlineAt?: string
+}
+
 export type BrowserStatusResult = {
   backend?: string
+  presentation?: 'native' | 'stream' | string
+  capabilities?: BrowserCapabilities
   reachable?: boolean
   running?: boolean
   pages?: BrowserPage[]
   currentTargetId?: string
   current?: BrowserCurrentPage
+  recording?: BrowserRecording | null
+  recordings?: BrowserRecording[]
   error?: string
 }
 
@@ -245,10 +272,19 @@ export type BrowserActionOperation =
   | 'navigate.back'
   | 'navigate.forward'
   | 'navigate.reload'
+  | 'recording.start'
+  | 'recording.stop'
+  | 'recording.status'
+  | 'recording.delete'
+  | 'evaluate'
 
 export type BrowserActionParams = {
   url?: string
   targetId?: string
+  recordingId?: string
+  title?: string
+  idleTimeoutMs?: number
+  expression?: string
 }
 
 export type BrowserActionRequest = {

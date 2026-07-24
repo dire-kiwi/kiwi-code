@@ -1,4 +1,4 @@
-import { apiUrl } from './apiUrl'
+import { apiUrl, apiWebSocketUrl } from './apiUrl'
 import type {
   AgentSkillStatus,
   AppSettings,
@@ -88,7 +88,8 @@ export function getSettings(signal?: AbortSignal) {
 export function updateSettings(input: string | Partial<Pick<
   AppSettings,
   'worktreeBasePath' | 'archivedThreadRetentionDays' | 'orphanedWorktreeRetentionDays' | 'subAgentNestingDepth'
-  | 'disableWorkflows' | 'workflowKeywordTriggerEnabled' | 'workflowSizeGuideline' | 'claudeCodeProfiles' | 'theme'
+  | 'disableWorkflows' | 'workflowKeywordTriggerEnabled' | 'workflowSizeGuideline' | 'claudeCodeProfiles'
+  | 'theme'
 >>) {
   return request<AppSettings>('/api/settings', {
     method: 'PUT',
@@ -146,6 +147,7 @@ export function updateProject(
     subAgentNestingDepthOverride?: number | null
     worktreeBranchPrefix?: string
     environment?: LocalEnvironment
+    figmaMCPEnabled?: boolean
   },
 ) {
   return request<Project>(`/api/projects/${encodeURIComponent(id)}`, {
@@ -175,6 +177,10 @@ export function runEnvironmentAction(projectId: string, threadId: string, action
     `${threadPath(projectId, threadId)}/environment/actions/${encodeURIComponent(actionId)}`,
     { method: 'POST', body: '{}' },
   )
+}
+
+export function updateProjectFigmaMCPEnabled(id: string, enabled: boolean) {
+  return updateProject(id, { figmaMCPEnabled: enabled })
 }
 
 export function updateProjectOrder(profileId: string, projectIds: string[]) {
@@ -360,6 +366,18 @@ export function performBrowserAction<Result = unknown>(
     body: JSON.stringify(action),
     signal,
   })
+}
+
+export function browserStreamUrl(projectId: string, threadId: string) {
+  return apiWebSocketUrl(`${browserPath(projectId, threadId)}/stream`).toString()
+}
+
+export function browserRecordingDownloadUrl(projectId: string, threadId: string, recordingId: string) {
+  return apiUrl(`${browserPath(projectId, threadId)}/recordings/${encodeURIComponent(recordingId)}`)
+}
+
+export function browserRecordingPlaybackUrl(projectId: string, threadId: string, recordingId: string) {
+  return `${browserRecordingDownloadUrl(projectId, threadId, recordingId)}?disposition=inline`
 }
 
 export async function getBrowserFrame(

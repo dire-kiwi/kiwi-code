@@ -45,6 +45,8 @@ type piNativeManager struct {
 	piPath           string
 	extensionPaths   []string
 	extensionErr     error
+	figmaExtension   string
+	figmaMCPURL      func(project.Project) string
 	agentToken       string
 	processes        map[piNativeProcessKey]*piNativeProcess
 	history          map[piNativeProcessKey]*piNativeProcess
@@ -150,17 +152,31 @@ const (
 	piNativeClientRestart
 )
 
-func newPiNativeManager(dataDirectory string, extensionPaths []string, extensionErr error, agentToken string) *piNativeManager {
+func newPiNativeManager(
+	dataDirectory string,
+	extensionPaths []string,
+	extensionErr error,
+	agentToken string,
+	figmaExtension string,
+) *piNativeManager {
 	return &piNativeManager{
 		dataDirectory:  dataDirectory,
 		extensionPaths: append([]string(nil), extensionPaths...),
 		extensionErr:   extensionErr,
+		figmaExtension: figmaExtension,
 		agentToken:     agentToken,
 		processes:      make(map[piNativeProcessKey]*piNativeProcess),
 		history:        make(map[piNativeProcessKey]*piNativeProcess),
 		reviewClients:  make(map[piNativeProcessKey]int),
 		reviewStops:    make(map[piNativeProcessKey]chan struct{}),
 	}
+}
+
+func (m *piNativeManager) resolveFigmaMCPURL(item project.Project) string {
+	if m == nil || m.figmaMCPURL == nil {
+		return ""
+	}
+	return m.figmaMCPURL(item)
 }
 
 func (m *piNativeManager) stopOnContext(ctx context.Context) {
@@ -455,6 +471,7 @@ func (m *piNativeManager) getOrStart(
 	if m.extensionErr != nil {
 		return nil, m.extensionErr
 	}
+	launchOptions.FigmaMCPURL = m.resolveFigmaMCPURL(item)
 	key := piNativeProcessKey{ProjectID: item.ID, ThreadID: thread.ID}
 
 	for {
@@ -502,6 +519,7 @@ func (m *piNativeManager) restart(
 	if m.extensionErr != nil {
 		return nil, m.extensionErr
 	}
+	launchOptions.FigmaMCPURL = m.resolveFigmaMCPURL(item)
 	key := piNativeProcessKey{ProjectID: item.ID, ThreadID: thread.ID}
 
 	m.mu.Lock()
@@ -539,6 +557,27 @@ func (m *piNativeManager) restart(
 	return process, nil
 }
 
+func piNativeThreadEnvironment(
+	threadEndpoint string,
+	projectID string,
+	threadID string,
+	agentToken string,
+	parentThreadID string,
+	browserThreadEndpoint string,
+) []string {
+	environment := kiwiCodeThreadEnvironment(threadEndpoint, projectID, threadID)
+	if agentToken != "" {
+		environment = append(environment, "KIWI_CODE_AGENT_TOKEN="+agentToken)
+	}
+	if parentThreadID != "" {
+		environment = append(environment, "KIWI_CODE_PARENT_THREAD_ID="+parentThreadID)
+	}
+	if browserThreadEndpoint != "" {
+		environment = append(environment, "KIWI_CODE_BROWSER_THREAD_ENDPOINT="+browserThreadEndpoint)
+	}
+	return environment
+}
+
 func (m *piNativeManager) startProcess(
 	key piNativeProcessKey,
 	thread project.Thread,
@@ -564,14 +603,23 @@ func (m *piNativeManager) startProcess(
 			return nil, errors.New("Pi is not installed or not on PATH")
 		}
 	}
-	command := exec.Command(piPath, piNativeArguments(sessionDirectory, m.extensionPaths, launchOptions)...)
+	command := exec.Command(piPath, piNativeArguments(
+		sessionDirectory,
+		m.extensionPaths,
+		m.figmaExtension,
+		launchOptions,
+	)...)
 	command.Dir = thread.Cwd
-	threadEnvironment := kiwiCodeThreadEnvironment(threadEndpoint, key.ProjectID, key.ThreadID)
-	if m.agentToken != "" {
-		threadEnvironment = append(threadEnvironment, "KIWI_CODE_AGENT_TOKEN="+m.agentToken)
-	}
-	if thread.ParentThreadID != "" {
-		threadEnvironment = append(threadEnvironment, "KIWI_CODE_PARENT_THREAD_ID="+thread.ParentThreadID)
+	threadEnvironment := piNativeThreadEnvironment(
+		threadEndpoint,
+		key.ProjectID,
+		key.ThreadID,
+		m.agentToken,
+		thread.ParentThreadID,
+		launchOptions.BrowserThreadEndpoint,
+	)
+	if launchOptions.FigmaMCPURL != "" {
+		threadEnvironment = append(threadEnvironment, figmaMCPEnvironmentName+"="+launchOptions.FigmaMCPURL)
 	}
 	command.Env = append(
 		os.Environ(),
@@ -645,6 +693,7 @@ func (h *terminalHandler) withSubAgentNestingPrompt(
 func piNativeArguments(
 	sessionDirectory string,
 	extensionPaths []string,
+	figmaExtensionPath string,
 	launchOptions codingAgentLaunchOptions,
 ) []string {
 	arguments := []string{
@@ -655,6 +704,11 @@ func piNativeArguments(
 	}
 	for _, extensionPath := range extensionPaths {
 		arguments = append(arguments, "--extension", extensionPath)
+	}
+	// Pi has no built-in MCP support, so Figma is bridged by an extension that
+	// only loads for projects that enabled it.
+	if launchOptions.FigmaMCPURL != "" && figmaExtensionPath != "" {
+		arguments = append(arguments, "--extension", figmaExtensionPath)
 	}
 	if launchOptions.Model != "" {
 		arguments = append(arguments, "--model", launchOptions.Model)

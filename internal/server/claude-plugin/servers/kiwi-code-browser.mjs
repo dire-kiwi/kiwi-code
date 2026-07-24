@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 const SERVER_NAME = "kiwi-code-browser";
-const SERVER_VERSION = "1.0.0";
+const SERVER_VERSION = "1.1.0";
 const MAX_TEXT_BYTES = 50 * 1024;
 const MAX_TEXT_LINES = 2_000;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -45,6 +45,34 @@ const tools = [
         backend: string("Browser backend; only in-app is supported.", {
           enum: ["in-app"],
         }),
+      },
+      ["action"],
+    ),
+    annotations: { destructiveHint: true, openWorldHint: true },
+  },
+  {
+    name: "browser_recording",
+    title: "Browser Recording",
+    description:
+      "Inspect, start, or stop video recording for the current in-app browser tab. Start requires a concise purpose title, lazily opens a blank tab if needed, and defaults to a 300-second inactivity timeout. Browser operations refresh the timeout; inactivity automatically finalizes the WebM.",
+    inputSchema: object(
+      {
+        action: string("Recording operation.", { enum: ["status", "start", "stop"] }),
+        targetId: string("Target tab ID for start; defaults to the selected tab.", {
+          minLength: 1,
+        }),
+        title: string("Required for start: 2–12 words explaining the point of the recording.", {
+          minLength: 3,
+          maxLength: 80,
+        }),
+        recordingId: string("Exact recording ID required for stop.", {
+          minLength: 1,
+        }),
+        idleTimeoutSeconds: integer(
+          "Auto-stop after this many seconds without browser activity; defaults to 300.",
+          30,
+          3_600,
+        ),
       },
       ["action"],
     ),
@@ -238,7 +266,27 @@ function hasPageFields(value) {
   ]);
 }
 
+function validBrowserRecording(value) {
+  return isRecord(value) && hasFields(value, [
+    ["id", "string"],
+    ["startedAt", "string"],
+    ["state", "string"],
+    ["targetId", "string"],
+    ["title", "string"],
+  ]) && ["starting", "recording", "finalizing", "completed"].includes(value.state) &&
+    (value.idleTimeoutMs === undefined || typeof value.idleTimeoutMs === "number") &&
+    (value.idleDeadlineAt === undefined || typeof value.idleDeadlineAt === "string");
+}
+
 function validBrowserActionResult(operation, result) {
+  if (operation === "recording.status") {
+    return Object.hasOwn(result, "recording") &&
+      (result.recording === null || validBrowserRecording(result.recording)) &&
+      Array.isArray(result.recordings) && result.recordings.every(validBrowserRecording);
+  }
+  if (operation === "recording.start" || operation === "recording.stop") {
+    return validBrowserRecording(result);
+  }
   if (operation.startsWith("session.")) {
     if (!hasFields(result, [["message", "string"], ["status", "object"]])) return false;
     return hasFields(result.status, [
@@ -366,6 +414,24 @@ function validateArguments(tool, args) {
       ((typeof args.ref === "string") === (typeof args.selector === "string"))) {
     throw new Error("Provide exactly one of ref or selector.");
   }
+  if (tool.name === "browser_recording") {
+    if (args.action !== "stop" && args.recordingId) {
+      throw new Error("recordingId is only valid for recording.stop.");
+    }
+    if (args.action === "stop" && !args.recordingId) {
+      throw new Error("recordingId is required for recording.stop.");
+    }
+    if (args.action === "start") {
+      const title = typeof args.title === "string" ? args.title.replace(/\s+/g, " ").trim() : "";
+      const words = title.split(" ").filter(Boolean);
+      if (title.length < 3 || title.length > 80 || words.length < 2 || words.length > 12) {
+        throw new Error("recording.start requires a 2–12 word title explaining the point of the recording.");
+      }
+      args.title = title;
+    } else if (args.targetId || args.title || args.idleTimeoutSeconds !== undefined) {
+      throw new Error("targetId, title, and idleTimeoutSeconds are only valid for recording.start.");
+    }
+  }
   if (tool.name === "browser_tabs" && args.action === "select" && !args.targetId) {
     throw new Error("targetId is required when selecting a browser tab.");
   }
@@ -396,6 +462,15 @@ function actionForTool(name, args) {
     case "browser_session": {
       delete params.action;
       return { operation: `session.${args.action}`, params };
+    }
+    case "browser_recording": {
+      delete params.action;
+      delete params.idleTimeoutSeconds;
+      if (args.action === "start") {
+        params.title = args.title;
+        params.idleTimeoutMs = (args.idleTimeoutSeconds ?? 300) * 1_000;
+      }
+      return { operation: `recording.${args.action}`, params };
     }
     case "browser_tabs": {
       delete params.action;
@@ -521,7 +596,7 @@ async function browserAction(operation, params, signal) {
   }
   if (response.status === 503) {
     throw new Error(
-      "Kiwi Code's in-app browser provider is unavailable (HTTP 503). Start or reconnect the Kiwi Code desktop app.",
+      "Kiwi Code's in-app browser provider is unavailable (HTTP 503). Check the configured browser backend; headless mode requires a supported Chrome installation, while Electron mode requires the desktop app.",
     );
   }
   if (!response.ok) {

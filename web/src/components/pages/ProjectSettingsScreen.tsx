@@ -3,12 +3,14 @@ import {
   Check,
   Folder,
   FolderGit2,
+  Frame,
   LoaderCircle,
   Network,
   Save,
   UserRound,
 } from 'lucide-react'
 import {
+  updateProjectFigmaMCPEnabled,
   updateProjectProfile,
   updateProjectSubAgentNestingDepth,
   updateProjectWorktreeBranchPrefix,
@@ -54,6 +56,9 @@ export function ProjectSettingsScreen({
   const [branchPrefixError, setBranchPrefixError] = useState('')
   const [branchPrefixMessage, setBranchPrefixMessage] = useState('')
   const [environmentSaving, setEnvironmentSaving] = useState(false)
+  const [figmaSaving, setFigmaSaving] = useState(false)
+  const [figmaError, setFigmaError] = useState('')
+  const [figmaMessage, setFigmaMessage] = useState('')
 
   useEffect(() => {
     setBranchPrefixError('')
@@ -62,13 +67,15 @@ export function ProjectSettingsScreen({
     setProfileMessage('')
     setNestingError('')
     setNestingMessage('')
+    setFigmaError('')
+    setFigmaMessage('')
   }, [project.id])
 
   useEffect(() => {
     setBranchPrefix(project.worktreeBranchPrefix)
   }, [project.id, project.worktreeBranchPrefix])
 
-  const saving = profileSaving || nestingSaving || branchPrefixSaving || environmentSaving
+  const saving = profileSaving || nestingSaving || branchPrefixSaving || environmentSaving || figmaSaving
   const profileName = profiles.find((profile) => profile.id === project.profileId)?.name
   const normalizedBranchPrefix = branchPrefix.trim()
   const branchPrefixDirty = normalizedBranchPrefix.length > 0
@@ -107,6 +114,24 @@ export function ProjectSettingsScreen({
       setNestingError(reason instanceof Error ? reason.message : 'Could not update sub-agent nesting.')
     } finally {
       setNestingSaving(false)
+    }
+  }
+
+  async function handleFigmaToggle(enabled: boolean) {
+    if (figmaSaving || enabled === project.figmaMCPEnabled) return
+    setFigmaSaving(true)
+    setFigmaError('')
+    setFigmaMessage('')
+    try {
+      const updated = await updateProjectFigmaMCPEnabled(project.id, enabled)
+      onProjectUpdated(updated)
+      setFigmaMessage(updated.figmaMCPEnabled
+        ? 'Figma MCP enabled. Restart the coding agent to load its tools.'
+        : 'Figma MCP disabled. Restart the coding agent to drop its tools.')
+    } catch (reason) {
+      setFigmaError(reason instanceof Error ? reason.message : 'Could not update Figma MCP.')
+    } finally {
+      setFigmaSaving(false)
     }
   }
 
@@ -249,6 +274,51 @@ export function ProjectSettingsScreen({
                 <FeedbackMessage role="status" tone="success" size="status" className="mt-4 flex items-center gap-2">
                   <Check size={13} />
                   {nestingMessage}
+                </FeedbackMessage>
+              )}
+            </div>
+          </Surface>
+
+          <Surface as="section" variant="elevated-panel" className="overflow-hidden">
+            <SectionHeader
+              icon={<Frame size={16} />}
+              title="Figma MCP"
+              description="Expose the Figma MCP server to Pi and Claude Code in this project."
+              tone="blue"
+              badge={(
+                <StatusBadge tone={project.figmaMCPEnabled ? 'success' : 'neutral'}>
+                  {project.figmaMCPEnabled ? 'Enabled' : 'Disabled'}
+                </StatusBadge>
+              )}
+            />
+
+            <div className="p-4 sm:p-5">
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-ghost-border/55 bg-ghost-black/25 p-3.5">
+                <input
+                  type="checkbox"
+                  checked={project.figmaMCPEnabled}
+                  disabled={figmaSaving}
+                  onChange={(event) => void handleFigmaToggle(event.target.checked)}
+                  className="mt-0.5 size-4 accent-ghost-green"
+                />
+                <span>
+                  <span className="block text-[10px] font-semibold text-ghost-bright-white">Enable Figma MCP tools</span>
+                  <span className="mt-1 block text-[9px] leading-4 text-ghost-faint">
+                    Claude Code loads the server directly; Pi loads it through the bundled MCP bridge extension. The
+                    endpoint is configured in the application settings and the Figma desktop app must be running.
+                  </span>
+                </span>
+              </label>
+
+              {figmaError && (
+                <FeedbackMessage id="project-figma-mcp-error" role="alert" tone="error" className="mt-4">
+                  {figmaError}
+                </FeedbackMessage>
+              )}
+              {figmaMessage && (
+                <FeedbackMessage role="status" tone="success" size="status" className="mt-4 flex items-center gap-2">
+                  <Check size={13} />
+                  {figmaMessage}
                 </FeedbackMessage>
               )}
             </div>

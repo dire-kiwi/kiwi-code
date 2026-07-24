@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -24,6 +25,8 @@ func main() {
 	allowedOriginPort := flag.Int("allowed-origin-port", 0, "allow API access from a same-host browser origin on this port")
 	mode := flag.String("mode", envOr("KIWI_CODE_MODE", runtimeModeProduction), "runtime mode: production or development")
 	addCurrentDirectory := flag.Bool("add-current-directory", false, "ensure the server working directory is a project (for isolated development and agent tests)")
+	browserBackend := flag.String("browser-backend", envOr("KIWI_CODE_BROWSER_BACKEND", "headless"), "browser backend: headless or electron")
+	chromeBinary := flag.String("chrome-binary", envOr("KIWI_CODE_CHROME_BIN", ""), "Chrome executable for the headless browser backend")
 	flag.Parse()
 
 	if err := validateRuntimeStartup(runtimeConfiguration{
@@ -61,10 +64,13 @@ func main() {
 	}
 
 	handler, err := server.NewWithOptions(store, server.Options{
-		AllowedOriginPort:  *allowedOriginPort,
-		AllowRemoteOrigins: true,
-		TmuxSocketName:     *tmuxSocket,
-		CleanupContext:     applicationContext,
+		AllowedOriginPort:       *allowedOriginPort,
+		AllowRemoteOrigins:      true,
+		TmuxSocketName:          *tmuxSocket,
+		CleanupContext:          applicationContext,
+		BrowserBackend:          *browserBackend,
+		BrowserChromeBinary:     *chromeBinary,
+		BrowserProtectedOrigins: browserProtectedOrigins(*addr, *allowedOriginPort),
 		Restart: func() {
 			select {
 			case restartRequests <- struct{}{}:
@@ -90,10 +96,11 @@ func main() {
 	}()
 
 	fmt.Printf("kiwi-code is running at http://%s\n", *addr)
+	var serveErr error
 	select {
 	case err := <-serverErrors:
 		if err != nil && err != http.ErrServerClosed {
-			log.Fatal(err)
+			serveErr = err
 		}
 	case <-restartRequests:
 		fmt.Println("Restart requested; shutting down kiwi-code completely...")
@@ -107,6 +114,30 @@ func main() {
 		}
 		cancelShutdown()
 	}
+	stopApplication()
+	if closer, ok := handler.(interface{ Close(context.Context) error }); ok {
+		closeContext, cancelClose := context.WithTimeout(context.Background(), restartShutdownTimeout)
+		if err := closer.Close(closeContext); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("close application browser: %v", err)
+		}
+		cancelClose()
+	}
+	if serveErr != nil {
+		log.Fatal(serveErr)
+	}
+}
+
+func browserProtectedOrigins(address string, allowedOriginPort int) []string {
+	_, port, err := net.SplitHostPort(address)
+	if err != nil || port == "" {
+		return nil
+	}
+	origins := []string{"http://127.0.0.1:" + port, "http://localhost:" + port, "http://[::1]:" + port}
+	if allowedOriginPort > 0 {
+		value := fmt.Sprintf("%d", allowedOriginPort)
+		origins = append(origins, "http://127.0.0.1:"+value, "http://localhost:"+value, "http://[::1]:"+value)
+	}
+	return origins
 }
 
 func defaultDataDir() string {
