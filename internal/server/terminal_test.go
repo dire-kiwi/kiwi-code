@@ -173,6 +173,7 @@ func TestPiCommandReceivesChildThreadCapability(t *testing.T) {
 	handler := &terminalHandler{
 		envPath:          "/usr/bin/env",
 		piExtensionPaths: []string{"/extension/child-threads.ts"},
+		piSkillPaths:     []string{"/skills/kiwi-sandbox-config"},
 		agentToken:       "agent-capability",
 	}
 	command, args, notice, err := handler.commandForCodingAgentPane(
@@ -192,6 +193,8 @@ func TestPiCommandReceivesChildThreadCapability(t *testing.T) {
 	for _, expected := range []string{
 		"--extension",
 		"/extension/child-threads.ts",
+		"--skill",
+		"/skills/kiwi-sandbox-config",
 		"KIWI_CODE_AGENT_TOKEN=agent-capability",
 		"KIWI_CODE_PARENT_THREAD_ID=parent",
 		piPath,
@@ -212,7 +215,12 @@ func TestClaudeCommandUsesTheFixedPiWindow(t *testing.T) {
 		}
 	}
 	t.Setenv("PATH", directory)
-	handler := &terminalHandler{envPath: "/usr/bin/env", claudePluginPath: "/plugin/kiwi-code", agentToken: "pi-only-token"}
+	handler := &terminalHandler{
+		envPath:                 "/usr/bin/env",
+		claudePluginPath:        "/plugin/kiwi-code",
+		claudeSandboxPluginPath: "/plugin/kiwi-sandbox",
+		agentToken:              "pi-only-token",
+	}
 	command, args, notice, err := handler.commandForCodingAgentPane(
 		project.Project{ID: "project"},
 		project.Thread{ID: "thread", ParentThreadID: "parent"},
@@ -230,9 +238,10 @@ func TestClaudeCommandUsesTheFixedPiWindow(t *testing.T) {
 	for _, expected := range []string{
 		"--plugin-dir",
 		"/plugin/kiwi-code",
+		"/plugin/kiwi-sandbox",
 		"--dangerously-skip-permissions",
 		"--settings",
-		`{"skipDangerousModePermissionPrompt":true}`,
+		`{"skipDangerousModePermissionPrompt":true,"enabledPlugins":{"sandbox-exec@dire-agent-extensions":false}}`,
 		"KIWI_CODE_TMUX_SESSION=kiwi-code-project-thread-tools",
 		"KIWI_CODE_TMUX_WINDOW=pi",
 		"KIWI_CODE_THREAD_ENDPOINT=http://127.0.0.1:8080/api/projects/project/threads/thread",

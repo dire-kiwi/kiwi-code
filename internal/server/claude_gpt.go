@@ -22,6 +22,7 @@ const (
 	claudeGPTProfileDirectoryName = "claude-code-gpt-profile"
 	claudeSettingsFileName        = "settings.json"
 	claudeSandboxPluginID         = "sandbox-exec@dire-agent-extensions"
+	claudeLaunchSettings          = `{"skipDangerousModePermissionPrompt":true,"enabledPlugins":{"` + claudeSandboxPluginID + `":false}}`
 	maxCLIProxyAPIModelsResponse  = 1 << 20
 	cliProxyAPIBaseURLEnvironment = "KIWI_CODE_CLIPROXY_BASE_URL"
 	cliProxyAPIKeyEnvironment     = "KIWI_CODE_CLIPROXY_API_KEY"
@@ -67,12 +68,6 @@ var claudeGPTExcludedSettingEnvironment = map[string]struct{}{
 	"CLAUDE_CODE_USE_BEDROCK":        {},
 	"CLAUDE_CODE_USE_FOUNDRY":        {},
 	"CLAUDE_CODE_USE_VERTEX":         {},
-}
-
-type claudeInstalledPluginRegistry struct {
-	Plugins map[string][]struct {
-		InstallPath string `json:"installPath"`
-	} `json:"plugins"`
 }
 
 func configuredCLIProxyAPI() (string, string, error) {
@@ -355,11 +350,9 @@ func filterClaudeGPTSettings(contents []byte) ([]byte, error) {
 		if err := json.Unmarshal(rawPlugins, &plugins); err != nil {
 			return nil, fmt.Errorf("decode Claude settings enabledPlugins: %w", err)
 		}
-		// The sandbox plugin is loaded explicitly with --plugin-dir below. Do
-		// not also present its installed-plugin enablement to the isolated GPT
-		// profile: resolving it through both paths can prevent Claude from
-		// loading session plugin hooks, including Kiwi Code's title and activity
-		// hooks.
+		// Kiwi Sandbox replaces the legacy user-installed sandbox-exec plugin.
+		// Keep the old plugin disabled in the isolated GPT profile so both
+		// permission hooks cannot race or wrap the same tool call.
 		delete(plugins, claudeSandboxPluginID)
 		encoded, err := json.Marshal(plugins)
 		if err != nil {
@@ -394,55 +387,6 @@ func defaultClaudePluginDirectory(configDirectory string) (string, error) {
 		return filepath.Abs(configured)
 	}
 	return filepath.Join(configDirectory, "plugins"), nil
-}
-
-func discoverClaudeSandboxPluginPath() (string, error) {
-	configDirectory, configErr := defaultClaudeConfigDirectory()
-	pluginDirectory, pluginErr := defaultClaudePluginDirectory(configDirectory)
-	return discoverClaudeSandboxPluginPathFrom(configDirectory, pluginDirectory, errors.Join(configErr, pluginErr))
-}
-
-func discoverClaudeSandboxPluginPathFrom(configDirectory, pluginDirectory string, configurationErr error) (string, error) {
-	if configurationErr != nil {
-		return "", fmt.Errorf("find Claude configuration: %w", configurationErr)
-	}
-	settingsContents, err := os.ReadFile(filepath.Join(configDirectory, claudeSettingsFileName))
-	if err != nil {
-		return "", fmt.Errorf("read Claude settings: %w", err)
-	}
-	var settings struct {
-		EnabledPlugins map[string]bool `json:"enabledPlugins"`
-	}
-	if err := json.Unmarshal(settingsContents, &settings); err != nil {
-		return "", fmt.Errorf("decode Claude settings: %w", err)
-	}
-	if !settings.EnabledPlugins[claudeSandboxPluginID] {
-		return "", fmt.Errorf("Claude plugin %s is not enabled", claudeSandboxPluginID)
-	}
-
-	registryContents, err := os.ReadFile(filepath.Join(pluginDirectory, "installed_plugins.json"))
-	if err != nil {
-		return "", fmt.Errorf("read installed Claude plugins: %w", err)
-	}
-	var registry claudeInstalledPluginRegistry
-	if err := json.Unmarshal(registryContents, &registry); err != nil {
-		return "", fmt.Errorf("decode installed Claude plugins: %w", err)
-	}
-	entries := registry.Plugins[claudeSandboxPluginID]
-	for index := len(entries) - 1; index >= 0; index-- {
-		installPath := strings.TrimSpace(entries[index].InstallPath)
-		if installPath == "" {
-			continue
-		}
-		if !filepath.IsAbs(installPath) {
-			installPath = filepath.Join(configDirectory, installPath)
-		}
-		manifest := filepath.Join(installPath, ".claude-plugin", "plugin.json")
-		if info, statErr := os.Stat(manifest); statErr == nil && !info.IsDir() {
-			return installPath, nil
-		}
-	}
-	return "", fmt.Errorf("Claude plugin %s is not installed", claudeSandboxPluginID)
 }
 
 func claudeGPTProxyEnvironment(profilePath, pluginDirectory, baseURL, apiKey, model string) []string {
