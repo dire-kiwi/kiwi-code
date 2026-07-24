@@ -33,6 +33,7 @@ func TestPiNativeArgumentsUseRPCAndPreserveLaunchChoices(t *testing.T) {
 	got := piNativeArguments(
 		"/tmp/sessions",
 		[]string{"/tmp/title.ts", "/tmp/activity.ts"},
+		"/tmp/figma.ts",
 		codingAgentLaunchOptions{
 			Model: "openai/gpt-5.6", ThinkingLevel: "high", AppendSystemPrompt: "Sub-agent depth context",
 		},
@@ -517,7 +518,7 @@ func TestPiNativeCommandChangesSession(t *testing.T) {
 }
 
 func TestPiNativeManagerTracksTheLastReviewClient(t *testing.T) {
-	manager := newPiNativeManager(t.TempDir(), nil, nil, "")
+	manager := newPiNativeManager(t.TempDir(), nil, nil, "", "")
 	manager.addReviewClient("project", "thread")
 	manager.addReviewClient("project", "thread")
 	if manager.removeReviewClient("project", "thread") {
@@ -567,7 +568,7 @@ done
 		t.Fatal(err)
 	}
 
-	manager := newPiNativeManager(filepath.Join(directory, "data"), nil, nil, "test-agent-token")
+	manager := newPiNativeManager(filepath.Join(directory, "data"), nil, nil, "test-agent-token", "")
 	manager.piPath = fakePi
 	item := project.Project{ID: "project-a"}
 	thread := project.Thread{ID: "thread-a", Cwd: directory}

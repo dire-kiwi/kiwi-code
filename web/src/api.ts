@@ -86,7 +86,8 @@ export function getSettings(signal?: AbortSignal) {
 export function updateSettings(input: string | Partial<Pick<
   AppSettings,
   'worktreeBasePath' | 'archivedThreadRetentionDays' | 'orphanedWorktreeRetentionDays' | 'subAgentNestingDepth'
-  | 'disableWorkflows' | 'workflowKeywordTriggerEnabled' | 'workflowSizeGuideline' | 'claudeCodeProfiles' | 'theme'
+  | 'disableWorkflows' | 'workflowKeywordTriggerEnabled' | 'workflowSizeGuideline' | 'claudeCodeProfiles'
+  | 'theme'
 >>) {
   return request<AppSettings>('/api/settings', {
     method: 'PUT',
@@ -139,7 +140,12 @@ export function createProject(input: { name: string; path: string; profileId: st
 
 export function updateProject(
   id: string,
-  input: { profileId?: string; subAgentNestingDepthOverride?: number | null; worktreeBranchPrefix?: string },
+  input: {
+    profileId?: string
+    subAgentNestingDepthOverride?: number | null
+    worktreeBranchPrefix?: string
+    figmaMCPEnabled?: boolean
+  },
 ) {
   return request<Project>(`/api/projects/${encodeURIComponent(id)}`, {
     method: 'PATCH',
@@ -157,6 +163,10 @@ export function updateProjectSubAgentNestingDepth(id: string, depth: number | nu
 
 export function updateProjectWorktreeBranchPrefix(id: string, prefix: string) {
   return updateProject(id, { worktreeBranchPrefix: prefix })
+}
+
+export function updateProjectFigmaMCPEnabled(id: string, enabled: boolean) {
+  return updateProject(id, { figmaMCPEnabled: enabled })
 }
 
 export function updateProjectOrder(profileId: string, projectIds: string[]) {

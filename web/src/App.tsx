@@ -158,6 +158,7 @@ function sameProjects(current: Project[], next: Project[]) {
       && candidate.createdAt === project.createdAt
       && candidate.subAgentNestingDepthOverride === project.subAgentNestingDepthOverride
       && candidate.worktreeBranchPrefix === project.worktreeBranchPrefix
+      && candidate.figmaMCPEnabled === project.figmaMCPEnabled
       && sameThreads(project.threads, candidate.threads)
   })
 }

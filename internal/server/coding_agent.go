@@ -45,6 +45,9 @@ type codingAgentLaunchOptions struct {
 	InitialPrompt        string
 	AppendSystemPrompt   string
 	AllowPendingCreation bool
+	// FigmaMCPURL is set for projects with Figma MCP support enabled. Empty
+	// means the agent launches without the Figma MCP server.
+	FigmaMCPURL string
 }
 
 type piModelCapabilityCacheEntry struct {

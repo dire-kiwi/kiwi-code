@@ -3024,3 +3024,38 @@ func TestEmptyStoreReturnsAnEmptyList(t *testing.T) {
 		t.Fatalf("expected an empty list, got %#v", items)
 	}
 }
+
+func TestFigmaMCPProjectToggleRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "data", "projects.json")
+	store, err := NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	item, err := store.Add("Example", t.TempDir(), PersonalProfileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.FigmaMCPEnabled {
+		t.Fatal("new projects must not enable Figma MCP")
+	}
+	enabled := true
+	updated, err := store.UpdateProject(item.ID, ProjectUpdate{FigmaMCPEnabled: &enabled})
+	if err != nil || !updated.FigmaMCPEnabled {
+		t.Fatalf("enable Figma MCP = %#v, err=%v", updated, err)
+	}
+
+	reloaded, err := NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := reloaded.Get(item.ID)
+	if err != nil || !persisted.FigmaMCPEnabled {
+		t.Fatalf("reloaded project = %#v, err=%v", persisted, err)
+	}
+
+	disabled := false
+	if updated, err = reloaded.UpdateProject(item.ID, ProjectUpdate{FigmaMCPEnabled: &disabled}); err != nil || updated.FigmaMCPEnabled {
+		t.Fatalf("disable Figma MCP = %#v, err=%v", updated, err)
+	}
+}
