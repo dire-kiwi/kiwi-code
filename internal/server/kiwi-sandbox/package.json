@@ -1,0 +1,26 @@
+{
+  "name": "@dire-kiwi/kiwi-sandbox-monorepo",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "pi": {
+    "extensions": ["./packages/pi/src/index.ts"],
+    "skills": ["./packages/pi/skills"]
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test:core": "node --import tsx --test packages/core/test/*.test.ts",
+    "test:pi": "node --import tsx packages/pi/test.ts",
+    "test:claude": "node --import tsx packages/claude/test.ts",
+    "test": "npm run check && npm run test:core && npm run test:pi && npm run test:claude"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.7",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

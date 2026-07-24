@@ -85,38 +85,6 @@ func TestClaudeGPTProfileDirectoryIsPrivateAndRejectsSymlinks(t *testing.T) {
 	}
 }
 
-func TestDiscoverClaudeSandboxPluginPathUsesTheExistingNonGPTProfile(t *testing.T) {
-	configDirectory := t.TempDir()
-	pluginDirectory := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", configDirectory)
-	t.Setenv("CLAUDE_CODE_PLUGIN_CACHE_DIR", pluginDirectory)
-	installPath := filepath.Join(t.TempDir(), "sandbox")
-	if err := os.MkdirAll(filepath.Join(installPath, ".claude-plugin"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(installPath, ".claude-plugin", "plugin.json"), []byte(`{"name":"sandbox-exec"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(configDirectory, "settings.json"), []byte(`{"enabledPlugins":{"sandbox-exec@dire-agent-extensions":true}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	registry, err := json.Marshal(map[string]any{
-		"plugins": map[string]any{
-			claudeSandboxPluginID: []map[string]string{{"installPath": installPath}},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(pluginDirectory, "installed_plugins.json"), registry, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	got, err := discoverClaudeSandboxPluginPath()
-	if err != nil || got != installPath {
-		t.Fatalf("sandbox plugin path = %q, %v; want %q", got, err, installPath)
-	}
-}
-
 func TestSyncClaudeCodeProfileSettingsMirrorsTheDefaultProfile(t *testing.T) {
 	configDirectory := t.TempDir()
 	profilePath := t.TempDir()
@@ -725,7 +693,7 @@ func TestClaudeGPTCommandLoadsItsDefaultModelFromCLIProxyAPI(t *testing.T) {
 	handler := &terminalHandler{
 		envPath:                 "/usr/bin/env",
 		claudePluginPath:        "/plugin/kiwi-code",
-		claudeSandboxPluginPath: "/plugin/sandbox-exec",
+		claudeSandboxPluginPath: "/plugin/kiwi-sandbox",
 		claudeGPTProfilePath:    filepath.Join(directory, "profile"),
 		cliProxyAPIBaseURL:      proxy.URL,
 		cliProxyAPIKey:          "test-key",
@@ -814,7 +782,7 @@ func TestConfiguredClaudeCodeProfileUsesTheDefaultClaudeLaunchConfiguration(t *t
 		claudePluginPath:        "/plugin/kiwi-code",
 		claudeConfigPath:        configDirectory,
 		claudePluginRootPath:    pluginDirectory,
-		claudeSandboxPluginPath: "/plugin/sandbox-exec",
+		claudeSandboxPluginPath: "/plugin/kiwi-sandbox",
 	}
 	options := codingAgentLaunchOptions{Model: "sonnet", ThinkingLevel: "high", InitialPrompt: "Review this change"}
 	item := project.Project{ID: "project"}
@@ -852,7 +820,7 @@ func TestConfiguredClaudeCodeProfileUsesTheDefaultClaudeLaunchConfiguration(t *t
 		"CLAUDE_CODE_PLUGIN_CACHE_DIR=" + pluginDirectory,
 		"--plugin-dir\n/plugin/kiwi-code",
 		"--dangerously-skip-permissions",
-		`{"skipDangerousModePermissionPrompt":true}`,
+		`{"skipDangerousModePermissionPrompt":true,"enabledPlugins":{"sandbox-exec@dire-agent-extensions":false}}`,
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("configured Claude args %#v do not contain %q", profileArgs, expected)
@@ -886,7 +854,7 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 		projects:                store,
 		envPath:                 "/usr/bin/env",
 		claudePluginPath:        "/plugin/kiwi-code",
-		claudeSandboxPluginPath: "/plugin/sandbox-exec",
+		claudeSandboxPluginPath: "/plugin/kiwi-sandbox",
 		claudeGPTProfilePath:    profilePath,
 		cliProxyAPIBaseURL:      "http://127.0.0.1:18317",
 		cliProxyAPIKey:          "proxy-client-key",
@@ -963,8 +931,8 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 						t.Fatalf("Claude Code profile args %#v do not contain %q", args, expected)
 					}
 				}
-				if strings.Contains(joined, "/plugin/sandbox-exec") {
-					t.Fatalf("Claude Code profile args %#v load the default sandbox plugin twice", args)
+				if !strings.Contains(joined, "/plugin/kiwi-sandbox") {
+					t.Fatalf("Claude Code profile args %#v do not load Kiwi Sandbox", args)
 				}
 			}
 			if test.agent == codingAgentClaudeGPT {
@@ -981,7 +949,7 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 					"ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-5.6-terra",
 					"ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5.6-luna",
 					"KIWI_CODE_CODING_AGENT=" + codingAgentClaudeGPT,
-					"/plugin/sandbox-exec",
+					"/plugin/kiwi-sandbox",
 				} {
 					if !strings.Contains(joined, expected) {
 						t.Fatalf("Claude GPT args %#v do not contain %q", args, expected)

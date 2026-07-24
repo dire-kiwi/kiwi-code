@@ -30,6 +30,7 @@ type terminalHandler struct {
 	tmuxPath                string
 	tmuxSocket              string
 	piExtensionPaths        []string
+	piSkillPaths            []string
 	piExtensionErr          error
 	piFigmaExtensionPath    string
 	piFigmaExtensionErr     error
@@ -208,6 +209,14 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 	tmuxPath, _ := exec.LookPath("tmux")
 	envPath, _ := exec.LookPath("env")
 	extensionPaths, extensionErr := materializePiExtensions(projects.DataDirectory())
+	kiwiSandboxPiPath, kiwiSandboxClaudePath, kiwiSandboxErr := materializeKiwiSandbox(projects.DataDirectory())
+	var piSkillPaths []string
+	if kiwiSandboxErr == nil {
+		extensionPaths = append(extensionPaths, kiwiSandboxPiPath)
+		piSkillPaths = append(piSkillPaths, kiwiSandboxPiSkillPath(projects.DataDirectory()))
+	} else {
+		extensionErr = errors.Join(extensionErr, kiwiSandboxErr)
+	}
 	// The Figma bridge is materialized separately from the always-on extensions
 	// so it only loads for projects that enabled Figma MCP support.
 	figmaExtensionPath, figmaExtensionErr := materializePiFigmaMCPExtension(projects.DataDirectory())
@@ -215,31 +224,34 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 	claudePluginPath, claudePluginErr := materializeClaudePlugin(projects.DataDirectory())
 	claudeConfigPath, claudeConfigErr := defaultClaudeConfigDirectory()
 	claudePluginRootPath, claudePluginRootErr := defaultClaudePluginDirectory(claudeConfigPath)
-	claudeSandboxPluginPath, claudeSandboxPluginErr := discoverClaudeSandboxPluginPathFrom(
-		claudeConfigPath,
-		claudePluginRootPath,
-		errors.Join(claudeConfigErr, claudePluginRootErr),
-	)
+	claudeSandboxPluginPath, claudeSandboxPluginErr := kiwiSandboxClaudePath, kiwiSandboxErr
 	claudeGPTProfilePath, claudeGPTProfileErr := prepareClaudeGPTProfileDirectory(projects.DataDirectory())
 	cliProxyAPIBaseURL, cliProxyAPIKey, cliProxyAPIErr := configuredCLIProxyAPI()
 	handler := &terminalHandler{
-		projects:                projects,
-		tmuxPath:                tmuxPath,
-		tmuxSocket:              tmuxSocket,
-		piExtensionPaths:        extensionPaths,
-		piExtensionErr:          extensionErr,
-		piFigmaExtensionPath:    figmaExtensionPath,
-		piFigmaExtensionErr:     figmaExtensionErr,
-		agentToken:              agentToken,
-		agentTokenErr:           agentTokenErr,
+		projects:             projects,
+		tmuxPath:             tmuxPath,
+		tmuxSocket:           tmuxSocket,
+		piExtensionPaths:     extensionPaths,
+		piSkillPaths:         piSkillPaths,
+		piExtensionErr:       extensionErr,
+		piFigmaExtensionPath: figmaExtensionPath,
+		piFigmaExtensionErr:  figmaExtensionErr,
+		agentToken:           agentToken,
+		agentTokenErr:        agentTokenErr,
 		nativePi: newPiNativeManager(
 			projects.DataDirectory(),
 			extensionPaths,
+			piSkillPaths,
 			extensionErr,
 			agentToken,
 			figmaExtensionPath,
 		),
-		nativeClaude:            newClaudeNativeManager(projects.DataDirectory(), claudePluginPath, claudePluginErr),
+		nativeClaude: newClaudeNativeManager(
+			projects.DataDirectory(),
+			claudePluginPath,
+			claudeSandboxPluginPath,
+			errors.Join(claudePluginErr, claudeSandboxPluginErr),
+		),
 		claudePluginPath:        claudePluginPath,
 		claudePluginErr:         claudePluginErr,
 		claudeConfigPath:        claudeConfigPath,
@@ -2930,9 +2942,12 @@ func (h *terminalHandler) commandForTmuxTarget(
 			}
 			extensionPaths = append(append([]string(nil), extensionPaths...), h.piFigmaExtensionPath)
 		}
-		extensionArgs := make([]string, 0, len(extensionPaths)*2+len(args))
+		extensionArgs := make([]string, 0, len(extensionPaths)*2+len(h.piSkillPaths)*2+len(args))
 		for _, extensionPath := range extensionPaths {
 			extensionArgs = append(extensionArgs, "--extension", extensionPath)
+		}
+		for _, skillPath := range h.piSkillPaths {
+			extensionArgs = append(extensionArgs, "--skill", skillPath)
 		}
 		args = append(extensionArgs, args...)
 	}
@@ -2954,11 +2969,9 @@ func (h *terminalHandler) commandForTmuxTarget(
 		if profileAgent {
 			// A named profile isolates Claude's account and session state, not its
 			// launch configuration. Mirror the default settings and use the default
-			// plugin registry below so installed-plugin skills, MCP servers, and the
-			// sandbox permission boundary load exactly as they do for the built-in
-			// Claude entry. Loading the sandbox again with --plugin-dir can make
-			// Claude resolve the same plugin through two sources and drop session
-			// plugin hooks.
+			// plugin registry below so installed-plugin skills and MCP servers load
+			// exactly as they do for the built-in Claude entry. Kiwi Sandbox is
+			// loaded explicitly for every Claude mode below.
 			if h.claudeSandboxPluginErr != nil {
 				return "", nil, "", h.claudeSandboxPluginErr
 			}
@@ -2975,18 +2988,20 @@ func (h *terminalHandler) commandForTmuxTarget(
 				return "", nil, "", err
 			}
 		}
-		pluginArguments := []string{"--plugin-dir", h.claudePluginPath}
+		if h.claudeSandboxPluginErr != nil {
+			return "", nil, "", h.claudeSandboxPluginErr
+		}
+		if h.claudeSandboxPluginPath == "" {
+			return "", nil, "", errors.New("Claude sandbox plugin path is unavailable")
+		}
+		pluginArguments := []string{
+			"--plugin-dir", h.claudePluginPath,
+			"--plugin-dir", h.claudeSandboxPluginPath,
+		}
 		if tool == codingAgentClaudeGPT {
 			if launchOptions.Model == "" || !isCLIProxyAPIGPTModel(launchOptions.Model) {
 				return "", nil, "", errors.New("Claude Code (with gpt) requires a CLIProxyAPI GPT model")
 			}
-			if h.claudeSandboxPluginErr != nil {
-				return "", nil, "", h.claudeSandboxPluginErr
-			}
-			if h.claudeSandboxPluginPath == "" {
-				return "", nil, "", errors.New("Claude sandbox plugin path is unavailable")
-			}
-			pluginArguments = append(pluginArguments, "--plugin-dir", h.claudeSandboxPluginPath)
 		}
 		if figmaMCPURL != "" {
 			figmaConfig, err := figmaMCPConfigArgument(figmaMCPURL)
@@ -2999,7 +3014,7 @@ func (h *terminalHandler) commandForTmuxTarget(
 		}
 		pluginArguments = append(pluginArguments,
 			"--dangerously-skip-permissions",
-			"--settings", `{"skipDangerousModePermissionPrompt":true}`,
+			"--settings", claudeLaunchSettings,
 		)
 		args = append(pluginArguments, args...)
 	}

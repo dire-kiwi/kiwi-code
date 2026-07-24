@@ -44,6 +44,7 @@ type piNativeManager struct {
 	dataDirectory    string
 	piPath           string
 	extensionPaths   []string
+	skillPaths       []string
 	extensionErr     error
 	figmaExtension   string
 	figmaMCPURL      func(project.Project) string
@@ -155,6 +156,7 @@ const (
 func newPiNativeManager(
 	dataDirectory string,
 	extensionPaths []string,
+	skillPaths []string,
 	extensionErr error,
 	agentToken string,
 	figmaExtension string,
@@ -162,6 +164,7 @@ func newPiNativeManager(
 	return &piNativeManager{
 		dataDirectory:  dataDirectory,
 		extensionPaths: append([]string(nil), extensionPaths...),
+		skillPaths:     append([]string(nil), skillPaths...),
 		extensionErr:   extensionErr,
 		figmaExtension: figmaExtension,
 		agentToken:     agentToken,
@@ -606,6 +609,7 @@ func (m *piNativeManager) startProcess(
 	command := exec.Command(piPath, piNativeArguments(
 		sessionDirectory,
 		m.extensionPaths,
+		m.skillPaths,
 		m.figmaExtension,
 		launchOptions,
 	)...)
@@ -693,6 +697,7 @@ func (h *terminalHandler) withSubAgentNestingPrompt(
 func piNativeArguments(
 	sessionDirectory string,
 	extensionPaths []string,
+	skillPaths []string,
 	figmaExtensionPath string,
 	launchOptions codingAgentLaunchOptions,
 ) []string {
@@ -704,6 +709,9 @@ func piNativeArguments(
 	}
 	for _, extensionPath := range extensionPaths {
 		arguments = append(arguments, "--extension", extensionPath)
+	}
+	for _, skillPath := range skillPaths {
+		arguments = append(arguments, "--skill", skillPath)
 	}
 	// Pi has no built-in MCP support, so Figma is bridged by an extension that
 	// only loads for projects that enabled it.
