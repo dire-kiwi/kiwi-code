@@ -6,6 +6,7 @@
   "main": "electron/main.cjs",
   "scripts": {
     "generate:theme": "node scripts/generate-default-theme.mjs",
+    "generate:browser-host": "node scripts/build-browser-host.mjs",
     "predev": "npm run generate:theme",
     "dev": "vite",
     "predev:servers": "npm run generate:theme",
@@ -14,7 +15,7 @@
     "dev:desktop": "node scripts/dev-stack.mjs --desktop",
     "run:desktop": "concurrently --kill-others --success command-desktop --names server,desktop \"cd .. && make run\" \"wait-on --timeout 30000 http-get://127.0.0.1:4000/api/health && KIWI_CODE_DESKTOP_URL=http://127.0.0.1:4000 node scripts/electron-launcher.mjs\"",
     "test": "node --test scripts/*.test.mjs electron/*.test.cjs",
-    "prebuild": "npm run generate:theme",
+    "prebuild": "npm run generate:theme && npm run generate:browser-host",
     "build": "tsc --noEmit -p tsconfig.app.json && vite build",
     "preview": "vite preview"
   },
@@ -28,6 +29,7 @@
     "katex": "^0.16.47",
     "lucide-react": "latest",
     "mermaid": "^11.16.0",
+    "puppeteer-core": "^24.40.0",
     "react": "latest",
     "react-dom": "latest",
     "react-router-dom": "latest"
@@ -39,6 +41,7 @@
     "@vitejs/plugin-react": "latest",
     "concurrently": "latest",
     "electron": "latest",
+    "esbuild": "^0.27.4",
     "tailwindcss": "latest",
     "typescript": "latest",
     "vite": "latest",

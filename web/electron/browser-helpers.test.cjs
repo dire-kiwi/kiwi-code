@@ -177,9 +177,13 @@ test('no-session status and preview preserve the provider compatibility contract
     message: 'Electron browser session is not running.',
     status: {
       endpoint: '', reachable: false, product: '', protocolVersion: '', pages: 0,
-      currentTargetId: null, owned: true,
+      currentTargetId: null, owned: true, presentation: 'native',
+      capabilities: { nativeView: true, interactiveStream: false, preview: true, recording: true },
     },
-    backend: 'electron', running: false, pages: [], pageList: [], currentTargetId: null,
+    backend: 'electron', presentation: 'native',
+    capabilities: { nativeView: true, interactiveStream: false, preview: true, recording: true },
+    running: false, pages: [], pageList: [], currentTargetId: null,
+    recording: null, recordings: [],
   })
   await assert.rejects(
     manager.perform({ projectId: 'p', threadId: 't', operation: 'preview', params: { format: 'jpeg', quality: 70 } }),

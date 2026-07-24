@@ -1,4 +1,4 @@
-import { apiUrl } from './apiUrl'
+import { apiUrl, apiWebSocketUrl } from './apiUrl'
 import type {
   AgentSkillStatus,
   AppSettings,
@@ -352,6 +352,18 @@ export function performBrowserAction<Result = unknown>(
     body: JSON.stringify(action),
     signal,
   })
+}
+
+export function browserStreamUrl(projectId: string, threadId: string) {
+  return apiWebSocketUrl(`${browserPath(projectId, threadId)}/stream`).toString()
+}
+
+export function browserRecordingDownloadUrl(projectId: string, threadId: string, recordingId: string) {
+  return apiUrl(`${browserPath(projectId, threadId)}/recordings/${encodeURIComponent(recordingId)}`)
+}
+
+export function browserRecordingPlaybackUrl(projectId: string, threadId: string, recordingId: string) {
+  return `${browserRecordingDownloadUrl(projectId, threadId, recordingId)}?disposition=inline`
 }
 
 export async function getBrowserFrame(
