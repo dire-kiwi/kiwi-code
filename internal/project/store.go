@@ -80,17 +80,18 @@ type Thread struct {
 }
 
 type Project struct {
-	ID                           string    `json:"id"`
-	Name                         string    `json:"name"`
-	Path                         string    `json:"path"`
-	ProfileID                    string    `json:"profileId"`
-	Host                         string    `json:"host"`
-	IsGitRepo                    bool      `json:"isGitRepo"`
-	CreatedAt                    time.Time `json:"createdAt"`
-	Threads                      []Thread  `json:"threads"`
-	SubAgentNestingDepthOverride *int      `json:"subAgentNestingDepthOverride,omitempty"`
-	WorktreeBranchPrefix         string    `json:"worktreeBranchPrefix"`
-	FigmaMCPEnabled              bool      `json:"figmaMCPEnabled"`
+	ID                           string           `json:"id"`
+	Name                         string           `json:"name"`
+	Path                         string           `json:"path"`
+	ProfileID                    string           `json:"profileId"`
+	Host                         string           `json:"host"`
+	IsGitRepo                    bool             `json:"isGitRepo"`
+	CreatedAt                    time.Time        `json:"createdAt"`
+	Threads                      []Thread         `json:"threads"`
+	SubAgentNestingDepthOverride *int             `json:"subAgentNestingDepthOverride,omitempty"`
+	WorktreeBranchPrefix         string           `json:"worktreeBranchPrefix"`
+	Environment                  LocalEnvironment `json:"environment"`
+	FigmaMCPEnabled              bool             `json:"figmaMCPEnabled"`
 }
 
 type SubAgentNestingContext struct {
@@ -209,6 +210,7 @@ type ProjectUpdate struct {
 	SubAgentNestingDepthOverride       *int
 	UpdateSubAgentNestingDepthOverride bool
 	WorktreeBranchPrefix               *string
+	Environment                        *LocalEnvironment
 	FigmaMCPEnabled                    *bool
 }
 
@@ -457,6 +459,7 @@ func cloneProject(source Project) Project {
 		depth := *source.SubAgentNestingDepthOverride
 		item.SubAgentNestingDepthOverride = &depth
 	}
+	item.Environment = cloneLocalEnvironment(source.Environment)
 	return item
 }
 
@@ -600,6 +603,11 @@ func readProjectsFile(path string) ([]Project, error) {
 		if item.WorktreeBranchPrefix != "" {
 			if _, err := normalizeWorktreeBranchPrefix(item.WorktreeBranchPrefix); err != nil {
 				return nil, fmt.Errorf("decode projects: worktree branch prefix for project %q: %w", item.ID, err)
+			}
+		}
+		if !localEnvironmentIsZero(item.Environment) {
+			if _, err := normalizeLocalEnvironment(item.Environment); err != nil {
+				return nil, fmt.Errorf("decode projects: environment for project %q: %w", item.ID, err)
 			}
 		}
 		seenThreads := make(map[string]struct{}, len(item.Threads))
@@ -1469,6 +1477,7 @@ func (s *Store) Add(name, path string, profileIDs ...string) (result Project, er
 	item := Project{
 		ID: id, Name: name, Path: absPath, ProfileID: profileID, Host: localHostname(), IsGitRepo: isGitRepository(absPath), CreatedAt: now,
 		Threads: []Thread{{ID: threadID, Title: defaultThreadTitle, Cwd: absPath, CreatedAt: now}}, WorktreeBranchPrefix: DefaultWorktreeBranchPrefix,
+		Environment: defaultLocalEnvironment(),
 	}
 	previous := s.projects
 	updated := make([]Project, len(previous)+1)
@@ -1534,7 +1543,7 @@ func (s *Store) UpdateProjectProfile(projectID, profileID string) (Project, erro
 
 func (s *Store) UpdateProject(projectID string, update ProjectUpdate) (result Project, err error) {
 	if update.ProfileID == nil && !update.UpdateSubAgentNestingDepthOverride &&
-		update.WorktreeBranchPrefix == nil && update.FigmaMCPEnabled == nil {
+		update.WorktreeBranchPrefix == nil && update.Environment == nil && update.FigmaMCPEnabled == nil {
 		return Project{}, errors.New("at least one project setting is required")
 	}
 	var profileID string
@@ -1552,6 +1561,13 @@ func (s *Store) UpdateProject(projectID string, update ProjectUpdate) (result Pr
 	var branchPrefix string
 	if update.WorktreeBranchPrefix != nil {
 		branchPrefix, err = normalizeWorktreeBranchPrefix(*update.WorktreeBranchPrefix)
+		if err != nil {
+			return Project{}, err
+		}
+	}
+	var environment LocalEnvironment
+	if update.Environment != nil {
+		environment, err = normalizeLocalEnvironment(*update.Environment)
 		if err != nil {
 			return Project{}, err
 		}
@@ -1595,6 +1611,10 @@ func (s *Store) UpdateProject(projectID string, update ProjectUpdate) (result Pr
 	}
 	if update.WorktreeBranchPrefix != nil && s.projects[projectIndex].WorktreeBranchPrefix != branchPrefix {
 		s.projects[projectIndex].WorktreeBranchPrefix = branchPrefix
+		changed = true
+	}
+	if update.Environment != nil && !equalLocalEnvironment(s.projects[projectIndex].Environment, environment) {
+		s.projects[projectIndex].Environment = cloneLocalEnvironment(environment)
 		changed = true
 	}
 	if update.FigmaMCPEnabled != nil && s.projects[projectIndex].FigmaMCPEnabled != *update.FigmaMCPEnabled {
@@ -2323,13 +2343,16 @@ func (s *Store) createWorktreeThread(item Project, thread Thread, baseBranch, ba
 	if _, err := gitOutput(item.Path, "worktree", "add", "-b", thread.Branch, worktreePath, startPoint); err != nil {
 		return cleanupFailedCreation(fmt.Errorf("create Git worktree: %w", err))
 	}
+	if err := os.MkdirAll(thread.Cwd, 0o700); err != nil {
+		return cleanupFailedCreation(fmt.Errorf("create worktree working directory: %w", err))
+	}
+	if err := runEnvironmentSetup(item, thread); err != nil {
+		return cleanupFailedCreation(err)
+	}
 	if s.worktreeSetup != nil {
 		if err := s.worktreeSetup(thread); err != nil {
 			return cleanupFailedCreation(err)
 		}
-	}
-	if err := os.MkdirAll(thread.Cwd, 0o700); err != nil {
-		return cleanupFailedCreation(fmt.Errorf("create worktree working directory: %w", err))
 	}
 	return thread, nil
 }
@@ -2816,6 +2839,16 @@ func (s *Store) load() error {
 		if projects[index].WorktreeBranchPrefix == "" {
 			projects[index].WorktreeBranchPrefix = DefaultWorktreeBranchPrefix
 			changed = true
+		}
+		if localEnvironmentIsZero(projects[index].Environment) {
+			projects[index].Environment = defaultLocalEnvironment()
+			changed = true
+		} else {
+			environment, normalizeErr := normalizeLocalEnvironment(projects[index].Environment)
+			if normalizeErr != nil {
+				return fmt.Errorf("migrate project environment %q: %w", projects[index].ID, normalizeErr)
+			}
+			projects[index].Environment = environment
 		}
 		if projects[index].Threads == nil {
 			projects[index].Threads = []Thread{}

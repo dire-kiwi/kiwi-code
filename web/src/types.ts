@@ -8,6 +8,32 @@ export type DirectorySuggestion = {
   path: string
 }
 
+export type PlatformScripts = {
+  default: string
+  macos: string
+  linux: string
+  windows: string
+}
+
+export type EnvironmentVariable = {
+  name: string
+  value: string
+}
+
+export type EnvironmentAction = {
+  id: string
+  name: string
+  scripts: PlatformScripts
+}
+
+export type LocalEnvironment = {
+  name: string
+  setupScripts: PlatformScripts
+  cleanupScripts: PlatformScripts
+  variables: EnvironmentVariable[]
+  actions: EnvironmentAction[]
+}
+
 export type Project = {
   id: string
   name: string
@@ -19,6 +45,7 @@ export type Project = {
   threads: Thread[]
   subAgentNestingDepthOverride?: number | null
   worktreeBranchPrefix: string
+  environment: LocalEnvironment
   figmaMCPEnabled: boolean
 }
 

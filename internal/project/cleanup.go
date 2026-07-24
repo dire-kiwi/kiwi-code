@@ -54,15 +54,18 @@ type WorktreeCleanupOverview struct {
 }
 
 type orphanedWorktree struct {
-	ProjectID    string    `json:"projectId"`
-	ProjectName  string    `json:"projectName,omitempty"`
-	ThreadID     string    `json:"threadId"`
-	ThreadTitle  string    `json:"threadTitle,omitempty"`
-	ProjectPath  string    `json:"projectPath"`
-	WorktreePath string    `json:"worktreePath"`
-	Branch       string    `json:"branch,omitempty"`
-	DetachedAt   time.Time `json:"detachedAt"`
-	DeleteBranch bool      `json:"deleteBranch,omitempty"`
+	ProjectID               string                `json:"projectId"`
+	ProjectName             string                `json:"projectName,omitempty"`
+	ThreadID                string                `json:"threadId"`
+	ThreadTitle             string                `json:"threadTitle,omitempty"`
+	ProjectPath             string                `json:"projectPath"`
+	WorktreePath            string                `json:"worktreePath"`
+	Branch                  string                `json:"branch,omitempty"`
+	DetachedAt              time.Time             `json:"detachedAt"`
+	DeleteBranch            bool                  `json:"deleteBranch,omitempty"`
+	CleanupScript           string                `json:"cleanupScript,omitempty"`
+	CleanupWorkingDirectory string                `json:"cleanupWorkingDirectory,omitempty"`
+	CleanupVariables        []EnvironmentVariable `json:"cleanupVariables,omitempty"`
 }
 
 func (s *Store) ArchivedThreadsDue(now time.Time) ([]ArchivedThreadRef, error) {
@@ -241,14 +244,17 @@ func (s *Store) rememberOrphanedWorktreeLocked(item Project, thread Thread, deta
 	worktreePath := filepath.Clean(thread.WorktreePath)
 	worktreeIdentity := worktreeIdentityPath(worktreePath)
 	record := orphanedWorktree{
-		ProjectID:    item.ID,
-		ProjectName:  item.Name,
-		ThreadID:     thread.ID,
-		ThreadTitle:  thread.Title,
-		ProjectPath:  filepath.Clean(item.Path),
-		WorktreePath: worktreePath,
-		Branch:       thread.Branch,
-		DetachedAt:   detachedAt.UTC(),
+		ProjectID:               item.ID,
+		ProjectName:             item.Name,
+		ThreadID:                thread.ID,
+		ThreadTitle:             thread.Title,
+		ProjectPath:             filepath.Clean(item.Path),
+		WorktreePath:            worktreePath,
+		Branch:                  thread.Branch,
+		DetachedAt:              detachedAt.UTC(),
+		CleanupScript:           platformScript(item.Environment.CleanupScripts),
+		CleanupWorkingDirectory: thread.Cwd,
+		CleanupVariables:        environmentVariables(item, thread),
 	}
 	for index := range s.orphanedWorktrees {
 		if worktreeIdentityPath(s.orphanedWorktrees[index].WorktreePath) == worktreeIdentity {
@@ -506,6 +512,17 @@ func (s *Store) CleanupOrphanedWorktrees(now time.Time) (result WorktreeCleanupR
 			kept = append(kept, record)
 			result.RetainedWithChanges = append(result.RetainedWithChanges, record.WorktreePath)
 			continue
+		}
+		if strings.TrimSpace(record.CleanupScript) != "" {
+			workingDirectory := strings.TrimSpace(record.CleanupWorkingDirectory)
+			if workingDirectory == "" {
+				workingDirectory = record.WorktreePath
+			}
+			if cleanupErr := runEnvironmentScript(workingDirectory, record.CleanupScript, record.CleanupVariables); cleanupErr != nil {
+				kept = append(kept, record)
+				cleanupErrors = append(cleanupErrors, fmt.Errorf("run cleanup script for unattached worktree %q: %w", record.WorktreePath, cleanupErr))
+				continue
+			}
 		}
 		if removeErr := removeOrphanedWorktree(record); removeErr != nil {
 			kept = append(kept, record)

@@ -9,6 +9,8 @@ import type {
   CodingAgentConfig,
   DirectorySuggestion,
   GitBranchState,
+  LocalEnvironment,
+  ProcessWindow,
   Profile,
   Project,
   Thread,
@@ -144,6 +146,7 @@ export function updateProject(
     profileId?: string
     subAgentNestingDepthOverride?: number | null
     worktreeBranchPrefix?: string
+    environment?: LocalEnvironment
     figmaMCPEnabled?: boolean
   },
 ) {
@@ -163,6 +166,17 @@ export function updateProjectSubAgentNestingDepth(id: string, depth: number | nu
 
 export function updateProjectWorktreeBranchPrefix(id: string, prefix: string) {
   return updateProject(id, { worktreeBranchPrefix: prefix })
+}
+
+export function updateProjectEnvironment(id: string, environment: LocalEnvironment) {
+  return updateProject(id, { environment })
+}
+
+export function runEnvironmentAction(projectId: string, threadId: string, actionId: string) {
+  return request<ProcessWindow>(
+    `${threadPath(projectId, threadId)}/environment/actions/${encodeURIComponent(actionId)}`,
+    { method: 'POST', body: '{}' },
+  )
 }
 
 export function updateProjectFigmaMCPEnabled(id: string, enabled: boolean) {

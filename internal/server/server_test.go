@@ -71,6 +71,58 @@ func TestProjectAPI(t *testing.T) {
 	}
 }
 
+func TestProjectEnvironmentAPI(t *testing.T) {
+	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := newIsolatedServerHandler(t, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	environment := project.LocalEnvironment{
+		Name:           "Development",
+		SetupScripts:   project.PlatformScripts{Default: "npm install"},
+		CleanupScripts: project.PlatformScripts{Default: "rm -rf .cache"},
+		Variables:      []project.EnvironmentVariable{{Name: "APP_MODE", Value: "test"}},
+		Actions: []project.EnvironmentAction{{
+			ID: "run-tests", Name: "Run tests", Scripts: project.PlatformScripts{Default: `printf '%s' "$APP_MODE"`},
+		}},
+	}
+	body, err := json.Marshal(map[string]any{"environment": environment})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updateResponse := httptest.NewRecorder()
+	handler.ServeHTTP(updateResponse, httptest.NewRequest(http.MethodPatch, "/api/projects/"+item.ID, bytes.NewReader(body)))
+	if updateResponse.Code != http.StatusOK {
+		t.Fatalf("update environment status = %d, body = %s", updateResponse.Code, updateResponse.Body.String())
+	}
+	var updated project.Project
+	if err := json.NewDecoder(updateResponse.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Environment.Name != "Development" || len(updated.Environment.Actions) != 1 {
+		t.Fatalf("updated environment = %#v", updated.Environment)
+	}
+
+	persisted, err := store.Get(item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	action, command, variables, err := project.ResolveEnvironmentAction(persisted, item.Threads[0], "run-tests")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action.Name != "Run tests" || command == "" || len(variables) < 2 {
+		t.Fatalf("resolved environment action = %#v, command = %q, variables = %#v", action, command, variables)
+	}
+}
+
 func TestProjectAndThreadOrderAPI(t *testing.T) {
 	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
 	if err != nil {

@@ -27,6 +27,7 @@ import { InfoCallout } from '../molecules/InfoCallout'
 import { PageIntro } from '../molecules/PageIntro'
 import { ScreenHeader } from '../molecules/ScreenHeader'
 import { SectionHeader } from '../molecules/SectionHeader'
+import { ProjectEnvironmentSettings } from '../organisms/ProjectEnvironmentSettings'
 import { FormScreenTemplate } from '../templates/FormScreenTemplate'
 
 type ProjectSettingsScreenProps = {
@@ -54,6 +55,7 @@ export function ProjectSettingsScreen({
   const [branchPrefixSaving, setBranchPrefixSaving] = useState(false)
   const [branchPrefixError, setBranchPrefixError] = useState('')
   const [branchPrefixMessage, setBranchPrefixMessage] = useState('')
+  const [environmentSaving, setEnvironmentSaving] = useState(false)
   const [figmaSaving, setFigmaSaving] = useState(false)
   const [figmaError, setFigmaError] = useState('')
   const [figmaMessage, setFigmaMessage] = useState('')
@@ -73,7 +75,7 @@ export function ProjectSettingsScreen({
     setBranchPrefix(project.worktreeBranchPrefix)
   }, [project.id, project.worktreeBranchPrefix])
 
-  const saving = profileSaving || nestingSaving || branchPrefixSaving || figmaSaving
+  const saving = profileSaving || nestingSaving || branchPrefixSaving || environmentSaving || figmaSaving
   const profileName = profiles.find((profile) => profile.id === project.profileId)?.name
   const normalizedBranchPrefix = branchPrefix.trim()
   const branchPrefixDirty = normalizedBranchPrefix.length > 0
@@ -211,6 +213,12 @@ export function ProjectSettingsScreen({
               )}
             </div>
           </Surface>
+
+          <ProjectEnvironmentSettings
+            project={project}
+            onProjectUpdated={onProjectUpdated}
+            onSavingChange={setEnvironmentSaving}
+          />
 
           <Surface as="section" variant="elevated-panel" className="overflow-hidden">
             <SectionHeader
