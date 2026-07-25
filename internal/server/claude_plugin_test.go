@@ -361,6 +361,8 @@ func TestClaudePluginHeartbeatReportsPromptStart(t *testing.T) {
 	type activityUpdate struct {
 		State           string `json:"state"`
 		Agent           string `json:"agent"`
+		Token           string `json:"token"`
+		Session         string `json:"session"`
 		PromptStartedAt string `json:"promptStartedAt"`
 	}
 	updates := make(chan activityUpdate, 1)
@@ -406,6 +408,11 @@ func TestClaudePluginHeartbeatReportsPromptStart(t *testing.T) {
 	case update := <-updates:
 		if update.State != "working" || update.Agent != codingAgentClaude {
 			t.Fatalf("Claude heartbeat = %#v", update)
+		}
+		// The token and session let Kiwi Code drop a heartbeat that was already in
+		// flight when the turn ended, so the sidebar indicator cannot flicker.
+		if update.Token != "prompt-1" || update.Session != "session-1" {
+			t.Fatalf("Claude heartbeat identifiers = %#v", update)
 		}
 		if _, err := time.Parse(time.RFC3339Nano, update.PromptStartedAt); err != nil {
 			t.Fatalf("Claude prompt start time = %q: %v", update.PromptStartedAt, err)

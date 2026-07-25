@@ -5,6 +5,11 @@ import path from 'node:path'
 
 const heartbeatIntervalMs = 5_000
 const requestTimeoutMs = 3_500
+// The finished transition drives the sidebar's completed dot, so it is worth
+// waiting out a slow server rather than leaving the thread stuck on working
+// until the stale-working timeout silently clears the indicator.
+const transitionTimeoutMs = 2_500
+const transitionAttempts = 3
 const titleTimeoutMs = 20_000
 const maxTitleOutputBytes = 64 * 1024
 const titleModel = 'openai-codex/gpt-5.6-luna'
@@ -37,6 +42,10 @@ function sessionKey(input) {
     process.env.KIWI_CODE_THREAD_ID,
     input.session_id,
   ].map(safeSegment).join('-')
+}
+
+function activitySession(input) {
+  return input.session_id ? safeSegment(input.session_id) : ''
 }
 
 function statePath(input) {
@@ -79,7 +88,7 @@ async function request(url, init = {}, timeoutMs = requestTimeoutMs) {
   }
 }
 
-async function sendActivity(state, timeoutMs = requestTimeoutMs, promptStartedAt = '') {
+async function sendActivity(state, token, timeoutMs = requestTimeoutMs, promptStartedAt = '', session = '') {
   const endpoint = threadEndpoint()
   if (!endpoint) return
   await request(`${endpoint}/claude/activity`, {
@@ -88,9 +97,28 @@ async function sendActivity(state, timeoutMs = requestTimeoutMs, promptStartedAt
     body: JSON.stringify({
       state,
       agent: process.env.KIWI_CODE_CODING_AGENT || 'claude',
+      // The heartbeat and the stop hook are separate processes, so their updates
+      // can arrive out of order. The token lets Kiwi Code discard a working
+      // heartbeat that belongs to a turn it already saw finish.
+      ...(token ? { token: String(token).slice(0, 200) } : {}),
+      // Child sessions report against the same thread. Scoping by session keeps
+      // one of them finishing from clearing the spinner while another still works.
+      ...(session ? { session: String(session).slice(0, 200) } : {}),
       ...(promptStartedAt ? { promptStartedAt } : {}),
     }),
   }, timeoutMs)
+}
+
+async function sendActivityWithRetry(state, token, session, timeoutMs, attempts) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await sendActivity(state, token, timeoutMs, '', session)
+      return true
+    } catch {
+      if (attempt < attempts - 1) await sleep(150)
+    }
+  }
+  return false
 }
 
 function processExists(pid) {
@@ -123,8 +151,12 @@ async function heartbeat(input) {
     const current = await readState(input)
     if (!current || current.token !== token || current.state !== 'working') return
 
-    await sendActivity('working', requestTimeoutMs, promptStartedAt).catch(() => {})
-    await sleep(heartbeatIntervalMs)
+    const startedAt = Date.now()
+    await sendActivity('working', token, requestTimeoutMs, promptStartedAt, activitySession(input)).catch(() => {})
+    // Pace from the start of the request so a slow round trip does not stretch
+    // the interval past the server's stale-working timeout, which would drop
+    // the sidebar indicator mid-turn.
+    await sleep(Math.max(500, heartbeatIntervalMs - (Date.now() - startedAt)))
   }
 }
 
@@ -133,17 +165,11 @@ async function transitionActivity(input, state, onlyIfActive = false) {
   const current = await readState(input)
   if (onlyIfActive && current?.state !== 'working') return
   const token = String(current?.token || input.prompt_id || `${Date.now()}-${process.pid}`)
+  // Writing the state first stops the heartbeat process on its next tick. The
+  // token travels with the update so an already in-flight heartbeat cannot
+  // resurrect the working indicator on the server.
   await writeState(input, { token, state })
-  const timeoutMs = 700
-  await sendActivity(state, timeoutMs).catch(() => {})
-  // Send a second local transition after any in-flight heartbeat has drained.
-  // Both updates happen before the hook returns, so an acknowledgement cannot
-  // be followed by a late heartbeat that resurrects the finished indicator.
-  await sleep(100)
-  const latest = await readState(input)
-  if (latest?.token === token && latest.state === state) {
-    await sendActivity(state, timeoutMs).catch(() => {})
-  }
+  await sendActivityWithRetry(state, token, activitySession(input), transitionTimeoutMs, transitionAttempts)
 }
 
 async function endSession(input) {
