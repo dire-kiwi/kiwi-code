@@ -7,10 +7,51 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
+
+func TestClaudeRelatedProjectDirectoriesMatchSandboxExpansion(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	parent := t.TempDir()
+	root := filepath.Join(parent, "current")
+	if err := os.MkdirAll(filepath.Join(root, ".config"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	config := `{"relatedProjects":["../shared","$CWD/../shared","~/personal","$TMPDIR/cache"]}`
+	if err := os.WriteFile(filepath.Join(root, ".config", "kiwi-sandbox.json"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := claudeRelatedProjectDirectories(project.Thread{Cwd: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		filepath.Join(parent, "shared"),
+		filepath.Join(home, "personal"),
+		filepath.Join(os.TempDir(), "cache"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Claude related directories = %#v, want %#v", got, want)
+	}
+}
+
+func TestClaudeRelatedProjectDirectoriesRejectMalformedConfig(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".config"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".config", "kiwi-sandbox.json"), []byte(`{"relatedProjects":"../shared"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := claudeRelatedProjectDirectories(project.Thread{Cwd: root}); err == nil {
+		t.Fatal("malformed relatedProjects did not prevent Claude launch")
+	}
+}
 
 func TestGlobalSandboxConfigAPIRoundTrip(t *testing.T) {
 	home := t.TempDir()

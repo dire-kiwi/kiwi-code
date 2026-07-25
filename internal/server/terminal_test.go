@@ -215,15 +215,22 @@ func TestClaudeCommandUsesTheFixedPiWindow(t *testing.T) {
 		}
 	}
 	t.Setenv("PATH", directory)
+	threadRoot := t.TempDir()
+	configPath := filepath.Join(threadRoot, ".config", "kiwi-sandbox.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(`{"relatedProjects":["../shared-library"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	handler := &terminalHandler{
-		envPath:                 "/usr/bin/env",
-		claudePluginPath:        "/plugin/kiwi-code",
-		claudeSandboxPluginPath: "/plugin/kiwi-sandbox",
-		agentToken:              "pi-only-token",
+		envPath:          "/usr/bin/env",
+		claudePluginPath: "/plugin/kiwi-code",
+		agentToken:       "pi-only-token",
 	}
 	command, args, notice, err := handler.commandForCodingAgentPane(
 		project.Project{ID: "project"},
-		project.Thread{ID: "thread", ParentThreadID: "parent"},
+		project.Thread{ID: "thread", Cwd: threadRoot, ParentThreadID: "parent"},
 		codingAgentClaude,
 		"http://127.0.0.1:8080/api/projects/project/threads/thread",
 		"kiwi-code-project-thread-tools",
@@ -238,7 +245,8 @@ func TestClaudeCommandUsesTheFixedPiWindow(t *testing.T) {
 	for _, expected := range []string{
 		"--plugin-dir",
 		"/plugin/kiwi-code",
-		"/plugin/kiwi-sandbox",
+		"--add-dir",
+		filepath.Clean(filepath.Join(threadRoot, "../shared-library")),
 		"--dangerously-skip-permissions",
 		"--settings",
 		`{"skipDangerousModePermissionPrompt":true,"enabledPlugins":{"sandbox-exec@dire-agent-extensions":false}}`,
@@ -254,9 +262,9 @@ func TestClaudeCommandUsesTheFixedPiWindow(t *testing.T) {
 			t.Fatalf("Claude environment %q does not contain %q", joined, expected)
 		}
 	}
-	for _, forbidden := range []string{"KIWI_CODE_AGENT_TOKEN=", "KIWI_CODE_PARENT_THREAD_ID=", "KIWI_CODE_CLAUDE_PATH="} {
+	for _, forbidden := range []string{"/plugin/kiwi-sandbox", "KIWI_CODE_AGENT_TOKEN=", "KIWI_CODE_PARENT_THREAD_ID=", "KIWI_CODE_CLAUDE_PATH="} {
 		if strings.Contains(joined, forbidden) {
-			t.Fatalf("Claude environment %q unexpectedly contains Pi-only child metadata %q", joined, forbidden)
+			t.Fatalf("Claude environment %q unexpectedly contains %q", joined, forbidden)
 		}
 	}
 }

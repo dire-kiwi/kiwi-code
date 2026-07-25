@@ -26,55 +26,53 @@ import (
 )
 
 type terminalHandler struct {
-	projects                *project.Store
-	tmuxPath                string
-	tmuxSocket              string
-	piExtensionPaths        []string
-	piSkillPaths            []string
-	piExtensionErr          error
-	piFigmaExtensionPath    string
-	piFigmaExtensionErr     error
-	piModelMu               sync.Mutex
-	piModelCache            map[string]piModelCapabilityCacheEntry
-	piModelInflight         map[string]*piModelCapabilityInflight
-	agentToken              string
-	agentTokenErr           error
-	nativePi                *piNativeManager
-	nativeClaude            *claudeNativeManager
-	claudePluginPath        string
-	claudePluginErr         error
-	claudeConfigPath        string
-	claudeConfigErr         error
-	claudePluginRootPath    string
-	claudePluginRootErr     error
-	claudeSandboxPluginPath string
-	claudeSandboxPluginErr  error
-	claudeGPTProfilePath    string
-	claudeGPTProfileErr     error
-	cliProxyAPIBaseURL      string
-	cliProxyAPIKey          string
-	cliProxyAPIErr          error
-	cliProxyAPIHTTPClient   *http.Client
-	envPath                 string
-	sessionMu               sync.Mutex
-	terminalStops           *terminalStopManager
-	terminalMutations       *terminalMutationManager
-	stoppingProjects        map[string]struct{}
-	stoppingThreads         map[terminalThreadKey]struct{}
-	viewCounter             atomic.Uint64
-	activeViews             map[string]struct{}
-	tmuxWatchMu             sync.Mutex
-	tmuxWatches             map[string]*tmuxSessionWatch
-	agentWatchMu            sync.Mutex
-	agentWatches            map[codingAgentWatchKey]struct{}
-	agentExits              map[codingAgentExitKey]tmuxPaneExitState
-	agentExitLogs           map[codingAgentExitKey]struct{}
-	agentExitSuppressed     map[codingAgentExitKey]tmuxPaneExitState
-	agentExitMarkerMu       sync.Mutex
-	agentExitDirectory      string
-	threadStatusChanged     func(projectID, threadID string)
-	budgetReached           func(projectID, threadID string) (bool, string, error)
-	upgrader                websocket.Upgrader
+	projects              *project.Store
+	tmuxPath              string
+	tmuxSocket            string
+	piExtensionPaths      []string
+	piSkillPaths          []string
+	piExtensionErr        error
+	piFigmaExtensionPath  string
+	piFigmaExtensionErr   error
+	piModelMu             sync.Mutex
+	piModelCache          map[string]piModelCapabilityCacheEntry
+	piModelInflight       map[string]*piModelCapabilityInflight
+	agentToken            string
+	agentTokenErr         error
+	nativePi              *piNativeManager
+	nativeClaude          *claudeNativeManager
+	claudePluginPath      string
+	claudePluginErr       error
+	claudeConfigPath      string
+	claudeConfigErr       error
+	claudePluginRootPath  string
+	claudePluginRootErr   error
+	claudeGPTProfilePath  string
+	claudeGPTProfileErr   error
+	cliProxyAPIBaseURL    string
+	cliProxyAPIKey        string
+	cliProxyAPIErr        error
+	cliProxyAPIHTTPClient *http.Client
+	envPath               string
+	sessionMu             sync.Mutex
+	terminalStops         *terminalStopManager
+	terminalMutations     *terminalMutationManager
+	stoppingProjects      map[string]struct{}
+	stoppingThreads       map[terminalThreadKey]struct{}
+	viewCounter           atomic.Uint64
+	activeViews           map[string]struct{}
+	tmuxWatchMu           sync.Mutex
+	tmuxWatches           map[string]*tmuxSessionWatch
+	agentWatchMu          sync.Mutex
+	agentWatches          map[codingAgentWatchKey]struct{}
+	agentExits            map[codingAgentExitKey]tmuxPaneExitState
+	agentExitLogs         map[codingAgentExitKey]struct{}
+	agentExitSuppressed   map[codingAgentExitKey]tmuxPaneExitState
+	agentExitMarkerMu     sync.Mutex
+	agentExitDirectory    string
+	threadStatusChanged   func(projectID, threadID string)
+	budgetReached         func(projectID, threadID string) (bool, string, error)
+	upgrader              websocket.Upgrader
 }
 
 const (
@@ -210,7 +208,7 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 	tmuxPath, _ := exec.LookPath("tmux")
 	envPath, _ := exec.LookPath("env")
 	extensionPaths, extensionErr := materializePiExtensions(projects.DataDirectory())
-	kiwiSandboxPiPath, kiwiSandboxClaudePath, kiwiSandboxErr := materializeKiwiSandbox(projects.DataDirectory())
+	kiwiSandboxPiPath, _, kiwiSandboxErr := materializeKiwiSandbox(projects.DataDirectory())
 	var piSkillPaths []string
 	if kiwiSandboxErr == nil {
 		extensionPaths = append(extensionPaths, kiwiSandboxPiPath)
@@ -225,7 +223,6 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 	claudePluginPath, claudePluginErr := materializeClaudePlugin(projects.DataDirectory())
 	claudeConfigPath, claudeConfigErr := defaultClaudeConfigDirectory()
 	claudePluginRootPath, claudePluginRootErr := defaultClaudePluginDirectory(claudeConfigPath)
-	claudeSandboxPluginPath, claudeSandboxPluginErr := kiwiSandboxClaudePath, kiwiSandboxErr
 	claudeGPTProfilePath, claudeGPTProfileErr := prepareClaudeGPTProfileDirectory(projects.DataDirectory())
 	cliProxyAPIBaseURL, cliProxyAPIKey, cliProxyAPIErr := configuredCLIProxyAPI()
 	handler := &terminalHandler{
@@ -250,25 +247,22 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 		nativeClaude: newClaudeNativeManager(
 			projects.DataDirectory(),
 			claudePluginPath,
-			claudeSandboxPluginPath,
-			errors.Join(claudePluginErr, claudeSandboxPluginErr),
+			claudePluginErr,
 		),
-		claudePluginPath:        claudePluginPath,
-		claudePluginErr:         claudePluginErr,
-		claudeConfigPath:        claudeConfigPath,
-		claudeConfigErr:         claudeConfigErr,
-		claudePluginRootPath:    claudePluginRootPath,
-		claudePluginRootErr:     claudePluginRootErr,
-		claudeSandboxPluginPath: claudeSandboxPluginPath,
-		claudeSandboxPluginErr:  claudeSandboxPluginErr,
-		claudeGPTProfilePath:    claudeGPTProfilePath,
-		claudeGPTProfileErr:     claudeGPTProfileErr,
-		cliProxyAPIBaseURL:      cliProxyAPIBaseURL,
-		cliProxyAPIKey:          cliProxyAPIKey,
-		cliProxyAPIErr:          cliProxyAPIErr,
-		envPath:                 envPath,
-		terminalStops:           newTerminalStopManager(projects.DataDirectory()),
-		terminalMutations:       newTerminalMutationManager(projects.DataDirectory()),
+		claudePluginPath:     claudePluginPath,
+		claudePluginErr:      claudePluginErr,
+		claudeConfigPath:     claudeConfigPath,
+		claudeConfigErr:      claudeConfigErr,
+		claudePluginRootPath: claudePluginRootPath,
+		claudePluginRootErr:  claudePluginRootErr,
+		claudeGPTProfilePath: claudeGPTProfilePath,
+		claudeGPTProfileErr:  claudeGPTProfileErr,
+		cliProxyAPIBaseURL:   cliProxyAPIBaseURL,
+		cliProxyAPIKey:       cliProxyAPIKey,
+		cliProxyAPIErr:       cliProxyAPIErr,
+		envPath:              envPath,
+		terminalStops:        newTerminalStopManager(projects.DataDirectory()),
+		terminalMutations:    newTerminalMutationManager(projects.DataDirectory()),
 		agentExitDirectory: filepath.Join(
 			projects.DataDirectory(),
 			"coding-agent-exits",
@@ -2977,8 +2971,7 @@ func (h *terminalHandler) commandForTmuxTarget(
 			// A named profile isolates Claude's account and session state, not its
 			// launch configuration. Mirror the default settings and use the default
 			// plugin registry below so installed-plugin skills and MCP servers load
-			// exactly as they do for the default Claude profile. Kiwi Sandbox is
-			// loaded explicitly for every Claude mode below.
+			// exactly as they do for the default Claude profile.
 			if h.claudeConfigErr != nil {
 				return "", nil, "", h.claudeConfigErr
 			}
@@ -2989,15 +2982,16 @@ func (h *terminalHandler) commandForTmuxTarget(
 				return "", nil, "", err
 			}
 		}
-		if h.claudeSandboxPluginErr != nil {
-			return "", nil, "", h.claudeSandboxPluginErr
+		// Kiwi Sandbox is intentionally not loaded into Claude for now. Preserve
+		// its related-project ergonomics through Claude's native --add-dir flag.
+		pluginArguments := []string{"--plugin-dir", h.claudePluginPath}
+		relatedDirectories, err := claudeRelatedProjectDirectories(thread)
+		if err != nil {
+			return "", nil, "", err
 		}
-		if h.claudeSandboxPluginPath == "" {
-			return "", nil, "", errors.New("Claude sandbox plugin path is unavailable")
-		}
-		pluginArguments := []string{
-			"--plugin-dir", h.claudePluginPath,
-			"--plugin-dir", h.claudeSandboxPluginPath,
+		if len(relatedDirectories) > 0 {
+			pluginArguments = append(pluginArguments, "--add-dir")
+			pluginArguments = append(pluginArguments, relatedDirectories...)
 		}
 		if gptAgent {
 			if launchOptions.Model == "" || !isCLIProxyAPIGPTModel(launchOptions.Model) {

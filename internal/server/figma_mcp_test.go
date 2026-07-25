@@ -62,7 +62,7 @@ func TestPiNativeArgumentsLoadFigmaBridgeOnlyWhenEnabled(t *testing.T) {
 }
 
 func TestClaudeNativeArgumentsPassFigmaMCPConfig(t *testing.T) {
-	without, err := claudeNativeArguments("", "", "", codingAgentLaunchOptions{})
+	without, err := claudeNativeArguments("", nil, "", codingAgentLaunchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestClaudeNativeArgumentsPassFigmaMCPConfig(t *testing.T) {
 		t.Fatalf("disabled arguments included --mcp-config: %#v", without)
 	}
 
-	with, err := claudeNativeArguments("", "", "", codingAgentLaunchOptions{
+	with, err := claudeNativeArguments("", nil, "", codingAgentLaunchOptions{
 		FigmaMCPURL: project.DefaultFigmaMCPURL,
 	})
 	if err != nil {
@@ -103,12 +103,11 @@ func TestTmuxCodingAgentLaunchWiresFigmaMCPPerAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := &terminalHandler{
-		projects:                store,
-		envPath:                 "/usr/bin/env",
-		claudePluginPath:        "/plugin/kiwi-code",
-		claudeSandboxPluginPath: "/plugin/kiwi-sandbox",
-		piExtensionPaths:        []string{"/extensions/activity.ts"},
-		piFigmaExtensionPath:    "/extensions/figma.ts",
+		projects:             store,
+		envPath:              "/usr/bin/env",
+		claudePluginPath:     "/plugin/kiwi-code",
+		piExtensionPaths:     []string{"/extensions/activity.ts"},
+		piFigmaExtensionPath: "/extensions/figma.ts",
 	}
 
 	launch := func(item project.Project, agent string) []string {
