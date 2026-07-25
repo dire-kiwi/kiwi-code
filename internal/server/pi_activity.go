@@ -19,8 +19,12 @@ const (
 	piActivityWorking          piActivityState = "working"
 	piActivityFinished         piActivityState = "finished"
 	piActivityIdle             piActivityState = "idle"
-	piWorkingTimeout                           = 15 * time.Second
+	// Integrations heartbeat every 5s. Allow several consecutive misses so a
+	// slow request or a busy host cannot prune a genuinely working thread and
+	// make the sidebar indicator flicker mid-turn.
+	piWorkingTimeout                           = 25 * time.Second
 	piActivitySnapshotInterval                 = 5 * time.Second
+	maxPiActivityTokenLength                   = 200
 )
 
 type piThreadActivity struct {
@@ -34,6 +38,11 @@ type piActivityKey struct {
 	projectID string
 	threadID  string
 	agent     string
+	// session separates concurrent agent sessions running against one thread.
+	// Claude Code reports activity from child sessions as well as the session
+	// the user drives; without this they would share an entry and each child
+	// finishing would flip the thread out of working while it is still busy.
+	session string
 }
 
 type piThreadActivityKey struct {
@@ -44,12 +53,19 @@ type piThreadActivityKey struct {
 type piActivityTracker struct {
 	mu         sync.Mutex
 	activities map[piActivityKey]piThreadActivity
-	changes    *broadcast.Broker[[]piThreadActivity]
+	// settled records the prompt token whose turn has already ended for a key.
+	// Integrations that report activity from several processes (Claude Code
+	// runs its heartbeat and its stop hook independently) can deliver a working
+	// heartbeat that was already in flight when the turn ended. Dropping those
+	// keeps a finished turn from flapping back to working.
+	settled map[piActivityKey]string
+	changes *broadcast.Broker[[]piThreadActivity]
 }
 
 func newPiActivityTracker() *piActivityTracker {
 	return &piActivityTracker{
 		activities: make(map[piActivityKey]piThreadActivity),
+		settled:    make(map[piActivityKey]string),
 		changes:    broadcast.NewBroker[[]piThreadActivity](broadcast.DefaultMaxPending),
 	}
 }
@@ -64,9 +80,30 @@ func (t *piActivityTracker) updateAgent(projectID, threadID, agent string, state
 }
 
 func (t *piActivityTracker) updateAgentTransition(projectID, threadID, agent string, state piActivityState, now time.Time) (*piThreadActivity, bool) {
+	activity, startedWorking, _ := t.updateAgentToken(projectID, threadID, agent, "", "", state, now)
+	return activity, startedWorking
+}
+
+// updateAgentToken applies an activity update. session scopes the update to one
+// agent session and token identifies the prompt it belongs to; both are optional
+// and an empty token opts out of ordering protection. The final return value
+// reports whether the update was applied.
+func (t *piActivityTracker) updateAgentToken(projectID, threadID, agent, session, token string, state piActivityState, now time.Time) (*piThreadActivity, bool, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	key := piActivityKey{projectID: projectID, threadID: threadID, agent: agent}
+	key := piActivityKey{projectID: projectID, threadID: threadID, agent: agent, session: session}
+	if token != "" {
+		if state == piActivityWorking {
+			if t.settled[key] == token {
+				return nil, false, false
+			}
+			delete(t.settled, key)
+		} else {
+			t.settled[key] = token
+		}
+	} else if state != piActivityWorking {
+		delete(t.settled, key)
+	}
 	previous, exists := t.activities[key]
 	startedWorking := state == piActivityWorking && (!exists || previous.State != piActivityWorking)
 	if state == piActivityIdle {
@@ -74,7 +111,7 @@ func (t *piActivityTracker) updateAgentTransition(projectID, threadID, agent str
 			delete(t.activities, key)
 			t.notifyLocked()
 		}
-		return nil, false
+		return nil, false, true
 	}
 	activity := piThreadActivity{
 		ProjectID: projectID,
@@ -86,7 +123,7 @@ func (t *piActivityTracker) updateAgentTransition(projectID, threadID, agent str
 	// Repeated working updates refresh UpdatedAt and are status events too.
 	// Publish every heartbeat so every connected client observes it.
 	t.notifyLocked()
-	return &activity, startedWorking
+	return &activity, startedWorking, true
 }
 
 func (t *piActivityTracker) list(now time.Time) []piThreadActivity {
@@ -96,6 +133,7 @@ func (t *piActivityTracker) list(now time.Time) []piThreadActivity {
 	for key, activity := range t.activities {
 		if activity.State == piActivityWorking && now.Sub(activity.UpdatedAt) > piWorkingTimeout {
 			delete(t.activities, key)
+			delete(t.settled, key)
 			removedStaleActivity = true
 		}
 	}
@@ -169,7 +207,13 @@ func (t *piActivityTracker) removeThread(projectID, threadID string) {
 	for key := range t.activities {
 		if key.projectID == projectID && key.threadID == threadID {
 			delete(t.activities, key)
+			delete(t.settled, key)
 			removedActivity = true
+		}
+	}
+	for key := range t.settled {
+		if key.projectID == projectID && key.threadID == threadID {
+			delete(t.settled, key)
 		}
 	}
 	if removedActivity {
@@ -185,6 +229,11 @@ func (t *piActivityTracker) removeProject(projectID string) {
 		if key.projectID == projectID {
 			delete(t.activities, key)
 			removedActivity = true
+		}
+	}
+	for key := range t.settled {
+		if key.projectID == projectID {
+			delete(t.settled, key)
 		}
 	}
 	if removedActivity {
@@ -269,6 +318,8 @@ func (s *Server) updateAgentActivity(w http.ResponseWriter, r *http.Request, age
 	var input struct {
 		State           piActivityState `json:"state"`
 		Agent           string          `json:"agent,omitempty"`
+		Session         string          `json:"session,omitempty"`
+		Token           string          `json:"token,omitempty"`
 		PromptStartedAt *time.Time      `json:"promptStartedAt,omitempty"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10))
@@ -285,6 +336,10 @@ func (s *Server) updateAgentActivity(w http.ResponseWriter, r *http.Request, age
 		writeError(w, http.StatusBadRequest, "A prompt start can only be reported with working activity.")
 		return
 	}
+	if len(input.Token) > maxPiActivityTokenLength || len(input.Session) > maxPiActivityTokenLength {
+		writeError(w, http.StatusBadRequest, "The "+label+" activity identifiers are too long.")
+		return
+	}
 	activityAgent := agent
 	if input.Agent != "" {
 		requestedAgent, normalizeErr := normalizeCodingAgent(input.Agent)
@@ -293,6 +348,14 @@ func (s *Server) updateAgentActivity(w http.ResponseWriter, r *http.Request, age
 			return
 		}
 		activityAgent = requestedAgent
+	}
+	now := time.Now().UTC()
+	activity, startedWorking, applied := s.piActivity.updateAgentToken(projectID, threadID, activityAgent, input.Session, input.Token, input.State, now)
+	if !applied {
+		// A heartbeat that was already in flight when the turn ended. Ignoring it
+		// keeps the finished indicator from flapping back to working.
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
 	if input.State == piActivityWorking && thread.ParentThreadID != "" && thread.ClosedAt != nil {
 		if _, err := s.projects.ReopenChildThread(projectID, thread.ParentThreadID, threadID); err != nil {
@@ -305,8 +368,6 @@ func (s *Server) updateAgentActivity(w http.ResponseWriter, r *http.Request, age
 		}
 	}
 
-	now := time.Now().UTC()
-	activity, startedWorking := s.piActivity.updateAgentTransition(projectID, threadID, activityAgent, input.State, now)
 	promptedAt := input.PromptStartedAt
 	if promptedAt == nil && startedWorking {
 		// Compatibility for already-running integrations that predate explicit

@@ -207,6 +207,48 @@ func TestAgentActivityAggregatesPiAndClaude(t *testing.T) {
 	}
 }
 
+func TestFinishedActivityIgnoresLateHeartbeatForTheSamePrompt(t *testing.T) {
+	tracker := newPiActivityTracker()
+	now := time.Now()
+	tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityWorking, now)
+	tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityFinished, now.Add(time.Second))
+
+	if _, _, applied := tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityWorking, now.Add(2*time.Second)); applied {
+		t.Fatal("a heartbeat from the finished prompt was applied")
+	}
+	activities := tracker.list(now.Add(3 * time.Second))
+	if len(activities) != 1 || activities[0].State != piActivityFinished {
+		t.Fatalf("late heartbeat resurrected the working indicator: %#v", activities)
+	}
+
+	if _, _, applied := tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-2", piActivityWorking, now.Add(4*time.Second)); !applied {
+		t.Fatal("the next prompt could not start working")
+	}
+	activities = tracker.list(now.Add(5 * time.Second))
+	if len(activities) != 1 || activities[0].State != piActivityWorking {
+		t.Fatalf("the next prompt did not show as working: %#v", activities)
+	}
+}
+
+func TestChildSessionFinishingKeepsTheDrivingSessionWorking(t *testing.T) {
+	tracker := newPiActivityTracker()
+	now := time.Now()
+	tracker.updateAgentToken("project", "thread", codingAgentClaude, "main", "prompt-1", piActivityWorking, now)
+	tracker.updateAgentToken("project", "thread", codingAgentClaude, "child", "prompt-2", piActivityWorking, now.Add(time.Second))
+	tracker.updateAgentToken("project", "thread", codingAgentClaude, "child", "prompt-2", piActivityFinished, now.Add(2*time.Second))
+
+	activities := tracker.list(now.Add(3 * time.Second))
+	if len(activities) != 1 || activities[0].State != piActivityWorking {
+		t.Fatalf("a child session finishing cleared the spinner: %#v", activities)
+	}
+
+	tracker.updateAgentToken("project", "thread", codingAgentClaude, "main", "prompt-1", piActivityFinished, now.Add(4*time.Second))
+	activities = tracker.list(now.Add(5 * time.Second))
+	if len(activities) != 1 || activities[0].State != piActivityFinished {
+		t.Fatalf("the completed indicator did not appear: %#v", activities)
+	}
+}
+
 func TestPiActivityEventStream(t *testing.T) {
 	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
 	if err != nil {
