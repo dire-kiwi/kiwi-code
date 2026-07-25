@@ -18,8 +18,11 @@ import { ProjectThreadFinder } from './components/organisms/ProjectThreadFinder'
 import { CleanupScreen } from './components/pages/CleanupScreen'
 import { EmptyWorkspace } from './components/pages/EmptyWorkspace'
 import { NewThreadScreen } from './components/pages/NewThreadScreen'
-import { ProjectSettingsScreen } from './components/pages/ProjectSettingsScreen'
-import { SettingsScreen } from './components/pages/SettingsScreen'
+import { SettingsShell } from './components/pages/settings/SettingsShell'
+import {
+  DEFAULT_GLOBAL_SETTINGS_SECTION,
+  DEFAULT_PROJECT_SETTINGS_SECTION,
+} from './components/pages/settings/registry'
 import { TmuxScreen } from './components/pages/TmuxScreen'
 import { TerminalWorkspace } from './components/pages/TerminalWorkspace'
 import {
@@ -27,12 +30,15 @@ import {
   NEW_THREAD_ROUTE,
   PROJECT_ROUTE,
   PROJECT_SETTINGS_ROUTE,
+  PROJECT_SETTINGS_SECTION_ROUTE,
   SETTINGS_ROUTE,
+  SETTINGS_SECTION_ROUTE,
   THREAD_ROUTE,
   TMUX_ROUTE,
   WORKSPACE_ROUTE,
   newThreadPath,
   projectSettingsPath,
+  settingsPath,
   workspacePath,
   workspaceToolFromRoute,
 } from './routes'
@@ -247,8 +253,10 @@ export default function App() {
   const threadMatch = useMatch(THREAD_ROUTE)
   const projectMatch = useMatch(PROJECT_ROUTE)
   const projectSettingsMatch = useMatch(PROJECT_SETTINGS_ROUTE)
+  const projectSettingsSectionMatch = useMatch(PROJECT_SETTINGS_SECTION_ROUTE)
   const cleanupMatch = useMatch(CLEANUP_ROUTE)
   const settingsMatch = useMatch(SETTINGS_ROUTE)
+  const settingsSectionMatch = useMatch(SETTINGS_SECTION_ROUTE)
   const tmuxMatch = useMatch(TMUX_ROUTE)
 
   const [profiles, setProfiles] = useState<Profile[]>([])
@@ -486,9 +494,11 @@ export default function App() {
     [projectMatch?.params.projectId, projects],
   )
 
+  const settingsProjectId = projectSettingsSectionMatch?.params.projectId
+    ?? projectSettingsMatch?.params.projectId
   const settingsProject = useMemo(
-    () => projects.find((project) => project.id === projectSettingsMatch?.params.projectId) ?? null,
-    [projectSettingsMatch?.params.projectId, projects],
+    () => projects.find((project) => project.id === settingsProjectId) ?? null,
+    [settingsProjectId, projects],
   )
 
   const activeProfile = useMemo(
@@ -837,7 +847,7 @@ export default function App() {
         bookmarkingThreadId={bookmarkingThreadId}
         cleanupSelected={Boolean(cleanupMatch)}
         tmuxSelected={Boolean(tmuxMatch)}
-        settingsSelected={Boolean(settingsMatch)}
+        settingsSelected={Boolean(settingsMatch || settingsSectionMatch)}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         onOpenFinder={() => setProjectFinderOpen(true)}
@@ -849,7 +859,7 @@ export default function App() {
           setSidebarOpen(false)
         }}
         onOpenProjectSettings={(projectId) => {
-          navigate(projectSettingsPath(projectId))
+          navigate(projectSettingsPath(projectId, DEFAULT_PROJECT_SETTINGS_SECTION))
           setSidebarOpen(false)
         }}
         onOpenCleanup={() => {
@@ -861,7 +871,7 @@ export default function App() {
           setSidebarOpen(false)
         }}
         onOpenSettings={() => {
-          navigate(SETTINGS_ROUTE)
+          navigate(settingsPath(DEFAULT_GLOBAL_SETTINGS_SECTION))
           setSidebarOpen(false)
         }}
         onProjectCreated={handleCreated}
@@ -898,8 +908,15 @@ export default function App() {
             />
             <Route
               path={SETTINGS_ROUTE}
+              element={<Navigate to={settingsPath(DEFAULT_GLOBAL_SETTINGS_SECTION)} replace />}
+            />
+            <Route
+              path={SETTINGS_SECTION_ROUTE}
               element={(
-                <SettingsScreen
+                <SettingsShell
+                  scope="global"
+                  profiles={profiles}
+                  onProjectUpdated={handleProjectUpdated}
                   onOpenSidebar={() => setSidebarOpen(true)}
                   onBack={() => navigate(workspaceReturnDestination(), { replace: true })}
                 />
@@ -908,13 +925,21 @@ export default function App() {
             <Route
               path={PROJECT_SETTINGS_ROUTE}
               element={settingsProject ? (
-                <ProjectSettingsScreen
-                  key={settingsProject.id}
+                <Navigate to={projectSettingsPath(settingsProject.id, DEFAULT_PROJECT_SETTINGS_SECTION)} replace />
+              ) : (
+                <Navigate to={defaultWorkspacePath ?? '/'} replace />
+              )}
+            />
+            <Route
+              path={PROJECT_SETTINGS_SECTION_ROUTE}
+              element={settingsProject ? (
+                <SettingsShell
+                  scope="project"
                   project={settingsProject}
                   profiles={profiles}
+                  onProjectUpdated={handleProjectUpdated}
                   onOpenSidebar={() => setSidebarOpen(true)}
                   onBack={() => navigate(workspaceReturnDestination(settingsProject.id), { replace: true })}
-                  onProjectUpdated={handleProjectUpdated}
                 />
               ) : (
                 <Navigate to={defaultWorkspacePath ?? '/'} replace />
