@@ -12,6 +12,7 @@ import {
   RotateCcw,
   Save,
   Settings2,
+  Shield,
   Sparkles,
   Trash2,
   UserRound,
@@ -44,6 +45,7 @@ import { FormScreenTemplate } from '../templates/FormScreenTemplate'
 type SettingsScreenProps = {
   onOpenSidebar: () => void
   onBack: () => void
+  onOpenSandboxSettings: () => void
 }
 
 type SavingAction = 'worktree-save' | 'worktree-reset' | 'claude-profiles-save' | 'cleanup-save' | 'nesting-save' | 'workflows-save' | 'theme-save' | 'theme-reset' | null
@@ -117,7 +119,7 @@ const themeColorGroups: ThemeColorGroup[] = [
   },
 ]
 
-export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
+export function SettingsScreen({ onOpenSidebar, onBack, onOpenSandboxSettings }: SettingsScreenProps) {
   const { setTheme: applyTheme } = useTheme()
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [worktreeBasePath, setWorktreeBasePath] = useState('')
@@ -1156,6 +1158,34 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
                 >
                   {saving === 'theme-save' ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
                   Save theme
+                </PrimaryButton>
+              </div>
+            </Surface>
+
+            <Surface as="section" variant="elevated-panel" className="overflow-hidden">
+              <SectionHeader
+                icon={<Shield size={16} />}
+                title="Kiwi Sandbox"
+                description="Default file, network, and shell policy for sandboxed Pi and Claude Code sessions."
+                tone="green"
+              />
+
+              <div className="p-4 sm:p-5">
+                <InfoCallout>
+                  The global policy applies to every project. Threads can override it for their own git branch
+                  from the thread sidebar.
+                </InfoCallout>
+              </div>
+
+              <div className="flex items-center justify-end border-t border-ghost-border/60 bg-ghost-black/15 px-4 py-3 sm:px-5">
+                <PrimaryButton
+                  type="button"
+                  size="md"
+                  onClick={onOpenSandboxSettings}
+                  className="flex min-w-40 items-center justify-center gap-2"
+                >
+                  <Shield size={14} />
+                  Open sandbox settings
                 </PrimaryButton>
               </div>
             </Surface>
