@@ -7,6 +7,13 @@ import { LoaderCircle, RefreshCw } from 'lucide-react'
 import { uploadPiImage } from '../../api'
 import { apiWebSocketUrl } from '../../apiUrl'
 import { imageFilesFromClipboard, validateImageAdditions } from '../../lib/promptImages'
+import {
+  isTerminalEscapeKey,
+  shouldBridgeTerminalControl,
+  shouldForwardTerminalBlurAsEscape,
+  TERMINAL_ESCAPE_SEQUENCE,
+  terminalControlSequence,
+} from '../../terminalKeyBridge.mjs'
 import { toTerminalTheme, useTheme } from '../../theme'
 import type { CodingAgent, ConnectionStatus, TerminalTool } from '../../types'
 import { Button } from '../atoms/Button'
@@ -206,26 +213,6 @@ export function TerminalSession({
         return true
       })
 
-      function handleTerminalKeyDown(event: KeyboardEvent) {
-        const isEscape = event.key === 'Escape' || event.code === 'Escape'
-        const isWordErase = (event.ctrlKey || event.metaKey)
-          && !event.altKey
-          && !event.shiftKey
-          && (event.key.toLowerCase() === 'w' || event.code === 'KeyW')
-        const target = event.target
-        const terminalHasFocus = terminalHost.contains(document.activeElement)
-          || (target instanceof Node && terminalHost.contains(target))
-        if (!activeRef.current || !terminalHasFocus || (!isEscape && !isWordErase)) return
-
-        // Capture browser-reserved keys before the browser or xterm can handle
-        // them, then emit the terminal sequence exactly once. Meta+W is included
-        // for macOS browsers, while Escape needs an explicit bridge in web mode.
-        event.preventDefault()
-        event.stopImmediatePropagation()
-        terminal.input(isEscape ? '\x1b' : '\x17')
-      }
-      window.addEventListener('keydown', handleTerminalKeyDown, true)
-
       fitRef.current = fit
       terminalRef.current = terminal
       fit.fit()
@@ -257,6 +244,110 @@ export function TerminalSession({
       socketUrl.search = params.toString()
       const socket = new WebSocket(socketUrl)
       socket.binaryType = 'arraybuffer'
+      let escapeHandledOnKeyDown = false
+      let lastEscapeKeyboardEventAt = Number.NEGATIVE_INFINITY
+      let lastPointerDownAt = Number.NEGATIVE_INFINITY
+      let terminalBlurFrame = 0
+
+      function terminalHasKeyboardFocus(event: KeyboardEvent) {
+        const target = event.target
+        return terminalHost.contains(document.activeElement)
+          || (target instanceof Node && terminalHost.contains(target))
+      }
+
+      function pageHasNeutralActiveElement() {
+        const activeElement = document.activeElement
+        return activeElement === document.body || activeElement === document.documentElement
+      }
+
+      function pageHasNeutralKeyboardFocus(event: KeyboardEvent) {
+        const target = event.target
+        const targetIsPage = target === document.body || target === document.documentElement
+        return pageHasNeutralActiveElement() && targetIsPage
+      }
+
+      function terminalShouldHandle(data: string, event: KeyboardEvent) {
+        return shouldBridgeTerminalControl(
+          data,
+          terminalHasKeyboardFocus(event),
+          pageHasNeutralKeyboardFocus(event),
+        )
+      }
+
+      function sendTerminalInput(data: string) {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'input', data }))
+        }
+      }
+
+      function consumeTerminalKey(event: KeyboardEvent, data: string) {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        sendTerminalInput(data)
+      }
+
+      function handleTerminalKeyDown(event: KeyboardEvent) {
+        const data = terminalControlSequence(event)
+        if (data === TERMINAL_ESCAPE_SEQUENCE) lastEscapeKeyboardEventAt = performance.now()
+        if (!activeRef.current || data === null || !terminalShouldHandle(data, event)) return
+
+        // Capture browser-reserved keys before the browser or xterm can handle
+        // them, then write directly to the terminal socket. Meta+W is included
+        // for macOS browsers, while Escape needs an explicit bridge in web mode.
+        if (data === TERMINAL_ESCAPE_SEQUENCE) escapeHandledOnKeyDown = true
+        consumeTerminalKey(event, data)
+      }
+
+      function handleTerminalKeyUp(event: KeyboardEvent) {
+        if (!isTerminalEscapeKey(event)) return
+
+        lastEscapeKeyboardEventAt = performance.now()
+        const handledOnKeyDown = escapeHandledOnKeyDown
+        escapeHandledOnKeyDown = false
+        if (!activeRef.current || !terminalShouldHandle(TERMINAL_ESCAPE_SEQUENCE, event)) return
+
+        // Some browser/window-manager combinations reserve Escape on keydown but
+        // still expose keyup. Use it as a fallback without sending two escapes in
+        // browsers where the keydown bridge already ran.
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        if (!handledOnKeyDown) sendTerminalInput(TERMINAL_ESCAPE_SEQUENCE)
+      }
+
+      function handlePagePointerDown() {
+        lastPointerDownAt = performance.now()
+      }
+
+      function handleTerminalFocusOut() {
+        cancelAnimationFrame(terminalBlurFrame)
+        terminalBlurFrame = requestAnimationFrame(() => {
+          if (disposed) return
+
+          const now = performance.now()
+          if (!shouldForwardTerminalBlurAsEscape({
+            active: activeRef.current,
+            isPiTerminal: tool === 'pi',
+            pageStillFocused: document.hasFocus(),
+            pageHasNeutralFocus: pageHasNeutralActiveElement(),
+            recentPointerDown: now - lastPointerDownAt < 250,
+            recentEscapeEvent: now - lastEscapeKeyboardEventAt < 100,
+          })) return
+
+          // Full Chrome can consume the first Escape before dispatching any
+          // keyboard event, leaving xterm's hidden textarea focused on <body>.
+          // A keyboard-caused blur with no pointer or window focus change is the
+          // only observable signal, so forward that swallowed Escape once.
+          escapeHandledOnKeyDown = true
+          lastEscapeKeyboardEventAt = now
+          terminal.focus()
+          sendTerminalInput(TERMINAL_ESCAPE_SEQUENCE)
+        })
+      }
+
+      window.addEventListener('keydown', handleTerminalKeyDown, true)
+      window.addEventListener('keyup', handleTerminalKeyUp, true)
+      window.addEventListener('pointerdown', handlePagePointerDown, true)
+      terminalHost.addEventListener('focusout', handleTerminalFocusOut, true)
 
       function updateStatus(next: ConnectionStatus) {
         if (disposed) return
@@ -389,11 +480,7 @@ export function TerminalSession({
       }
       host.addEventListener('paste', handlePaste, true)
 
-      const inputDisposable = terminal.onData((data) => {
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: 'input', data }))
-        }
-      })
+      const inputDisposable = terminal.onData((data) => sendTerminalInput(data))
 
       const resizeDisposable = terminal.onResize(({ cols, rows }) => {
         if (socket.readyState === WebSocket.OPEN) {
@@ -418,11 +505,15 @@ export function TerminalSession({
       disposeTerminal = () => {
         disposed = true
         cancelAnimationFrame(resizeFrame)
+        cancelAnimationFrame(terminalBlurFrame)
         if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
         if (reconnectStableTimer !== undefined) window.clearTimeout(reconnectStableTimer)
         if (pasteNoticeTimer !== undefined) window.clearTimeout(pasteNoticeTimer)
         uploadController.abort()
         window.removeEventListener('keydown', handleTerminalKeyDown, true)
+        window.removeEventListener('keyup', handleTerminalKeyUp, true)
+        window.removeEventListener('pointerdown', handlePagePointerDown, true)
+        terminalHost.removeEventListener('focusout', handleTerminalFocusOut, true)
         host.removeEventListener('paste', handlePaste, true)
         observer.disconnect()
         clipboardDisposable.dispose()
