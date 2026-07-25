@@ -1,0 +1,49 @@
+export type ActivityGroupThread = {
+  id: string
+  createdAt: string
+  lastPromptAt?: string
+  parentThreadId?: string
+  closedAt?: string
+  archivedAt?: string
+  bookmarked?: boolean
+}
+
+export type ActivityGroupProject = {
+  id: string
+  threads: readonly ActivityGroupThread[]
+}
+
+export type ActivityGroupActivity = {
+  projectId: string
+  threadId: string
+  state: string
+  updatedAt?: string
+}
+
+export type ActivityGroupEntry = {
+  projectId: string
+  threadId: string
+  /** Milliseconds timestamp used for the row's elapsed-time display. */
+  at: number
+}
+
+export type ActivityViewGroups = {
+  working: ActivityGroupEntry[]
+  needsReview: ActivityGroupEntry[]
+  pinned: ActivityGroupEntry[]
+  recent: ActivityGroupEntry[]
+  hiddenRecentCount: number
+}
+
+export const recentThreadLimit: number
+
+export function activityViewGroups(
+  projects: readonly ActivityGroupProject[],
+  activities: readonly ActivityGroupActivity[],
+  recentLimit?: number,
+): ActivityViewGroups
+
+export function formatRelativeShort(
+  value: string | number | null | undefined,
+  nowMs: number,
+): string
