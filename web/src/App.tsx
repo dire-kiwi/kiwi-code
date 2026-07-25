@@ -19,6 +19,7 @@ import { CleanupScreen } from './components/pages/CleanupScreen'
 import { EmptyWorkspace } from './components/pages/EmptyWorkspace'
 import { NewThreadScreen } from './components/pages/NewThreadScreen'
 import { ProjectSettingsScreen } from './components/pages/ProjectSettingsScreen'
+import { SandboxSettingsScreen } from './components/pages/SandboxSettingsScreen'
 import { SettingsScreen } from './components/pages/SettingsScreen'
 import { TmuxScreen } from './components/pages/TmuxScreen'
 import { TerminalWorkspace } from './components/pages/TerminalWorkspace'
@@ -27,8 +28,10 @@ import {
   NEW_THREAD_ROUTE,
   PROJECT_ROUTE,
   PROJECT_SETTINGS_ROUTE,
+  SANDBOX_SETTINGS_ROUTE,
   SETTINGS_ROUTE,
   THREAD_ROUTE,
+  THREAD_SANDBOX_ROUTE,
   TMUX_ROUTE,
   WORKSPACE_ROUTE,
   newThreadPath,
@@ -902,7 +905,36 @@ export default function App() {
                 <SettingsScreen
                   onOpenSidebar={() => setSidebarOpen(true)}
                   onBack={() => navigate(workspaceReturnDestination(), { replace: true })}
+                  onOpenSandboxSettings={() => navigate(SANDBOX_SETTINGS_ROUTE)}
                 />
+              )}
+            />
+            <Route
+              path={SANDBOX_SETTINGS_ROUTE}
+              element={(
+                <SandboxSettingsScreen
+                  scope="global"
+                  onOpenSidebar={() => setSidebarOpen(true)}
+                  onBack={() => navigate(SETTINGS_ROUTE)}
+                />
+              )}
+            />
+            <Route
+              path={THREAD_SANDBOX_ROUTE}
+              element={selectedProject && selectedThread ? (
+                <SandboxSettingsScreen
+                  key={`${selectedProject.id}:${selectedThread.id}:sandbox`}
+                  scope="thread"
+                  project={selectedProject}
+                  thread={selectedThread}
+                  onOpenSidebar={() => setSidebarOpen(true)}
+                  onBack={() => navigate(
+                    workspacePath(selectedProject.id, selectedThread.id, defaultWorkspaceTool),
+                    { replace: true },
+                  )}
+                />
+              ) : (
+                <Navigate to={defaultWorkspacePath ?? '/'} replace />
               )}
             />
             <Route

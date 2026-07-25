@@ -13,6 +13,8 @@ import type {
   ProcessWindow,
   Profile,
   Project,
+  SandboxConfig,
+  SandboxConfigState,
   Thread,
   SavedWorkflow,
   TmuxBrowserSession,
@@ -95,6 +97,34 @@ export function updateSettings(input: string | Partial<Pick<
     method: 'PUT',
     body: JSON.stringify(typeof input === 'string' ? { worktreeBasePath: input } : input),
   })
+}
+
+export function getGlobalSandboxConfig(signal?: AbortSignal) {
+  return request<SandboxConfigState>('/api/sandbox/config', { signal })
+}
+
+export function updateGlobalSandboxConfig(config: SandboxConfig) {
+  return request<SandboxConfigState>('/api/sandbox/config', {
+    method: 'PUT',
+    body: JSON.stringify(config),
+  })
+}
+
+export function getThreadSandboxConfig(projectId: string, threadId: string, signal?: AbortSignal) {
+  return request<SandboxConfigState>(
+    `/api/projects/${projectId}/threads/${threadId}/sandbox/config`,
+    { signal },
+  )
+}
+
+export function updateThreadSandboxConfig(projectId: string, threadId: string, config: SandboxConfig) {
+  return request<SandboxConfigState>(
+    `/api/projects/${projectId}/threads/${threadId}/sandbox/config`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    },
+  )
 }
 
 export function getCleanupOverview(signal?: AbortSignal) {
