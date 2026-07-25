@@ -47,12 +47,12 @@ func TestFigmaMCPURLForProjectFollowsProjectToggle(t *testing.T) {
 }
 
 func TestPiNativeArgumentsLoadFigmaBridgeOnlyWhenEnabled(t *testing.T) {
-	without := piNativeArguments("/tmp/sessions", nil, nil, "/tmp/figma.ts", codingAgentLaunchOptions{})
+	without := piNativeArguments("/tmp/sessions", "", nil, nil, "/tmp/figma.ts", codingAgentLaunchOptions{})
 	if slices.Contains(without, "/tmp/figma.ts") {
 		t.Fatalf("disabled arguments loaded the Figma bridge: %#v", without)
 	}
 
-	with := piNativeArguments("/tmp/sessions", nil, nil, "/tmp/figma.ts", codingAgentLaunchOptions{
+	with := piNativeArguments("/tmp/sessions", "", nil, nil, "/tmp/figma.ts", codingAgentLaunchOptions{
 		FigmaMCPURL: project.DefaultFigmaMCPURL,
 	})
 	index := slices.Index(with, "/tmp/figma.ts")
