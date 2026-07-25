@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -2285,6 +2286,74 @@ func TestStoreRejectsInvalidProjectWorktreeBranchPrefixes(t *testing.T) {
 	}
 }
 
+func TestStoreRunsProjectEnvironmentSetupAndCleanup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses POSIX shell commands")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+
+	repositoryPath := createGitRepository(t)
+	dataDirectory := filepath.Join(t.TempDir(), "data")
+	store, err := NewStore(filepath.Join(dataDirectory, "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", repositoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupMarker := filepath.Join(t.TempDir(), "setup.txt")
+	cleanupMarker := filepath.Join(t.TempDir(), "cleanup.txt")
+	environment := defaultLocalEnvironment()
+	environment.Name = "Development"
+	environment.SetupScripts.Default = `printf '%s\n%s' "$TEST_VALUE" "$CODEX_WORKTREE_PATH" > "$SETUP_MARKER"`
+	environment.CleanupScripts.Default = `printf '%s\n%s' "$TEST_VALUE" "$KIWI_CODE_WORKTREE_PATH" > "$CLEANUP_MARKER"`
+	environment.Variables = []EnvironmentVariable{
+		{Name: "TEST_VALUE", Value: "available"},
+		{Name: "SETUP_MARKER", Value: setupMarker},
+		{Name: "CLEANUP_MARKER", Value: cleanupMarker},
+	}
+	item, err = store.UpdateProject(item.ID, ProjectUpdate{Environment: &environment})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Environment.Name != "Development" {
+		t.Fatalf("saved environment = %#v", item.Environment)
+	}
+
+	thread, err := store.AddThread(item.ID, "Environment lifecycle", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupContents, err := os.ReadFile(setupMarker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(setupContents), "available\n"+thread.WorktreePath; got != want {
+		t.Fatalf("setup marker = %q, want %q", got, want)
+	}
+
+	if err := store.DeleteThread(item.ID, thread.ID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := store.CleanupOrphanedWorktrees(time.Now().UTC().Add(31 * 24 * time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Deleted) != 1 || result.Deleted[0] != thread.WorktreePath {
+		t.Fatalf("cleanup result = %#v", result)
+	}
+	cleanupContents, err := os.ReadFile(cleanupMarker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(cleanupContents), "available\n"+thread.WorktreePath; got != want {
+		t.Fatalf("cleanup marker = %q, want %q", got, want)
+	}
+}
+
 func TestStoreCreatesGitWorktreeFromSelectedBaseBranch(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
@@ -3045,5 +3114,40 @@ func TestEmptyStoreReturnsAnEmptyList(t *testing.T) {
 	}
 	if len(items) != 0 {
 		t.Fatalf("expected an empty list, got %#v", items)
+	}
+}
+
+func TestFigmaMCPProjectToggleRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "data", "projects.json")
+	store, err := NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	item, err := store.Add("Example", t.TempDir(), PersonalProfileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.FigmaMCPEnabled {
+		t.Fatal("new projects must not enable Figma MCP")
+	}
+	enabled := true
+	updated, err := store.UpdateProject(item.ID, ProjectUpdate{FigmaMCPEnabled: &enabled})
+	if err != nil || !updated.FigmaMCPEnabled {
+		t.Fatalf("enable Figma MCP = %#v, err=%v", updated, err)
+	}
+
+	reloaded, err := NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := reloaded.Get(item.ID)
+	if err != nil || !persisted.FigmaMCPEnabled {
+		t.Fatalf("reloaded project = %#v, err=%v", persisted, err)
+	}
+
+	disabled := false
+	if updated, err = reloaded.UpdateProject(item.ID, ProjectUpdate{FigmaMCPEnabled: &disabled}); err != nil || updated.FigmaMCPEnabled {
+		t.Fatalf("disable Figma MCP = %#v, err=%v", updated, err)
 	}
 }

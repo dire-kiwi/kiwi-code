@@ -1,4 +1,4 @@
-import { apiUrl } from './apiUrl'
+import { apiUrl, apiWebSocketUrl } from './apiUrl'
 import type {
   AgentSkillStatus,
   AppSettings,
@@ -9,8 +9,12 @@ import type {
   CodingAgentConfig,
   DirectorySuggestion,
   GitBranchState,
+  LocalEnvironment,
+  ProcessWindow,
   Profile,
   Project,
+  SandboxConfig,
+  SandboxConfigState,
   Thread,
   SavedWorkflow,
   TmuxBrowserSession,
@@ -94,6 +98,34 @@ export function updateSettings(input: string | Partial<Pick<
   })
 }
 
+export function getGlobalSandboxConfig(signal?: AbortSignal) {
+  return request<SandboxConfigState>('/api/sandbox/config', { signal })
+}
+
+export function updateGlobalSandboxConfig(config: SandboxConfig) {
+  return request<SandboxConfigState>('/api/sandbox/config', {
+    method: 'PUT',
+    body: JSON.stringify(config),
+  })
+}
+
+export function getThreadSandboxConfig(projectId: string, threadId: string, signal?: AbortSignal) {
+  return request<SandboxConfigState>(
+    `/api/projects/${projectId}/threads/${threadId}/sandbox/config`,
+    { signal },
+  )
+}
+
+export function updateThreadSandboxConfig(projectId: string, threadId: string, config: SandboxConfig) {
+  return request<SandboxConfigState>(
+    `/api/projects/${projectId}/threads/${threadId}/sandbox/config`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    },
+  )
+}
+
 export function getCleanupOverview(signal?: AbortSignal) {
   return request<CleanupOverview>('/api/cleanup', { signal })
 }
@@ -139,7 +171,13 @@ export function createProject(input: { name: string; path: string; profileId: st
 
 export function updateProject(
   id: string,
-  input: { profileId?: string; subAgentNestingDepthOverride?: number | null; worktreeBranchPrefix?: string },
+  input: {
+    profileId?: string
+    subAgentNestingDepthOverride?: number | null
+    worktreeBranchPrefix?: string
+    environment?: LocalEnvironment
+    figmaMCPEnabled?: boolean
+  },
 ) {
   return request<Project>(`/api/projects/${encodeURIComponent(id)}`, {
     method: 'PATCH',
@@ -157,6 +195,21 @@ export function updateProjectSubAgentNestingDepth(id: string, depth: number | nu
 
 export function updateProjectWorktreeBranchPrefix(id: string, prefix: string) {
   return updateProject(id, { worktreeBranchPrefix: prefix })
+}
+
+export function updateProjectEnvironment(id: string, environment: LocalEnvironment) {
+  return updateProject(id, { environment })
+}
+
+export function runEnvironmentAction(projectId: string, threadId: string, actionId: string) {
+  return request<ProcessWindow>(
+    `${threadPath(projectId, threadId)}/environment/actions/${encodeURIComponent(actionId)}`,
+    { method: 'POST', body: '{}' },
+  )
+}
+
+export function updateProjectFigmaMCPEnabled(id: string, enabled: boolean) {
+  return updateProject(id, { figmaMCPEnabled: enabled })
 }
 
 export function updateProjectOrder(profileId: string, projectIds: string[]) {
@@ -342,6 +395,18 @@ export function performBrowserAction<Result = unknown>(
     body: JSON.stringify(action),
     signal,
   })
+}
+
+export function browserStreamUrl(projectId: string, threadId: string) {
+  return apiWebSocketUrl(`${browserPath(projectId, threadId)}/stream`).toString()
+}
+
+export function browserRecordingDownloadUrl(projectId: string, threadId: string, recordingId: string) {
+  return apiUrl(`${browserPath(projectId, threadId)}/recordings/${encodeURIComponent(recordingId)}`)
+}
+
+export function browserRecordingPlaybackUrl(projectId: string, threadId: string, recordingId: string) {
+  return `${browserRecordingDownloadUrl(projectId, threadId, recordingId)}?disposition=inline`
 }
 
 export async function getBrowserFrame(

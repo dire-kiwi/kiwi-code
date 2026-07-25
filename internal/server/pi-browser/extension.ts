@@ -19,6 +19,7 @@ import { Type } from "typebox";
 const SessionAction = StringEnum(
   ["status", "start", "disconnect", "stop"] as const,
 );
+const RecordingAction = StringEnum(["status", "start", "stop"] as const);
 const TabAction = StringEnum(["list", "new", "select", "close"] as const);
 const NavigationAction = StringEnum(
   ["goto", "back", "forward", "reload"] as const,
@@ -36,6 +37,7 @@ const BROWSER_SKILL_PATH = fileURLToPath(
 const BROWSER_TOOL_LOADER = "browser_tool_search";
 const BROWSER_TOOL_NAMES = [
   "browser_session",
+  "browser_recording",
   "browser_tabs",
   "browser_navigate",
   "browser_snapshot",
@@ -53,6 +55,8 @@ const BROWSER_TOOL_NAME_SET = new Set<string>(BROWSER_TOOL_NAMES);
 const BROWSER_TOOL_SEARCH_TEXT: Record<BrowserToolName, string> = {
   browser_session:
     "connect launch start status lifecycle disconnect stop chrome chromium endpoint",
+  browser_recording:
+    "record recording video webm start stop status capture timeout idle watchdog",
   browser_tabs: "tab tabs window windows target list open create select switch close",
   browser_navigate:
     "browse visit open url website navigate navigation goto reload refresh back forward history",
@@ -157,7 +161,10 @@ function errorMessage(error: unknown): string {
 }
 
 function browserActionsEndpoint(): string {
-  const rawEndpoint = process.env.KIWI_CODE_THREAD_ENDPOINT?.trim().replace(/\/+$/, "");
+  const rawEndpoint = (
+    process.env.KIWI_CODE_BROWSER_THREAD_ENDPOINT
+    ?? process.env.KIWI_CODE_THREAD_ENDPOINT
+  )?.trim().replace(/\/+$/, "");
   if (!rawEndpoint) {
     throw new Error(
       "KIWI_CODE_THREAD_ENDPOINT is not set. Browser tools must run inside a Kiwi Code agent session.",
@@ -214,7 +221,29 @@ function hasPageFields(value: unknown): boolean {
   );
 }
 
+function validBrowserRecording(value: unknown): boolean {
+  if (!isRecord(value) || !hasFields(value, [
+    ["id", "string"],
+    ["startedAt", "string"],
+    ["state", "string"],
+    ["targetId", "string"],
+    ["title", "string"],
+  ])) return false;
+  if (!["starting", "recording", "finalizing", "completed"].includes(value.state as string)) return false;
+  if (value.idleTimeoutMs !== undefined && typeof value.idleTimeoutMs !== "number") return false;
+  if (value.idleDeadlineAt !== undefined && typeof value.idleDeadlineAt !== "string") return false;
+  return true;
+}
+
 function validBrowserActionResult(operation: string, result: Record<string, unknown>): boolean {
+  if (operation === "recording.status") {
+    return Object.hasOwn(result, "recording") &&
+      (result.recording === null || validBrowserRecording(result.recording)) &&
+      Array.isArray(result.recordings) && result.recordings.every(validBrowserRecording);
+  }
+  if (operation === "recording.start" || operation === "recording.stop") {
+    return validBrowserRecording(result);
+  }
   if (operation.startsWith("session.")) {
     if (!hasFields(result, [["message", "string"], ["status", "object"]])) return false;
     const status = result.status as Record<string, unknown>;
@@ -359,7 +388,7 @@ async function browserAction<T>(
   }
   if (response.status === 503) {
     throw new Error(
-      "Kiwi Code's in-app browser provider is unavailable (HTTP 503). Start or reconnect the Kiwi Code desktop app.",
+      "Kiwi Code's in-app browser provider is unavailable (HTTP 503). Check the configured browser backend; headless mode requires a supported Chrome installation, while Electron mode requires the desktop app.",
     );
   }
   if (!response.ok) {
@@ -473,6 +502,27 @@ function formatStatus(status: {
   ].join("\n");
 }
 
+function formatRecording(recording: Record<string, unknown>): string {
+  const lines = [
+    `Recording: ${recording.id}`,
+    `State: ${recording.state}`,
+    `Title: ${recording.title}`,
+    `Target: ${recording.targetId}`,
+    `Started: ${recording.startedAt}`,
+  ];
+  if (typeof recording.idleTimeoutMs === "number") {
+    lines.push(`Idle timeout: ${Math.round(recording.idleTimeoutMs / 1000)} seconds`);
+  }
+  if (typeof recording.idleDeadlineAt === "string") {
+    lines.push(`Idle deadline: ${recording.idleDeadlineAt}`);
+  }
+  if (typeof recording.durationMs === "number") {
+    lines.push(`Duration: ${recording.durationMs} ms`);
+  }
+  if (typeof recording.bytes === "number") lines.push(`Bytes: ${recording.bytes}`);
+  return lines.join("\n");
+}
+
 function formatTabs(result: {
   currentTargetId?: string;
   message: string;
@@ -540,6 +590,84 @@ export default function chromeDevtoolsExtension(pi: ExtensionAPI): void {
           ...result.status,
           backend: BROWSER_BACKEND,
         },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "browser_recording",
+    label: "Browser Recording",
+    description:
+      "Inspect, start, or stop video recording for the current in-app browser tab. Start requires a concise purpose title, lazily opens a blank tab if needed, and defaults to a 300-second inactivity timeout. Browser operations refresh that timeout; if requests stop, Kiwi Code automatically finalizes the WebM.",
+    parameters: Type.Object(
+      {
+        action: Type.Unsafe<"status" | "start" | "stop">({
+          ...RecordingAction,
+          description: "Recording operation.",
+        }),
+        targetId: Type.Optional(
+          Type.String({
+            description: "Target tab ID for start; defaults to the selected tab.",
+            minLength: 1,
+          }),
+        ),
+        title: Type.Optional(
+          Type.String({
+            description: "Required for start: 2–12 words explaining the point of the recording.",
+            minLength: 3,
+            maxLength: 80,
+          }),
+        ),
+        recordingId: Type.Optional(
+          Type.String({
+            description: "Exact recording ID required for stop.",
+            minLength: 1,
+          }),
+        ),
+        idleTimeoutSeconds: Type.Optional(
+          Type.Integer({
+            description: "Auto-stop after this many seconds without browser activity (default 300).",
+            maximum: 3_600,
+            minimum: 30,
+          }),
+        ),
+      },
+      { additionalProperties: false },
+    ),
+    executionMode: "sequential",
+    async execute(_id, params, signal) {
+      if (params.action !== "stop" && params.recordingId) {
+        throw new Error("recordingId is only valid for recording.stop.");
+      }
+      if (params.action === "stop" && !params.recordingId) {
+        throw new Error("recordingId is required for recording.stop.");
+      }
+      if (params.action === "start") {
+        const title = params.title?.replace(/\s+/g, " ").trim() ?? "";
+        const words = title.split(" ").filter(Boolean);
+        if (title.length < 3 || title.length > 80 || words.length < 2 || words.length > 12) {
+          throw new Error("recording.start requires a 2–12 word title explaining the point of the recording.");
+        }
+      } else if (params.targetId || params.title || params.idleTimeoutSeconds !== undefined) {
+        throw new Error("targetId, title, and idleTimeoutSeconds are only valid for recording.start.");
+      }
+      const operationParams: Record<string, unknown> = {};
+      if (params.action === "start") {
+        if (params.targetId) operationParams.targetId = params.targetId;
+        operationParams.title = params.title!.replace(/\s+/g, " ").trim();
+        operationParams.idleTimeoutMs = (params.idleTimeoutSeconds ?? 300) * 1_000;
+      } else if (params.action === "stop") {
+        operationParams.recordingId = params.recordingId;
+      }
+      const result = await browserAction<any>(`recording.${params.action}`, operationParams, signal);
+      const text = params.action === "status"
+        ? result.recording
+          ? `${formatRecording(result.recording)}\nCompleted recordings: ${result.recordings.length}`
+          : `No browser recording is active.\nCompleted recordings: ${result.recordings.length}`
+        : formatRecording(result);
+      return {
+        content: [{ type: "text", text }],
+        details: result,
       };
     },
   });

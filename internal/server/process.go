@@ -261,6 +261,27 @@ func (h *terminalHandler) processForRequest(item project.Project, thread project
 }
 
 func (h *terminalHandler) newProcessWindow(item project.Project, thread project.Thread, rawName, rawCommand string) (result processWindow, err error) {
+	return h.newProcessWindowWithEnvironment(item, thread, rawName, rawCommand, nil, false)
+}
+
+func (h *terminalHandler) newEnvironmentActionProcess(
+	item project.Project,
+	thread project.Thread,
+	rawName string,
+	rawCommand string,
+	variables []project.EnvironmentVariable,
+) (processWindow, error) {
+	return h.newProcessWindowWithEnvironment(item, thread, rawName, rawCommand, variables, true)
+}
+
+func (h *terminalHandler) newProcessWindowWithEnvironment(
+	item project.Project,
+	thread project.Thread,
+	rawName string,
+	rawCommand string,
+	variables []project.EnvironmentVariable,
+	uniqueName bool,
+) (result processWindow, err error) {
 	name, err := normalizeProcessName(rawName)
 	if err != nil {
 		return processWindow{}, err
@@ -303,10 +324,22 @@ func (h *terminalHandler) newProcessWindow(item project.Project, thread project.
 	if err != nil {
 		return processWindow{}, err
 	}
-	for _, window := range existing {
-		if window.Name == name {
+	baseName := name
+	for suffix := 1; ; suffix++ {
+		available := true
+		for _, window := range existing {
+			if window.Name == name {
+				available = false
+				break
+			}
+		}
+		if available {
+			break
+		}
+		if !uniqueName {
 			return processWindow{}, fmt.Errorf("a process named %q already exists", name)
 		}
+		name = fmt.Sprintf("%s %d", baseName, suffix+1)
 	}
 	processID, err := newProcessID()
 	if err != nil {
@@ -316,12 +349,16 @@ func (h *terminalHandler) newProcessWindow(item project.Project, thread project.
 	if err != nil {
 		return processWindow{}, err
 	}
-	environment := []string{
-		"KIWI_CODE_TMUX_SESSION=" + sessionName,
-		"KIWI_CODE_TMUX_WINDOW=" + name,
-		"KIWI_CODE_PROCESS_ID=" + processID,
-		shellCommandPath,
+	environment := make([]string, 0, len(variables)+4)
+	for _, variable := range variables {
+		environment = append(environment, variable.Name+"="+variable.Value)
 	}
+	environment = append(environment,
+		"KIWI_CODE_TMUX_SESSION="+sessionName,
+		"KIWI_CODE_TMUX_WINDOW="+name,
+		"KIWI_CODE_PROCESS_ID="+processID,
+		shellCommandPath,
+	)
 	envPath := h.envPath
 	if envPath == "" {
 		envPath = "env"

@@ -31,13 +31,17 @@ func TestStartClaudeNativeProcessRejectsRollbackPendingThread(t *testing.T) {
 }
 
 func TestClaudeNativeArgumentsUseStreamJSONAndPreserveLaunchChoices(t *testing.T) {
-	got := claudeNativeArguments(
+	got, err := claudeNativeArguments(
 		"/tmp/claude-plugin",
+		"/tmp/kiwi-sandbox",
 		"session-123",
 		codingAgentLaunchOptions{
 			Model: "opus", ThinkingLevel: "high", AppendSystemPrompt: "Extra context",
 		},
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := []string{
 		"--print",
 		"--input-format", "stream-json",
@@ -46,8 +50,9 @@ func TestClaudeNativeArgumentsUseStreamJSONAndPreserveLaunchChoices(t *testing.T
 		"--replay-user-messages",
 		"--verbose",
 		"--dangerously-skip-permissions",
-		"--settings", `{"skipDangerousModePermissionPrompt":true}`,
+		"--settings", `{"skipDangerousModePermissionPrompt":true,"enabledPlugins":{"sandbox-exec@dire-agent-extensions":false}}`,
 		"--plugin-dir", "/tmp/claude-plugin",
+		"--plugin-dir", "/tmp/kiwi-sandbox",
 		"--resume", "session-123",
 		"--model", "opus",
 		"--effort", "high",
@@ -57,7 +62,10 @@ func TestClaudeNativeArgumentsUseStreamJSONAndPreserveLaunchChoices(t *testing.T
 		t.Fatalf("claudeNativeArguments() = %#v, want %#v", got, want)
 	}
 
-	fresh := claudeNativeArguments("", "", codingAgentLaunchOptions{})
+	fresh, err := claudeNativeArguments("", "", "", codingAgentLaunchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, argument := range fresh {
 		if argument == "--resume" || argument == "--plugin-dir" {
 			t.Fatalf("fresh claudeNativeArguments() included %q: %#v", argument, fresh)
@@ -227,7 +235,7 @@ done
 	var reportMu sync.Mutex
 	var reportedSession string
 	var reportedTotals threadUsageTotals
-	manager := newClaudeNativeManager(filepath.Join(directory, "data"), "", nil)
+	manager := newClaudeNativeManager(filepath.Join(directory, "data"), "", "", nil)
 	manager.claudePath = fakeClaude
 	manager.usageReporter = func(_ piNativeProcessKey, sessionID string, totals threadUsageTotals) {
 		reportMu.Lock()

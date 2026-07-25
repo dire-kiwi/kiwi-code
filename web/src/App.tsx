@@ -19,8 +19,12 @@ import { ProjectThreadFinder } from './components/organisms/ProjectThreadFinder'
 import { CleanupScreen } from './components/pages/CleanupScreen'
 import { EmptyWorkspace } from './components/pages/EmptyWorkspace'
 import { NewThreadScreen } from './components/pages/NewThreadScreen'
-import { ProjectSettingsScreen } from './components/pages/ProjectSettingsScreen'
-import { SettingsScreen } from './components/pages/SettingsScreen'
+import { SandboxSettingsScreen } from './components/pages/SandboxSettingsScreen'
+import { SettingsShell } from './components/pages/settings/SettingsShell'
+import {
+  DEFAULT_GLOBAL_SETTINGS_SECTION,
+  DEFAULT_PROJECT_SETTINGS_SECTION,
+} from './components/pages/settings/registry'
 import { TmuxScreen } from './components/pages/TmuxScreen'
 import { TerminalWorkspace } from './components/pages/TerminalWorkspace'
 import {
@@ -28,12 +32,16 @@ import {
   NEW_THREAD_ROUTE,
   PROJECT_ROUTE,
   PROJECT_SETTINGS_ROUTE,
+  PROJECT_SETTINGS_SECTION_ROUTE,
   SETTINGS_ROUTE,
+  SETTINGS_SECTION_ROUTE,
   THREAD_ROUTE,
+  THREAD_SANDBOX_ROUTE,
   TMUX_ROUTE,
   WORKSPACE_ROUTE,
   newThreadPath,
   projectSettingsPath,
+  settingsPath,
   workspacePath,
   workspaceToolFromRoute,
 } from './routes'
@@ -159,6 +167,7 @@ function sameProjects(current: Project[], next: Project[]) {
       && candidate.createdAt === project.createdAt
       && candidate.subAgentNestingDepthOverride === project.subAgentNestingDepthOverride
       && candidate.worktreeBranchPrefix === project.worktreeBranchPrefix
+      && candidate.figmaMCPEnabled === project.figmaMCPEnabled
       && sameThreads(project.threads, candidate.threads)
   })
 }
@@ -247,8 +256,10 @@ export default function App() {
   const threadMatch = useMatch(THREAD_ROUTE)
   const projectMatch = useMatch(PROJECT_ROUTE)
   const projectSettingsMatch = useMatch(PROJECT_SETTINGS_ROUTE)
+  const projectSettingsSectionMatch = useMatch(PROJECT_SETTINGS_SECTION_ROUTE)
   const cleanupMatch = useMatch(CLEANUP_ROUTE)
   const settingsMatch = useMatch(SETTINGS_ROUTE)
+  const settingsSectionMatch = useMatch(SETTINGS_SECTION_ROUTE)
   const tmuxMatch = useMatch(TMUX_ROUTE)
 
   const [profiles, setProfiles] = useState<Profile[]>([])
@@ -278,7 +289,6 @@ export default function App() {
   const projectsRef = useRef<Project[]>(projects)
   projectsRef.current = projects
   const pendingPiAcknowledgementsRef = useRef(new Set<string>())
-  const activeThreadIdentityRef = useRef<string | null>(null)
   const previousActiveThreadRef = useRef<string | null>(null)
 
   const workspaceProjectId = workspaceMatch?.params.projectId
@@ -311,6 +321,9 @@ export default function App() {
     for (const activity of activities) queuePiAcknowledgement(projectId, activity.threadId)
   }, [queuePiAcknowledgement])
 
+  // A thread that finishes while it is the active thread stays "finished"
+  // until the user actually interacts with it (select, focus, key, pointer),
+  // so it remains visible under "Needs review" — no passive acknowledgment.
   const applyPiActivities = useCallback((nextActivities: PiThreadActivity[]) => {
     const pending = pendingPiAcknowledgementsRef.current
     const visibleActivities = nextActivities.filter((activity) =>
@@ -320,18 +333,7 @@ export default function App() {
       piActivitiesRef.current = visibleActivities
       setPiActivities(visibleActivities)
     }
-
-    const activeFinished = visibleActivities.filter((activity) => {
-      if (activity.state !== 'finished') return false
-      const project = projectsRef.current.find((item) => item.id === activity.projectId)
-      if (!project) return false
-      const displayThreadId = activityDisplayThreadId(project.threads, activity)
-      return piActivityKey(activity.projectId, displayThreadId) === activeThreadIdentityRef.current
-    })
-    for (const activity of activeFinished) {
-      queuePiAcknowledgement(activity.projectId, activity.threadId)
-    }
-  }, [queuePiAcknowledgement])
+  }, [])
 
   useEffect(() => {
     function handleProjectFinderShortcut(event: KeyboardEvent) {
@@ -486,9 +488,11 @@ export default function App() {
     [projectMatch?.params.projectId, projects],
   )
 
+  const settingsProjectId = projectSettingsSectionMatch?.params.projectId
+    ?? projectSettingsMatch?.params.projectId
   const settingsProject = useMemo(
-    () => projects.find((project) => project.id === projectSettingsMatch?.params.projectId) ?? null,
-    [projectSettingsMatch?.params.projectId, projects],
+    () => projects.find((project) => project.id === settingsProjectId) ?? null,
+    [settingsProjectId, projects],
   )
 
   const activeProfile = useMemo(
@@ -551,7 +555,6 @@ export default function App() {
   }, [activeProfileId])
 
   useEffect(() => {
-    activeThreadIdentityRef.current = activeThreadIdentity
     if (activeThreadIdentity && previousActiveThreadRef.current !== activeThreadIdentity && selectedProject && selectedThread) {
       acknowledgeThreadActivity(selectedProject.id, selectedThread.id)
     }
@@ -837,7 +840,7 @@ export default function App() {
         bookmarkingThreadId={bookmarkingThreadId}
         cleanupSelected={Boolean(cleanupMatch)}
         tmuxSelected={Boolean(tmuxMatch)}
-        settingsSelected={Boolean(settingsMatch)}
+        settingsSelected={Boolean(settingsMatch || settingsSectionMatch)}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         onOpenFinder={() => setProjectFinderOpen(true)}
@@ -849,7 +852,7 @@ export default function App() {
           setSidebarOpen(false)
         }}
         onOpenProjectSettings={(projectId) => {
-          navigate(projectSettingsPath(projectId))
+          navigate(projectSettingsPath(projectId, DEFAULT_PROJECT_SETTINGS_SECTION))
           setSidebarOpen(false)
         }}
         onOpenCleanup={() => {
@@ -861,7 +864,7 @@ export default function App() {
           setSidebarOpen(false)
         }}
         onOpenSettings={() => {
-          navigate(SETTINGS_ROUTE)
+          navigate(settingsPath(DEFAULT_GLOBAL_SETTINGS_SECTION))
           setSidebarOpen(false)
         }}
         onProjectCreated={handleCreated}
@@ -898,23 +901,56 @@ export default function App() {
             />
             <Route
               path={SETTINGS_ROUTE}
+              element={<Navigate to={settingsPath(DEFAULT_GLOBAL_SETTINGS_SECTION)} replace />}
+            />
+            <Route
+              path={SETTINGS_SECTION_ROUTE}
               element={(
-                <SettingsScreen
+                <SettingsShell
+                  scope="global"
+                  profiles={profiles}
+                  onProjectUpdated={handleProjectUpdated}
                   onOpenSidebar={() => setSidebarOpen(true)}
                   onBack={() => navigate(workspaceReturnDestination(), { replace: true })}
                 />
               )}
             />
             <Route
+              path={THREAD_SANDBOX_ROUTE}
+              element={selectedProject && selectedThread ? (
+                <SandboxSettingsScreen
+                  key={`${selectedProject.id}:${selectedThread.id}:sandbox`}
+                  scope="thread"
+                  project={selectedProject}
+                  thread={selectedThread}
+                  onOpenSidebar={() => setSidebarOpen(true)}
+                  onBack={() => navigate(
+                    workspacePath(selectedProject.id, selectedThread.id, defaultWorkspaceTool),
+                    { replace: true },
+                  )}
+                />
+              ) : (
+                <Navigate to={defaultWorkspacePath ?? '/'} replace />
+              )}
+            />
+            <Route
               path={PROJECT_SETTINGS_ROUTE}
               element={settingsProject ? (
-                <ProjectSettingsScreen
-                  key={settingsProject.id}
+                <Navigate to={projectSettingsPath(settingsProject.id, DEFAULT_PROJECT_SETTINGS_SECTION)} replace />
+              ) : (
+                <Navigate to={defaultWorkspacePath ?? '/'} replace />
+              )}
+            />
+            <Route
+              path={PROJECT_SETTINGS_SECTION_ROUTE}
+              element={settingsProject ? (
+                <SettingsShell
+                  scope="project"
                   project={settingsProject}
                   profiles={profiles}
+                  onProjectUpdated={handleProjectUpdated}
                   onOpenSidebar={() => setSidebarOpen(true)}
                   onBack={() => navigate(workspaceReturnDestination(settingsProject.id), { replace: true })}
-                  onProjectUpdated={handleProjectUpdated}
                 />
               ) : (
                 <Navigate to={defaultWorkspacePath ?? '/'} replace />

@@ -1,0 +1,28 @@
+{
+  "description": "Require filesystem and network tools to use Kiwi Sandbox",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --experimental-strip-types \"${CLAUDE_PLUGIN_ROOT}/src/hook.ts\" || exit 2",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Write|Edit|Glob|Grep|LS|NotebookEdit|MultiEdit|WebFetch|WebSearch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --experimental-strip-types \"${CLAUDE_PLUGIN_ROOT}/src/hook.ts\" || exit 2",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

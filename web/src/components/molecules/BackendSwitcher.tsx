@@ -28,7 +28,13 @@ function reloadForBackend(origin: string) {
   window.location.reload()
 }
 
-export function BackendSwitcher() {
+export type BackendSwitcherVariant = 'strip' | 'inline'
+
+type BackendSwitcherProps = {
+  variant?: BackendSwitcherVariant
+}
+
+export function BackendSwitcher({ variant = 'strip' }: BackendSwitcherProps) {
   const [addingBackend, setAddingBackend] = useState(false)
   const [backendInput, setBackendInput] = useState('')
   const [backendError, setBackendError] = useState('')
@@ -158,6 +164,31 @@ export function BackendSwitcher() {
         document.body,
       )
     : null
+
+  if (variant === 'inline') {
+    return (
+      <>
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          <span
+            className="size-1.5 shrink-0 rounded-full bg-ghost-green shadow-[0_0_5px_rgba(181,189,104,0.6)]"
+            aria-hidden="true"
+          />
+          <Select
+            variant="inline"
+            value={activeBackendOrigin}
+            options={options}
+            onChange={handleSelection}
+            className="!max-w-44"
+            rootClassName="min-w-0"
+            menuClassName="min-w-56"
+            aria-label="Current backend"
+            title={activeBackend?.origin}
+          />
+        </span>
+        {dialog}
+      </>
+    )
+  }
 
   return (
     <>

@@ -1,14 +1,14 @@
 ---
 name: kiwi-code-in-app-browser
-description: Controls Kiwi Code's in-app browser with browser_* MCP tools. Use when a task requires opening or interacting with websites, inspecting rendered pages, filling forms, taking screenshots, evaluating JavaScript in a page, managing tabs, or sending raw CDP commands.
-compatibility: Requires a Kiwi Code-managed Claude Code session and the Kiwi Code desktop in-app browser provider.
+description: Controls and records Kiwi Code's in-app browser with browser_* MCP tools. Use when a task requires opening or interacting with websites, inspecting rendered pages, filling forms, taking screenshots, evaluating JavaScript in a page, managing tabs, or sending raw CDP commands.
+compatibility: Requires a Kiwi Code-managed Claude Code session and a configured Kiwi Code in-app browser provider (server-managed headless Chrome or Electron).
 license: MIT
 context: fork
 ---
 
 # Kiwi Code in-app browser control
 
-Use the `browser_*` MCP tools bundled with the Kiwi Code Claude Code plugin to operate the real browser surface embedded in the Kiwi Code desktop app. Browser state belongs to the current Kiwi Code thread and is shared with Pi and Pi Native sessions in that thread.
+Use the `browser_*` MCP tools bundled with the Kiwi Code Claude Code plugin to operate Kiwi Code's thread-owned browser surface. The implementation may be a server-managed headless Chrome context projected into the Browser workspace or the Electron native guest. Browser state is shared with Pi and Pi Native sessions in that thread.
 
 ## Tool discovery
 
@@ -19,6 +19,7 @@ Available tools:
 | Tool | Use it for |
 |---|---|
 | `browser_session` | Check status or start, disconnect, or stop the in-app browser session |
+| `browser_recording` | Check, start, or stop a titled page-only WebM recording with inactivity auto-finalization |
 | `browser_tabs` | List, create, select, or close page targets |
 | `browser_navigate` | Go to a URL, reload, go back, or go forward |
 | `browser_snapshot` | Inspect the page as a compact accessibility tree with actionable refs |
@@ -34,18 +35,20 @@ Available tools:
 
 The only supported backend is `in-app`. Browser tools start or connect to it lazily, so most tasks do not need an explicit session call. Use `browser_session` with `action: "start"` only when explicit lifecycle control is useful.
 
-If an action reports that the in-app desktop provider is unavailable, ask the user to start or reconnect the Kiwi Code desktop app. Do not silently switch to another browser, launch Chrome yourself, or install a separate browser-control package.
+If an action reports that the in-app provider is unavailable, ask the user to check the configured backend: headless mode needs a supported Chrome installation and Electron mode needs the desktop app. Do not silently switch backends, launch another Chrome yourself, or install a separate browser-control package.
 
 ## Preferred workflow
 
-1. Load only the browser tools needed for the current step if Claude Code deferred them.
-2. Open the destination with `browser_navigate`, or inspect/select existing pages with `browser_tabs`.
-3. Call `browser_snapshot` to read the rendered page's accessibility tree.
-4. Use snapshot refs such as `e1` with `browser_click` and `browser_fill`.
-5. After navigation or a substantial page update, take a fresh snapshot before using more refs.
-6. Use `browser_wait` when an action triggers asynchronous UI or navigation.
-7. Use `browser_screenshot` when visual layout matters or the accessibility tree is insufficient.
-8. Use `browser_evaluate` or `browser_cdp` only when the focused semantic tools cannot perform the task.
+1. Load `browser_recording` together with only the other browser tools needed for the current step if Claude Code deferred them.
+2. Check recording status. If none is active, start one with a concise 2–12 word `title` explaining the point of the task, and remember the returned recording ID.
+3. Open the destination with `browser_navigate`, or inspect/select existing pages with `browser_tabs`.
+4. Call `browser_snapshot` to read the rendered page's accessibility tree.
+5. Use snapshot refs such as `e1` with `browser_click` and `browser_fill`.
+6. After navigation or a substantial page update, take a fresh snapshot before using more refs.
+7. Use `browser_wait` when an action triggers asynchronous UI or navigation.
+8. Use `browser_screenshot` when visual layout matters or the accessibility tree is insufficient.
+9. Use `browser_evaluate` or `browser_cdp` only when the focused semantic tools cannot perform the task.
+10. Before the final response, stop only the recording this task started by passing its exact ID. Attempt this cleanup even when the browsing task fails.
 
 ## Snapshots and element refs
 
@@ -71,6 +74,8 @@ Use `browser_screenshot` when the task depends on layout, canvas content, visual
 
 ## Lifecycle and safety
 
+- A skill-started recording defaults to a 300-second inactivity timeout. Browser operations and recording status refresh its deadline; inactivity automatically finalizes it.
+- Give every recording a short purpose title, remember the returned ID, and never stop a recording that was already active when this task began.
 - `browser_session` with `action: "disconnect"` releases the MCP server's control connection without asking Kiwi Code to destroy the in-app browser session.
 - `browser_session` with `action: "stop"` destroys the thread's in-app browser session and ephemeral profile; the next start uses fresh site data.
 - The profile can contain authenticated sessions and private page data. Treat snapshots, screenshots, evaluated values, and raw CDP results as sensitive.

@@ -35,14 +35,16 @@ const (
 )
 
 type claudeNativeManager struct {
-	mu               sync.Mutex
-	dataDirectory    string
-	claudePath       string
-	pluginPath       string
-	pluginErr        error
-	processes        map[piNativeProcessKey]*claudeNativeProcess
-	contextWatchOnce sync.Once
-	usageReporter    func(piNativeProcessKey, string, threadUsageTotals)
+	mu                sync.Mutex
+	dataDirectory     string
+	claudePath        string
+	pluginPath        string
+	sandboxPluginPath string
+	pluginErr         error
+	figmaMCPURL       func(project.Project) string
+	processes         map[piNativeProcessKey]*claudeNativeProcess
+	contextWatchOnce  sync.Once
+	usageReporter     func(piNativeProcessKey, string, threadUsageTotals)
 }
 
 type claudeNativeProcess struct {
@@ -96,13 +98,24 @@ type claudeNativeHistoryEntry struct {
 	Event json.RawMessage `json:"event"`
 }
 
-func newClaudeNativeManager(dataDirectory, pluginPath string, pluginErr error) *claudeNativeManager {
+func newClaudeNativeManager(
+	dataDirectory, pluginPath, sandboxPluginPath string,
+	pluginErr error,
+) *claudeNativeManager {
 	return &claudeNativeManager{
-		dataDirectory: dataDirectory,
-		pluginPath:    pluginPath,
-		pluginErr:     pluginErr,
-		processes:     make(map[piNativeProcessKey]*claudeNativeProcess),
+		dataDirectory:     dataDirectory,
+		pluginPath:        pluginPath,
+		sandboxPluginPath: sandboxPluginPath,
+		pluginErr:         pluginErr,
+		processes:         make(map[piNativeProcessKey]*claudeNativeProcess),
 	}
+}
+
+func (m *claudeNativeManager) resolveFigmaMCPURL(item project.Project) string {
+	if m == nil || m.figmaMCPURL == nil {
+		return ""
+	}
+	return m.figmaMCPURL(item)
 }
 
 func (m *claudeNativeManager) stopOnContext(ctx context.Context) {
@@ -398,6 +411,7 @@ func (m *claudeNativeManager) getOrStart(
 	if m.pluginErr != nil {
 		return nil, m.pluginErr
 	}
+	launchOptions.FigmaMCPURL = m.resolveFigmaMCPURL(item)
 	key := piNativeProcessKey{ProjectID: item.ID, ThreadID: thread.ID}
 
 	m.mu.Lock()
@@ -435,6 +449,7 @@ func (m *claudeNativeManager) restart(
 	if m.pluginErr != nil {
 		return nil, m.pluginErr
 	}
+	launchOptions.FigmaMCPURL = m.resolveFigmaMCPURL(item)
 	key := piNativeProcessKey{ProjectID: item.ID, ThreadID: thread.ID}
 
 	m.mu.Lock()
@@ -507,7 +522,11 @@ func (m *claudeNativeManager) startProcess(
 			return nil, errors.New("Claude Code is not installed or not on PATH")
 		}
 	}
-	command := exec.Command(claudePath, claudeNativeArguments(m.pluginPath, resumeSessionID, launchOptions)...)
+	arguments, err := claudeNativeArguments(m.pluginPath, m.sandboxPluginPath, resumeSessionID, launchOptions)
+	if err != nil {
+		return nil, err
+	}
+	command := exec.Command(claudePath, arguments...)
 	command.Dir = thread.Cwd
 	threadEnvironment := kiwiCodeThreadEnvironment(threadEndpoint, key.ProjectID, key.ThreadID)
 	// Match the terminal Claude launch: no Kiwi Code agent token or child-thread
@@ -560,7 +579,10 @@ func (m *claudeNativeManager) startProcess(
 	return process, nil
 }
 
-func claudeNativeArguments(pluginPath, resumeSessionID string, launchOptions codingAgentLaunchOptions) []string {
+func claudeNativeArguments(
+	pluginPath, sandboxPluginPath, resumeSessionID string,
+	launchOptions codingAgentLaunchOptions,
+) ([]string, error) {
 	arguments := []string{
 		"--print",
 		"--input-format", "stream-json",
@@ -569,10 +591,19 @@ func claudeNativeArguments(pluginPath, resumeSessionID string, launchOptions cod
 		"--replay-user-messages",
 		"--verbose",
 		"--dangerously-skip-permissions",
-		"--settings", `{"skipDangerousModePermissionPrompt":true}`,
+		"--settings", claudeLaunchSettings,
 	}
-	if pluginPath != "" {
-		arguments = append(arguments, "--plugin-dir", pluginPath)
+	for _, path := range []string{pluginPath, sandboxPluginPath} {
+		if path != "" {
+			arguments = append(arguments, "--plugin-dir", path)
+		}
+	}
+	if launchOptions.FigmaMCPURL != "" {
+		figmaConfig, err := figmaMCPConfigArgument(launchOptions.FigmaMCPURL)
+		if err != nil {
+			return nil, err
+		}
+		arguments = append(arguments, "--mcp-config", figmaConfig)
 	}
 	if resumeSessionID != "" {
 		arguments = append(arguments, "--resume", resumeSessionID)
@@ -586,7 +617,7 @@ func claudeNativeArguments(pluginPath, resumeSessionID string, launchOptions cod
 	if launchOptions.AppendSystemPrompt != "" {
 		arguments = append(arguments, "--append-system-prompt", launchOptions.AppendSystemPrompt)
 	}
-	return arguments
+	return arguments, nil
 }
 
 func readClaudeNativeSessionID(sessionDirectory string) string {

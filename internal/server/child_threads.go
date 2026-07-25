@@ -608,6 +608,13 @@ func (s *Server) createChildThreadAuthorized(w http.ResponseWriter, r *http.Requ
 	}
 
 	launchOptions.AllowPendingCreation = true
+	if source == childThreadCreationSkillFork {
+		// A context: fork skill is an implementation detail of the invoking
+		// thread. Browser work performed by that child must remain visible in
+		// the invoking thread's Browser workspace rather than creating a
+		// short-lived session owned by the retained child.
+		launchOptions.BrowserThreadEndpoint = threadEndpointURL(r, projectID, parentID)
+	}
 	process, err := s.terminal.startPiNativeProcess(
 		item,
 		thread,

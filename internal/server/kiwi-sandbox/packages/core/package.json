@@ -1,0 +1,10 @@
+{
+  "name": "@dire-kiwi/kiwi-sandbox-core",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "engines": {
+    "node": ">=22.6.0"
+  }
+}

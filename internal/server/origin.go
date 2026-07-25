@@ -8,10 +8,24 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/dire-kiwi/kiwi-code/internal/browsercontrol"
 )
 
 // Options configures server runtime behavior.
 type Options struct {
+	// BrowserBackend selects "headless" (the default) or "electron".
+	BrowserBackend string
+
+	// BrowserProvider injects an implementation, primarily for tests.
+	BrowserProvider browsercontrol.Provider
+
+	// BrowserChromeBinary overrides Chrome discovery for the headless backend.
+	BrowserChromeBinary string
+
+	// BrowserProtectedOrigins are denied to controlled pages.
+	BrowserProtectedOrigins []string
+
 	// AllowedOriginPort permits a browser frontend on this port to call the API
 	// when its hostname matches the hostname used for the backend request. The
 	// development launcher uses this for Vite without opening the API to

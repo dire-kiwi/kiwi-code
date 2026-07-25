@@ -39,6 +39,7 @@ const providerConfig = path.resolve(
     path.join(os.tmpdir(), `kiwi-code-browser-provider-${providerInstance}.json`),
 )
 const sharedEnvironment = {
+  KIWI_CODE_BROWSER_BACKEND: options.desktop ? 'electron' : 'headless',
   KIWI_CODE_BROWSER_PROVIDER_CONFIG: providerConfig,
   KIWI_CODE_API_ORIGIN: goUrl,
   KIWI_CODE_ELECTRON_USER_DATA: path.join(os.tmpdir(), `kiwi-code-electron-${providerInstance}`),
