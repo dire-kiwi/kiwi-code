@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { Link } from 'react-router-dom'
 import {
   Bot,
   Check,
@@ -10,11 +11,13 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Pencil,
+  Shield,
   SquareTerminal,
   X,
 } from 'lucide-react'
 import { updateThreadTitle } from '../../api'
 import { formatWhen } from '../../lib/formatWhen'
+import { threadSandboxPath } from '../../routes'
 import type { Project, Thread, ThreadPlan, ThreadUsageSnapshot, WorkflowRun } from '../../types'
 import { Button, GhostButton, PrimaryButton } from '../atoms/Button'
 import { IconButton } from '../atoms/IconButton'
@@ -367,6 +370,14 @@ export function ThreadProjectSidebar({
                   <p className="mt-2 break-all px-2 font-mono text-[9px] leading-4 text-ghost-faint" title={thread.cwd}>
                     {thread.cwd}
                   </p>
+                  <Link
+                    to={threadSandboxPath(project.id, thread.id)}
+                    className="mt-2.5 flex items-center gap-1.5 rounded-lg border border-ghost-border/70 px-2.5 py-1.5 text-[10px] font-medium text-ghost-muted transition hover:border-ghost-green/45 hover:text-ghost-bright-white"
+                    title="Configure the Kiwi Sandbox for this thread"
+                  >
+                    <Shield size={11} className="text-ghost-green" />
+                    Sandbox settings
+                  </Link>
                 </section>
 
                 {sectionDivider}

@@ -27,6 +27,37 @@ test("runs commands through the configured sandbox executable", async () => {
   assert.equal(Buffer.concat(chunks).toString(), "command-ok");
 });
 
+test("reports signal termination using conventional shell exit codes", async () => {
+  const { sandbox } = await fixture();
+  const result = await sandbox.runCommand("kill -ABRT $$");
+  assert.equal(result.exitCode, 134);
+});
+
+test("reports command output that indicates a Seatbelt denial", async () => {
+  const { sandbox } = await fixture();
+  const chunks: Buffer[] = [];
+  const result = await sandbox.runCommand(
+    "printf 'cat: secret: Operation not permitted\\n' >&2; exit 1",
+    { onOutput: (_stream, data) => chunks.push(data) },
+  );
+  assert.equal(result.sandboxDenied, true);
+  assert.match(Buffer.concat(chunks).toString(), /Kiwi Sandbox: access was denied by the active defaults policy/);
+
+  const ordinary = await sandbox.runCommand("exit 1");
+  assert.equal(ordinary.sandboxDenied, false);
+});
+
+test("reports Seatbelt denials from sandboxed file workers", async () => {
+  const { root, fake, sandbox } = await fixture();
+  const path = join(root, "sample.txt");
+  await writeFile(path, "sample");
+  await writeFile(fake, "#!/bin/sh\necho 'worker: Operation not permitted' >&2\nexit 1\n");
+  await assert.rejects(
+    () => sandbox.readFile(path),
+    /Kiwi Sandbox: read access denied by defaults policy/,
+  );
+});
+
 test("read, write, and edit use sandboxed file workers", async () => {
   const { root, sandbox } = await fixture();
   const path = join(root, "nested", "file.txt");

@@ -3,6 +3,7 @@ import {
   FolderGit2,
   Palette,
   Settings2,
+  Shield,
   Sparkles,
   UserRound,
   Workflow,
@@ -25,6 +26,7 @@ export type GlobalSettingsSectionId =
   | 'cleanup'
   | 'agents'
   | 'appearance'
+  | 'sandbox'
   | 'skills'
 
 export type ProjectSettingsSectionId = 'profile' | 'environment' | 'branches'
@@ -64,6 +66,13 @@ export const GLOBAL_SETTINGS_SECTIONS: Array<SettingsSectionMeta<GlobalSettingsS
     keywords: ['theme', 'font', 'colors', 'palette', 'ansi', 'terminal', 'canvas'],
     icon: Palette,
     tone: 'magenta',
+  },
+  {
+    id: 'sandbox',
+    label: 'Kiwi Sandbox',
+    keywords: ['sandbox', 'policy', 'file access', 'network', 'shell', 'security'],
+    icon: Shield,
+    tone: 'green',
   },
   {
     id: 'skills',

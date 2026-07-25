@@ -10,6 +10,7 @@ import { TextInput } from '../../atoms/Input'
 import { LoadErrorPanel, LoadingPanel } from '../../molecules/AsyncStatePanel'
 import { ScreenHeader } from '../../molecules/ScreenHeader'
 import { ProjectEnvironmentSettings } from '../../organisms/ProjectEnvironmentSettings'
+import { SandboxSettingsScreen } from '../SandboxSettingsScreen'
 import {
   DEFAULT_GLOBAL_SETTINGS_SECTION,
   DEFAULT_PROJECT_SETTINGS_SECTION,
@@ -193,6 +194,8 @@ export function SettingsShell({
         return <AgentsSection settings={settings} onSettingsUpdated={setSettings} />
       case 'appearance':
         return <AppearanceSection settings={settings} onSettingsUpdated={setSettings} />
+      case 'sandbox':
+        return <SandboxSettingsScreen scope="global" embedded />
       case 'skills':
         return <SkillsSection />
     }

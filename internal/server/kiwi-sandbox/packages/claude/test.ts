@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -55,7 +55,7 @@ try {
   }));
   assert.equal(
     sessionContext.hookSpecificOutput.additionalContext,
-    `Related Directories: ${join(project, "..", "related-project")}`,
+    `Related Directories: ${join(await realpath(join(project, "..")), "related-project")}`,
   );
   const hookConfig = JSON.parse(await readFile(new URL("./hooks/hooks.json", import.meta.url), "utf8"));
   const preToolHook = hookConfig.hooks.PreToolUse[0];

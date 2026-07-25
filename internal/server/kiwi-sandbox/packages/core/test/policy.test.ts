@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdtemp, mkdir, realpath, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { configPaths, defaultConfig, GLOBAL_CONFIG_PATH, loadConfig, relatedProjectsPrompt } from "../src/config.ts";
-import { isSimpleCommand, resolveDecision } from "../src/policy.ts";
+import { assertPathAllowed, assertWorkingDirectory, isSimpleCommand, resolveDecision } from "../src/policy.ts";
 import { createSeatbeltProfile } from "../src/profile.ts";
 
 test("uses the requested global and project config paths", () => {
@@ -70,6 +70,64 @@ test("command rule patterns can be grouped in a list", async () => {
   assert.equal((await resolveDecision(config, "gh issue list", root)).rule, "gh *");
 });
 
+test("built-in defaults run arbitrary commands without network or broad file access", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "kiwi-sandbox-defaults-"));
+  const config = defaultConfig();
+  const decision = await resolveDecision(config, "any-command --with arguments", cwd);
+
+  assert.equal(config.commands.length, 0);
+  assert.equal(decision.rule, "defaults");
+  assert.equal(decision.network, false);
+  await assertPathAllowed(join(cwd, "new-file.txt"), decision, "write");
+  await assert.rejects(
+    () => assertPathAllowed(join(homedir(), ".ssh", "id_ed25519"), decision, "read"),
+    /read access denied/,
+  );
+});
+
+test("working directory remains readable and writable under every constrained policy", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "kiwi-sandbox-implicit-cwd-"));
+  const cwd = join(parent, "project");
+  await mkdir(cwd);
+  const config = defaultConfig();
+  config.defaults = { read: [], write: [] };
+  config.commands = [{ pattern: "locked *", files: { read: [], write: [] } }];
+
+  for (const command of ["ordinary-command", "locked command"]) {
+    const decision = await resolveDecision(config, command, cwd);
+    await assertPathAllowed(join(cwd, "nested", "new-file.txt"), decision, "read");
+    await assertPathAllowed(join(cwd, "nested", "new-file.txt"), decision, "write");
+    await assert.rejects(
+      () => assertPathAllowed(join(parent, "outside.txt"), decision, "write"),
+      /write access denied/,
+    );
+  }
+});
+
+test("default policy grants related projects relative to the project root", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "kiwi-sandbox-related-"));
+  const project = join(parent, "project");
+  const nested = join(project, "nested");
+  const related = join(parent, "related");
+  await Promise.all([mkdir(nested, { recursive: true }), mkdir(related)]);
+
+  const config = defaultConfig();
+  config.relatedProjects = ["../related"];
+  const decision = await resolveDecision(config, "pwd", nested, [], project);
+  await assertPathAllowed(join(related, "new-file.txt"), decision, "write");
+  assert.equal(await assertWorkingDirectory(project, related, config.relatedProjects), await realpath(related));
+
+  config.commands = [{
+    pattern: "pwd",
+    files: { read: ["$CWD"], write: ["$CWD"] },
+  }];
+  const commandDecision = await resolveDecision(config, "pwd", nested, [], project);
+  await assert.rejects(
+    () => assertPathAllowed(join(related, "new-file.txt"), commandDecision, "write"),
+    /write access denied/,
+  );
+});
+
 test("command rules can override the global network policy", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "kiwi-sandbox-policy-"));
   const config = defaultConfig();
@@ -131,6 +189,8 @@ test("Seatbelt profiles remain deny-by-default", async () => {
   decision.deniedWrite = [join(cwd, ".config", "kiwi-sandbox.json")];
   const profile = createSeatbeltProfile(decision);
   assert.match(profile, /\(deny default\)/);
+  assert.match(profile, /\(allow file-read-data \(literal "\/"\)\)/);
+  assert.doesNotMatch(profile, /\(subpath "\/"\)/);
   assert.match(profile, /\(allow file-read\*/);
   assert.match(profile, /\(allow file-write\*/);
   assert.doesNotMatch(profile, /\(allow network\*\)/);

@@ -22,11 +22,13 @@ export async function resolveDecision(
   command: string,
   cwd: string,
   extraRuntimeRead: string[] = [],
+  projectRoot = cwd,
 ): Promise<PolicyDecision> {
   let files: FileAccess | undefined = config.defaults;
   let rule = "defaults";
   let unrestricted = false;
   let network = config.network;
+  let includeRelatedProjects = true;
 
   if (isSimpleCommand(command)) {
     for (const candidate of config.commands) {
@@ -36,19 +38,26 @@ export async function resolveDecision(
       files = candidate.files;
       rule = matchedPattern;
       unrestricted = candidate.files === undefined;
+      includeRelatedProjects = false;
       network = candidate.network ?? config.network;
       break;
     }
   }
 
   if (unrestricted) return { rule, unrestricted, read: [], write: [], deniedWrite: [], network };
-  const read = await resolvePaths([...RUNTIME_READ_PATHS, ...extraRuntimeRead, ...(files?.read ?? [])], cwd);
-  const write = await resolvePaths([...RUNTIME_WRITE_PATHS, ...(files?.write ?? [])], cwd);
+  const relatedProjects = includeRelatedProjects
+    ? await resolvePaths(config.relatedProjects, projectRoot)
+    : [];
+  // The directory a command runs in is always usable. Configured paths widen
+  // access; they cannot make the command's own working tree unreadable or
+  // unwritable. File tools resolve policy with the project root as their cwd.
+  const read = await resolvePaths([...RUNTIME_READ_PATHS, ...extraRuntimeRead, cwd, ...(files?.read ?? [])], cwd);
+  const write = await resolvePaths([...RUNTIME_WRITE_PATHS, cwd, ...(files?.write ?? [])], cwd);
   return {
     rule,
     unrestricted,
-    read: uniqueSorted([...read, ...write]),
-    write: uniqueSorted(write),
+    read: uniqueSorted([...read, ...write, ...relatedProjects]),
+    write: uniqueSorted([...write, ...relatedProjects]),
     deniedWrite: [],
     network,
   };
@@ -99,20 +108,32 @@ export function globMatches(pattern: string, value: string): boolean {
 export async function assertPathAllowed(path: string, decision: PolicyDecision, mode: "read" | "write"): Promise<string> {
   const canonical = await canonicalPath(path);
   if (mode === "write" && decision.deniedWrite.some((denied) => isWithin(denied, canonical))) {
-    throw new Error(`write access denied for protected Kiwi Sandbox path: ${path}`);
+    throw new Error(`Kiwi Sandbox: write access denied for protected Kiwi Sandbox path: ${path}`);
   }
   if (decision.unrestricted) return canonical;
   const allowed = mode === "read" ? decision.read : decision.write;
   if (!allowed.some((root) => isWithin(root, canonical))) {
-    throw new Error(`${mode} access denied by ${decision.rule} policy: ${path}`);
+    throw new Error(`Kiwi Sandbox: ${mode} access denied by ${decision.rule} policy: ${path}`);
   }
   return canonical;
 }
 
-export async function assertWorkingDirectory(projectRoot: string, requested: string): Promise<string> {
+export async function assertWorkingDirectory(
+  projectRoot: string,
+  requested: string,
+  relatedProjects: string[] = [],
+): Promise<string> {
   if (!isAbsolute(requested)) requested = resolve(projectRoot, requested);
-  const [root, cwd] = await Promise.all([realpath(projectRoot), realpath(requested)]);
-  if (!isWithin(root, cwd)) throw new Error(`Working directory must remain inside project root ${projectRoot}`);
+  const [roots, cwd] = await Promise.all([
+    Promise.all([
+      canonicalPath(projectRoot),
+      ...relatedProjects.map((path) => canonicalPath(expandConfiguredPath(path, projectRoot))),
+    ]),
+    realpath(requested),
+  ]);
+  if (!roots.some((root) => isWithin(root, cwd))) {
+    throw new Error(`Kiwi Sandbox: working directory access denied; it must remain inside project root ${projectRoot} or a related project`);
+  }
   const stat = await lstat(cwd);
   if (!stat.isDirectory()) throw new Error(`Working directory is not a directory: ${requested}`);
   return cwd;

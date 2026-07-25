@@ -18,6 +18,7 @@ import { ProjectThreadFinder } from './components/organisms/ProjectThreadFinder'
 import { CleanupScreen } from './components/pages/CleanupScreen'
 import { EmptyWorkspace } from './components/pages/EmptyWorkspace'
 import { NewThreadScreen } from './components/pages/NewThreadScreen'
+import { SandboxSettingsScreen } from './components/pages/SandboxSettingsScreen'
 import { SettingsShell } from './components/pages/settings/SettingsShell'
 import {
   DEFAULT_GLOBAL_SETTINGS_SECTION,
@@ -34,6 +35,7 @@ import {
   SETTINGS_ROUTE,
   SETTINGS_SECTION_ROUTE,
   THREAD_ROUTE,
+  THREAD_SANDBOX_ROUTE,
   TMUX_ROUTE,
   WORKSPACE_ROUTE,
   newThreadPath,
@@ -920,6 +922,24 @@ export default function App() {
                   onOpenSidebar={() => setSidebarOpen(true)}
                   onBack={() => navigate(workspaceReturnDestination(), { replace: true })}
                 />
+              )}
+            />
+            <Route
+              path={THREAD_SANDBOX_ROUTE}
+              element={selectedProject && selectedThread ? (
+                <SandboxSettingsScreen
+                  key={`${selectedProject.id}:${selectedThread.id}:sandbox`}
+                  scope="thread"
+                  project={selectedProject}
+                  thread={selectedThread}
+                  onOpenSidebar={() => setSidebarOpen(true)}
+                  onBack={() => navigate(
+                    workspacePath(selectedProject.id, selectedThread.id, defaultWorkspaceTool),
+                    { replace: true },
+                  )}
+                />
+              ) : (
+                <Navigate to={defaultWorkspacePath ?? '/'} replace />
               )}
             />
             <Route

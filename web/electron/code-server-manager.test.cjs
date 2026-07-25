@@ -145,7 +145,7 @@ test('blocks host files and Kiwi Code control origins from the Code partition', 
 })
 
 test('starts, authenticates, embeds, reuses, and disposes code-server', async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'kiwi-code-code-manager-'))
+  const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'kiwi-code-code-manager-')))
   const electronSession = fakeElectronSession()
   const appView = {
     webContents: {

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { constants as osConstants } from "node:os";
 import { dirname, resolve } from "node:path";
 import { loadConfig, type SandboxConfig } from "./config.ts";
 import { assertPathAllowed, assertWorkingDirectory, canonicalPath, resolveDecision, type PolicyDecision } from "./policy.ts";
@@ -17,6 +18,7 @@ export type CommandResult = {
   exitCode: number;
   timedOut: boolean;
   cancelled: boolean;
+  sandboxDenied: boolean;
   policy: PolicyDecision;
 };
 
@@ -91,7 +93,11 @@ export class KiwiSandbox {
 
   async runCommand(command: string, options: CommandOptions = {}): Promise<CommandResult> {
     const config = await this.validateConfig();
-    const cwd = await assertWorkingDirectory(this.projectRoot, options.cwd ?? this.projectRoot);
+    const cwd = await assertWorkingDirectory(
+      this.projectRoot,
+      options.cwd ?? this.projectRoot,
+      config.relatedProjects,
+    );
     const policy = this.enabled ? await this.decision(config, command, cwd) : disabledPolicy();
     const profile = this.enabled ? createSeatbeltProfile(policy) : undefined;
     const executable = this.enabled ? this.sandboxExecutable : config.shell;
@@ -102,8 +108,19 @@ export class KiwiSandbox {
       env: { ...process.env, ...options.env },
       stdio: ["ignore", "pipe", "pipe"],
     });
-    child.stdout.on("data", (data: Buffer) => options.onOutput?.("stdout", data));
-    child.stderr.on("data", (data: Buffer) => options.onOutput?.("stderr", data));
+    let sandboxDenied = false;
+    let diagnosticTail = "";
+    let outputEndedWithNewline = true;
+    const forwardOutput = (stream: "stdout" | "stderr", data: Buffer) => {
+      const text = data.toString("utf8");
+      const diagnosticText = diagnosticTail + text;
+      if (this.enabled && /operation not permitted/i.test(diagnosticText)) sandboxDenied = true;
+      diagnosticTail = diagnosticText.slice(-64);
+      outputEndedWithNewline = text.endsWith("\n");
+      options.onOutput?.(stream, data);
+    };
+    child.stdout.on("data", (data: Buffer) => forwardOutput("stdout", data));
+    child.stderr.on("data", (data: Buffer) => forwardOutput("stderr", data));
 
     let timedOut = false;
     let cancelled = false;
@@ -121,9 +138,15 @@ export class KiwiSandbox {
     try {
       const exitCode = await new Promise<number>((resolveExit, reject) => {
         child.once("error", reject);
-        child.once("close", (code) => resolveExit(code ?? -1));
+        child.once("close", (code, signal) => resolveExit(code ?? signalExitCode(signal)));
       });
-      return { exitCode, timedOut, cancelled, policy };
+      if (sandboxDenied) {
+        const prefix = outputEndedWithNewline ? "" : "\n";
+        options.onOutput?.("stderr", Buffer.from(
+          `${prefix}Kiwi Sandbox: access was denied by the active ${policy.rule} policy.\n`,
+        ));
+      }
+      return { exitCode, timedOut, cancelled, sandboxDenied, policy };
     } finally {
       if (timer) clearTimeout(timer);
       options.signal?.removeEventListener("abort", abort);
@@ -198,7 +221,13 @@ export class KiwiSandbox {
   }
 
   private async decision(config: SandboxConfig, command: string, cwd: string): Promise<PolicyDecision> {
-    const decision = await resolveDecision(config, command, cwd, [dirname(dirname(process.execPath))]);
+    const decision = await resolveDecision(
+      config,
+      command,
+      cwd,
+      [dirname(dirname(process.execPath))],
+      this.projectRoot,
+    );
     const protectedPaths = [...this.paths, ...this.protectedWritePaths];
     const canonicalProtected = await Promise.all(protectedPaths.map((path) => canonicalPath(path)));
     decision.deniedWrite = [...new Set([...protectedPaths.map((path) => resolve(path)), ...canonicalProtected])];
@@ -220,10 +249,16 @@ export class KiwiSandbox {
     child.stdin.end(JSON.stringify(request));
     const exitCode = await new Promise<number>((resolveExit, reject) => {
       child.once("error", reject);
-      child.once("close", (code) => resolveExit(code ?? -1));
+      child.once("close", (code, signal) => resolveExit(code ?? signalExitCode(signal)));
     });
     if (exitCode !== 0) {
-      throw new Error(Buffer.concat(stderr).toString("utf8") || `sandboxed file worker exited with status ${exitCode}`);
+      const message = Buffer.concat(stderr).toString("utf8");
+      if (/operation not permitted/i.test(message)) {
+        throw new Error(
+          `Kiwi Sandbox: ${fileWorkerAccess(request)} access denied by ${policy.rule} policy: ${request.path}`,
+        );
+      }
+      throw new Error(message || `sandboxed file worker exited with status ${exitCode}`);
     }
     const text = Buffer.concat(stdout).toString("utf8");
     return text ? JSON.parse(text) : {};
@@ -243,6 +278,17 @@ export class KiwiSandbox {
       if (this.mutationQueues.get(path) === queued) this.mutationQueues.delete(path);
     }
   }
+}
+
+function fileWorkerAccess(request: FileWorkerRequest): string {
+  if (request.operation === "access") return request.mode;
+  if (request.operation === "read") return "read";
+  return "write";
+}
+
+function signalExitCode(signal: NodeJS.Signals | null): number {
+  const signalNumber = signal ? osConstants.signals[signal] : undefined;
+  return signalNumber === undefined ? -1 : 128 + signalNumber;
 }
 
 function disabledPolicy(): PolicyDecision {
