@@ -2460,7 +2460,9 @@ func (h *terminalHandler) removeCodingAgentExitMarkersForThread(projectID, threa
 	agents := []string{codingAgentPi, codingAgentClaude, codingAgentClaudeGPT}
 	if h.projects != nil {
 		for _, configured := range h.projects.GetSettings().CodingAgents {
-			agents = append(agents, configuredCodingAgentID(configured))
+			if configured.Kind == project.CodingAgentKindClaude || configured.Kind == project.CodingAgentKindClaudeGPT {
+				agents = append(agents, configuredCodingAgentID(configured))
+			}
 		}
 	}
 	for _, agent := range agents {
@@ -4196,7 +4198,8 @@ func (h *terminalHandler) claudeCodeProfile(agent string) (project.CodingAgentSe
 		return project.CodingAgentSetting{}, false
 	}
 	for _, configured := range h.projects.GetSettings().CodingAgents {
-		if configuredCodingAgentID(configured) == agent {
+		if (configured.Kind == project.CodingAgentKindClaude || configured.Kind == project.CodingAgentKindClaudeGPT) &&
+			configuredCodingAgentID(configured) == agent {
 			return configured, true
 		}
 	}

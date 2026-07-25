@@ -177,8 +177,9 @@ export type ThemeSettings = {
 export type CodingAgentSetting = {
   id: string
   name: string
-  kind: 'claude' | 'claude-gpt'
+  kind: 'pi' | 'pi-native' | 'claude' | 'claude-gpt'
   configDirectory?: string
+  isDefault: boolean
 }
 
 export type AppSettings = {

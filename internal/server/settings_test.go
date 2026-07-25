@@ -44,7 +44,8 @@ func TestSettingsAPIUpdatesWorktreeBaseLocation(t *testing.T) {
 	if settings.DisableWorkflows || !settings.WorkflowKeywordTrigger || settings.WorkflowSizeGuideline != project.DefaultWorkflowSizeGuideline {
 		t.Fatalf("unexpected default workflow settings: %#v", settings)
 	}
-	if settings.CodingAgents == nil || len(settings.CodingAgents) != 0 {
+	if len(settings.CodingAgents) != 2 || settings.CodingAgents[0].Kind != project.CodingAgentKindPi ||
+		settings.CodingAgents[1].Kind != project.CodingAgentKindPiNative || !settings.CodingAgents[1].IsDefault {
 		t.Fatalf("unexpected default coding agents: %#v", settings.CodingAgents)
 	}
 	if !settings.UsingDefaultTheme || settings.Theme != project.DefaultTheme() || settings.DefaultTheme != project.DefaultTheme() {
@@ -161,9 +162,11 @@ func TestSettingsAPIUpdatesCodingAgents(t *testing.T) {
 	}
 
 	workDirectory := filepath.Join(t.TempDir(), "claude-work")
-	body, err := json.Marshal(map[string]any{"codingAgents": []map[string]string{
-		{"id": "work", "name": "Work", "kind": "claude", "configDirectory": workDirectory},
+	body, err := json.Marshal(map[string]any{"codingAgents": []map[string]any{
+		{"id": "pi-native", "name": "Pi Native", "kind": "pi-native"},
+		{"id": "work", "name": "Work", "kind": "claude", "configDirectory": workDirectory, "isDefault": true},
 		{"id": "gpt", "name": "GPT", "kind": "claude-gpt"},
+		{"id": "pi", "name": "Pi", "kind": "pi"},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +180,10 @@ func TestSettingsAPIUpdatesCodingAgents(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&settings); err != nil {
 		t.Fatal(err)
 	}
-	if len(settings.CodingAgents) != 2 || settings.CodingAgents[0].Name != "Work" || settings.CodingAgents[0].ConfigDirectory != workDirectory || settings.CodingAgents[1].Kind != project.CodingAgentKindClaudeGPT {
+	if len(settings.CodingAgents) != 4 || settings.CodingAgents[0].Kind != project.CodingAgentKindPiNative ||
+		settings.CodingAgents[1].Name != "Work" || settings.CodingAgents[1].ConfigDirectory != workDirectory || !settings.CodingAgents[1].IsDefault ||
+		settings.CodingAgents[2].Kind != project.CodingAgentKindClaudeGPT ||
+		settings.CodingAgents[3].Kind != project.CodingAgentKindPi {
 		t.Fatalf("coding agents = %#v", settings.CodingAgents)
 	}
 	if info, err := os.Stat(workDirectory); err != nil || !info.IsDir() {
@@ -187,8 +193,14 @@ func TestSettingsAPIUpdatesCodingAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if agents := reloaded.GetSettings().CodingAgents; len(agents) != 2 || agents[0] != settings.CodingAgents[0] || agents[1] != settings.CodingAgents[1] {
+	if agents := reloaded.GetSettings().CodingAgents; len(agents) != len(settings.CodingAgents) {
 		t.Fatalf("persisted coding agents = %#v", agents)
+	} else {
+		for index := range agents {
+			if agents[index] != settings.CodingAgents[index] {
+				t.Fatalf("persisted coding agents = %#v", agents)
+			}
+		}
 	}
 
 	response = httptest.NewRecorder()

@@ -230,6 +230,20 @@ test("simple command detector rejects composition and substitution", () => {
   assert.equal(isSimpleCommand("gh status > /tmp/result"), false);
 });
 
+test("Seatbelt profiles allow the lexical xcode-select runtime path read-only", () => {
+  const profile = createSeatbeltProfile({
+    rule: "defaults",
+    unrestricted: false,
+    read: [],
+    write: [],
+    deniedWrite: [],
+    network: false,
+  });
+  assert.match(profile, /\(literal "\/var\/select"\)/);
+  assert.match(profile, /\(subpath "\/var\/select"\)/);
+  assert.doesNotMatch(profile, /\(allow file-write\*[\s\S]*\/var\/select/);
+});
+
 test("Seatbelt profiles remain deny-by-default", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "kiwi-sandbox-profile-"));
   await mkdir(join(cwd, "write"));

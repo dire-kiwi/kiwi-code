@@ -26,12 +26,13 @@ import (
 )
 
 const (
-	piNativeSessionDirectoryName = "pi-native-sessions"
-	piNativeMaxClientMessage     = 1 << 20
-	piNativeMaxCompactPrompt     = 64 << 10
-	piNativeMaxPromptImages      = 20
-	piNativeMaxTrackedOutput     = 1 << 20
-	piNativeStopTimeout          = 3 * time.Second
+	piNativeSessionDirectoryName    = "pi-native-sessions"
+	piNativeActiveSessionMarkerName = ".active-session"
+	piNativeMaxClientMessage        = 1 << 20
+	piNativeMaxCompactPrompt        = 64 << 10
+	piNativeMaxPromptImages         = 20
+	piNativeMaxTrackedOutput        = 1 << 20
+	piNativeStopTimeout             = 3 * time.Second
 )
 
 type piNativeProcessKey struct {
@@ -59,22 +60,23 @@ type piNativeManager struct {
 }
 
 type piNativeProcess struct {
-	key           piNativeProcessKey
-	launchOptions codingAgentLaunchOptions
-	command       *exec.Cmd
-	stdin         io.WriteCloser
-	events        *broadcast.Broker[[]byte]
-	done          chan struct{}
-	writeMu       sync.Mutex
-	exitMu        sync.RWMutex
-	exitText      string
-	request       atomic.Uint64
-	stopping      atomic.Bool
-	runMu         sync.RWMutex
-	nextRun       uint64
-	activeRun     uint64
-	runs          map[uint64]piNativeRunSnapshot
-	usageReporter func(piNativeProcessKey, string, threadUsageTotals)
+	key              piNativeProcessKey
+	launchOptions    codingAgentLaunchOptions
+	sessionDirectory string
+	command          *exec.Cmd
+	stdin            io.WriteCloser
+	events           *broadcast.Broker[[]byte]
+	done             chan struct{}
+	writeMu          sync.Mutex
+	exitMu           sync.RWMutex
+	exitText         string
+	request          atomic.Uint64
+	stopping         atomic.Bool
+	runMu            sync.RWMutex
+	nextRun          uint64
+	activeRun        uint64
+	runs             map[uint64]piNativeRunSnapshot
+	usageReporter    func(piNativeProcessKey, string, threadUsageTotals)
 }
 
 type piNativeRPCImage struct {
@@ -606,8 +608,18 @@ func (m *piNativeManager) startProcess(
 			return nil, errors.New("Pi is not installed or not on PATH")
 		}
 	}
+	activeSessionFile, err := piNativeActiveSessionFile(sessionDirectory)
+	if err != nil {
+		return nil, fmt.Errorf("resolve native Pi session: %w", err)
+	}
+	if activeSessionFile != "" {
+		if err := alignPiNativeSessionCwd(activeSessionFile, thread.Cwd); err != nil {
+			return nil, fmt.Errorf("update native Pi session working directory: %w", err)
+		}
+	}
 	command := exec.Command(piPath, piNativeArguments(
 		sessionDirectory,
+		activeSessionFile,
 		m.extensionPaths,
 		m.skillPaths,
 		m.figmaExtension,
@@ -653,14 +665,15 @@ func (m *piNativeManager) startProcess(
 	}
 
 	process := &piNativeProcess{
-		key:           key,
-		launchOptions: launchOptions,
-		command:       command,
-		stdin:         stdin,
-		events:        broadcast.NewBroker[[]byte](broadcast.DefaultMaxPending * 2),
-		done:          make(chan struct{}),
-		runs:          make(map[uint64]piNativeRunSnapshot),
-		usageReporter: m.usageReporter,
+		key:              key,
+		launchOptions:    launchOptions,
+		sessionDirectory: sessionDirectory,
+		command:          command,
+		stdin:            stdin,
+		events:           broadcast.NewBroker[[]byte](broadcast.DefaultMaxPending * 2),
+		done:             make(chan struct{}),
+		runs:             make(map[uint64]piNativeRunSnapshot),
+		usageReporter:    m.usageReporter,
 	}
 	process.readOutput(stdout)
 	process.readDiagnostics(stderr)
@@ -696,6 +709,7 @@ func (h *terminalHandler) withSubAgentNestingPrompt(
 
 func piNativeArguments(
 	sessionDirectory string,
+	activeSessionFile string,
 	extensionPaths []string,
 	skillPaths []string,
 	figmaExtensionPath string,
@@ -704,9 +718,17 @@ func piNativeArguments(
 	arguments := []string{
 		"--mode", "rpc",
 		"--session-dir", sessionDirectory,
-		"--continue",
-		"--approve",
 	}
+	if activeSessionFile != "" {
+		// The directory belongs to exactly one Kiwi Code thread, so resume the
+		// selected file directly instead of relying on Pi's --continue cwd filter.
+		// That filter can strand a valid conversation when a thread's persisted
+		// working-directory spelling changes across an application restart.
+		arguments = append(arguments, "--session", activeSessionFile)
+	} else {
+		arguments = append(arguments, "--continue")
+	}
+	arguments = append(arguments, "--approve")
 	for _, extensionPath := range extensionPaths {
 		arguments = append(arguments, "--extension", extensionPath)
 	}
@@ -728,6 +750,223 @@ func piNativeArguments(
 		arguments = append(arguments, "--append-system-prompt", launchOptions.AppendSystemPrompt)
 	}
 	return arguments
+}
+
+func piNativeActiveSessionFile(sessionDirectory string) (string, error) {
+	markerPath := filepath.Join(sessionDirectory, piNativeActiveSessionMarkerName)
+	if contents, err := os.ReadFile(markerPath); err == nil {
+		name := strings.TrimSpace(string(contents))
+		if validPiNativeSessionFileName(name) {
+			candidate := filepath.Join(sessionDirectory, name)
+			if _, statErr := os.Lstat(candidate); errors.Is(statErr, os.ErrNotExist) {
+				// Pi does not materialize a new session file until it has an assistant
+				// message. Keep an intentionally empty or interrupted session selected.
+				return candidate, nil
+			} else if statErr != nil {
+				return "", statErr
+			}
+			if candidate, valid, candidateErr := piNativeSessionFileByName(sessionDirectory, name); candidateErr != nil {
+				return "", candidateErr
+			} else if valid {
+				return candidate, nil
+			}
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+
+	entries, err := os.ReadDir(sessionDirectory)
+	if err != nil {
+		return "", err
+	}
+	var selected string
+	var selectedModTime time.Time
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".jsonl" {
+			continue
+		}
+		candidate, valid, candidateErr := piNativeSessionFileByName(sessionDirectory, entry.Name())
+		if candidateErr != nil {
+			return "", candidateErr
+		}
+		if !valid {
+			continue
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			return "", infoErr
+		}
+		if selected == "" || info.ModTime().After(selectedModTime) ||
+			(info.ModTime().Equal(selectedModTime) && entry.Name() > filepath.Base(selected)) {
+			selected = candidate
+			selectedModTime = info.ModTime()
+		}
+	}
+	return selected, nil
+}
+
+func validPiNativeSessionFileName(name string) bool {
+	return name != "" && name == filepath.Base(name) && filepath.Ext(name) == ".jsonl"
+}
+
+func piNativeSessionFileByName(sessionDirectory, name string) (string, bool, error) {
+	if !validPiNativeSessionFileName(name) {
+		return "", false, nil
+	}
+	candidate := filepath.Join(sessionDirectory, name)
+	info, err := os.Lstat(candidate)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if !info.Mode().IsRegular() {
+		return "", false, nil
+	}
+	file, err := os.Open(candidate)
+	if err != nil {
+		return "", false, err
+	}
+	defer file.Close()
+	line, readErr := bufio.NewReader(io.LimitReader(file, 64<<10)).ReadBytes('\n')
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return "", false, readErr
+	}
+	var header struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+	}
+	if len(line) == 0 || json.Unmarshal(bytes.TrimSpace(line), &header) != nil || header.Type != "session" || header.ID == "" {
+		return "", false, nil
+	}
+	return candidate, true, nil
+}
+
+func alignPiNativeSessionCwd(sessionFile, cwd string) error {
+	resolvedCwd, err := filepath.Abs(cwd)
+	if err != nil {
+		return err
+	}
+	file, err := os.Open(sessionFile)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	reader := bufio.NewReader(file)
+	headerLine, err := reader.ReadBytes('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		_ = file.Close()
+		return err
+	}
+	var header map[string]any
+	if json.Unmarshal(bytes.TrimSpace(headerLine), &header) != nil || header["type"] != "session" {
+		_ = file.Close()
+		return errors.New("native Pi session has an invalid header")
+	}
+	if savedCwd, _ := header["cwd"].(string); savedCwd == resolvedCwd {
+		return file.Close()
+	}
+	header["cwd"] = resolvedCwd
+	encodedHeader, err := json.Marshal(header)
+	if err != nil {
+		_ = file.Close()
+		return err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(sessionFile), ".session-cwd-*")
+	if err != nil {
+		_ = file.Close()
+		return err
+	}
+	temporaryPath := temporary.Name()
+	cleanup := func() { _ = os.Remove(temporaryPath) }
+	if err := temporary.Chmod(0o600); err != nil {
+		_ = temporary.Close()
+		_ = file.Close()
+		cleanup()
+		return err
+	}
+	if _, err := temporary.Write(append(encodedHeader, '\n')); err == nil {
+		_, err = io.Copy(temporary, reader)
+	}
+	closeErr := temporary.Close()
+	fileCloseErr := file.Close()
+	if err != nil || closeErr != nil || fileCloseErr != nil {
+		cleanup()
+		return errors.Join(err, closeErr, fileCloseErr)
+	}
+	if err := os.Rename(temporaryPath, sessionFile); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
+}
+
+func rememberPiNativeActiveSession(sessionDirectory, sessionFile string) error {
+	if strings.TrimSpace(sessionFile) == "" {
+		return nil
+	}
+	resolvedDirectory, err := filepath.Abs(sessionDirectory)
+	if err != nil {
+		return err
+	}
+	resolvedFile := sessionFile
+	if !filepath.IsAbs(resolvedFile) {
+		resolvedFile = filepath.Join(resolvedDirectory, resolvedFile)
+	}
+	resolvedFile, err = filepath.Abs(resolvedFile)
+	if err != nil {
+		return err
+	}
+	if filepath.Dir(resolvedFile) != resolvedDirectory {
+		return errors.New("native Pi reported a session outside its thread directory")
+	}
+	name := filepath.Base(resolvedFile)
+	if !validPiNativeSessionFileName(name) {
+		return errors.New("native Pi reported an invalid session file name")
+	}
+	_, valid, err := piNativeSessionFileByName(resolvedDirectory, name)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		if _, statErr := os.Lstat(resolvedFile); statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+			return statErr
+		} else if statErr == nil {
+			return errors.New("native Pi reported an invalid session file")
+		}
+	}
+	markerPath := filepath.Join(resolvedDirectory, piNativeActiveSessionMarkerName)
+	if contents, readErr := os.ReadFile(markerPath); readErr == nil && strings.TrimSpace(string(contents)) == name {
+		return nil
+	}
+	temporary, err := os.CreateTemp(resolvedDirectory, piNativeActiveSessionMarkerName+"-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	cleanup := func() { _ = os.Remove(temporaryPath) }
+	if err := temporary.Chmod(0o600); err != nil {
+		_ = temporary.Close()
+		cleanup()
+		return err
+	}
+	if _, err := temporary.WriteString(name + "\n"); err != nil {
+		_ = temporary.Close()
+		cleanup()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(temporaryPath, markerPath); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
 }
 
 func validPiNativePathSegment(value string) error {
@@ -791,6 +1030,16 @@ func (p *piNativeProcess) publishPiEvent(payload []byte) {
 	}
 	if json.Unmarshal(payload, &event) != nil {
 		return
+	}
+	if event.Type == "response" && event.Success && (event.Command == "get_state" || event.Command == "get_session_stats") {
+		var session struct {
+			SessionFile string `json:"sessionFile"`
+		}
+		if json.Unmarshal(event.Data, &session) == nil && session.SessionFile != "" {
+			if err := rememberPiNativeActiveSession(p.sessionDirectory, session.SessionFile); err != nil {
+				log.Printf("remember native Pi session: project=%q thread=%q error=%v", p.key.ProjectID, p.key.ThreadID, err)
+			}
+		}
 	}
 	if event.Type == "response" && event.Command == "get_entries" {
 		// get_entries is an internal display-history probe. Unlike get_messages,

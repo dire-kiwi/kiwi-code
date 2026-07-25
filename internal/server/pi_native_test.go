@@ -32,6 +32,7 @@ func TestStartPiNativeProcessRejectsRollbackPendingThread(t *testing.T) {
 func TestPiNativeArgumentsUseRPCAndPreserveLaunchChoices(t *testing.T) {
 	got := piNativeArguments(
 		"/tmp/sessions",
+		"",
 		[]string{"/tmp/title.ts", "/tmp/activity.ts"},
 		[]string{"/tmp/kiwi-sandbox-config"},
 		"/tmp/figma.ts",
@@ -54,6 +55,150 @@ func TestPiNativeArgumentsUseRPCAndPreserveLaunchChoices(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("piNativeArguments() = %#v, want %#v", got, want)
 	}
+}
+
+func TestPiNativeArgumentsResumeTheSelectedSessionFile(t *testing.T) {
+	got := piNativeArguments(
+		"/tmp/sessions",
+		"/tmp/sessions/active.jsonl",
+		nil,
+		nil,
+		"",
+		codingAgentLaunchOptions{},
+	)
+	joined := strings.Join(got, " ")
+	if !strings.Contains(joined, "--session /tmp/sessions/active.jsonl") {
+		t.Fatalf("piNativeArguments() did not select the active session: %#v", got)
+	}
+	if strings.Contains(joined, "--continue") {
+		t.Fatalf("piNativeArguments() combined --session with --continue: %#v", got)
+	}
+}
+
+func TestPiNativeActiveSessionSurvivesManagerRestartAndCwdChange(t *testing.T) {
+	sessionDirectory := t.TempDir()
+	older := writePiNativeTestSession(t, sessionDirectory, "older.jsonl", "older", "/old/cwd")
+	newer := writePiNativeTestSession(t, sessionDirectory, "newer.jsonl", "newer", "/old/cwd")
+	oldTime := time.Now().Add(-time.Hour)
+	newTime := time.Now()
+	if err := os.Chtimes(older, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newer, newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+
+	selected, err := piNativeActiveSessionFile(sessionDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected != newer {
+		t.Fatalf("selected session = %q, want newest %q", selected, newer)
+	}
+	if err := rememberPiNativeActiveSession(sessionDirectory, older); err != nil {
+		t.Fatal(err)
+	}
+	selected, err = piNativeActiveSessionFile(sessionDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected != older {
+		t.Fatalf("selected marked session = %q, want %q", selected, older)
+	}
+
+	// A per-thread session must not depend on Pi matching the current cwd in the
+	// saved header. Align the header before passing the explicit path back to Pi.
+	movedCwd := t.TempDir()
+	if err := alignPiNativeSessionCwd(selected, movedCwd); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var header struct {
+		Cwd string `json:"cwd"`
+	}
+	if err := json.Unmarshal(bytes.SplitN(contents, []byte{'\n'}, 2)[0], &header); err != nil {
+		t.Fatal(err)
+	}
+	if header.Cwd != movedCwd {
+		t.Fatalf("aligned session cwd = %q, want %q", header.Cwd, movedCwd)
+	}
+	arguments := piNativeArguments(sessionDirectory, selected, nil, nil, "", codingAgentLaunchOptions{})
+	if !reflect.DeepEqual(arguments[:6], []string{
+		"--mode", "rpc", "--session-dir", sessionDirectory, "--session", older,
+	}) {
+		t.Fatalf("restart arguments = %#v", arguments)
+	}
+}
+
+func TestPiNativeActiveSessionKeepsAnUnmaterializedSessionSelected(t *testing.T) {
+	sessionDirectory := t.TempDir()
+	pending := filepath.Join(sessionDirectory, "pending.jsonl")
+	if err := rememberPiNativeActiveSession(sessionDirectory, pending); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := piNativeActiveSessionFile(sessionDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected != pending {
+		t.Fatalf("selected unmaterialized session = %q, want %q", selected, pending)
+	}
+	if err := alignPiNativeSessionCwd(selected, t.TempDir()); err != nil {
+		t.Fatalf("aligning an unmaterialized session: %v", err)
+	}
+}
+
+func TestPiNativeGetStateRemembersTheActiveSession(t *testing.T) {
+	sessionDirectory := t.TempDir()
+	sessionFile := writePiNativeTestSession(t, sessionDirectory, "active.jsonl", "active", t.TempDir())
+	process := &piNativeProcess{
+		key:              piNativeProcessKey{ProjectID: "project", ThreadID: "thread"},
+		sessionDirectory: sessionDirectory,
+		events:           broadcast.NewBroker[[]byte](4),
+		runs:             make(map[uint64]piNativeRunSnapshot),
+	}
+	payload, err := json.Marshal(map[string]any{
+		"type": "response", "command": "get_state", "success": true,
+		"data": map[string]any{"sessionFile": sessionFile},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	process.publishPiEvent(payload)
+	contents, err := os.ReadFile(filepath.Join(sessionDirectory, piNativeActiveSessionMarkerName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(contents)) != filepath.Base(sessionFile) {
+		t.Fatalf("active session marker = %q, want %q", contents, filepath.Base(sessionFile))
+	}
+}
+
+func TestRememberPiNativeActiveSessionRejectsOutsideFile(t *testing.T) {
+	sessionDirectory := t.TempDir()
+	outsideDirectory := t.TempDir()
+	outside := writePiNativeTestSession(t, outsideDirectory, "outside.jsonl", "outside", t.TempDir())
+	if err := rememberPiNativeActiveSession(sessionDirectory, outside); err == nil {
+		t.Fatal("rememberPiNativeActiveSession() accepted a file outside the thread directory")
+	}
+}
+
+func writePiNativeTestSession(t *testing.T, directory, name, id, cwd string) string {
+	t.Helper()
+	path := filepath.Join(directory, name)
+	header, err := json.Marshal(map[string]any{
+		"type": "session", "version": 3, "id": id, "timestamp": time.Now().UTC(), "cwd": cwd,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(header, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestPiNativeThreadEnvironmentCanRouteBrowserToolsToTheInvokingThread(t *testing.T) {
