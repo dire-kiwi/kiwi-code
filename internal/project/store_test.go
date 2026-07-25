@@ -1951,8 +1951,10 @@ func TestStorePersistsCodingAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if agents := store.GetSettings().CodingAgents; agents == nil || len(agents) != 0 {
-		t.Fatalf("default coding agents = %#v, want an empty list", agents)
+	if agents := store.GetSettings().CodingAgents; len(agents) != 2 ||
+		agents[0].Kind != CodingAgentKindPi || agents[0].IsDefault ||
+		agents[1].Kind != CodingAgentKindPiNative || !agents[1].IsDefault {
+		t.Fatalf("default coding agents = %#v", agents)
 	}
 
 	agents := []CodingAgentSetting{
@@ -1965,19 +1967,26 @@ func TestStorePersistsCodingAgents(t *testing.T) {
 	}
 	wantDirectory := filepath.Join(home, ".claude-work")
 	want := []CodingAgentSetting{
+		{ID: CodingAgentKindPi, Name: "Pi", Kind: CodingAgentKindPi},
 		{ID: "work-account", Name: "Work", Kind: CodingAgentKindClaude, ConfigDirectory: wantDirectory},
 		{ID: "gpt", Name: "GPT", Kind: CodingAgentKindClaudeGPT},
+		{ID: CodingAgentKindPiNative, Name: "Pi Native", Kind: CodingAgentKindPiNative, IsDefault: true},
 	}
-	if len(settings.CodingAgents) != 2 || settings.CodingAgents[0] != want[0] || settings.CodingAgents[1] != want[1] {
+	if len(settings.CodingAgents) != len(want) {
 		t.Fatalf("coding agents = %#v, want %#v", settings.CodingAgents, want)
+	}
+	for index := range want {
+		if settings.CodingAgents[index] != want[index] {
+			t.Fatalf("coding agents = %#v, want %#v", settings.CodingAgents, want)
+		}
 	}
 	if info, err := os.Stat(wantDirectory); err != nil || !info.IsDir() {
 		t.Fatalf("Claude Code config directory was not created: info=%v err=%v", info, err)
 	}
 
 	agents[0].Name = "Changed input"
-	settings.CodingAgents[0].Name = "Changed output"
-	if current := store.GetSettings().CodingAgents; len(current) != 2 || current[0] != want[0] {
+	settings.CodingAgents[1].Name = "Changed output"
+	if current := store.GetSettings().CodingAgents; len(current) != len(want) || current[1] != want[1] {
 		t.Fatalf("coding agents were not defensively copied: %#v", current)
 	}
 
@@ -1985,8 +1994,14 @@ func TestStorePersistsCodingAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if persisted := reloaded.GetSettings().CodingAgents; len(persisted) != 2 || persisted[0] != want[0] || persisted[1] != want[1] {
+	if persisted := reloaded.GetSettings().CodingAgents; len(persisted) != len(want) {
 		t.Fatalf("persisted coding agents = %#v", persisted)
+	} else {
+		for index := range want {
+			if persisted[index] != want[index] {
+				t.Fatalf("persisted coding agents = %#v", persisted)
+			}
+		}
 	}
 
 	empty := []CodingAgentSetting{}
@@ -1994,8 +2009,9 @@ func TestStorePersistsCodingAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.CodingAgents == nil || len(settings.CodingAgents) != 0 {
-		t.Fatalf("cleared coding agents = %#v", settings.CodingAgents)
+	if len(settings.CodingAgents) != 2 || settings.CodingAgents[0].Kind != CodingAgentKindPi ||
+		settings.CodingAgents[1].Kind != CodingAgentKindPiNative || !settings.CodingAgents[1].IsDefault {
+		t.Fatalf("reset coding agents = %#v", settings.CodingAgents)
 	}
 }
 
@@ -2014,7 +2030,9 @@ func TestStoreMigratesLegacyClaudeCodeProfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	agents := store.GetSettings().CodingAgents
-	if len(agents) != 1 || agents[0].Kind != CodingAgentKindClaude || agents[0].ID != "work" {
+	if len(agents) != 3 || agents[0].Kind != CodingAgentKindPi ||
+		agents[1].Kind != CodingAgentKindClaude || agents[1].ID != "work" ||
+		agents[2].Kind != CodingAgentKindPiNative || !agents[2].IsDefault {
 		t.Fatalf("migrated coding agents = %#v", agents)
 	}
 }
@@ -2040,6 +2058,11 @@ func TestStoreRejectsInvalidCodingAgents(t *testing.T) {
 		{name: "duplicate ids", agents: []CodingAgentSetting{valid("one", "Work", "one"), valid("one", "Personal", "two")}},
 		{name: "duplicate names", agents: []CodingAgentSetting{valid("one", "Work", "one"), valid("two", "work", "two")}},
 		{name: "duplicate directories", agents: []CodingAgentSetting{valid("one", "Work", "same"), valid("two", "Personal", "same")}},
+		{name: "duplicate Pi", agents: []CodingAgentSetting{{Kind: CodingAgentKindPi}, {Kind: CodingAgentKindPi}}},
+		{name: "multiple defaults", agents: []CodingAgentSetting{
+			{ID: "one", Name: "Work", Kind: CodingAgentKindClaudeGPT, IsDefault: true},
+			{ID: "two", Name: "Personal", Kind: CodingAgentKindClaudeGPT, IsDefault: true},
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
