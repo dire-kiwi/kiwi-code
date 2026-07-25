@@ -15,6 +15,16 @@ export function configuredCodingAgentId(agent: CodingAgentSetting): ConfiguredCl
     : `claude-profile-${agent.id}`
 }
 
+export function codingAgentSelectionForSetting(agent: CodingAgentSetting): CodingAgentSelection {
+  if (agent.kind === 'pi' || agent.kind === 'pi-native') return agent.kind
+  return configuredCodingAgentId(agent)
+}
+
+export function defaultCodingAgentSelection(agents: CodingAgentSetting[]): CodingAgentSelection {
+  const configuredDefault = agents.find((agent) => agent.isDefault)
+  return configuredDefault ? codingAgentSelectionForSetting(configuredDefault) : 'pi-native'
+}
+
 export function isCodingAgent(value: unknown): value is CodingAgent {
   return value === 'pi'
     || value === 'claude'
@@ -33,7 +43,7 @@ export function isCodingAgentSelection(value: unknown): value is CodingAgentSele
 
 export function configuredCodingAgentChoices(agents: CodingAgentSetting[]) {
   return agents.map((agent) => ({
-    id: configuredCodingAgentId(agent),
+    id: codingAgentSelectionForSetting(agent),
     label: agent.name,
   }))
 }

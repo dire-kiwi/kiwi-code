@@ -42,7 +42,7 @@ export const GLOBAL_SETTINGS_SECTIONS: Array<SettingsSectionMeta<GlobalSettingsS
   {
     id: 'profiles',
     label: 'Coding agents',
-    keywords: ['claude code', 'gpt', 'dropdown', 'config directory', 'accounts', 'login', 'sessions'],
+    keywords: ['pi', 'pi native', 'claude code', 'gpt', 'default', 'order', 'dropdown', 'config directory', 'accounts', 'login', 'sessions'],
     icon: UserRound,
     tone: 'blue',
   },

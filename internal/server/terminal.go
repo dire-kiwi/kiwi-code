@@ -617,6 +617,11 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 		closeWithError(message)
 	}
 
+	if err := h.markTmuxSessionUsed(sessionName, time.Now()); err != nil {
+		log.Printf("record tmux session use: session=%q error=%v", sessionName, err)
+	}
+	defer func() { _ = h.markTmuxSessionUsed(sessionName, time.Now()) }()
+
 	// Shell clients attach to their standalone session so the shell tab API can
 	// select its current window. Each shared window gets a temporary one-window
 	// view. This lets several browser panes view different windows without
@@ -2461,7 +2466,9 @@ func (h *terminalHandler) removeCodingAgentExitMarkersForThread(projectID, threa
 	agents := []string{codingAgentPi, codingAgentClaude, codingAgentClaudeGPT}
 	if h.projects != nil {
 		for _, configured := range h.projects.GetSettings().CodingAgents {
-			agents = append(agents, configuredCodingAgentID(configured))
+			if configured.Kind == project.CodingAgentKindClaude || configured.Kind == project.CodingAgentKindClaudeGPT {
+				agents = append(agents, configuredCodingAgentID(configured))
+			}
 		}
 	}
 	for _, agent := range agents {
@@ -4197,7 +4204,8 @@ func (h *terminalHandler) claudeCodeProfile(agent string) (project.CodingAgentSe
 		return project.CodingAgentSetting{}, false
 	}
 	for _, configured := range h.projects.GetSettings().CodingAgents {
-		if configuredCodingAgentID(configured) == agent {
+		if (configured.Kind == project.CodingAgentKindClaude || configured.Kind == project.CodingAgentKindClaudeGPT) &&
+			configuredCodingAgentID(configured) == agent {
 			return configured, true
 		}
 	}

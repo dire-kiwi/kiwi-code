@@ -59,10 +59,11 @@ See [`config.example.json`](config.example.json) for all tool patterns.
 
 ### Policy behavior
 
-With no configuration, every Bash command may run under the same deny-by-default Seatbelt policy: network access is blocked, file access is read/write within the directory Pi or Claude started in and configured related projects, fixed runtime folders are readable, and the operating-system temporary directory is writable. Commands do not need to be allowlisted.
+With no configuration, every Bash command may run under the same deny-by-default Seatbelt policy: network access is blocked, file access is read/write within the directory Pi or Claude started in, every active Git worktree for the same repository, and configured related projects; fixed runtime folders are readable, and the operating-system temporary directory is writable. Commands do not need to be allowlisted.
 
-- Every command's effective working directory is always readable and writable. For native file tools, this implicit directory is the project root. Configured defaults and command rules may widen access but cannot remove this grant.
-- The first matching command rule replaces `defaults`, including the automatic related-project access, but retains the implicit working-directory and fixed runtime access.
+- Every command's effective working directory and every active Git worktree for its repository are always readable and writable. For native file tools, the implicit working directory is the project root. Configured defaults and command rules may widen access but cannot remove these grants.
+- Git worktrees are rediscovered from the current repository before tool use, so they do not need to be copied into sandbox configuration. The system context states the capability once without enumerating worktree paths.
+- The first matching command rule replaces `defaults`, including the automatic related-project access, but retains the implicit working-directory, Git-worktree, and fixed runtime access.
 - A command string is shorthand for an unrestricted filesystem rule. For example, `"gh *"` is equivalent to `{ "pattern": "gh *" }`.
 - An object rule's `pattern` may be one string or a list such as `["gh", "gh *"]`; every listed pattern shares that rule's `files` and `network` policy.
 - A matching object rule with no `files` field also grants unrestricted filesystem reads and writes.
@@ -72,7 +73,7 @@ With no configuration, every Bash command may run under the same deny-by-default
 - Runtime paths needed for macOS, Node, and command execution are always readable. `/dev/null` and `/dev/tty` are always writable.
 - Globs support `*`, `?`, and character classes.
 - Unrestricted command rules are selected only for conservative single shell commands. Composition, redirection, command substitution, and unbalanced quotes fall back to `defaults`, preventing `gh status; cat ~/.ssh/id_ed25519` from inheriting `gh *` access.
-- A requested command working directory must remain inside the project root or a configured related project after resolving symlinks.
+- A requested command working directory must remain inside the project root, another worktree for the same Git repository, or a configured related project after resolving symlinks.
 - There is no unsandboxed fallback if `sandbox-exec` fails, and unknown configuration fields are rejected rather than ignored.
 - Policy pre-check failures and macOS `Operation not permitted` results are labeled `Kiwi Sandbox:` and include the active rule when available. Ordinary nonzero command exits are not mislabeled as sandbox denials.
 - While enforcement is enabled, both active config files, the loaded Kiwi Sandbox runtime, and Claude's enable/disable state directory are denied write access even when a command otherwise has unrestricted filesystem access. Disable explicitly before a user-requested policy edit, then re-enable immediately.

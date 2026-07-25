@@ -2,6 +2,7 @@ import { generatePath } from 'react-router-dom'
 import type { WorkspaceTool } from './types'
 
 export const CLEANUP_ROUTE = '/cleanup'
+export const SESSION_LOG_ROUTE = '/session-log'
 export const SETTINGS_ROUTE = '/settings'
 export const SETTINGS_SECTION_ROUTE = '/settings/:section'
 export const TMUX_ROUTE = '/tmux'

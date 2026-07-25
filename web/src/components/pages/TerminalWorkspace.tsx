@@ -11,7 +11,7 @@ import {
   Play,
   SquareTerminal,
 } from 'lucide-react'
-import { getSettings, runEnvironmentAction, threadEventsPath } from '../../api'
+import { getSettings, runEnvironmentAction, threadEventsPath, touchThreadTmuxActivity } from '../../api'
 import { configuredCodingAgentChoices, isCodingAgent } from '../../codingAgents'
 import { workspacePath } from '../../routes'
 import type {
@@ -215,13 +215,23 @@ export function TerminalWorkspace({
 
   useEffect(() => {
     const controller = new AbortController()
+    const touch = () => {
+      void touchThreadTmuxActivity(project.id, thread.id, controller.signal).catch(() => {})
+    }
+    touch()
+    const interval = window.setInterval(touch, 5 * 60 * 1000)
+    return () => {
+      window.clearInterval(interval)
+      controller.abort()
+    }
+  }, [project.id, thread.id])
+
+  useEffect(() => {
+    const controller = new AbortController()
     getSettings(controller.signal)
       .then((settings) => {
         if (controller.signal.aborted) return
-        const choices = [
-          ...configuredCodingAgentChoices(settings.codingAgents),
-          ...fallbackWorkspaceCodingAgents,
-        ]
+        const choices = configuredCodingAgentChoices(settings.codingAgents)
         setCodingAgentChoices(choices)
         setCodingAgent((current) => choices.some((choice) => choice.id === current) ? current : 'pi')
       })

@@ -50,11 +50,16 @@ func (s *Server) startCleanupLoop(ctx context.Context, interval time.Duration) {
 }
 
 func (s *Server) runCleanupCycle(now time.Time) error {
+	var cleanupErrors []error
+	if err := s.closeInactiveTmuxSessions(now); err != nil {
+		cleanupErrors = append(cleanupErrors, fmt.Errorf("close inactive tmux sessions: %w", err))
+	}
+
 	due, err := s.projects.ArchivedThreadsDue(now)
 	if err != nil {
-		return fmt.Errorf("find archived threads: %w", err)
+		cleanupErrors = append(cleanupErrors, fmt.Errorf("find archived threads: %w", err))
+		return errors.Join(cleanupErrors...)
 	}
-	var cleanupErrors []error
 	for _, ref := range due {
 		if err := s.deleteExpiredArchivedThread(ref); err != nil {
 			cleanupErrors = append(cleanupErrors, fmt.Errorf(

@@ -177,8 +177,9 @@ export type ThemeSettings = {
 export type CodingAgentSetting = {
   id: string
   name: string
-  kind: 'claude' | 'claude-gpt'
+  kind: 'pi' | 'pi-native' | 'claude' | 'claude-gpt'
   configDirectory?: string
+  isDefault: boolean
 }
 
 export type AppSettings = {
@@ -226,6 +227,24 @@ export type CleanupOverview = {
   orphanedWorktreeRetentionDays: number
   threads: ThreadCleanupOverview[]
   worktrees: WorktreeCleanupOverview[]
+}
+
+export type SessionClosureEvent = {
+  id: string
+  projectId: string
+  projectName: string
+  threadId: string
+  threadTitle: string
+  sessionNames: string[]
+  lastActivityAt: string
+  closedAt: string
+  reason: 'inactivity'
+}
+
+export type SessionClosureOverview = {
+  generatedAt: string
+  inactivityHours: number
+  events: SessionClosureEvent[]
 }
 
 export type AgentSkillItemStatus = {

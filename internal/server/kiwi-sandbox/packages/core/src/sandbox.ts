@@ -6,6 +6,7 @@ import { dirname, resolve } from "node:path";
 import { loadConfig, type SandboxConfig } from "./config.ts";
 import { assertPathAllowed, assertWorkingDirectory, canonicalPath, resolveDecision, type PolicyDecision } from "./policy.ts";
 import { createSeatbeltProfile } from "./profile.ts";
+import { discoverGitWorktrees } from "./worktrees.ts";
 
 export type SandboxOptions = {
   projectRoot: string;
@@ -92,13 +93,17 @@ export class KiwiSandbox {
   }
 
   async runCommand(command: string, options: CommandOptions = {}): Promise<CommandResult> {
-    const config = await this.validateConfig();
+    const [config, worktrees] = await Promise.all([
+      this.validateConfig(),
+      discoverGitWorktrees(this.projectRoot),
+    ]);
     const cwd = await assertWorkingDirectory(
       this.projectRoot,
       options.cwd ?? this.projectRoot,
       config.relatedProjects,
+      worktrees.roots,
     );
-    const policy = this.enabled ? await this.decision(config, command, cwd) : disabledPolicy();
+    const policy = this.enabled ? await this.decision(config, command, cwd, worktrees.roots) : disabledPolicy();
     const profile = this.enabled ? createSeatbeltProfile(policy) : undefined;
     const executable = this.enabled ? this.sandboxExecutable : config.shell;
     const args = this.enabled ? ["-p", profile!, config.shell, "-lc", command] : ["-lc", command];
@@ -220,13 +225,20 @@ export class KiwiSandbox {
     return { policy, canonical };
   }
 
-  private async decision(config: SandboxConfig, command: string, cwd: string): Promise<PolicyDecision> {
+  private async decision(
+    config: SandboxConfig,
+    command: string,
+    cwd: string,
+    gitWorktrees?: string[],
+  ): Promise<PolicyDecision> {
+    const worktrees = gitWorktrees ?? (await discoverGitWorktrees(this.projectRoot)).roots;
     const decision = await resolveDecision(
       config,
       command,
       cwd,
       [dirname(dirname(process.execPath))],
       this.projectRoot,
+      worktrees,
     );
     const protectedPaths = [...this.paths, ...this.protectedWritePaths];
     const canonicalProtected = await Promise.all(protectedPaths.map((path) => canonicalPath(path)));

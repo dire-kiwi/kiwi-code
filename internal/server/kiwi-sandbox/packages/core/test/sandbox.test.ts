@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,6 +8,8 @@ import { KiwiSandbox } from "../src/sandbox.ts";
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "kiwi-sandbox-core-"));
   const fake = join(root, "sandbox-exec");
+  await mkdir(join(root, ".git"));
+  await writeFile(join(root, ".git", "HEAD"), "ref: refs/heads/main\n");
   await writeFile(fake, '#!/bin/sh\nshift 2\nexec "$@"\n');
   await chmod(fake, 0o700);
   const config = join(root, "sandbox.json");

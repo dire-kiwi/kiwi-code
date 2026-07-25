@@ -17,6 +17,8 @@ import {
 } from 'lucide-react'
 import { createThread, getSettings, listCodingAgents, listProjectGitBranches, uploadPiImage } from '../../api'
 import {
+  codingAgentSelectionForSetting,
+  defaultCodingAgentSelection,
   fallbackCodingAgentConfigs,
   isClaudeGPTCodingAgent,
   isCodingAgent,
@@ -240,7 +242,15 @@ export function NewThreadScreen({
     setSettingsError('')
     getSettings(controller.signal)
       .then((next) => {
-        if (!controller.signal.aborted) setSettings(next)
+        if (controller.signal.aborted) return
+        setSettings(next)
+        const availableAgents = next.codingAgents.map(codingAgentSelectionForSetting)
+        const configuredDefault = defaultCodingAgentSelection(next.codingAgents)
+        const nextAgent = availableAgents.includes(configuredDefault) ? configuredDefault : 'pi-native'
+        const rememberedModel = agentModels[codingAgentIdForSelection(nextAgent)]
+        setCodingAgent(nextAgent)
+        setModel(rememberedModel?.model ?? '')
+        setThinkingLevel(rememberedModel?.thinkingLevel ?? '')
       })
       .catch((reason) => {
         if (controller.signal.aborted) return
@@ -442,6 +452,13 @@ export function NewThreadScreen({
       : effectiveNestingDepth)
   }, [effectiveNestingDepth])
 
+  const configuredAgentOptions = settings?.codingAgents.map((agent) => ({
+    value: codingAgentSelectionForSetting(agent),
+    label: agent.name,
+  })) ?? [
+    { value: 'pi' as CodingAgentSelection, label: 'Pi' },
+    { value: 'pi-native' as CodingAgentSelection, label: 'Pi Native' },
+  ]
   const selectedAgentId = codingAgentIdForSelection(codingAgent)
   const selectedAgent = codingAgents.find((agent) => agent.id === selectedAgentId)
     ?? fallbackCodingAgentConfigs[0]
@@ -547,10 +564,7 @@ export function NewThreadScreen({
               <Select
                 id="thread-coding-agent"
                 value={codingAgent}
-                options={[
-                  ...codingAgents.map((agent) => ({ value: agent.id, label: agent.label })),
-                  { value: 'pi-native', label: 'Pi Native' },
-                ]}
+                options={configuredAgentOptions}
                 onChange={(agent) => handleCodingAgentChange(agent as CodingAgentSelection)}
                 disabled={submitting}
                 leadingIcon={<Bot size={12} />}

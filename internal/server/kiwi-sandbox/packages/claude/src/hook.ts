@@ -1,4 +1,4 @@
-import { configPaths, loadConfig, relatedProjectsPrompt } from "../../core/src/index.ts";
+import { configPaths, loadConfig, sandboxSystemPrompt } from "../../core/src/index.ts";
 import { canonicalProjectRoot, isSandboxEnabled } from "./state.ts";
 
 const failClosedTimer = setTimeout(() => {
@@ -12,7 +12,7 @@ try {
   const event = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { cwd?: string; hook_event_name?: string };
   const projectRoot = canonicalProjectRoot(process.env.CLAUDE_PROJECT_DIR || event.cwd || process.cwd());
   if (event.hook_event_name === "SessionStart") {
-    const context = relatedProjectsPrompt(await loadConfig(configPaths(projectRoot)), projectRoot);
+    const context = await sandboxSystemPrompt(await loadConfig(configPaths(projectRoot)), projectRoot);
     if (context) {
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: {
