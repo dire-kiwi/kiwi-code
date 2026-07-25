@@ -34,6 +34,47 @@ export type LocalEnvironment = {
   actions: EnvironmentAction[]
 }
 
+export type SandboxFileAccess = {
+  read: string[]
+  write: string[]
+}
+
+export type SandboxCommandRule = {
+  patterns: string[]
+  files?: SandboxFileAccess
+  network?: boolean
+}
+
+/** Sparse Kiwi Sandbox config: absent fields inherit from the previous layer. */
+export type SandboxConfig = {
+  defaults?: SandboxFileAccess
+  commands?: SandboxCommandRule[]
+  network?: boolean
+  shell?: string
+  relatedProjects?: string[]
+}
+
+export type EffectiveSandboxConfig = {
+  defaults: SandboxFileAccess
+  commands: SandboxCommandRule[]
+  network: boolean
+  shell: string
+  relatedProjects: string[]
+}
+
+export type SandboxConfigScope = 'global' | 'thread'
+
+export type SandboxConfigState = {
+  scope: SandboxConfigScope
+  path: string
+  exists: boolean
+  parseError?: string
+  globalParseError?: string
+  config: SandboxConfig
+  inherited: EffectiveSandboxConfig
+  effective: EffectiveSandboxConfig
+}
+
 export type Project = {
   id: string
   name: string
