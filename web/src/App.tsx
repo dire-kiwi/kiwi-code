@@ -288,7 +288,6 @@ export default function App() {
   const projectsRef = useRef<Project[]>(projects)
   projectsRef.current = projects
   const pendingPiAcknowledgementsRef = useRef(new Set<string>())
-  const activeThreadIdentityRef = useRef<string | null>(null)
   const previousActiveThreadRef = useRef<string | null>(null)
 
   const workspaceProjectId = workspaceMatch?.params.projectId
@@ -321,6 +320,9 @@ export default function App() {
     for (const activity of activities) queuePiAcknowledgement(projectId, activity.threadId)
   }, [queuePiAcknowledgement])
 
+  // A thread that finishes while it is the active thread stays "finished"
+  // until the user actually interacts with it (select, focus, key, pointer),
+  // so it remains visible under "Needs review" — no passive acknowledgment.
   const applyPiActivities = useCallback((nextActivities: PiThreadActivity[]) => {
     const pending = pendingPiAcknowledgementsRef.current
     const visibleActivities = nextActivities.filter((activity) =>
@@ -330,18 +332,7 @@ export default function App() {
       piActivitiesRef.current = visibleActivities
       setPiActivities(visibleActivities)
     }
-
-    const activeFinished = visibleActivities.filter((activity) => {
-      if (activity.state !== 'finished') return false
-      const project = projectsRef.current.find((item) => item.id === activity.projectId)
-      if (!project) return false
-      const displayThreadId = activityDisplayThreadId(project.threads, activity)
-      return piActivityKey(activity.projectId, displayThreadId) === activeThreadIdentityRef.current
-    })
-    for (const activity of activeFinished) {
-      queuePiAcknowledgement(activity.projectId, activity.threadId)
-    }
-  }, [queuePiAcknowledgement])
+  }, [])
 
   useEffect(() => {
     function handleProjectFinderShortcut(event: KeyboardEvent) {
@@ -563,7 +554,6 @@ export default function App() {
   }, [activeProfileId])
 
   useEffect(() => {
-    activeThreadIdentityRef.current = activeThreadIdentity
     if (activeThreadIdentity && previousActiveThreadRef.current !== activeThreadIdentity && selectedProject && selectedThread) {
       acknowledgeThreadActivity(selectedProject.id, selectedThread.id)
     }

@@ -16,12 +16,14 @@ type SelectionStyle = {
 
 const selectionStyles: Record<SelectionButtonVariant, SelectionStyle> = {
   navigation: {
-    base: 'flex h-8 w-full items-center gap-1.5 rounded-md py-1 pl-8 pr-9 text-left text-[11px] leading-4 transition-colors',
+    // Horizontal padding is supplied by the call site so rows can indent
+    // without fighting the base classes for specificity.
+    base: 'flex h-8 w-full items-center gap-1.5 rounded-md py-1 text-left text-xs leading-4 transition-colors',
     selected: 'bg-ghost-selected/80 text-ghost-bright-white ring-1 ring-inset ring-ghost-border/60',
     idle: 'text-ghost-muted hover:bg-ghost-raised/45 hover:text-ghost-white',
   },
   'navigation-compact': {
-    base: 'flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-[10px] font-medium transition-colors',
+    base: 'flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-[11px] font-medium transition-colors',
     selected: 'bg-ghost-selected/80 text-ghost-bright-white ring-1 ring-inset ring-ghost-border/60',
     idle: 'text-ghost-dim hover:bg-ghost-raised/45 hover:text-ghost-white',
   },

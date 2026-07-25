@@ -8,6 +8,7 @@ import {
   type KeyboardEvent,
 } from 'react'
 import {
+  Activity,
   Archive,
   ArchiveRestore,
   Bookmark,
@@ -16,6 +17,7 @@ import {
   ChevronUp,
   Clock3,
   CornerDownRight,
+  EllipsisVertical,
   ExternalLink,
   Folder,
   FolderGit2,
@@ -24,6 +26,7 @@ import {
   GitFork,
   Globe2,
   GripVertical,
+  ListTree,
   LoaderCircle,
   PanelLeftClose,
   PanelsTopLeft,
@@ -52,6 +55,7 @@ import { SelectionButton } from '../atoms/SelectionButton'
 import { Select } from '../atoms/Select'
 import { BackendSwitcher } from '../molecules/BackendSwitcher'
 import { ProjectPathAutocomplete } from '../molecules/ProjectPathAutocomplete'
+import { SidebarActivityView } from './SidebarActivityView'
 
 type ProjectSidebarProps = {
   profiles: Profile[]
@@ -89,6 +93,56 @@ type ProjectSidebarProps = {
 }
 
 const newProfileValue = '__new-profile__'
+
+type SidebarViewMode = 'activity' | 'tree'
+
+const sidebarViewStorageKey = 'kiwi-code.sidebar.view'
+const sidebarWidthStorageKey = 'kiwi-code.sidebar.width'
+const collapsedProjectsStorageKey = 'kiwi-code.sidebar.collapsed-projects'
+const collapsedChildThreadsStorageKey = 'kiwi-code.sidebar.collapsed-child-threads'
+const webServersCollapsedStorageKey = 'kiwi-code.sidebar.web-servers-collapsed'
+
+const defaultSidebarWidth = 288
+const minSidebarWidth = 288
+const maxSidebarWidth = 384
+const sidebarWidthKeyboardStep = 16
+
+function readStoredValue(key: string) {
+  try {
+    return window.localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeStoredValue(key: string, value: string) {
+  try {
+    window.localStorage.setItem(key, value)
+  } catch {
+    // Storage can be unavailable (private mode); the sidebar still works.
+  }
+}
+
+function readStoredIdSet(key: string): Set<string> {
+  const raw = readStoredValue(key)
+  if (!raw) return new Set()
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(parsed.filter((id): id is string => typeof id === 'string'))
+  } catch {
+    return new Set()
+  }
+}
+
+function clampSidebarWidth(value: number) {
+  return Math.min(maxSidebarWidth, Math.max(minSidebarWidth, Math.round(value)))
+}
+
+function readStoredSidebarWidth() {
+  const raw = Number(readStoredValue(sidebarWidthStorageKey))
+  return Number.isFinite(raw) && raw > 0 ? clampSidebarWidth(raw) : defaultSidebarWidth
+}
 
 type DragItem =
   | { kind: 'project'; id: string }
@@ -204,21 +258,78 @@ export function ProjectSidebar({
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   const [savingOrder, setSavingOrder] = useState(false)
   const [restarting, setRestarting] = useState(false)
-  const [collapsedProjectIds, setCollapsedProjectIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [viewMode, setViewMode] = useState<SidebarViewMode>(
+    () => readStoredValue(sidebarViewStorageKey) === 'tree' ? 'tree' : 'activity',
+  )
+  const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth)
+  const [collapsedProjectIds, setCollapsedProjectIds] = useState<ReadonlySet<string>>(
+    () => readStoredIdSet(collapsedProjectsStorageKey),
+  )
   const [expandedMoreProjectIds, setExpandedMoreProjectIds] = useState<ReadonlySet<string>>(() => new Set())
-  const [collapsedChildThreadIds, setCollapsedChildThreadIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [collapsedChildThreadIds, setCollapsedChildThreadIds] = useState<ReadonlySet<string>>(
+    () => readStoredIdSet(collapsedChildThreadsStorageKey),
+  )
   const [bookmarksOnly, setBookmarksOnly] = useState(false)
+  const [webServersCollapsed, setWebServersCollapsed] = useState(
+    () => readStoredValue(webServersCollapsedStorageKey) === 'true',
+  )
+  const [threadMenuId, setThreadMenuId] = useState<string | null>(null)
   const draggedItemRef = useRef<DragItem | null>(null)
+  const asideRef = useRef<HTMLElement>(null)
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0]
   const usageByThread = useMemo(() => new Map(
     usageSnapshots.map((snapshot) => [`${snapshot.projectId}\0${snapshot.threadId}`, snapshot]),
   ), [usageSnapshots])
+  const projectActivityCounts = useMemo(() => {
+    const counts = new Map<string, { working: number; finished: number }>()
+    for (const activity of piActivities) {
+      if (activity.state !== 'working' && activity.state !== 'finished') continue
+      const current = counts.get(activity.projectId) ?? { working: 0, finished: 0 }
+      if (activity.state === 'working') current.working += 1
+      else current.finished += 1
+      counts.set(activity.projectId, current)
+    }
+    return counts
+  }, [piActivities])
   const bookmarkThreadIdsByProject = useMemo(() => new Map(
     projects.map((project) => [project.id, new Set(bookmarkedThreadPathIds(project.threads))]),
   ), [projects])
   const visibleProjects = bookmarksOnly
     ? projects.filter((project) => (bookmarkThreadIdsByProject.get(project.id)?.size ?? 0) > 0)
     : projects
+
+  useEffect(() => {
+    writeStoredValue(sidebarViewStorageKey, viewMode)
+  }, [viewMode])
+
+  useEffect(() => {
+    writeStoredValue(sidebarWidthStorageKey, String(sidebarWidth))
+  }, [sidebarWidth])
+
+  useEffect(() => {
+    writeStoredValue(collapsedProjectsStorageKey, JSON.stringify([...collapsedProjectIds]))
+  }, [collapsedProjectIds])
+
+  useEffect(() => {
+    writeStoredValue(collapsedChildThreadsStorageKey, JSON.stringify([...collapsedChildThreadIds]))
+  }, [collapsedChildThreadIds])
+
+  useEffect(() => {
+    writeStoredValue(webServersCollapsedStorageKey, String(webServersCollapsed))
+  }, [webServersCollapsed])
+
+  useEffect(() => {
+    if (!threadMenuId) return
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target
+      if (target instanceof Element && target.closest('[data-thread-menu]')) return
+      setThreadMenuId(null)
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown, true)
+    return () => document.removeEventListener('pointerdown', handlePointerDown, true)
+  }, [threadMenuId])
 
   useEffect(() => {
     if (!selectedThreadId) return
@@ -531,6 +642,7 @@ export function ProjectSidebar({
     const selectionPadding = isChild
       ? hasChildren ? 'pl-8' : 'pl-3'
       : hasChildren ? 'pl-12' : 'pl-8'
+    const menuOpen = threadMenuId === thread.id
 
     return (
       <li
@@ -587,7 +699,7 @@ export function ProjectSidebar({
             onClick={() => onSelectThread(project.id, thread.id)}
             aria-current={selected ? 'page' : undefined}
             title={`${locationTitle}${archivedTitle}${closedTitle}${activityTitle}${usageTitle}`}
-            className={`${selectionPadding} pr-[4.75rem]`}
+            className={`${selectionPadding} pr-12`}
           >
             {isChild && <CornerDownRight size={11} className="shrink-0 text-ghost-cyan" aria-hidden="true" />}
             {thread.worktree && <GitBranch size={11} className="shrink-0 text-ghost-green" />}
@@ -596,7 +708,7 @@ export function ProjectSidebar({
             <span className="min-w-0 flex-1 truncate">{thread.title}</span>
             {thread.closedAt && <span className="sr-only">Completed {new Date(thread.closedAt).toLocaleString()}</span>}
             {hasChildren && (
-              <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-ghost-border/65 px-1 py-0.5 font-mono text-[8px] text-ghost-faint" aria-label={`${children.length} child ${children.length === 1 ? 'thread' : 'threads'}`}>
+              <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-ghost-border/65 px-1 py-0.5 font-mono text-[9px] leading-none text-ghost-faint" aria-label={`${children.length} child ${children.length === 1 ? 'thread' : 'threads'}`}>
                 <GitFork size={8} aria-hidden="true" />
                 {children.length}
               </span>
@@ -612,48 +724,19 @@ export function ProjectSidebar({
                 <span className="sr-only">{childActivity ? 'Child coding agent' : 'Coding agent'} finished</span>
               </>
             ) : null}
+            {displayedUsage && (
+              <span
+                aria-hidden="true"
+                className={`shrink-0 font-mono text-[9px] leading-none ${
+                  usage?.limitReached ? 'text-ghost-bright-red' : 'text-ghost-faint'
+                }`}
+              >
+                {formatCompactTokens(displayedUsage.totalTokens)} · {formatCompactUsd(displayedUsage.costUsd)}
+              </span>
+            )}
             {displayedUsage && <span className="sr-only">{usageScope}: {usageDescription(displayedUsage)}{usage?.limitReached ? '. Limit reached.' : ''}</span>}
           </SelectionButton>
-          {displayedUsage && (
-            <span
-              aria-hidden="true"
-              className={`pointer-events-none absolute right-8 top-1/2 flex -translate-y-1/2 flex-col items-end font-mono leading-none transition group-hover/thread:opacity-0 group-focus-within/thread:opacity-0 ${
-                usage?.limitReached ? 'text-ghost-bright-red' : 'text-ghost-faint'
-              }`}
-            >
-              {hasDescendantUsageScope && (
-                <span className="mb-0.5 text-[6px] font-semibold uppercase tracking-[0.12em]">all threads</span>
-              )}
-              <span className="text-[8px]">{formatCompactTokens(displayedUsage.totalTokens)} · {formatCompactUsd(displayedUsage.costUsd)}</span>
-            </span>
-          )}
           <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center">
-            <div className="pointer-events-none flex opacity-0 transition group-hover/thread:pointer-events-auto group-hover/thread:opacity-100 group-focus-within/thread:pointer-events-auto group-focus-within/thread:opacity-100">
-              <IconButton
-                type="button"
-                size="xs"
-                variant="subtle"
-                disabled={Boolean(archivingThreadId || deletingThreadId || bookmarkingThreadId)}
-                onClick={() => onArchiveThread(project, thread, !archived)}
-                aria-label={`${archived ? 'Restore' : 'Archive'} ${thread.title}`}
-                title={archived ? 'Restore thread' : 'Archive thread'}
-              >
-                {archivingThreadId === thread.id
-                  ? <LoaderCircle size={11} className="animate-spin" />
-                  : archived ? <ArchiveRestore size={11} /> : <Archive size={11} />}
-              </IconButton>
-              <IconButton
-                type="button"
-                size="xs"
-                variant="danger"
-                disabled={Boolean(deletingThreadId || archivingThreadId || bookmarkingThreadId)}
-                onClick={() => onDeleteThread(project, thread)}
-                aria-label={`Delete ${thread.title}`}
-                title="Delete thread now"
-              >
-                {deletingThreadId === thread.id ? <LoaderCircle size={11} className="animate-spin" /> : <Trash2 size={11} />}
-              </IconButton>
-            </div>
             <IconButton
               type="button"
               size="xs"
@@ -663,12 +746,74 @@ export function ProjectSidebar({
               aria-pressed={Boolean(thread.bookmarked)}
               aria-label={thread.bookmarked ? `Remove bookmark from ${thread.title}` : `Bookmark ${thread.title}`}
               title={thread.bookmarked ? 'Remove bookmark' : 'Bookmark thread'}
-              className={thread.bookmarked ? 'text-ghost-green hover:text-ghost-bright-green' : 'text-ghost-faint'}
+              className={thread.bookmarked
+                ? 'text-ghost-green hover:text-ghost-bright-green'
+                : 'text-ghost-faint opacity-0 transition group-hover/thread:opacity-100 group-focus-within/thread:opacity-100'}
             >
               {bookmarkingThreadId === thread.id
                 ? <LoaderCircle size={11} className="animate-spin" />
                 : <Bookmark size={11} fill={thread.bookmarked ? 'currentColor' : 'none'} />}
             </IconButton>
+            <div className="relative" data-thread-menu>
+              <IconButton
+                type="button"
+                size="xs"
+                variant="subtle"
+                onClick={() => setThreadMenuId((current) => current === thread.id ? null : thread.id)}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                aria-label={`Actions for ${thread.title}`}
+                title="Thread actions"
+                className={menuOpen || selected
+                  ? undefined
+                  : 'opacity-0 transition group-hover/thread:opacity-100 group-focus-within/thread:opacity-100'}
+              >
+                <EllipsisVertical size={12} />
+              </IconButton>
+              {menuOpen && (
+                <div
+                  role="menu"
+                  aria-label={`Actions for ${thread.title}`}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Escape') return
+                    event.stopPropagation()
+                    setThreadMenuId(null)
+                  }}
+                  className="absolute right-0 top-[calc(100%+2px)] z-30 w-40 rounded-lg border border-ghost-border/90 bg-ghost-panel p-1 shadow-2xl"
+                >
+                  <Button
+                    role="menuitem"
+                    type="button"
+                    variant="subtle"
+                    disabled={Boolean(archivingThreadId || deletingThreadId || bookmarkingThreadId)}
+                    onClick={() => {
+                      setThreadMenuId(null)
+                      onArchiveThread(project, thread, !archived)
+                    }}
+                    className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px]"
+                  >
+                    {archivingThreadId === thread.id
+                      ? <LoaderCircle size={12} className="animate-spin" />
+                      : archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}
+                    {archived ? 'Restore thread' : 'Archive thread'}
+                  </Button>
+                  <Button
+                    role="menuitem"
+                    type="button"
+                    variant="danger"
+                    disabled={Boolean(deletingThreadId || archivingThreadId || bookmarkingThreadId)}
+                    onClick={() => {
+                      setThreadMenuId(null)
+                      onDeleteThread(project, thread)
+                    }}
+                    className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px]"
+                  >
+                    {deletingThreadId === thread.id ? <LoaderCircle size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                    Delete thread
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
           {!bookmarksOnly && !isChild && !archived && dropTarget?.kind === 'thread' && dropTarget.projectId === project.id && dropTarget.id === thread.id && dropTarget.position === 'after' && (
             <span className="pointer-events-none absolute inset-x-2 bottom-0 z-20 h-0.5 rounded-full bg-ghost-green shadow-[0_0_7px_rgba(181,189,104,0.8)]" />
@@ -715,18 +860,18 @@ export function ProjectSidebar({
               variant="text"
               onClick={() => toggleMoreThreads(project.id)}
               aria-expanded={expanded}
-              className="flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-left font-mono text-[9px] text-ghost-faint transition hover:bg-ghost-raised/45 hover:text-ghost-muted"
+              className="flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-left font-mono text-[10px] text-ghost-faint transition hover:bg-ghost-raised/45 hover:text-ghost-muted"
             >
               {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
               <span>{expanded ? 'Show less' : 'Show more'}</span>
               <span className="ml-auto flex items-center gap-1">
                 {hiddenActiveCount > 0 && (
-                  <span className="rounded-full border border-ghost-border/65 px-1.5 py-0.5 text-[8px]">
+                  <span className="rounded-full border border-ghost-border/65 px-1.5 py-0.5 text-[9px]">
                     {hiddenActiveCount} older
                   </span>
                 )}
                 {archivedThreads.length > 0 && (
-                  <span className="rounded-full border border-ghost-border/65 px-1.5 py-0.5 text-[8px]">
+                  <span className="rounded-full border border-ghost-border/65 px-1.5 py-0.5 text-[9px]">
                     {archivedThreads.length} archived
                   </span>
                 )}
@@ -755,42 +900,62 @@ export function ProjectSidebar({
       />
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-72 max-w-[calc(100vw-2rem)] shrink-0 flex-col border-r border-ghost-border/70 bg-ghost-sidebar shadow-2xl transition-[transform,visibility] duration-300 md:static md:z-auto md:visible md:max-w-none md:translate-x-0 md:shadow-none ${
+        ref={asideRef}
+        style={{ width: sidebarWidth }}
+        className={`fixed inset-y-0 left-0 z-40 flex max-w-[calc(100vw-2rem)] shrink-0 flex-col border-r border-ghost-border/70 bg-ghost-sidebar shadow-2xl transition-[transform,visibility] duration-300 md:relative md:z-auto md:visible md:max-w-none md:translate-x-0 md:shadow-none ${
           isOpen ? 'visible translate-x-0' : 'invisible -translate-x-full'
         }`}
       >
-        <header className="flex h-[4.5rem] shrink-0 items-center justify-between gap-2 border-b border-ghost-border/70 px-3">
-          <div className="min-w-0">
-            <h1 className="text-xs font-semibold text-ghost-bright-white">Projects</h1>
-            <label className="mt-0.5 inline-flex max-w-full items-center">
-              <span className="sr-only">Current profile</span>
-              <Select
-                variant="inline"
-                value={activeProfileId}
-                options={[
-                  ...profiles.map((profile) => ({ value: profile.id, label: profile.name })),
-                  { value: newProfileValue, label: '＋ New profile…' },
-                ]}
-                onChange={(profileId) => void handleProfileSelection(profileId)}
-                disabled={creatingProfile}
-                className="min-w-0 max-w-36"
-                aria-label="Current profile"
-              />
-            </label>
-          </div>
-          <div className="flex shrink-0 items-center gap-0.5">
-            <IconButton
-              type="button"
-              size="sm"
-              variant="subtle"
-              onClick={() => setBookmarksOnly((current) => !current)}
-              aria-pressed={bookmarksOnly}
-              aria-label={bookmarksOnly ? 'Show all threads' : 'Show bookmarked threads only'}
-              title={bookmarksOnly ? 'Show all threads' : 'Show bookmarked threads only'}
-              className={bookmarksOnly ? 'bg-ghost-green/10 text-ghost-green' : undefined}
+        <header className="flex h-[4.5rem] shrink-0 flex-col justify-center gap-1 border-b border-ghost-border/70 px-3">
+          <div className="flex items-center justify-between gap-2">
+            <h1 className="min-w-0 truncate text-xs font-semibold text-ghost-bright-white">
+              {viewMode === 'activity' ? 'Threads' : 'Projects'}
+            </h1>
+            <div className="flex shrink-0 items-center gap-0.5">
+            <div
+              role="group"
+              aria-label="Sidebar view"
+              className="mr-0.5 flex items-center gap-0.5 rounded-md border border-ghost-border/55 p-0.5"
             >
-              <Bookmark size={14} fill={bookmarksOnly ? 'currentColor' : 'none'} />
-            </IconButton>
+              <IconButton
+                type="button"
+                size="xs"
+                variant="subtle"
+                onClick={() => setViewMode('activity')}
+                aria-pressed={viewMode === 'activity'}
+                aria-label="Activity view"
+                title="Activity view: working, needs review, pinned, recent"
+                className={viewMode === 'activity' ? 'bg-ghost-green/10 text-ghost-green' : undefined}
+              >
+                <Activity size={12} />
+              </IconButton>
+              <IconButton
+                type="button"
+                size="xs"
+                variant="subtle"
+                onClick={() => setViewMode('tree')}
+                aria-pressed={viewMode === 'tree'}
+                aria-label="Projects view"
+                title="Projects view: the full project and thread tree"
+                className={viewMode === 'tree' ? 'bg-ghost-green/10 text-ghost-green' : undefined}
+              >
+                <ListTree size={12} />
+              </IconButton>
+            </div>
+            {viewMode === 'tree' && (
+              <IconButton
+                type="button"
+                size="sm"
+                variant="subtle"
+                onClick={() => setBookmarksOnly((current) => !current)}
+                aria-pressed={bookmarksOnly}
+                aria-label={bookmarksOnly ? 'Show all threads' : 'Show bookmarked threads only'}
+                title={bookmarksOnly ? 'Show all threads' : 'Show bookmarked threads only'}
+                className={bookmarksOnly ? 'bg-ghost-green/10 text-ghost-green' : undefined}
+              >
+                <Bookmark size={14} fill={bookmarksOnly ? 'currentColor' : 'none'} />
+              </IconButton>
+            )}
             <IconButton
               type="button"
               size="sm"
@@ -824,10 +989,28 @@ export function ProjectSidebar({
             >
               <PanelLeftClose size={15} />
             </IconButton>
+            </div>
+          </div>
+          <div className="flex min-w-0 items-center gap-1">
+            <label className="inline-flex shrink-0 items-center">
+              <span className="sr-only">Current profile</span>
+              <Select
+                variant="inline"
+                value={activeProfileId}
+                options={[
+                  ...profiles.map((profile) => ({ value: profile.id, label: profile.name })),
+                  { value: newProfileValue, label: '＋ New profile…' },
+                ]}
+                onChange={(profileId) => void handleProfileSelection(profileId)}
+                disabled={creatingProfile}
+                className="min-w-0 max-w-36"
+                aria-label="Current profile"
+              />
+            </label>
+            <span className="shrink-0 text-[9px] text-ghost-faint" aria-hidden="true">·</span>
+            <BackendSwitcher variant="inline" />
           </div>
         </header>
-
-        <BackendSwitcher />
 
         {showProjectForm && (
           <form onSubmit={handleProjectSubmit} className="relative z-10 mx-2 mt-2 rounded-lg border border-ghost-border/70 bg-ghost-panel p-3">
@@ -871,6 +1054,17 @@ export function ProjectSidebar({
                 No projects{activeProfile ? ` in ${activeProfile.name}` : ' yet'}
               </p>
             </div>
+          ) : viewMode === 'activity' ? (
+            <SidebarActivityView
+              projects={projects}
+              piActivities={piActivities}
+              usageSnapshots={usageSnapshots}
+              selectedThreadId={selectedThreadId}
+              onSelectThread={onSelectThread}
+              onNewThread={onNewThread}
+              onOpenFinder={onOpenFinder}
+              onShowAllThreads={() => setViewMode('tree')}
+            />
           ) : bookmarksOnly && visibleProjects.length === 0 ? (
             <div className="mx-1 mt-2 rounded-lg border border-dashed border-ghost-border/70 px-3 py-6 text-center">
               <Bookmark size={17} className="mx-auto text-ghost-faint" />
@@ -944,8 +1138,32 @@ export function ProjectSidebar({
                           : <FolderOpen size={16} strokeWidth={1.7} />}
                         <Globe2 size={7} strokeWidth={1.9} className="absolute bottom-0 right-0 rounded-full bg-ghost-sidebar" />
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-[11px] font-semibold">{project.name}</span>
+                      <span className="min-w-0 flex-1 truncate text-xs font-semibold">{project.name}</span>
                     </Button>
+                    {(() => {
+                      const counts = projectActivityCounts.get(project.id)
+                      if (!counts || (counts.working === 0 && counts.finished === 0)) return null
+                      return (
+                        <span className="flex shrink-0 items-center gap-1 group-hover/project:hidden">
+                          {counts.working > 0 && (
+                            <span
+                              className="rounded-full border border-ghost-green/40 px-1.5 py-0.5 font-mono text-[9px] leading-none text-ghost-green"
+                              title={`${counts.working} coding ${counts.working === 1 ? 'agent is' : 'agents are'} working`}
+                            >
+                              {counts.working} live
+                            </span>
+                          )}
+                          {counts.finished > 0 && (
+                            <span
+                              className="rounded-full border border-ghost-border/65 px-1.5 py-0.5 font-mono text-[9px] leading-none text-ghost-green"
+                              title={`${counts.finished} ${counts.finished === 1 ? 'thread needs' : 'threads need'} review`}
+                            >
+                              {counts.finished} done
+                            </span>
+                          )}
+                        </span>
+                      )
+                    })()}
                     <IconButton
                       type="button"
                       size="xs"
@@ -997,50 +1215,59 @@ export function ProjectSidebar({
               ))}
             </ul>
           )}
-        </nav>
 
-        <section className="max-h-40 shrink-0 overflow-y-auto border-t border-ghost-border/70 px-2 py-2" aria-labelledby="sidebar-processes-title">
-          <div className="flex h-5 items-center gap-1.5 px-1.5">
-            <RadioTower size={11} className={processWebServers.length > 0 ? 'text-ghost-green' : 'text-ghost-faint'} />
-            <h2 id="sidebar-processes-title" className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-dim">
-              Processes
-            </h2>
-            {processWebServers.length > 0 && (
-              <span className="ml-auto rounded-full border border-ghost-border/70 px-1.5 font-mono text-[8px] text-ghost-faint">
-                {processWebServers.length}
-              </span>
-            )}
-          </div>
-          {processWebServers.length === 0 ? (
-            <p className="px-1.5 pt-1 font-mono text-[9px] text-ghost-faint">No web servers</p>
-          ) : (
-            <ul className="mt-1 space-y-0.5">
-              {processWebServers.map((webServer) => (
-                <li key={`${webServer.projectId}:${webServer.threadId}:${webServer.processId}:${webServer.url}`}>
-                  <a
-                    href={webServer.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={onClose}
-                    title={`${webServer.projectName} / ${webServer.threadTitle} / ${webServer.processName}\n${webServer.url}`}
-                    className="group/server flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1.5 text-ghost-muted transition hover:bg-ghost-raised/45 hover:text-ghost-bright-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ghost-green/45"
-                  >
-                    <span className="grid size-5 shrink-0 place-items-center rounded bg-ghost-green/[0.08] text-ghost-green">
-                      <RadioTower size={11} />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-mono text-[9px] text-ghost-white">{webServerAddress(webServer.url)}</span>
-                      <span className="block truncate text-[8px] text-ghost-faint">
-                        {webServer.processName} · {webServer.projectName}
-                      </span>
-                    </span>
-                    <ExternalLink size={9} className="shrink-0 text-ghost-faint transition group-hover/server:text-ghost-green" />
-                  </a>
-                </li>
-              ))}
-            </ul>
+          {processWebServers.length > 0 && (
+            <section className="mt-4 border-t border-ghost-border/55 pt-1.5" aria-labelledby="sidebar-web-servers-title">
+              <Button
+                type="button"
+                onClick={() => setWebServersCollapsed((current) => !current)}
+                aria-expanded={!webServersCollapsed}
+                aria-controls="sidebar-web-servers-list"
+                className="flex h-6 w-full items-center gap-1.5 rounded-md px-1.5 text-left transition hover:bg-ghost-raised/45"
+              >
+                <RadioTower size={11} className="text-ghost-green" aria-hidden="true" />
+                <h2 id="sidebar-web-servers-title" className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-dim">
+                  Web servers
+                </h2>
+                <span className="rounded-full border border-ghost-border/70 px-1.5 font-mono text-[9px] text-ghost-faint">
+                  {processWebServers.length}
+                </span>
+                <ChevronDown
+                  size={10}
+                  className={`ml-auto text-ghost-faint transition-transform ${webServersCollapsed ? '-rotate-90' : ''}`}
+                  aria-hidden="true"
+                />
+              </Button>
+              {!webServersCollapsed && (
+                <ul id="sidebar-web-servers-list" className="mt-1 space-y-0.5">
+                  {processWebServers.map((webServer) => (
+                    <li key={`${webServer.projectId}:${webServer.threadId}:${webServer.processId}:${webServer.url}`}>
+                      <a
+                        href={webServer.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={onClose}
+                        title={`${webServer.projectName} / ${webServer.threadTitle} / ${webServer.processName}\n${webServer.url}`}
+                        className="group/server flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1.5 text-ghost-muted transition hover:bg-ghost-raised/45 hover:text-ghost-bright-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ghost-green/45"
+                      >
+                        <span className="grid size-5 shrink-0 place-items-center rounded bg-ghost-green/[0.08] text-ghost-green">
+                          <RadioTower size={11} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-mono text-[10px] text-ghost-white">{webServerAddress(webServer.url)}</span>
+                          <span className="block truncate text-[9px] text-ghost-faint">
+                            {webServer.processName} · {webServer.projectName}
+                          </span>
+                        </span>
+                        <ExternalLink size={9} className="shrink-0 text-ghost-faint transition group-hover/server:text-ghost-green" />
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
           )}
-        </section>
+        </nav>
 
         <div className="shrink-0 space-y-0.5 border-t border-ghost-border/70 bg-ghost-panel/25 p-2">
           <SelectionButton
@@ -1091,6 +1318,31 @@ export function ProjectSidebar({
             </Button>
           </div>
         </div>
+
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          tabIndex={0}
+          title="Drag to resize; arrow keys also work. Double-click to reset."
+          onPointerDown={(event) => {
+            event.preventDefault()
+            event.currentTarget.setPointerCapture(event.pointerId)
+          }}
+          onPointerMove={(event) => {
+            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+            const left = asideRef.current?.getBoundingClientRect().left ?? 0
+            setSidebarWidth(clampSidebarWidth(event.clientX - left))
+          }}
+          onDoubleClick={() => setSidebarWidth(defaultSidebarWidth)}
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+            event.preventDefault()
+            const delta = event.key === 'ArrowLeft' ? -sidebarWidthKeyboardStep : sidebarWidthKeyboardStep
+            setSidebarWidth((current) => clampSidebarWidth(current + delta))
+          }}
+          className="absolute inset-y-0 right-0 z-50 hidden w-1 cursor-col-resize transition-colors hover:bg-ghost-green/30 focus-visible:bg-ghost-green/40 active:bg-ghost-green/40 md:block"
+        />
       </aside>
     </>
   )
