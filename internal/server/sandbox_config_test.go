@@ -39,7 +39,7 @@ func TestGlobalSandboxConfigAPIRoundTrip(t *testing.T) {
 	if state.Path != filepath.Join(home, ".config", "kiwi-sandbox", "sandbox.json") {
 		t.Fatalf("unexpected config path: %q", state.Path)
 	}
-	if !state.Effective.Network || state.Effective.Shell != "/bin/zsh" {
+	if state.Effective.Network || state.Effective.Shell != "/bin/zsh" {
 		t.Fatalf("unexpected effective defaults: %#v", state.Effective)
 	}
 

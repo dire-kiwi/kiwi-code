@@ -603,7 +603,7 @@ export function SandboxSettingsScreen({
                 <SectionHeader
                   icon={<FolderGit2 size={16} />}
                   title="Related projects"
-                  description="Extra directories the agent is told about alongside this thread, such as a sibling repository."
+                  description="Extra directories the agent may read, write, and use as a working directory alongside this thread."
                   tone="green"
                 />
                 <div className="p-4 sm:p-5">
@@ -618,7 +618,9 @@ export function SandboxSettingsScreen({
                       className="mt-2.5"
                     />
                   </label>
-                  <p className="mt-2 text-[9px] leading-4 text-ghost-faint">{pathListHelp}</p>
+                  <p className="mt-2 text-[9px] leading-4 text-ghost-faint">
+                    {pathListHelp} Related projects are included in the default file policy; matching command rules replace that policy.
+                  </p>
                 </div>
               </Surface>
             )}

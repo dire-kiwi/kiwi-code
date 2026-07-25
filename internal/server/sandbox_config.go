@@ -71,7 +71,7 @@ func defaultEffectiveSandboxConfig() effectiveSandboxConfig {
 			Write: []string{"$CWD", "$TMPDIR"},
 		},
 		Commands:        []sandboxCommandRule{},
-		Network:         true,
+		Network:         false,
 		Shell:           "/bin/zsh",
 		RelatedProjects: []string{},
 	}

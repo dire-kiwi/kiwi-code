@@ -29,7 +29,7 @@ The project file overrides top-level fields from the global file. Pi only reads 
     "read": ["$CWD"],
     "write": ["$CWD", "$TMPDIR"]
   },
-  "network": true,
+  "network": false,
   "shell": "/bin/zsh",
   "relatedProjects": ["../shared-library", "~/projects/related-service"],
   "commands": [
@@ -59,7 +59,9 @@ See [`config.example.json`](config.example.json) for all tool patterns.
 
 ### Policy behavior
 
-- The first matching command rule replaces `defaults`.
+With no configuration, every Bash command may run under the same deny-by-default Seatbelt policy: network access is blocked, file access is read/write within the directory Pi or Claude started in and configured related projects, fixed runtime folders are readable, and the operating-system temporary directory is writable. Commands do not need to be allowlisted.
+
+- The first matching command rule replaces `defaults`, including the automatic related-project access.
 - A command string is shorthand for an unrestricted filesystem rule. For example, `"gh *"` is equivalent to `{ "pattern": "gh *" }`.
 - An object rule's `pattern` may be one string or a list such as `["gh", "gh *"]`; every listed pattern shares that rule's `files` and `network` policy.
 - A matching object rule with no `files` field also grants unrestricted filesystem reads and writes.
@@ -69,11 +71,11 @@ See [`config.example.json`](config.example.json) for all tool patterns.
 - Runtime paths needed for macOS, Node, and command execution are always readable. `/dev/null` and `/dev/tty` are always writable.
 - Globs support `*`, `?`, and character classes.
 - Unrestricted command rules are selected only for conservative single shell commands. Composition, redirection, command substitution, and unbalanced quotes fall back to `defaults`, preventing `gh status; cat ~/.ssh/id_ed25519` from inheriting `gh *` access.
-- A requested command working directory must remain inside the project root after resolving symlinks.
+- A requested command working directory must remain inside the project root or a configured related project after resolving symlinks.
 - There is no unsandboxed fallback if `sandbox-exec` fails, and unknown configuration fields are rejected rather than ignored.
 - While enforcement is enabled, both active config files, the loaded Kiwi Sandbox runtime, and Claude's enable/disable state directory are denied write access even when a command otherwise has unrestricted filesystem access. Disable explicitly before a user-requested policy edit, then re-enable immediately.
 - Command-level network overrides apply only when that simple command rule matches. For a deny-by-default network policy, set top-level `network` to `false` and opt specific commands in with `"network": true`.
-- Only project config may set `relatedProjects` to relative, absolute, or home-relative project paths. Only these paths—not ordinary `defaults` or command read/write roots—are added to Pi and Claude's system context. This is informational and does not grant filesystem access.
+- Only project config may set `relatedProjects` to relative, absolute, or home-relative project paths. These paths are added to Pi and Claude's system context and receive default read/write access. Ordinary `defaults` or command read/write roots are not injected into context.
 
 The filesystem tools are evaluated as command-like patterns:
 

@@ -37,7 +37,7 @@ Configuration is JSON without comments:
     "read": ["$CWD"],
     "write": ["$CWD", "$TMPDIR"]
   },
-  "network": true,
+  "network": false,
   "shell": "/bin/zsh",
   "relatedProjects": ["../shared-library", "~/projects/related-service"],
   "commands": [
@@ -83,8 +83,8 @@ Configuration is JSON without comments:
 - `defaults.write`: directories or files writable when no command rule matches. Write paths are automatically readable.
 - `network`: whether sandboxed processes may use the network.
 - `shell`: absolute shell path used by command execution.
-- `relatedProjects`: project-config-only paths injected into Pi and Claude's system context. Relative paths resolve from the project root. They are informational and do not grant filesystem access. Ordinary read/write roots are not injected.
-- `commands`: ordered command rules. The first matching rule replaces `defaults` for that operation.
+- `relatedProjects`: project-config-only paths injected into Pi and Claude's system context and added to the default read/write policy. Relative paths resolve from the project root. Ordinary read/write roots are not injected into context.
+- `commands`: ordered command rules. The first matching rule replaces `defaults`, including automatic related-project access, for that operation.
 - A string command entry is an unrestricted-filesystem shorthand; `"gh *"` equals `{ "pattern": "gh *" }`.
 - `commands[].pattern`: one glob or a non-empty list of globs supporting `*`, `?`, and character classes. Every pattern in a list shares the object's policy.
 - `commands[].network`: optional network override for the matching command; omission inherits top-level `network`.

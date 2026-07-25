@@ -91,7 +91,11 @@ export class KiwiSandbox {
 
   async runCommand(command: string, options: CommandOptions = {}): Promise<CommandResult> {
     const config = await this.validateConfig();
-    const cwd = await assertWorkingDirectory(this.projectRoot, options.cwd ?? this.projectRoot);
+    const cwd = await assertWorkingDirectory(
+      this.projectRoot,
+      options.cwd ?? this.projectRoot,
+      config.relatedProjects,
+    );
     const policy = this.enabled ? await this.decision(config, command, cwd) : disabledPolicy();
     const profile = this.enabled ? createSeatbeltProfile(policy) : undefined;
     const executable = this.enabled ? this.sandboxExecutable : config.shell;
@@ -198,7 +202,13 @@ export class KiwiSandbox {
   }
 
   private async decision(config: SandboxConfig, command: string, cwd: string): Promise<PolicyDecision> {
-    const decision = await resolveDecision(config, command, cwd, [dirname(dirname(process.execPath))]);
+    const decision = await resolveDecision(
+      config,
+      command,
+      cwd,
+      [dirname(dirname(process.execPath))],
+      this.projectRoot,
+    );
     const protectedPaths = [...this.paths, ...this.protectedWritePaths];
     const canonicalProtected = await Promise.all(protectedPaths.map((path) => canonicalPath(path)));
     decision.deniedWrite = [...new Set([...protectedPaths.map((path) => resolve(path)), ...canonicalProtected])];

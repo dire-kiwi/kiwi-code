@@ -3,7 +3,7 @@
     "read": ["$CWD"],
     "write": ["$CWD", "$TMPDIR"]
   },
-  "network": true,
+  "network": false,
   "shell": "/bin/zsh",
   "relatedProjects": ["../shared-library", "~/projects/related-service"],
   "commands": [

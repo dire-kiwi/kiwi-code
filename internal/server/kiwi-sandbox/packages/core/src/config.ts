@@ -38,7 +38,7 @@ export function defaultConfig(): SandboxConfig {
       write: ["$CWD", "$TMPDIR"],
     },
     commands: [],
-    network: true,
+    network: false,
     shell: "/bin/zsh",
     relatedProjects: [],
   };
