@@ -1,5 +1,13 @@
 import type { PolicyDecision } from "./policy.ts";
 
+// macOS exposes the active developer-tools selection through /var/select, while
+// /var itself resolves to /private/var. Policy paths are intentionally
+// canonicalized, but Seatbelt does not treat a grant for /private/var/select as
+// a grant for the lexical /var/select alias used by xcode-select. Keep this
+// narrow, read-only alias in the generated profile so Apple developer-tool
+// shims such as /usr/bin/git can discover their installation.
+const LEXICAL_RUNTIME_READ_PATHS = ["/var/select"];
+
 export function createSeatbeltProfile(decision: PolicyDecision): string {
   const lines = [
     "(version 1)",
@@ -19,7 +27,7 @@ export function createSeatbeltProfile(decision: PolicyDecision): string {
   if (decision.unrestricted) {
     lines.push("(allow file-read*)", "(allow file-write*)");
   } else {
-    appendPaths(lines, "file-read*", decision.read);
+    appendPaths(lines, "file-read*", [...decision.read, ...LEXICAL_RUNTIME_READ_PATHS]);
     appendPaths(lines, "file-write*", decision.write);
   }
   appendPaths(lines, "file-write*", decision.deniedWrite, "deny");
