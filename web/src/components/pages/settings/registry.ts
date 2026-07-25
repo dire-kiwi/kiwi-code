@@ -41,8 +41,8 @@ export const GLOBAL_SETTINGS_SECTIONS: Array<SettingsSectionMeta<GlobalSettingsS
   },
   {
     id: 'profiles',
-    label: 'Claude profiles',
-    keywords: ['claude code', 'config directory', 'accounts', 'login', 'sessions'],
+    label: 'Coding agents',
+    keywords: ['claude code', 'gpt', 'dropdown', 'config directory', 'accounts', 'login', 'sessions'],
     icon: UserRound,
     tone: 'blue',
   },

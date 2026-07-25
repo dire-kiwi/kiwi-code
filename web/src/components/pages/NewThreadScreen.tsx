@@ -18,6 +18,7 @@ import {
 import { createThread, getSettings, listCodingAgents, listProjectGitBranches, uploadPiImage } from '../../api'
 import {
   fallbackCodingAgentConfigs,
+  isClaudeGPTCodingAgent,
   isCodingAgent,
   isCodingAgentSelection,
 } from '../../codingAgents'
@@ -450,7 +451,7 @@ export function NewThreadScreen({
       ? 'Claude Native'
       : selectedAgent.label
   const startsAgent = Boolean(initialPrompt.trim() || initialPromptImages.length > 0)
-  const selectedAgentModelsUnavailable = selectedAgentId === 'claude-gpt'
+  const selectedAgentModelsUnavailable = isClaudeGPTCodingAgent(selectedAgentId)
     && selectedAgent.models.length === 0
   const submitDisabled = submitting
     || selectedAgentModelsUnavailable
@@ -549,7 +550,6 @@ export function NewThreadScreen({
                 options={[
                   ...codingAgents.map((agent) => ({ value: agent.id, label: agent.label })),
                   { value: 'pi-native', label: 'Pi Native' },
-                  { value: 'claude-native', label: 'Claude Native' },
                 ]}
                 onChange={(agent) => handleCodingAgentChange(agent as CodingAgentSelection)}
                 disabled={submitting}

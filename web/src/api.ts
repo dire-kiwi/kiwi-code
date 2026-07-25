@@ -90,8 +90,7 @@ export function getSettings(signal?: AbortSignal) {
 export function updateSettings(input: string | Partial<Pick<
   AppSettings,
   'worktreeBasePath' | 'archivedThreadRetentionDays' | 'orphanedWorktreeRetentionDays' | 'subAgentNestingDepth'
-  | 'disableWorkflows' | 'workflowKeywordTriggerEnabled' | 'workflowSizeGuideline' | 'claudeCodeProfiles'
-  | 'theme'
+  | 'disableWorkflows' | 'workflowKeywordTriggerEnabled' | 'workflowSizeGuideline' | 'codingAgents' | 'theme'
 >>) {
   return request<AppSettings>('/api/settings', {
     method: 'PUT',
