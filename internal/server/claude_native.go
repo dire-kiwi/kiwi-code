@@ -35,16 +35,15 @@ const (
 )
 
 type claudeNativeManager struct {
-	mu                sync.Mutex
-	dataDirectory     string
-	claudePath        string
-	pluginPath        string
-	sandboxPluginPath string
-	pluginErr         error
-	figmaMCPURL       func(project.Project) string
-	processes         map[piNativeProcessKey]*claudeNativeProcess
-	contextWatchOnce  sync.Once
-	usageReporter     func(piNativeProcessKey, string, threadUsageTotals)
+	mu               sync.Mutex
+	dataDirectory    string
+	claudePath       string
+	pluginPath       string
+	pluginErr        error
+	figmaMCPURL      func(project.Project) string
+	processes        map[piNativeProcessKey]*claudeNativeProcess
+	contextWatchOnce sync.Once
+	usageReporter    func(piNativeProcessKey, string, threadUsageTotals)
 }
 
 type claudeNativeProcess struct {
@@ -99,15 +98,14 @@ type claudeNativeHistoryEntry struct {
 }
 
 func newClaudeNativeManager(
-	dataDirectory, pluginPath, sandboxPluginPath string,
+	dataDirectory, pluginPath string,
 	pluginErr error,
 ) *claudeNativeManager {
 	return &claudeNativeManager{
-		dataDirectory:     dataDirectory,
-		pluginPath:        pluginPath,
-		sandboxPluginPath: sandboxPluginPath,
-		pluginErr:         pluginErr,
-		processes:         make(map[piNativeProcessKey]*claudeNativeProcess),
+		dataDirectory: dataDirectory,
+		pluginPath:    pluginPath,
+		pluginErr:     pluginErr,
+		processes:     make(map[piNativeProcessKey]*claudeNativeProcess),
 	}
 }
 
@@ -522,7 +520,13 @@ func (m *claudeNativeManager) startProcess(
 			return nil, errors.New("Claude Code is not installed or not on PATH")
 		}
 	}
-	arguments, err := claudeNativeArguments(m.pluginPath, m.sandboxPluginPath, resumeSessionID, launchOptions)
+	// Kiwi Sandbox is intentionally not loaded into Claude for now. Preserve
+	// its related-project ergonomics through Claude's native --add-dir flag.
+	relatedDirectories, err := claudeRelatedProjectDirectories(thread)
+	if err != nil {
+		return nil, err
+	}
+	arguments, err := claudeNativeArguments(m.pluginPath, relatedDirectories, resumeSessionID, launchOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -580,7 +584,9 @@ func (m *claudeNativeManager) startProcess(
 }
 
 func claudeNativeArguments(
-	pluginPath, sandboxPluginPath, resumeSessionID string,
+	pluginPath string,
+	relatedDirectories []string,
+	resumeSessionID string,
 	launchOptions codingAgentLaunchOptions,
 ) ([]string, error) {
 	arguments := []string{
@@ -590,13 +596,17 @@ func claudeNativeArguments(
 		"--include-partial-messages",
 		"--replay-user-messages",
 		"--verbose",
+	}
+	if len(relatedDirectories) > 0 {
+		arguments = append(arguments, "--add-dir")
+		arguments = append(arguments, relatedDirectories...)
+	}
+	arguments = append(arguments,
 		"--dangerously-skip-permissions",
 		"--settings", claudeLaunchSettings,
-	}
-	for _, path := range []string{pluginPath, sandboxPluginPath} {
-		if path != "" {
-			arguments = append(arguments, "--plugin-dir", path)
-		}
+	)
+	if pluginPath != "" {
+		arguments = append(arguments, "--plugin-dir", pluginPath)
 	}
 	if launchOptions.FigmaMCPURL != "" {
 		figmaConfig, err := figmaMCPConfigArgument(launchOptions.FigmaMCPURL)

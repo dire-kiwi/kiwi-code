@@ -96,6 +96,51 @@ func threadSandboxConfigPath(thread project.Thread) string {
 	return filepath.Join(threadSandboxRoot(thread), ".config", "kiwi-sandbox.json")
 }
 
+// claudeRelatedProjectDirectories translates the project-only relatedProjects
+// setting into the absolute paths accepted by Claude Code's --add-dir flag.
+// Keep this expansion aligned with Kiwi Sandbox so switching enforcement back
+// on later does not change which related directories Claude can access.
+func claudeRelatedProjectDirectories(thread project.Thread) ([]string, error) {
+	config, _, err := readSandboxConfigFile(threadSandboxConfigPath(thread), true)
+	if err != nil {
+		return nil, fmt.Errorf("load related projects: %w", err)
+	}
+	if config.RelatedProjects == nil {
+		return nil, nil
+	}
+
+	root, err := filepath.Abs(threadSandboxRoot(thread))
+	if err != nil {
+		return nil, fmt.Errorf("resolve thread directory: %w", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve home directory: %w", err)
+	}
+
+	directories := make([]string, 0, len(*config.RelatedProjects))
+	seen := make(map[string]struct{}, len(*config.RelatedProjects))
+	for _, configured := range *config.RelatedProjects {
+		expanded := strings.ReplaceAll(configured, "$CWD", root)
+		expanded = strings.ReplaceAll(expanded, "$HOME", home)
+		expanded = strings.ReplaceAll(expanded, "$TMPDIR", os.TempDir())
+		if expanded == "~" {
+			expanded = home
+		} else if strings.HasPrefix(expanded, "~/") {
+			expanded = filepath.Join(home, expanded[2:])
+		} else if !filepath.IsAbs(expanded) {
+			expanded = filepath.Join(root, expanded)
+		}
+		expanded = filepath.Clean(expanded)
+		if _, exists := seen[expanded]; exists {
+			continue
+		}
+		seen[expanded] = struct{}{}
+		directories = append(directories, expanded)
+	}
+	return directories, nil
+}
+
 func applySandboxConfig(base effectiveSandboxConfig, overlay sandboxConfig) effectiveSandboxConfig {
 	if overlay.Defaults != nil {
 		base.Defaults = *overlay.Defaults

@@ -9,7 +9,7 @@ import (
 	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
-func TestTerminalHandlerAlwaysLoadsKiwiSandbox(t *testing.T) {
+func TestTerminalHandlerLoadsKiwiSandboxForPi(t *testing.T) {
 	store, err := project.NewStore(filepath.Join(t.TempDir(), "data", "projects.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -30,12 +30,6 @@ func TestTerminalHandlerAlwaysLoadsKiwiSandbox(t *testing.T) {
 	}
 	if len(handler.piSkillPaths) != 1 || filepath.Base(handler.piSkillPaths[0]) != "kiwi-sandbox-config" {
 		t.Fatalf("Pi skills do not include kiwi-sandbox-config: %#v", handler.piSkillPaths)
-	}
-	if handler.claudeSandboxPluginErr != nil {
-		t.Fatal(handler.claudeSandboxPluginErr)
-	}
-	if filepath.Base(handler.claudeSandboxPluginPath) != "claude" {
-		t.Fatalf("Claude sandbox plugin path = %q", handler.claudeSandboxPluginPath)
 	}
 }
 

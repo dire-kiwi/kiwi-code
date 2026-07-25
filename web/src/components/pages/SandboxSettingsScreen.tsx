@@ -607,7 +607,7 @@ export function SandboxSettingsScreen({
                     />
                   </label>
                   <p className="mt-2 text-[9px] leading-4 text-ghost-faint">
-                    {pathListHelp} Related projects are included in the default file policy; matching command rules replace that policy.
+                    {pathListHelp} Related projects are included in Pi&apos;s default file policy and passed to Claude Code with --add-dir.
                   </p>
                 </div>
               </Surface>
@@ -660,7 +660,7 @@ export function SandboxSettingsScreen({
       <div className="relative mx-auto w-full max-w-[44rem]">
         <PageIntro icon={<Shield size={20} />} title={title}>
           {scope === 'global'
-            ? 'The sandbox policy applied to every Pi and Claude Code session that Kiwi Code launches. Individual threads can override these values for their own git branch.'
+            ? 'The sandbox policy applied to every Pi session that Kiwi Code launches. Individual threads can override these values for their own git branch; Claude Code currently uses only each thread’s related-project paths.'
             : 'Sandbox overrides for this thread only. Because the thread works on its own git branch, the settings are stored inside the thread directory and travel with it. Anything you leave inherited comes from the global sandbox configuration.'}
         </PageIntro>
         {body}

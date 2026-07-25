@@ -1381,8 +1381,6 @@ func TestClaudeGPTUsesADistinctPaneInTheFixedPiWindow(t *testing.T) {
 	handler, item := newIsolatedTmuxHandler(t)
 	thread := item.Threads[0]
 	setMockCodingAgents(t)
-	handler.claudeSandboxPluginPath = t.TempDir()
-	handler.claudeSandboxPluginErr = nil
 	configureTestClaudeGPTUserConfiguration(t, handler)
 
 	sessionName, _, _, err := handler.ensureTmuxSession(item, thread, "pi")

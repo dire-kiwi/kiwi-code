@@ -706,14 +706,13 @@ func TestConfiguredClaudeGPTCommandLoadsItsDefaultModelFromCLIProxyAPI(t *testin
 		t.Fatal(err)
 	}
 	handler := &terminalHandler{
-		projects:                store,
-		envPath:                 "/usr/bin/env",
-		claudePluginPath:        "/plugin/kiwi-code",
-		claudeSandboxPluginPath: "/plugin/kiwi-sandbox",
-		claudeGPTProfilePath:    filepath.Join(directory, "profile"),
-		cliProxyAPIBaseURL:      proxy.URL,
-		cliProxyAPIKey:          "test-key",
-		cliProxyAPIHTTPClient:   proxy.Client(),
+		projects:              store,
+		envPath:               "/usr/bin/env",
+		claudePluginPath:      "/plugin/kiwi-code",
+		claudeGPTProfilePath:  filepath.Join(directory, "profile"),
+		cliProxyAPIBaseURL:    proxy.URL,
+		cliProxyAPIKey:        "test-key",
+		cliProxyAPIHTTPClient: proxy.Client(),
 	}
 	pluginDirectory := configureTestClaudeGPTUserConfiguration(t, handler)
 	_, args, notice, err := handler.commandForCodingAgentPaneWithOptions(
@@ -793,12 +792,11 @@ func TestConfiguredClaudeCodeProfileUsesTheDefaultClaudeLaunchConfiguration(t *t
 		t.Fatal(err)
 	}
 	handler := &terminalHandler{
-		projects:                store,
-		envPath:                 "/usr/bin/env",
-		claudePluginPath:        "/plugin/kiwi-code",
-		claudeConfigPath:        configDirectory,
-		claudePluginRootPath:    pluginDirectory,
-		claudeSandboxPluginPath: "/plugin/kiwi-sandbox",
+		projects:             store,
+		envPath:              "/usr/bin/env",
+		claudePluginPath:     "/plugin/kiwi-code",
+		claudeConfigPath:     configDirectory,
+		claudePluginRootPath: pluginDirectory,
 	}
 	options := codingAgentLaunchOptions{Model: "sonnet", ThinkingLevel: "high", InitialPrompt: "Review this change"}
 	item := project.Project{ID: "project"}
@@ -867,13 +865,12 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 		t.Fatal(err)
 	}
 	handler := &terminalHandler{
-		projects:                store,
-		envPath:                 "/usr/bin/env",
-		claudePluginPath:        "/plugin/kiwi-code",
-		claudeSandboxPluginPath: "/plugin/kiwi-sandbox",
-		claudeGPTProfilePath:    profilePath,
-		cliProxyAPIBaseURL:      "http://127.0.0.1:18317",
-		cliProxyAPIKey:          "proxy-client-key",
+		projects:             store,
+		envPath:              "/usr/bin/env",
+		claudePluginPath:     "/plugin/kiwi-code",
+		claudeGPTProfilePath: profilePath,
+		cliProxyAPIBaseURL:   "http://127.0.0.1:18317",
+		cliProxyAPIKey:       "proxy-client-key",
 	}
 	pluginDirectory := configureTestClaudeGPTUserConfiguration(t, handler)
 
@@ -947,9 +944,6 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 						t.Fatalf("Claude Code profile args %#v do not contain %q", args, expected)
 					}
 				}
-				if !strings.Contains(joined, "/plugin/kiwi-sandbox") {
-					t.Fatalf("Claude Code profile args %#v do not load Kiwi Sandbox", args)
-				}
 			}
 			if test.agent == codingAgentClaudeGPT {
 				joined := strings.Join(args, "\n")
@@ -965,7 +959,6 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 					"ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-5.6-terra",
 					"ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5.6-luna",
 					"KIWI_CODE_CODING_AGENT=" + codingAgentClaudeGPT,
-					"/plugin/kiwi-sandbox",
 				} {
 					if !strings.Contains(joined, expected) {
 						t.Fatalf("Claude GPT args %#v do not contain %q", args, expected)
