@@ -127,7 +127,7 @@ function configFromDraft(draft: Draft, scope: 'global' | 'thread'): SandboxConfi
   return config
 }
 
-const pathListHelp = 'One path per line. Paths may use $CWD, $HOME, $TMPDIR, and ~; relative paths resolve against the session directory.'
+const pathListHelp = 'The session working directory is always readable and writable. Add one extra path per line; paths may use $CWD, $HOME, $TMPDIR, and ~, and relative paths resolve against the session directory.'
 
 export function SandboxSettingsScreen({
   scope,
@@ -370,7 +370,7 @@ export function SandboxSettingsScreen({
               <SectionHeader
                 icon={<FolderOpen size={16} />}
                 title="File access defaults"
-                description="Directories every sandboxed command may read and write unless a command rule overrides them."
+                description="Extra directories sandboxed commands may access in addition to their always-readable and writable working directory."
                 tone="green"
                 badge={(
                   <StatusBadge tone={draft.defaultsEnabled ? 'success' : 'neutral'}>
@@ -548,7 +548,7 @@ export function SandboxSettingsScreen({
                                 onChange={(event) => updateRule(rule.key, { read: event.target.value })}
                                 disabled={saving}
                                 spellCheck={false}
-                                placeholder="$CWD"
+                                placeholder="$HOME/.config/tool"
                                 className="mt-2.5 min-h-16"
                               />
                             </label>
@@ -559,11 +559,16 @@ export function SandboxSettingsScreen({
                                 onChange={(event) => updateRule(rule.key, { write: event.target.value })}
                                 disabled={saving}
                                 spellCheck={false}
-                                placeholder="$CWD"
+                                placeholder="$TMPDIR/tool-cache"
                                 className="mt-2.5 min-h-16"
                               />
                             </label>
                           </div>
+                        )}
+                        {rule.filesEnabled && (
+                          <p className="mt-2 text-[9px] leading-4 text-ghost-faint">
+                            These paths are additional; matching commands always retain read/write access to their working directory.
+                          </p>
                         )}
                       </div>
                     ))}

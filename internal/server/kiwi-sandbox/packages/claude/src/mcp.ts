@@ -86,7 +86,8 @@ async function callTool(name: string, args: any): Promise<Record<string, unknown
         });
         const output = Buffer.concat(chunks, outputBytes).toString("utf8") || `Command exited with status ${result.exitCode}`;
         return toolResult(output, result.exitCode !== 0 || result.timedOut || result.cancelled, {
-          exitCode: result.exitCode, timedOut: result.timedOut, cancelled: result.cancelled, policy: result.policy,
+          exitCode: result.exitCode, timedOut: result.timedOut, cancelled: result.cancelled,
+          sandboxDenied: result.sandboxDenied, policy: result.policy,
         });
       }
       case "sandbox_read": {

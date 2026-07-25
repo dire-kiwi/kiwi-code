@@ -85,6 +85,25 @@ test("built-in defaults run arbitrary commands without network or broad file acc
   );
 });
 
+test("working directory remains readable and writable under every constrained policy", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "kiwi-sandbox-implicit-cwd-"));
+  const cwd = join(parent, "project");
+  await mkdir(cwd);
+  const config = defaultConfig();
+  config.defaults = { read: [], write: [] };
+  config.commands = [{ pattern: "locked *", files: { read: [], write: [] } }];
+
+  for (const command of ["ordinary-command", "locked command"]) {
+    const decision = await resolveDecision(config, command, cwd);
+    await assertPathAllowed(join(cwd, "nested", "new-file.txt"), decision, "read");
+    await assertPathAllowed(join(cwd, "nested", "new-file.txt"), decision, "write");
+    await assert.rejects(
+      () => assertPathAllowed(join(parent, "outside.txt"), decision, "write"),
+      /write access denied/,
+    );
+  }
+});
+
 test("default policy grants related projects relative to the project root", async () => {
   const parent = await mkdtemp(join(tmpdir(), "kiwi-sandbox-related-"));
   const project = join(parent, "project");
@@ -170,6 +189,8 @@ test("Seatbelt profiles remain deny-by-default", async () => {
   decision.deniedWrite = [join(cwd, ".config", "kiwi-sandbox.json")];
   const profile = createSeatbeltProfile(decision);
   assert.match(profile, /\(deny default\)/);
+  assert.match(profile, /\(allow file-read-data \(literal "\/"\)\)/);
+  assert.doesNotMatch(profile, /\(subpath "\/"\)/);
   assert.match(profile, /\(allow file-read\*/);
   assert.match(profile, /\(allow file-write\*/);
   assert.doesNotMatch(profile, /\(allow network\*\)/);

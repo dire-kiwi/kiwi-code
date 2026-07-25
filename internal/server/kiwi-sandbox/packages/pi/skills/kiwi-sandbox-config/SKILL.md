@@ -79,19 +79,20 @@ Configuration is JSON without comments:
 
 ### Fields
 
-- `defaults.read`: directories or files readable when no command rule matches.
-- `defaults.write`: directories or files writable when no command rule matches. Write paths are automatically readable.
+- The effective command working directory is always readable and writable; for file tools this is the project root.
+- `defaults.read`: additional directories or files readable when no command rule matches.
+- `defaults.write`: additional directories or files writable when no command rule matches. Write paths are automatically readable.
 - `network`: whether sandboxed processes may use the network.
 - `shell`: absolute shell path used by command execution.
 - `relatedProjects`: project-config-only paths injected into Pi and Claude's system context and added to the default read/write policy. Relative paths resolve from the project root. Ordinary read/write roots are not injected into context.
-- `commands`: ordered command rules. The first matching rule replaces `defaults`, including automatic related-project access, for that operation.
+- `commands`: ordered command rules. The first matching rule replaces `defaults`, including automatic related-project access, for that operation, but cannot remove implicit working-directory access.
 - A string command entry is an unrestricted-filesystem shorthand; `"gh *"` equals `{ "pattern": "gh *" }`.
 - `commands[].pattern`: one glob or a non-empty list of globs supporting `*`, `?`, and character classes. Every pattern in a list shares the object's policy.
 - `commands[].network`: optional network override for the matching command; omission inherits top-level `network`.
 - `commands[].files.read`: read allowlist for the matching rule.
 - `commands[].files.write`: write allowlist for the matching rule.
 
-A matching command object with no `files` field grants unrestricted filesystem reads and writes. An explicit empty policy uses `"files": { "read": [], "write": [] }`.
+A matching command object with no `files` field grants unrestricted filesystem reads and writes. An explicit empty policy uses `"files": { "read": [], "write": [] }` and grants only the implicit working directory plus fixed runtime access.
 
 ## Paths and substitutions
 

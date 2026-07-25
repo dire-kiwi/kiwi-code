@@ -48,8 +48,11 @@ export async function resolveDecision(
   const relatedProjects = includeRelatedProjects
     ? await resolvePaths(config.relatedProjects, projectRoot)
     : [];
-  const read = await resolvePaths([...RUNTIME_READ_PATHS, ...extraRuntimeRead, ...(files?.read ?? [])], cwd);
-  const write = await resolvePaths([...RUNTIME_WRITE_PATHS, ...(files?.write ?? [])], cwd);
+  // The directory a command runs in is always usable. Configured paths widen
+  // access; they cannot make the command's own working tree unreadable or
+  // unwritable. File tools resolve policy with the project root as their cwd.
+  const read = await resolvePaths([...RUNTIME_READ_PATHS, ...extraRuntimeRead, cwd, ...(files?.read ?? [])], cwd);
+  const write = await resolvePaths([...RUNTIME_WRITE_PATHS, cwd, ...(files?.write ?? [])], cwd);
   return {
     rule,
     unrestricted,
@@ -105,12 +108,12 @@ export function globMatches(pattern: string, value: string): boolean {
 export async function assertPathAllowed(path: string, decision: PolicyDecision, mode: "read" | "write"): Promise<string> {
   const canonical = await canonicalPath(path);
   if (mode === "write" && decision.deniedWrite.some((denied) => isWithin(denied, canonical))) {
-    throw new Error(`write access denied for protected Kiwi Sandbox path: ${path}`);
+    throw new Error(`Kiwi Sandbox: write access denied for protected Kiwi Sandbox path: ${path}`);
   }
   if (decision.unrestricted) return canonical;
   const allowed = mode === "read" ? decision.read : decision.write;
   if (!allowed.some((root) => isWithin(root, canonical))) {
-    throw new Error(`${mode} access denied by ${decision.rule} policy: ${path}`);
+    throw new Error(`Kiwi Sandbox: ${mode} access denied by ${decision.rule} policy: ${path}`);
   }
   return canonical;
 }
@@ -129,7 +132,7 @@ export async function assertWorkingDirectory(
     realpath(requested),
   ]);
   if (!roots.some((root) => isWithin(root, cwd))) {
-    throw new Error(`Working directory must remain inside project root ${projectRoot} or a related project`);
+    throw new Error(`Kiwi Sandbox: working directory access denied; it must remain inside project root ${projectRoot} or a related project`);
   }
   const stat = await lstat(cwd);
   if (!stat.isDirectory()) throw new Error(`Working directory is not a directory: ${requested}`);

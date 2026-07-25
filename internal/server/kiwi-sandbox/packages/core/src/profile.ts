@@ -10,6 +10,10 @@ export function createSeatbeltProfile(decision: PolicyDecision): string {
     "(allow mach-lookup)",
     "(allow ipc-posix*)",
     "(allow system-socket)",
+    // macOS 26 processes read the root directory while starting. Without this
+    // exact-path grant, even /bin/pwd aborts before it can inspect an allowed cwd.
+    // Keep this separate from decision.read so it does not become (subpath "/").
+    '(allow file-read-data (literal "/"))',
   ];
   if (decision.network) lines.push("(allow network*)");
   if (decision.unrestricted) {
