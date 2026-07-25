@@ -3,11 +3,13 @@ import type { WorkspaceTool } from './types'
 
 export const CLEANUP_ROUTE = '/cleanup'
 export const SETTINGS_ROUTE = '/settings'
+export const SANDBOX_SETTINGS_ROUTE = '/settings/sandbox'
 export const TMUX_ROUTE = '/tmux'
 export const PROJECT_ROUTE = '/projects/:projectId'
 export const PROJECT_SETTINGS_ROUTE = '/projects/:projectId/settings'
 export const NEW_THREAD_ROUTE = '/projects/:projectId/threads/new'
 export const THREAD_ROUTE = '/projects/:projectId/threads/:threadId'
+export const THREAD_SANDBOX_ROUTE = '/projects/:projectId/threads/:threadId/sandbox'
 export const WORKSPACE_ROUTE = '/projects/:projectId/threads/:threadId/:tool'
 
 const routeSegmentByTool: Record<WorkspaceTool, string> = {
@@ -42,4 +44,8 @@ export function newThreadPath(projectId: string): string {
 
 export function projectSettingsPath(projectId: string): string {
   return generatePath(PROJECT_SETTINGS_ROUTE, { projectId })
+}
+
+export function threadSandboxPath(projectId: string, threadId: string): string {
+  return generatePath(THREAD_SANDBOX_ROUTE, { projectId, threadId })
 }
