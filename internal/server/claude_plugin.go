@@ -24,8 +24,14 @@ var claudePluginHookScript []byte
 //go:embed claude-plugin/servers/kiwi-code-browser.mjs
 var claudePluginBrowserServer []byte
 
+//go:embed claude-plugin/servers/kiwi-code-plans.mjs
+var claudePluginPlansServer []byte
+
 //go:embed claude-plugin/skills/kiwi-code-in-app-browser/SKILL.md
 var claudePluginBrowserSkill []byte
+
+//go:embed claude-plugin/skills/kiwi-code-planner/SKILL.md
+var claudePluginPlannerSkill []byte
 
 //go:embed claude-plugin/LICENSE
 var claudePluginBrowserLicense []byte
@@ -59,7 +65,9 @@ func claudePluginFiles() ([]claudePluginFile, error) {
 		{path: filepath.Join("hooks", "hooks.json"), contents: claudePluginHooks},
 		{path: filepath.Join("scripts", "kiwi-code-hook.mjs"), contents: claudePluginHookScript},
 		{path: filepath.Join("servers", "kiwi-code-browser.mjs"), contents: claudePluginBrowserServer},
+		{path: filepath.Join("servers", "kiwi-code-plans.mjs"), contents: claudePluginPlansServer},
 		{path: filepath.Join("skills", "kiwi-code-in-app-browser", "SKILL.md"), contents: claudePluginBrowserSkill},
+		{path: filepath.Join("skills", "kiwi-code-planner", "SKILL.md"), contents: claudePluginPlannerSkill},
 		{path: "LICENSE", contents: claudePluginBrowserLicense},
 		{path: filepath.Join("skills", agentSkillName, "SKILL.md"), contents: claudePluginProcessSkill},
 	}

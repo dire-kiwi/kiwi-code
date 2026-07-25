@@ -49,7 +49,7 @@ func TestMaterializeClaudePlugin(t *testing.T) {
 	if manifest.Name != "kiwi-code" {
 		t.Fatalf("plugin name = %q, want kiwi-code", manifest.Name)
 	}
-	for _, capability := range []string{"browser", "process"} {
+	for _, capability := range []string{"browser", "process", "plan"} {
 		if !strings.Contains(strings.ToLower(manifest.Description), capability) {
 			t.Fatalf("plugin description %q does not mention %q support", manifest.Description, capability)
 		}
@@ -68,14 +68,16 @@ func TestMaterializeClaudePlugin(t *testing.T) {
 	if err := json.Unmarshal(claudePluginMCPConfig, &mcpConfig); err != nil {
 		t.Fatalf("parse plugin MCP config: %v", err)
 	}
-	browserServer, ok := mcpConfig.MCPServers["browser"]
-	if !ok || browserServer.Command != "node" || len(browserServer.Args) != 1 || !strings.Contains(browserServer.Args[0], "${CLAUDE_PLUGIN_ROOT}") ||
-		browserServer.Env["KIWI_CODE_THREAD_ENDPOINT"] != "${KIWI_CODE_THREAD_ENDPOINT}" ||
-		browserServer.Env["KIWI_CODE_AGENT_TOKEN_FILE"] != "${CLAUDE_PLUGIN_ROOT}/../"+agentTokenFileName {
-		t.Fatalf("browser MCP server config = %#v", browserServer)
+	for _, name := range []string{"browser", "plans"} {
+		mcpServer, ok := mcpConfig.MCPServers[name]
+		if !ok || mcpServer.Command != "node" || len(mcpServer.Args) != 1 || !strings.Contains(mcpServer.Args[0], "${CLAUDE_PLUGIN_ROOT}") ||
+			mcpServer.Env["KIWI_CODE_THREAD_ENDPOINT"] != "${KIWI_CODE_THREAD_ENDPOINT}" ||
+			mcpServer.Env["KIWI_CODE_AGENT_TOKEN_FILE"] != "${CLAUDE_PLUGIN_ROOT}/../"+agentTokenFileName {
+			t.Fatalf("%s MCP server config = %#v", name, mcpServer)
+		}
 	}
-	if len(mcpConfig.MCPServers) != 1 {
-		t.Fatalf("Claude plugin MCP servers = %#v, want browser only", mcpConfig.MCPServers)
+	if len(mcpConfig.MCPServers) != 2 {
+		t.Fatalf("Claude plugin MCP servers = %#v, want browser and plans", mcpConfig.MCPServers)
 	}
 	if strings.Contains(strings.ToLower(manifest.Description), "workflow") ||
 		bytes.Contains(claudePluginHooks, []byte("workflow-activation")) ||
@@ -90,6 +92,13 @@ func TestMaterializeClaudePlugin(t *testing.T) {
 	}
 	if !bytes.Contains(claudePluginBrowserSkill, []byte("browser_recording")) || !bytes.Contains(claudePluginBrowserSkill, []byte("inactivity timeout")) {
 		t.Fatal("Claude browser skill does not own recording lifecycle and inactivity cleanup")
+	}
+	if !bytes.Contains(claudePluginPlannerSkill, []byte("\nname: kiwi-code-planner\n")) ||
+		!bytes.Contains(claudePluginPlannerSkill, []byte("\ncontext: fork\n")) ||
+		!bytes.Contains(claudePluginPlannerSkill, []byte("\nagent: Plan\n")) ||
+		!bytes.Contains(claudePluginPlannerSkill, []byte("publish_thread_plan")) ||
+		!bytes.Contains(claudePluginPlannerSkill, []byte("ToolSearch")) {
+		t.Fatal("Claude planner skill is not configured for forked planning and retained publication")
 	}
 	if !bytes.Contains(claudePluginProcessSkill, []byte("\nname: kiwi-code-processes\n")) {
 		t.Fatal("Claude process skill does not use its Kiwi Code name")
@@ -346,6 +355,191 @@ func TestClaudeBrowserMCPServer(t *testing.T) {
 	}) {
 		t.Fatalf("browser MCP tool names = %#v", toolNames)
 	}
+}
+
+func TestClaudePlansMCPServer(t *testing.T) {
+	nodePath, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	dataDirectory := t.TempDir()
+	pluginRoot, err := materializeClaudePlugin(dataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDirectory, agentTokenFileName), []byte("claude-plan-capability\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	content := "# Implementation plan\n\n1. Update the Claude integration.\n2. Run tests.\n"
+	plan := threadPlanSnapshot{
+		ID:             "plan-1",
+		ProjectID:      "project",
+		ThreadID:       "thread",
+		SourceThreadID: "thread",
+		Title:          "Support Claude plans",
+		CreatedAt:      time.Date(2026, time.July, 21, 12, 0, 0, 0, time.UTC),
+		SizeBytes:      len([]byte(content)),
+	}
+	var uploaded struct {
+		Title   string `json:"title"`
+		Content string `json:"content"`
+	}
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get(agentTokenHeader); got != "claude-plan-capability" {
+			t.Errorf("plan MCP agent token = %q", got)
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/plans":
+			writeJSON(w, http.StatusOK, []threadPlanSnapshot{plan})
+		case r.Method == http.MethodGet && r.URL.Path == "/plans/plan-1":
+			w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+			_, _ = w.Write([]byte(content))
+		case r.Method == http.MethodPost && r.URL.Path == "/plans":
+			if got := r.Header.Get(claudePlanContextHeader); got != claudePlanContextFork {
+				t.Errorf("Claude plan context = %q", got)
+			}
+			decoder := json.NewDecoder(r.Body)
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&uploaded); err != nil {
+				t.Errorf("decode published plan: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, http.StatusCreated, plan)
+		default:
+			t.Errorf("plan MCP request = %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer api.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, nodePath, filepath.Join(pluginRoot, "servers", "kiwi-code-plans.mjs"))
+	command.Env = append(os.Environ(),
+		"KIWI_CODE_THREAD_ENDPOINT="+api.URL,
+		"KIWI_CODE_AGENT_TOKEN_FILE="+filepath.Join(pluginRoot, "..", agentTokenFileName),
+	)
+	stdin, err := command.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = stdin.Close()
+		if command.Process != nil {
+			_ = command.Process.Kill()
+		}
+		_ = command.Wait()
+	})
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), 2<<20)
+	nextID := 0
+	roundTrip := func(method string, params any) map[string]any {
+		t.Helper()
+		nextID++
+		encoded, err := json.Marshal(map[string]any{
+			"jsonrpc": "2.0", "id": nextID, "method": method, "params": params,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := stdin.Write(append(encoded, '\n')); err != nil {
+			t.Fatalf("write plan MCP request: %v; stderr=%s", err, stderr.String())
+		}
+		if !scanner.Scan() {
+			t.Fatalf("read plan MCP response: %v; stderr=%s", scanner.Err(), stderr.String())
+		}
+		var response map[string]any
+		if err := json.Unmarshal(scanner.Bytes(), &response); err != nil {
+			t.Fatalf("parse plan MCP response %q: %v", scanner.Bytes(), err)
+		}
+		if response["id"] != float64(nextID) || response["error"] != nil {
+			t.Fatalf("plan MCP response = %#v", response)
+		}
+		result, ok := response["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("plan MCP response result = %#v", response["result"])
+		}
+		return result
+	}
+
+	initialized := roundTrip("initialize", map[string]any{"protocolVersion": "2025-06-18"})
+	if initialized["protocolVersion"] != "2025-06-18" {
+		t.Fatalf("plan MCP protocol version = %#v", initialized["protocolVersion"])
+	}
+	listed := roundTrip("tools/list", map[string]any{})
+	listedTools, ok := listed["tools"].([]any)
+	if !ok || len(listedTools) != 3 {
+		t.Fatalf("plan MCP tools = %#v, want 3", listed["tools"])
+	}
+	var names []string
+	for _, value := range listedTools {
+		tool, ok := value.(map[string]any)
+		if !ok {
+			t.Fatalf("plan MCP tool = %#v", value)
+		}
+		name, _ := tool["name"].(string)
+		names = append(names, name)
+	}
+	if !slices.Equal(names, []string{"publish_thread_plan", "list_thread_plans", "download_thread_plan"}) {
+		t.Fatalf("plan MCP tool names = %#v", names)
+	}
+
+	listResult := roundTrip("tools/call", map[string]any{
+		"name": "list_thread_plans", "arguments": map[string]any{},
+	})
+	if listResult["isError"] != false || !strings.Contains(mcpTextContent(t, listResult), plan.ID) {
+		t.Fatalf("list plan MCP result = %#v", listResult)
+	}
+	downloadResult := roundTrip("tools/call", map[string]any{
+		"name": "download_thread_plan", "arguments": map[string]any{},
+	})
+	if downloadResult["isError"] != false || mcpTextContent(t, downloadResult) != content {
+		t.Fatalf("download plan MCP result = %#v", downloadResult)
+	}
+	publishResult := roundTrip("tools/call", map[string]any{
+		"name":      "publish_thread_plan",
+		"arguments": map[string]any{"title": "  Support Claude plans  ", "content": content},
+	})
+	if publishResult["isError"] != false || !strings.Contains(mcpTextContent(t, publishResult), plan.ID) {
+		t.Fatalf("publish plan MCP result = %#v", publishResult)
+	}
+	if uploaded.Title != "Support Claude plans" || uploaded.Content != content {
+		t.Fatalf("published plan payload = %#v", uploaded)
+	}
+	invalid := roundTrip("tools/call", map[string]any{
+		"name": "publish_thread_plan", "arguments": map[string]any{"title": "Empty", "content": "   "},
+	})
+	if invalid["isError"] != true {
+		t.Fatalf("invalid plan MCP result = %#v, want tool error", invalid)
+	}
+}
+
+func mcpTextContent(t *testing.T, result map[string]any) string {
+	t.Helper()
+	content, ok := result["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("MCP text content = %#v", result["content"])
+	}
+	item, ok := content[0].(map[string]any)
+	if !ok || item["type"] != "text" {
+		t.Fatalf("MCP content item = %#v", content[0])
+	}
+	text, ok := item["text"].(string)
+	if !ok {
+		t.Fatalf("MCP content text = %#v", item["text"])
+	}
+	return text
 }
 
 func TestClaudePluginHeartbeatReportsPromptStart(t *testing.T) {

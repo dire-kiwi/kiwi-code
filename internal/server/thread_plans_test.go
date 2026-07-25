@@ -152,6 +152,30 @@ func TestThreadPlanUploadRequiresForkedChildAndValidMarkdown(t *testing.T) {
 		t.Fatalf("parent upload status = %d, body = %s", parentResponse.Code, parentResponse.Body.String())
 	}
 
+	claudeUnauthorizedRequest := httptest.NewRequest(http.MethodPost, parentPath, strings.NewReader(`{"title":"Claude plan","content":"# Plan"}`))
+	claudeUnauthorizedRequest.Header.Set(claudePlanContextHeader, claudePlanContextFork)
+	claudeUnauthorizedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(claudeUnauthorizedResponse, claudeUnauthorizedRequest)
+	if claudeUnauthorizedResponse.Code != http.StatusForbidden {
+		t.Fatalf("unauthorized Claude context fork upload status = %d, body = %s", claudeUnauthorizedResponse.Code, claudeUnauthorizedResponse.Body.String())
+	}
+
+	claudeRequest := httptest.NewRequest(http.MethodPost, parentPath, strings.NewReader(`{"title":"Claude plan","content":"# Plan"}`))
+	claudeRequest.Header.Set(agentTokenHeader, application.terminal.agentToken)
+	claudeRequest.Header.Set(claudePlanContextHeader, claudePlanContextFork)
+	claudeResponse := httptest.NewRecorder()
+	handler.ServeHTTP(claudeResponse, claudeRequest)
+	if claudeResponse.Code != http.StatusCreated {
+		t.Fatalf("Claude context fork upload status = %d, body = %s", claudeResponse.Code, claudeResponse.Body.String())
+	}
+	var claudePlan threadPlanSnapshot
+	if err := json.NewDecoder(claudeResponse.Body).Decode(&claudePlan); err != nil {
+		t.Fatal(err)
+	}
+	if claudePlan.ThreadID != parent.ID || claudePlan.SourceThreadID != parent.ID || claudePlan.Title != "Claude plan" {
+		t.Fatalf("Claude context fork plan = %#v", claudePlan)
+	}
+
 	workflowChild, err := store.AddThreadWithOptions(item.ID, "Workflow child", project.AddThreadOptions{
 		ParentThreadID:  parent.ID,
 		WorkflowRunID:   "run-1",
@@ -163,6 +187,7 @@ func TestThreadPlanUploadRequiresForkedChildAndValidMarkdown(t *testing.T) {
 	workflowPath := "/api/projects/" + item.ID + "/threads/" + workflowChild.ID + "/plans"
 	workflowRequest := httptest.NewRequest(http.MethodPost, workflowPath, strings.NewReader(`{"title":"Workflow","content":"# Plan"}`))
 	workflowRequest.Header.Set(agentTokenHeader, application.terminal.agentToken)
+	workflowRequest.Header.Set(claudePlanContextHeader, claudePlanContextFork)
 	workflowResponse := httptest.NewRecorder()
 	handler.ServeHTTP(workflowResponse, workflowRequest)
 	if workflowResponse.Code != http.StatusConflict || !strings.Contains(workflowResponse.Body.String(), "context: fork") {
