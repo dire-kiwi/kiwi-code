@@ -135,11 +135,13 @@ func (h *terminalHandler) listCodingAgents(w http.ResponseWriter, r *http.Reques
 	configuredAgents := []project.CodingAgentSetting{}
 	needsGPTModels := false
 	if h.projects != nil {
-		configuredAgents = h.projects.GetSettings().CodingAgents
-		for _, configured := range configuredAgents {
+		for _, configured := range h.projects.GetSettings().CodingAgents {
+			if configured.Kind != project.CodingAgentKindClaude && configured.Kind != project.CodingAgentKindClaudeGPT {
+				continue
+			}
+			configuredAgents = append(configuredAgents, configured)
 			if configured.Kind == project.CodingAgentKindClaudeGPT {
 				needsGPTModels = true
-				break
 			}
 		}
 	}
