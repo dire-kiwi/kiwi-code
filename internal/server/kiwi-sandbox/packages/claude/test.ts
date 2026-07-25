@@ -4,13 +4,15 @@ import { promisify } from "node:util";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { GIT_WORKTREES_PROMPT } from "../core/src/index.ts";
 
 const execFileAsync = promisify(execFile);
 const project = await mkdtemp(join(tmpdir(), "kiwi-sandbox-claude-"));
 const fake = join(project, "sandbox-exec");
 await writeFile(fake, '#!/bin/sh\nshift 2\nexec "$@"\n');
 await chmod(fake, 0o700);
-await mkdir(join(project, ".config"));
+await Promise.all([mkdir(join(project, ".config")), mkdir(join(project, ".git"))]);
+await writeFile(join(project, ".git", "HEAD"), "ref: refs/heads/main\n");
 await writeFile(join(project, ".config", "kiwi-sandbox.json"), JSON.stringify({
   defaults: { read: ["$CWD"], write: ["$CWD"] }, commands: [], network: false,
   relatedProjects: ["../related-project"],
@@ -55,7 +57,7 @@ try {
   }));
   assert.equal(
     sessionContext.hookSpecificOutput.additionalContext,
-    `Related Directories: ${join(await realpath(join(project, "..")), "related-project")}`,
+    `Related Directories: ${join(await realpath(join(project, "..")), "related-project")}\n${GIT_WORKTREES_PROMPT}`,
   );
   const hookConfig = JSON.parse(await readFile(new URL("./hooks/hooks.json", import.meta.url), "utf8"));
   const preToolHook = hookConfig.hooks.PreToolUse[0];

@@ -73,8 +73,10 @@ func TestMaterializeKiwiSandbox(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(piSkillPath, "SKILL.md")); err != nil {
 		t.Fatalf("materialized Pi config skill: %v", err)
 	}
-	corePath := filepath.Join(dataDirectory, "kiwi-sandbox", "packages", "core", "src", "sandbox.ts")
-	if _, err := os.Stat(corePath); err != nil {
-		t.Fatalf("materialized shared sandbox library: %v", err)
+	for _, name := range []string{"sandbox.ts", "context.ts", "worktrees.ts"} {
+		corePath := filepath.Join(dataDirectory, "kiwi-sandbox", "packages", "core", "src", name)
+		if _, err := os.Stat(corePath); err != nil {
+			t.Fatalf("materialized shared sandbox library %q: %v", name, err)
+		}
 	}
 }

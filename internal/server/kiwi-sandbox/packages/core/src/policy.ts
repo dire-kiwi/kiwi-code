@@ -23,6 +23,7 @@ export async function resolveDecision(
   cwd: string,
   extraRuntimeRead: string[] = [],
   projectRoot = cwd,
+  gitWorktrees: string[] = [],
 ): Promise<PolicyDecision> {
   let files: FileAccess | undefined = config.defaults;
   let rule = "defaults";
@@ -48,16 +49,17 @@ export async function resolveDecision(
   const relatedProjects = includeRelatedProjects
     ? await resolvePaths(config.relatedProjects, projectRoot)
     : [];
-  // The directory a command runs in is always usable. Configured paths widen
-  // access; they cannot make the command's own working tree unreadable or
-  // unwritable. File tools resolve policy with the project root as their cwd.
+  const worktrees = uniqueSorted(await Promise.all(gitWorktrees.map(canonicalPath)));
+  // The directory a command runs in and every worktree in its repository are
+  // always usable. Configured paths widen access; they cannot remove these
+  // grants. File tools resolve policy with the project root as their cwd.
   const read = await resolvePaths([...RUNTIME_READ_PATHS, ...extraRuntimeRead, cwd, ...(files?.read ?? [])], cwd);
   const write = await resolvePaths([...RUNTIME_WRITE_PATHS, cwd, ...(files?.write ?? [])], cwd);
   return {
     rule,
     unrestricted,
-    read: uniqueSorted([...read, ...write, ...relatedProjects]),
-    write: uniqueSorted([...write, ...relatedProjects]),
+    read: uniqueSorted([...read, ...write, ...relatedProjects, ...worktrees]),
+    write: uniqueSorted([...write, ...relatedProjects, ...worktrees]),
     deniedWrite: [],
     network,
   };
@@ -122,17 +124,19 @@ export async function assertWorkingDirectory(
   projectRoot: string,
   requested: string,
   relatedProjects: string[] = [],
+  gitWorktrees: string[] = [],
 ): Promise<string> {
   if (!isAbsolute(requested)) requested = resolve(projectRoot, requested);
   const [roots, cwd] = await Promise.all([
     Promise.all([
       canonicalPath(projectRoot),
       ...relatedProjects.map((path) => canonicalPath(expandConfiguredPath(path, projectRoot))),
+      ...gitWorktrees.map((path) => canonicalPath(path)),
     ]),
     realpath(requested),
   ]);
   if (!roots.some((root) => isWithin(root, cwd))) {
-    throw new Error(`Kiwi Sandbox: working directory access denied; it must remain inside project root ${projectRoot} or a related project`);
+    throw new Error(`Kiwi Sandbox: working directory access denied; it must remain inside project root ${projectRoot}, a repository worktree, or a related project`);
   }
   const stat = await lstat(cwd);
   if (!stat.isDirectory()) throw new Error(`Working directory is not a directory: ${requested}`);
