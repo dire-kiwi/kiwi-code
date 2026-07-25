@@ -22,11 +22,18 @@ import {
 } from '../../lib/promptImages'
 import {
   readPiNativeDraft,
+  readPiNativePastes,
   readPiNativeWorkflowDismissed,
   writePiNativeDraft,
+  writePiNativePastes,
   writePiNativeWorkflowDismissed,
 } from '../../lib/promptDrafts'
 import { useImageAttachments } from '../../lib/useImageAttachments'
+import {
+  collapsePromptPaste,
+  expandPromptPastes,
+  prunePromptPastes,
+} from '../../prompt-pastes.mjs'
 import type { AgentContextStatus, ConnectionStatus } from '../../types'
 import { piNativeStyles } from './piNativeStyles'
 import {
@@ -272,6 +279,7 @@ export function PiNativePane({
   const [selectedModel, setSelectedModel] = useState(initialModel ?? '')
   const [selectedThinking, setSelectedThinking] = useState(initialThinkingLevel ?? '')
   const [draft, setDraft] = useState(() => readPiNativeDraft(projectId, threadId))
+  const [draftPastes, setDraftPastes] = useState(() => readPiNativePastes(projectId, threadId))
   const {
     attachments: draftImages,
     addFiles: addDraftImageFiles,
@@ -282,7 +290,10 @@ export function PiNativePane({
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false)
   const [workflowKeywordDismissed, setWorkflowKeywordDismissed] = useState(() => (
     readPiNativeWorkflowDismissed(projectId, threadId)
-    && ULTRACODE_KEYWORD_PATTERN.test(readPiNativeDraft(projectId, threadId))
+    && ULTRACODE_KEYWORD_PATTERN.test(expandPromptPastes(
+      readPiNativeDraft(projectId, threadId),
+      readPiNativePastes(projectId, threadId),
+    ))
   ))
   const [workflowKeywordTriggerEnabled, setWorkflowKeywordTriggerEnabled] = useState(false)
   const [workflowsEnabled, setWorkflowsEnabled] = useState(false)
@@ -768,12 +779,14 @@ export function PiNativePane({
 
   useEffect(() => {
     writePiNativeDraft(projectId, threadId, draft)
-  }, [draft, projectId, threadId])
+    writePiNativePastes(projectId, threadId, draftPastes)
+  }, [draft, draftPastes, projectId, threadId])
 
   useEffect(() => {
     if (!readOnly) return
     imageUploadControllerRef.current?.abort()
     setDraft('')
+    setDraftPastes([])
     clearDraftImages()
     setSlashMenuDismissed(true)
     setSelectedSlashIndex(0)
@@ -884,6 +897,7 @@ export function PiNativePane({
     () => buildTimeline(messages, liveAssistant, toolStates, isStreaming),
     [isStreaming, liveAssistant, messages, toolStates],
   )
+  const expandedDraft = expandPromptPastes(draft, draftPastes)
   const latestCacheHitRate = useMemo(() => piLatestCacheHitRate(messages), [messages])
   const composerSuggestions = useMemo(
     () => buildComposerSuggestions(draft, piCommands, availableModels),
@@ -936,6 +950,7 @@ export function PiNativePane({
 
   function clearSubmittedDraft() {
     setDraft('')
+    setDraftPastes([])
     clearDraftImages()
     setError('')
     setSlashMenuDismissed(false)
@@ -946,7 +961,7 @@ export function PiNativePane({
 
   async function sendPrompt(queueMode?: 'steer' | 'followUp') {
     if (readOnlyRef.current) return
-    const message = draft.trim()
+    const message = expandedDraft.trim()
     const images = [...draftImages]
     if ((!message && images.length === 0) || promptSubmissionRef.current) return
     const socket = socketRef.current
@@ -1100,7 +1115,7 @@ export function PiNativePane({
 
   function submitDraft(queueMode?: 'steer' | 'followUp') {
     if (readOnlyRef.current) return
-    const message = draft.trim()
+    const message = expandedDraft.trim()
     if ((!message && draftImages.length === 0) || (message && runNativeSlashCommand(message))) return
     void sendPrompt(queueMode)
   }
@@ -1118,6 +1133,37 @@ export function PiNativePane({
   function handleComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
     if (readOnlyRef.current) return
     addDraftImages(imageFilesFromClipboard(event.clipboardData))
+    const pastedText = event.clipboardData.getData('text/plain')
+    if (!pastedText) return
+    const textarea = event.currentTarget
+    const collapsed = collapsePromptPaste({
+      value: draft,
+      selectionStart: textarea.selectionStart,
+      selectionEnd: textarea.selectionEnd,
+      pastedText,
+      pastes: draftPastes,
+    })
+    if (!collapsed) return
+
+    event.preventDefault()
+    setDraft(collapsed.value)
+    setDraftPastes(collapsed.pastes)
+    setError('')
+    window.requestAnimationFrame(() => {
+      textarea.setSelectionRange(collapsed.selectionStart, collapsed.selectionStart)
+    })
+  }
+
+  function handleDraftChange(value: string) {
+    const nextPastes = prunePromptPastes(value, draftPastes)
+    setDraft(value)
+    setDraftPastes(nextPastes)
+    if (!ULTRACODE_KEYWORD_PATTERN.test(expandPromptPastes(value, nextPastes))) {
+      if (workflowKeywordDismissed) setNotice('')
+      setWorkflowKeywordDismissed(false)
+    }
+    setSlashMenuDismissed(false)
+    setSelectedSlashIndex(0)
   }
 
   function handleComposerDrop(event: DragEvent<HTMLTextAreaElement>) {
@@ -1168,6 +1214,7 @@ export function PiNativePane({
   function applyComposerSuggestion(suggestion: ComposerSuggestion) {
     if (readOnlyRef.current) return
     setDraft(suggestion.completion)
+    setDraftPastes([])
     setSelectedSlashIndex(0)
     setSlashMenuDismissed(!suggestion.completion.endsWith(' '))
     window.requestAnimationFrame(() => {
@@ -1180,7 +1227,7 @@ export function PiNativePane({
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (readOnlyRef.current || event.nativeEvent.isComposing) return
-    if (event.altKey && event.key.toLowerCase() === 'w' && workflowsEnabled && workflowKeywordTriggerEnabled && ULTRACODE_KEYWORD_PATTERN.test(draft)) {
+    if (event.altKey && event.key.toLowerCase() === 'w' && workflowsEnabled && workflowKeywordTriggerEnabled && ULTRACODE_KEYWORD_PATTERN.test(expandedDraft)) {
       event.preventDefault()
       setWorkflowKeywordDismissed(true)
       setNotice('Ultracode keyword trigger dismissed for this prompt.')
@@ -1333,7 +1380,7 @@ export function PiNativePane({
       ? `Uploading ${draftImages.length} image${draftImages.length === 1 ? '' : 's'}…`
       : connectionStatus !== 'open'
         ? 'Connecting to Pi…'
-        : workflowsEnabled && workflowKeywordTriggerEnabled && ULTRACODE_KEYWORD_PATTERN.test(draft)
+        : workflowsEnabled && workflowKeywordTriggerEnabled && ULTRACODE_KEYWORD_PATTERN.test(expandedDraft)
           ? workflowKeywordDismissed
             ? 'Ultracode keyword trigger dismissed for this prompt'
             : 'Ultracode workflow trigger · Option/Alt+W to dismiss'
@@ -1409,15 +1456,7 @@ export function PiNativePane({
         onRemoveAttachment={removeDraftImage}
         textareaRef={textareaRef}
         draft={draft}
-        onDraftChange={(value) => {
-          setDraft(value)
-          if (!ULTRACODE_KEYWORD_PATTERN.test(value)) {
-            if (workflowKeywordDismissed) setNotice('')
-            setWorkflowKeywordDismissed(false)
-          }
-          setSlashMenuDismissed(false)
-          setSelectedSlashIndex(0)
-        }}
+        onDraftChange={handleDraftChange}
         onPaste={handleComposerPaste}
         onDrop={handleComposerDrop}
         onKeyDown={handleComposerKeyDown}

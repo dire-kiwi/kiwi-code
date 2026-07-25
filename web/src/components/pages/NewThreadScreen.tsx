@@ -28,8 +28,18 @@ import {
   piNativePromptImagePolicy,
   validateImageAdditions,
 } from '../../lib/promptImages'
-import { readNewThreadDraft, writeNewThreadDraft } from '../../lib/promptDrafts'
+import {
+  readNewThreadDraft,
+  readNewThreadPastes,
+  writeNewThreadDraft,
+  writeNewThreadPastes,
+} from '../../lib/promptDrafts'
 import { useImageAttachments } from '../../lib/useImageAttachments'
+import {
+  collapsePromptPaste,
+  expandPromptPastes,
+  prunePromptPastes,
+} from '../../prompt-pastes.mjs'
 import type {
   AppSettings,
   CodingAgent,
@@ -60,6 +70,8 @@ type NewThreadScreenProps = {
   onCancel: () => void
   onCreated: (thread: Thread, start: CodingAgentStart) => void
 }
+
+const INITIAL_PROMPT_MAX_LENGTH = 12_000
 
 type AgentModelPreferences = {
   model: string
@@ -183,6 +195,9 @@ export function NewThreadScreen({
   const [settingsError, setSettingsError] = useState('')
   const [nestedDepth, setNestedDepth] = useState<number | 'inherit'>('inherit')
   const [initialPrompt, setInitialPrompt] = useState(() => readNewThreadDraft(project.id))
+  const [initialPromptPastes, setInitialPromptPastes] = useState(() => (
+    readNewThreadPastes(project.id)
+  ))
   const {
     attachments: initialPromptImages,
     addFiles: addInitialPromptImageFiles,
@@ -194,7 +209,8 @@ export function NewThreadScreen({
 
   useEffect(() => {
     writeNewThreadDraft(project.id, initialPrompt)
-  }, [initialPrompt, project.id])
+    writeNewThreadPastes(project.id, initialPromptPastes)
+  }, [initialPrompt, initialPromptPastes, project.id])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -297,7 +313,7 @@ export function NewThreadScreen({
     event.preventDefault()
     if (submitting) return
 
-    const prompt = initialPrompt.trim()
+    const prompt = expandPromptPastes(initialPrompt, initialPromptPastes).trim()
     const creatingWorktree = location === 'worktree'
     if (creatingWorktree && !baseBranch) {
       setError('Select a base branch for the new worktree.')
@@ -341,6 +357,7 @@ export function NewThreadScreen({
         },
       })
       writeNewThreadDraft(project.id, '')
+      writeNewThreadPastes(project.id, [])
       onCreated(thread, {
         agent: codingAgentIdForSelection(codingAgent),
         presentation: nativeAgent ? 'native' : 'terminal',
@@ -371,6 +388,37 @@ export function NewThreadScreen({
 
   function handleInitialPromptPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
     addInitialPromptImages(imageFilesFromClipboard(event.clipboardData))
+    const pastedText = event.clipboardData.getData('text/plain')
+    if (!pastedText) return
+    const textarea = event.currentTarget
+    const collapsed = collapsePromptPaste({
+      value: initialPrompt,
+      selectionStart: textarea.selectionStart,
+      selectionEnd: textarea.selectionEnd,
+      pastedText,
+      pastes: initialPromptPastes,
+      maxExpandedLength: INITIAL_PROMPT_MAX_LENGTH,
+    })
+    if (!collapsed) return
+
+    event.preventDefault()
+    setInitialPrompt(collapsed.value)
+    setInitialPromptPastes(collapsed.pastes)
+    setError('')
+    window.requestAnimationFrame(() => {
+      textarea.setSelectionRange(collapsed.selectionStart, collapsed.selectionStart)
+    })
+  }
+
+  function handleInitialPromptChange(value: string) {
+    const nextPastes = prunePromptPastes(value, initialPromptPastes)
+    if (expandPromptPastes(value, nextPastes).length > INITIAL_PROMPT_MAX_LENGTH) {
+      setError(`Initial prompts are limited to ${INITIAL_PROMPT_MAX_LENGTH.toLocaleString()} characters.`)
+      return
+    }
+    setInitialPrompt(value)
+    setInitialPromptPastes(nextPastes)
+    setError('')
   }
 
   function handleInitialPromptDrop(event: DragEvent<HTMLTextAreaElement>) {
@@ -599,17 +647,14 @@ export function NewThreadScreen({
             <TextArea
               id="thread-initial-prompt"
               value={initialPrompt}
-              onChange={(event) => {
-                setInitialPrompt(event.target.value)
-                setError('')
-              }}
+              onChange={(event) => handleInitialPromptChange(event.target.value)}
               onPaste={handleInitialPromptPaste}
               onKeyDown={handleInitialPromptKeyDown}
               onDragOver={(event) => event.preventDefault()}
               onDrop={handleInitialPromptDrop}
               disabled={submitting}
               rows={5}
-              maxLength={12_000}
+              maxLength={INITIAL_PROMPT_MAX_LENGTH}
               placeholder="Describe what you want to build, investigate, or change…"
               aria-describedby="thread-initial-prompt-help"
               className="mt-2 min-h-32"
