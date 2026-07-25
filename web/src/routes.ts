@@ -4,10 +4,11 @@ import type { WorkspaceTool } from './types'
 export const CLEANUP_ROUTE = '/cleanup'
 export const SESSION_LOG_ROUTE = '/session-log'
 export const SETTINGS_ROUTE = '/settings'
-export const SANDBOX_SETTINGS_ROUTE = '/settings/sandbox'
+export const SETTINGS_SECTION_ROUTE = '/settings/:section'
 export const TMUX_ROUTE = '/tmux'
 export const PROJECT_ROUTE = '/projects/:projectId'
 export const PROJECT_SETTINGS_ROUTE = '/projects/:projectId/settings'
+export const PROJECT_SETTINGS_SECTION_ROUTE = '/projects/:projectId/settings/:section'
 export const NEW_THREAD_ROUTE = '/projects/:projectId/threads/new'
 export const THREAD_ROUTE = '/projects/:projectId/threads/:threadId'
 export const THREAD_SANDBOX_ROUTE = '/projects/:projectId/threads/:threadId/sandbox'
@@ -43,8 +44,14 @@ export function newThreadPath(projectId: string): string {
   return generatePath(NEW_THREAD_ROUTE, { projectId })
 }
 
-export function projectSettingsPath(projectId: string): string {
-  return generatePath(PROJECT_SETTINGS_ROUTE, { projectId })
+export function projectSettingsPath(projectId: string, section?: string): string {
+  return section
+    ? generatePath(PROJECT_SETTINGS_SECTION_ROUTE, { projectId, section })
+    : generatePath(PROJECT_SETTINGS_ROUTE, { projectId })
+}
+
+export function settingsPath(section?: string): string {
+  return section ? generatePath(SETTINGS_SECTION_ROUTE, { section }) : SETTINGS_ROUTE
 }
 
 export function threadSandboxPath(projectId: string, threadId: string): string {

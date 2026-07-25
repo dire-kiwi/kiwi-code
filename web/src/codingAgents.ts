@@ -1,33 +1,40 @@
 import type {
-  ClaudeCodeProfile,
-  ClaudeCodeProfileAgent,
   CodingAgent,
   CodingAgentChoice,
   CodingAgentConfig,
   CodingAgentSelection,
+  CodingAgentSetting,
+  ConfiguredClaudeAgent,
 } from './types'
 
-const claudeCodeProfileAgentPattern = /^claude-profile-[A-Za-z0-9_-]{1,64}$/
+const configuredClaudeAgentPattern = /^claude-(?:gpt-)?profile-[A-Za-z0-9_-]{1,64}$/
 
-export function claudeCodeProfileAgentId(profileId: string): ClaudeCodeProfileAgent {
-  return `claude-profile-${profileId}`
+export function configuredCodingAgentId(agent: CodingAgentSetting): ConfiguredClaudeAgent {
+  return agent.kind === 'claude-gpt'
+    ? `claude-gpt-profile-${agent.id}`
+    : `claude-profile-${agent.id}`
 }
 
 export function isCodingAgent(value: unknown): value is CodingAgent {
   return value === 'pi'
     || value === 'claude'
     || value === 'claude-gpt'
-    || (typeof value === 'string' && claudeCodeProfileAgentPattern.test(value))
+    || (typeof value === 'string' && configuredClaudeAgentPattern.test(value))
+}
+
+export function isClaudeGPTCodingAgent(value: unknown) {
+  return value === 'claude-gpt'
+    || (typeof value === 'string' && value.startsWith('claude-gpt-profile-'))
 }
 
 export function isCodingAgentSelection(value: unknown): value is CodingAgentSelection {
   return value === 'pi-native' || value === 'claude-native' || isCodingAgent(value)
 }
 
-export function claudeCodeProfileChoices(profiles: ClaudeCodeProfile[]) {
-  return profiles.map((profile) => ({
-    id: claudeCodeProfileAgentId(profile.id),
-    label: `Claude Code · ${profile.name}`,
+export function configuredCodingAgentChoices(agents: CodingAgentSetting[]) {
+  return agents.map((agent) => ({
+    id: configuredCodingAgentId(agent),
+    label: agent.name,
   }))
 }
 
@@ -86,20 +93,5 @@ export const fallbackCodingAgentConfigs: CodingAgentConfig[] = [
     label: 'Pi',
     models: [{ id: '', label: 'Use Pi default' }],
     thinkingLevels: thinkingLevels('Use Pi default'),
-  },
-  {
-    id: 'claude',
-    label: 'Claude Code',
-    models: [
-      { id: '', label: 'Use Claude default' },
-      ...claudeModelChoices,
-    ],
-    thinkingLevels: thinkingLevels('Use Claude default', claudeThinkingLevelIds),
-  },
-  {
-    id: 'claude-gpt',
-    label: 'Claude Code (with gpt)',
-    models: [],
-    thinkingLevels: thinkingLevels('Use model default', claudeThinkingLevelIds),
   },
 ]

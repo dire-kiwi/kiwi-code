@@ -13,6 +13,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 const (
@@ -130,6 +132,18 @@ func (h *terminalHandler) listCodingAgents(w http.ResponseWriter, r *http.Reques
 		discoveryCwd = item.Path
 	}
 
+	configuredAgents := []project.CodingAgentSetting{}
+	needsGPTModels := false
+	if h.projects != nil {
+		configuredAgents = h.projects.GetSettings().CodingAgents
+		for _, configured := range configuredAgents {
+			if configured.Kind == project.CodingAgentKindClaudeGPT {
+				needsGPTModels = true
+				break
+			}
+		}
+	}
+
 	type modelDiscoveryResult struct {
 		piModels  []piModelCapability
 		gptModels []codingAgentChoice
@@ -140,10 +154,14 @@ func (h *terminalHandler) listCodingAgents(w http.ResponseWriter, r *http.Reques
 		discovered, _ := h.availablePiModelCapabilities(ctx, discoveryCwd, false)
 		piResult <- discovered
 	}()
-	go func() {
-		discovered, _ := h.availableCLIProxyAPIGPTModels(ctx)
-		claudeGPTResult <- discovered
-	}()
+	if needsGPTModels {
+		go func() {
+			discovered, _ := h.availableCLIProxyAPIGPTModels(ctx)
+			claudeGPTResult <- discovered
+		}()
+	} else {
+		claudeGPTResult <- nil
+	}
 	result := modelDiscoveryResult{
 		piModels:  <-piResult,
 		gptModels: <-claudeGPTResult,
@@ -158,33 +176,25 @@ func (h *terminalHandler) listCodingAgents(w http.ResponseWriter, r *http.Reques
 		claudeGPTModels = []codingAgentChoice{}
 	}
 
-	configs := []codingAgentConfig{
-		{
-			ID:             codingAgentPi,
-			Label:          "Pi",
-			Models:         piModels,
-			ThinkingLevels: piThinkingLevels,
-		},
-		{
-			ID:             codingAgentClaude,
-			Label:          "Claude Code",
-			Models:         claudeModels,
-			ThinkingLevels: claudeThinkingLevels,
-		},
-		{
-			ID:             codingAgentClaudeGPT,
-			Label:          "Claude Code (with gpt)",
-			Models:         claudeGPTModels,
-			ThinkingLevels: claudeGPTThinkingLevels,
-		},
-	}
+	configs := []codingAgentConfig{{
+		ID:             codingAgentPi,
+		Label:          "Pi",
+		Models:         piModels,
+		ThinkingLevels: piThinkingLevels,
+	}}
 	if h.projects != nil {
-		for _, profile := range h.projects.GetSettings().ClaudeCodeProfiles {
+		for _, configured := range configuredAgents {
+			models := claudeModels
+			thinkingLevels := claudeThinkingLevels
+			if configured.Kind == project.CodingAgentKindClaudeGPT {
+				models = claudeGPTModels
+				thinkingLevels = claudeGPTThinkingLevels
+			}
 			configs = append(configs, codingAgentConfig{
-				ID:             claudeCodeProfileAgentID(profile.ID),
-				Label:          "Claude Code · " + profile.Name,
-				Models:         claudeModels,
-				ThinkingLevels: claudeThinkingLevels,
+				ID:             configuredCodingAgentID(configured),
+				Label:          configured.Name,
+				Models:         models,
+				ThinkingLevels: thinkingLevels,
 			})
 		}
 	}
@@ -498,7 +508,7 @@ func normalizeCodingAgentLaunchOptions(agent, model, thinkingLevel string) (codi
 	if isClaudeCodingAgent(agent) {
 		levels = claudeThinkingLevels
 	}
-	if agent == codingAgentClaudeGPT {
+	if isClaudeGPTCodingAgent(agent) {
 		if model != "" && !isCLIProxyAPIGPTModel(model) {
 			return codingAgentLaunchOptions{}, errors.New("Claude Code (with gpt) requires a GPT model from CLIProxyAPI")
 		}
