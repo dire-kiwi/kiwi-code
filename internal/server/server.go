@@ -38,6 +38,7 @@ type Server struct {
 	threadStatusChanges       *broadcast.Broker[threadStatusKey]
 	workflows                 *workflowManager
 	plans                     *threadPlanManager
+	sessionClosures           *sessionClosureLog
 	agentSkills               *agentSkillInstaller
 	instanceID                string
 	restart                   func()
@@ -93,6 +94,10 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	if err != nil {
 		return nil, err
 	}
+	sessionClosures, err := newSessionClosureLog(projects.DataDirectory())
+	if err != nil {
+		return nil, err
+	}
 	terminal := newTerminalHandlerUnreconciledWithOptions(projects, originPolicy, tmuxSocket)
 	if err := terminal.reconcileTerminalStops(); err != nil {
 		log.Printf("reconcile durable terminal stops: error=%v", err)
@@ -124,6 +129,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 		threadStatusChanges: broadcast.NewBroker[threadStatusKey](broadcast.DefaultMaxPending),
 		workflows:           workflows,
 		plans:               plans,
+		sessionClosures:     sessionClosures,
 		agentSkills:         newAgentSkillInstaller(agentSkillsDirectory),
 		instanceID:          newServerInstanceID(),
 		restart:             options.Restart,
@@ -157,6 +163,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("GET /api/sandbox/config", server.getGlobalSandboxConfig)
 	mux.HandleFunc("PUT /api/sandbox/config", server.updateGlobalSandboxConfig)
 	mux.HandleFunc("GET /api/cleanup", server.getCleanupOverview)
+	mux.HandleFunc("GET /api/session-closures", server.getSessionClosureLog)
 	mux.HandleFunc("GET /api/coding-agents", server.terminal.listCodingAgents)
 	mux.HandleFunc("GET /api/profiles", server.listProfiles)
 	mux.HandleFunc("POST /api/profiles", server.addProfile)
@@ -221,6 +228,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/claude/activity", server.updateClaudeActivity)
 	mux.HandleFunc("DELETE /api/projects/{id}/threads/{threadId}/pi/activity", server.acknowledgePiActivity)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/context/status", server.updateContextStatus)
+	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/tmux/activity", server.touchThreadTmuxActivity)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/events", server.streamThreadEvents)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/git/branches", server.listGitBranches)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/git/branches", server.createGitBranch)

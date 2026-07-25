@@ -617,6 +617,11 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 		closeWithError(message)
 	}
 
+	if err := h.markTmuxSessionUsed(sessionName, time.Now()); err != nil {
+		log.Printf("record tmux session use: session=%q error=%v", sessionName, err)
+	}
+	defer func() { _ = h.markTmuxSessionUsed(sessionName, time.Now()) }()
+
 	// Shell clients attach to their standalone session so the shell tab API can
 	// select its current window. Each shared window gets a temporary one-window
 	// view. This lets several browser panes view different windows without

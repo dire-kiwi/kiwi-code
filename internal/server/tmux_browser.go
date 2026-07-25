@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/creack/pty"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
@@ -324,6 +325,12 @@ func (h *terminalHandler) serveTmuxBrowserTerminal(w http.ResponseWriter, r *htt
 		return
 	}
 	defer h.closeTmuxViewSession(viewSessionName)
+	if managed {
+		if err := h.markTmuxSessionUsed(sessionName, time.Now()); err != nil {
+			log.Printf("record tmux browser session use: session=%q error=%v", sessionName, err)
+		}
+		defer func() { _ = h.markTmuxSessionUsed(sessionName, time.Now()) }()
+	}
 
 	if err := h.configureTmuxClipboard(); err != nil {
 		log.Printf("configure tmux clipboard: %v", err)
