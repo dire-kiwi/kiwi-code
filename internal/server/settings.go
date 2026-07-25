@@ -13,15 +13,15 @@ func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		WorktreeBasePath              *string                      `json:"worktreeBasePath"`
-		ArchivedThreadRetentionDays   *int                         `json:"archivedThreadRetentionDays"`
-		OrphanedWorktreeRetentionDays *int                         `json:"orphanedWorktreeRetentionDays"`
-		SubAgentNestingDepth          *int                         `json:"subAgentNestingDepth"`
-		DisableWorkflows              *bool                        `json:"disableWorkflows"`
-		WorkflowKeywordTrigger        *bool                        `json:"workflowKeywordTriggerEnabled"`
-		WorkflowSizeGuideline         *string                      `json:"workflowSizeGuideline"`
-		ClaudeCodeProfiles            *[]project.ClaudeCodeProfile `json:"claudeCodeProfiles"`
-		Theme                         *project.Theme               `json:"theme"`
+		WorktreeBasePath              *string                       `json:"worktreeBasePath"`
+		ArchivedThreadRetentionDays   *int                          `json:"archivedThreadRetentionDays"`
+		OrphanedWorktreeRetentionDays *int                          `json:"orphanedWorktreeRetentionDays"`
+		SubAgentNestingDepth          *int                          `json:"subAgentNestingDepth"`
+		DisableWorkflows              *bool                         `json:"disableWorkflows"`
+		WorkflowKeywordTrigger        *bool                         `json:"workflowKeywordTriggerEnabled"`
+		WorkflowSizeGuideline         *string                       `json:"workflowSizeGuideline"`
+		CodingAgents                  *[]project.CodingAgentSetting `json:"codingAgents"`
+		Theme                         *project.Theme                `json:"theme"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 	decoder.DisallowUnknownFields()
@@ -29,7 +29,7 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 		input.ArchivedThreadRetentionDays == nil &&
 		input.OrphanedWorktreeRetentionDays == nil && input.SubAgentNestingDepth == nil &&
 		input.DisableWorkflows == nil && input.WorkflowKeywordTrigger == nil &&
-		input.WorkflowSizeGuideline == nil && input.ClaudeCodeProfiles == nil && input.Theme == nil) {
+		input.WorkflowSizeGuideline == nil && input.CodingAgents == nil && input.Theme == nil) {
 		writeError(w, http.StatusBadRequest, "Invalid settings.")
 		return
 	}
@@ -41,7 +41,7 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 		DisableWorkflows:              input.DisableWorkflows,
 		WorkflowKeywordTrigger:        input.WorkflowKeywordTrigger,
 		WorkflowSizeGuideline:         input.WorkflowSizeGuideline,
-		ClaudeCodeProfiles:            input.ClaudeCodeProfiles,
+		CodingAgents:                  input.CodingAgents,
 		Theme:                         input.Theme,
 	})
 	if err != nil {

@@ -367,18 +367,19 @@ func TestNormalizeTerminalTool(t *testing.T) {
 
 func TestNormalizeCodingAgent(t *testing.T) {
 	for input, want := range map[string]string{
-		"":                    codingAgentPi,
-		"pi":                  codingAgentPi,
-		"claude":              codingAgentClaude,
-		"claude-gpt":          codingAgentClaudeGPT,
-		"claude-profile-work": claudeCodeProfileAgentID("work"),
+		"":                        codingAgentPi,
+		"pi":                      codingAgentPi,
+		"claude":                  codingAgentClaude,
+		"claude-gpt":              codingAgentClaudeGPT,
+		"claude-profile-work":     claudeCodeProfileAgentID("work"),
+		"claude-gpt-profile-work": claudeCodeGPTProfileAgentID("work"),
 	} {
 		got, err := normalizeCodingAgent(input)
 		if err != nil || got != want {
 			t.Fatalf("normalizeCodingAgent(%q) = %q, %v; want %q, nil", input, got, err, want)
 		}
 	}
-	for _, input := range []string{"unknown", "claude-profile-", "claude-profile-work/account"} {
+	for _, input := range []string{"unknown", "claude-profile-", "claude-profile-work/account", "claude-gpt-profile-work/account"} {
 		if _, err := normalizeCodingAgent(input); err == nil {
 			t.Fatalf("expected an error for coding agent %q", input)
 		}

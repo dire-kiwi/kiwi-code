@@ -12,6 +12,7 @@ import {
   updateThreadOrder,
 } from './api'
 import { apiUrl } from './apiUrl'
+import { isCodingAgent } from './codingAgents'
 import { WorkspaceLoadingState } from './components/molecules/WorkspaceLoadingState'
 import { ProjectSidebar } from './components/organisms/ProjectSidebar'
 import { ProjectThreadFinder } from './components/organisms/ProjectThreadFinder'
@@ -67,11 +68,11 @@ function newThreadStartFromState(state: unknown): NewThreadStart | null {
     candidate.kind !== 'new-thread-start'
     || typeof candidate.projectId !== 'string'
     || typeof candidate.threadId !== 'string'
-    || (candidate.agent !== 'pi' && candidate.agent !== 'claude' && candidate.agent !== 'claude-gpt')
+    || !isCodingAgent(candidate.agent)
     || (candidate.presentation !== undefined
       && candidate.presentation !== 'native'
       && candidate.presentation !== 'terminal')
-    || (candidate.agent === 'claude-gpt'
+    || (candidate.agent !== 'pi' && candidate.agent !== 'claude'
       && candidate.presentation !== undefined
       && candidate.presentation !== 'terminal')
     || typeof candidate.model !== 'string'

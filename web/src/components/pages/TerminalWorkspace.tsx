@@ -10,7 +10,7 @@ import {
   SquareTerminal,
 } from 'lucide-react'
 import { getSettings, threadEventsPath } from '../../api'
-import { claudeCodeProfileChoices, isCodingAgent } from '../../codingAgents'
+import { configuredCodingAgentChoices, isCodingAgent } from '../../codingAgents'
 import { workspacePath } from '../../routes'
 import type {
   AgentContextStatus,
@@ -88,10 +88,7 @@ const statusCopy: Record<ConnectionStatus, string> = {
 
 const fallbackWorkspaceCodingAgents: Array<{ id: CodingAgentSelection; label: string }> = [
   { id: 'pi', label: 'Pi' },
-  { id: 'claude', label: 'Claude Code' },
-  { id: 'claude-gpt', label: 'Claude Code (with gpt)' },
   { id: 'pi-native', label: 'Pi Native' },
-  { id: 'claude-native', label: 'Claude Native' },
 ]
 
 function codingAgentStorageKey(projectId: string, threadId: string) {
@@ -153,9 +150,8 @@ export function TerminalWorkspace({
       return fallbackWorkspaceCodingAgents
     }
     return [
-      ...fallbackWorkspaceCodingAgents.slice(0, 3),
       { id: initialCodingAgent, label: 'Claude Code' },
-      ...fallbackWorkspaceCodingAgents.slice(3),
+      ...fallbackWorkspaceCodingAgents,
     ]
   })
   const [codingAgent, setCodingAgent] = useState<CodingAgent>(() =>
@@ -219,9 +215,8 @@ export function TerminalWorkspace({
       .then((settings) => {
         if (controller.signal.aborted) return
         const choices = [
-          ...fallbackWorkspaceCodingAgents.slice(0, 3),
-          ...claudeCodeProfileChoices(settings.claudeCodeProfiles),
-          ...fallbackWorkspaceCodingAgents.slice(3),
+          ...configuredCodingAgentChoices(settings.codingAgents),
+          ...fallbackWorkspaceCodingAgents,
         ]
         setCodingAgentChoices(choices)
         setCodingAgent((current) => choices.some((choice) => choice.id === current) ? current : 'pi')

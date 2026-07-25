@@ -25,7 +25,7 @@ import {
 } from '../../api'
 import { isHexColor, MAX_CLEANUP_RETENTION_DAYS } from '../../lib/validation'
 import { DEFAULT_THEME, themesEqual, useTheme } from '../../theme'
-import type { AgentSkillStatus, AppSettings, ClaudeCodeProfile, ThemeColors, ThemeSettings } from '../../types'
+import type { AgentSkillStatus, AppSettings, CodingAgentSetting, ThemeColors, ThemeSettings } from '../../types'
 import { GhostButton, PrimaryButton } from '../atoms/Button'
 import { TextInput } from '../atoms/Input'
 import { Select } from '../atoms/Select'
@@ -46,7 +46,7 @@ type SettingsScreenProps = {
   onBack: () => void
 }
 
-type SavingAction = 'worktree-save' | 'worktree-reset' | 'claude-profiles-save' | 'cleanup-save' | 'nesting-save' | 'workflows-save' | 'theme-save' | 'theme-reset' | null
+type SavingAction = 'worktree-save' | 'worktree-reset' | 'coding-agents-save' | 'cleanup-save' | 'nesting-save' | 'workflows-save' | 'theme-save' | 'theme-reset' | null
 
 type ThemeColorGroup = {
   title: string
@@ -54,9 +54,9 @@ type ThemeColorGroup = {
   colors: Array<{ key: keyof ThemeColors; label: string }>
 }
 
-const maxClaudeCodeProfiles = 16
+const maxCodingAgents = 16
 
-function newClaudeCodeProfileId() {
+function newCodingAgentId() {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
@@ -127,9 +127,9 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
   const [disableWorkflows, setDisableWorkflows] = useState(false)
   const [workflowKeywordTrigger, setWorkflowKeywordTrigger] = useState(true)
   const [workflowSizeGuideline, setWorkflowSizeGuideline] = useState<AppSettings['workflowSizeGuideline']>('unrestricted')
-  const [claudeCodeProfiles, setClaudeCodeProfiles] = useState<ClaudeCodeProfile[]>([])
-  const [claudeProfilesError, setClaudeProfilesError] = useState('')
-  const [claudeProfilesMessage, setClaudeProfilesMessage] = useState('')
+  const [codingAgents, setCodingAgents] = useState<CodingAgentSetting[]>([])
+  const [codingAgentsError, setCodingAgentsError] = useState('')
+  const [codingAgentsMessage, setCodingAgentsMessage] = useState('')
   const [theme, setTheme] = useState<ThemeSettings>(DEFAULT_THEME)
   const [loading, setLoading] = useState(true)
   const [loadKey, setLoadKey] = useState(0)
@@ -166,7 +166,7 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
         setDisableWorkflows(next.disableWorkflows)
         setWorkflowKeywordTrigger(next.workflowKeywordTriggerEnabled)
         setWorkflowSizeGuideline(next.workflowSizeGuideline)
-        setClaudeCodeProfiles(next.claudeCodeProfiles ?? [])
+        setCodingAgents(next.codingAgents ?? [])
         setTheme(next.theme)
         applyTheme(next.theme)
         setAgentSkill(skill)
@@ -218,50 +218,50 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
     }
   }
 
-  function addClaudeCodeProfile() {
-    if (saving || claudeCodeProfiles.length >= maxClaudeCodeProfiles) return
-    setClaudeCodeProfiles((current) => [
+  function addCodingAgent() {
+    if (saving || codingAgents.length >= maxCodingAgents) return
+    setCodingAgents((current) => [
       ...current,
-      { id: newClaudeCodeProfileId(), name: '', configDirectory: '' },
+      { id: newCodingAgentId(), name: '', kind: 'claude', configDirectory: '' },
     ])
-    setClaudeProfilesError('')
-    setClaudeProfilesMessage('')
+    setCodingAgentsError('')
+    setCodingAgentsMessage('')
   }
 
-  function updateClaudeCodeProfile(id: string, update: Partial<ClaudeCodeProfile>) {
-    setClaudeCodeProfiles((current) => current.map((profile) =>
+  function updateCodingAgent(id: string, update: Partial<CodingAgentSetting>) {
+    setCodingAgents((current) => current.map((profile) =>
       profile.id === id ? { ...profile, ...update } : profile,
     ))
-    setClaudeProfilesError('')
-    setClaudeProfilesMessage('')
+    setCodingAgentsError('')
+    setCodingAgentsMessage('')
   }
 
-  function removeClaudeCodeProfile(id: string) {
+  function removeCodingAgent(id: string) {
     if (saving) return
-    setClaudeCodeProfiles((current) => current.filter((profile) => profile.id !== id))
-    setClaudeProfilesError('')
-    setClaudeProfilesMessage('')
+    setCodingAgents((current) => current.filter((profile) => profile.id !== id))
+    setCodingAgentsError('')
+    setCodingAgentsMessage('')
   }
 
-  async function handleClaudeProfilesSave(event: FormEvent<HTMLFormElement>) {
+  async function handleCodingAgentsSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (saving) return
-    setSaving('claude-profiles-save')
-    setClaudeProfilesError('')
-    setClaudeProfilesMessage('')
+    setSaving('coding-agents-save')
+    setCodingAgentsError('')
+    setCodingAgentsMessage('')
     try {
       const next = await updateSettings({
-        claudeCodeProfiles: claudeCodeProfiles.map((profile) => ({
-          ...profile,
-          name: profile.name.trim(),
-          configDirectory: profile.configDirectory.trim(),
+        codingAgents: codingAgents.map((agent) => ({
+          ...agent,
+          name: agent.name.trim(),
+          configDirectory: agent.kind === 'claude' ? (agent.configDirectory ?? '').trim() : undefined,
         })),
       })
       setSettings(next)
-      setClaudeCodeProfiles(next.claudeCodeProfiles)
-      setClaudeProfilesMessage('Claude Code profiles saved.')
+      setCodingAgents(next.codingAgents)
+      setCodingAgentsMessage('Coding agents saved.')
     } catch (reason) {
-      setClaudeProfilesError(reason instanceof Error ? reason.message : 'Could not save Claude Code profiles.')
+      setCodingAgentsError(reason instanceof Error ? reason.message : 'Could not save coding agents.')
     } finally {
       setSaving(null)
     }
@@ -427,21 +427,23 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
   const dirty = settings !== null && normalizedInput !== settings.worktreeBasePath
   const canReset = settings !== null
     && (!settings.usingDefault || normalizedInput !== settings.defaultWorktreeBasePath)
-  const normalizedClaudeProfiles = claudeCodeProfiles.map((profile) => ({
-    ...profile,
-    name: profile.name.trim(),
-    configDirectory: profile.configDirectory.trim(),
+  const normalizedCodingAgents = codingAgents.map((agent) => ({
+    ...agent,
+    name: agent.name.trim(),
+    configDirectory: agent.kind === 'claude' ? (agent.configDirectory ?? '').trim() : undefined,
   }))
-  const claudeProfileNames = normalizedClaudeProfiles.map((profile) => profile.name.toLocaleLowerCase())
-  const claudeProfileDirectories = normalizedClaudeProfiles.map((profile) => profile.configDirectory)
-  const claudeProfilesValid = normalizedClaudeProfiles.length <= maxClaudeCodeProfiles
-    && normalizedClaudeProfiles.every((profile) => profile.name.length > 0
-      && profile.name.length <= 80
-      && profile.configDirectory.length > 0)
-    && new Set(claudeProfileNames).size === claudeProfileNames.length
-    && new Set(claudeProfileDirectories).size === claudeProfileDirectories.length
-  const claudeProfilesDirty = settings !== null
-    && JSON.stringify(normalizedClaudeProfiles) !== JSON.stringify(settings.claudeCodeProfiles)
+  const codingAgentNames = normalizedCodingAgents.map((agent) => agent.name.toLocaleLowerCase())
+  const claudeDirectories = normalizedCodingAgents
+    .filter((agent) => agent.kind === 'claude')
+    .map((agent) => agent.configDirectory)
+  const codingAgentsValid = normalizedCodingAgents.length <= maxCodingAgents
+    && normalizedCodingAgents.every((agent) => agent.name.length > 0
+      && agent.name.length <= 80
+      && (agent.kind === 'claude-gpt' || Boolean(agent.configDirectory)))
+    && new Set(codingAgentNames).size === codingAgentNames.length
+    && new Set(claudeDirectories).size === claudeDirectories.length
+  const codingAgentsDirty = settings !== null
+    && JSON.stringify(normalizedCodingAgents) !== JSON.stringify(settings.codingAgents)
   const parsedArchivedDays = Number(archivedThreadRetentionDays)
   const parsedOrphanedDays = Number(orphanedWorktreeRetentionDays)
   const cleanupValuesValid = archivedThreadRetentionDays.trim() !== ''
@@ -610,39 +612,39 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
             <Surface
               as="form"
               variant="elevated-panel"
-              onSubmit={(event) => void handleClaudeProfilesSave(event)}
+              onSubmit={(event) => void handleCodingAgentsSave(event)}
               className="overflow-hidden"
             >
               <SectionHeader
                 icon={<UserRound size={16} />}
-                title="Claude Code profiles"
-                description="Add named Claude Code sessions backed by separate configuration directories."
+                title="Coding agents"
+                description="Choose the Claude Code instances that appear in agent dropdowns."
                 tone="blue"
                 badge={(
-                  <StatusBadge tone={claudeCodeProfiles.length > 0 ? 'success' : 'neutral'}>
-                    {claudeCodeProfiles.length} configured
+                  <StatusBadge tone={codingAgents.length > 0 ? 'success' : 'neutral'}>
+                    {codingAgents.length} configured
                   </StatusBadge>
                 )}
               />
 
               <div className="space-y-3 p-4 sm:p-5">
-                {claudeCodeProfiles.length === 0 ? (
+                {codingAgents.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-ghost-border/70 bg-ghost-black/20 px-4 py-5 text-center">
-                    <p className="text-[10px] font-medium text-ghost-muted">No additional Claude Code profiles.</p>
+                    <p className="text-[10px] font-medium text-ghost-muted">No Claude Code agents configured.</p>
                     <p className="mt-1 text-[9px] leading-4 text-ghost-faint">
-                      The built-in Claude Code entry continues to use your default configuration directory.
+                      Pi and Pi Native remain available. Add only the Claude Code instances you want in the dropdown.
                     </p>
                   </div>
-                ) : claudeCodeProfiles.map((profile, index) => (
+                ) : codingAgents.map((profile, index) => (
                   <div key={profile.id} className="rounded-xl border border-ghost-border/55 bg-ghost-black/25 p-3.5">
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-faint">
-                        Profile {index + 1}
+                        Agent {index + 1}
                       </p>
                       <GhostButton
                         type="button"
                         size="sm"
-                        onClick={() => removeClaudeCodeProfile(profile.id)}
+                        onClick={() => removeCodingAgent(profile.id)}
                         disabled={Boolean(saving)}
                         className="flex items-center gap-1.5 text-ghost-bright-red disabled:opacity-40"
                         aria-label={`Remove ${profile.name || `profile ${index + 1}`}`}
@@ -651,29 +653,47 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
                         Remove
                       </GhostButton>
                     </div>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)]">
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <label className="block text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-dim">
-                        Title
+                        Type
+                        <Select
+                          value={profile.kind}
+                          options={[
+                            { value: 'claude', label: 'Claude Code' },
+                            { value: 'claude-gpt', label: 'Claude Code with GPT' },
+                          ]}
+                          onChange={(kind) => updateCodingAgent(profile.id, {
+                            kind: kind as CodingAgentSetting['kind'],
+                            configDirectory: kind === 'claude' ? profile.configDirectory ?? '' : undefined,
+                          })}
+                          disabled={Boolean(saving)}
+                          className="mt-1.5 normal-case tracking-normal"
+                        />
+                      </label>
+                      <label className="block text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-dim">
+                        Dropdown label
                         <TextInput
                           value={profile.name}
-                          onChange={(event) => updateClaudeCodeProfile(profile.id, { name: event.target.value })}
+                          onChange={(event) => updateCodingAgent(profile.id, { name: event.target.value })}
                           maxLength={80}
                           autoComplete="off"
-                          placeholder="Work"
+                          placeholder={profile.kind === 'claude-gpt' ? 'Claude Code · GPT' : 'Claude Code · Work'}
                           className="mt-1.5"
                         />
                       </label>
-                      <div className="block text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-dim">
-                        Config directory
-                        <DirectoryPathAutocomplete
-                          value={profile.configDirectory}
-                          disabled={Boolean(saving)}
-                          label={`${profile.name || `Profile ${index + 1}`} config directory`}
-                          placeholder="~/.claude-work"
-                          className="mt-1.5 normal-case tracking-normal"
-                          onChange={(configDirectory) => updateClaudeCodeProfile(profile.id, { configDirectory })}
-                        />
-                      </div>
+                      {profile.kind === 'claude' && (
+                        <div className="block text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-dim sm:col-span-2">
+                          Config directory
+                          <DirectoryPathAutocomplete
+                            value={profile.configDirectory ?? ''}
+                            disabled={Boolean(saving)}
+                            label={`${profile.name || `Agent ${index + 1}`} config directory`}
+                            placeholder="~/.claude"
+                            className="mt-1.5 normal-case tracking-normal"
+                            onChange={(configDirectory) => updateCodingAgent(profile.id, { configDirectory })}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -681,33 +701,32 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
                 <GhostButton
                   type="button"
                   size="md"
-                  onClick={addClaudeCodeProfile}
-                  disabled={Boolean(saving) || claudeCodeProfiles.length >= maxClaudeCodeProfiles}
+                  onClick={addCodingAgent}
+                  disabled={Boolean(saving) || codingAgents.length >= maxCodingAgents}
                   className="flex items-center gap-2 px-3 disabled:opacity-40"
                 >
                   <Plus size={13} />
-                  Add Claude Code
+                  Add agent
                 </GhostButton>
 
                 <InfoCallout>
-                  Each entry appears as “Claude Code · Title” in the new-thread and workspace agent lists. Kiwi Code
-                  launches it with <span className="font-mono text-ghost-blue">CLAUDE_CONFIG_DIR</span> set to the selected
-                  directory. Login and session state stay separate; before each launch, Kiwi Code mirrors the default Claude
-                  settings and uses the same installed plugins. Missing directories are created when you save.
+                  The list starts empty and controls every Claude Code entry in the new-thread and workspace dropdowns.
+                  Standard instances use their selected <span className="font-mono text-ghost-blue">CLAUDE_CONFIG_DIR</span>;
+                  GPT instances use Kiwi Code's managed CLIProxyAPI profile. Missing standard directories are created on save.
                 </InfoCallout>
 
-                {!claudeProfilesValid && claudeCodeProfiles.length > 0 && (
+                {!codingAgentsValid && codingAgents.length > 0 && (
                   <FeedbackMessage role="alert" tone="error">
-                    Every profile needs a unique title and config directory.
+                    Every agent needs a unique label. Standard Claude Code agents also need a unique config directory.
                   </FeedbackMessage>
                 )}
-                {claudeProfilesError && (
-                  <FeedbackMessage role="alert" tone="error">{claudeProfilesError}</FeedbackMessage>
+                {codingAgentsError && (
+                  <FeedbackMessage role="alert" tone="error">{codingAgentsError}</FeedbackMessage>
                 )}
-                {claudeProfilesMessage && (
+                {codingAgentsMessage && (
                   <FeedbackMessage role="status" tone="success" size="status" className="flex items-center gap-2">
                     <Check size={13} />
-                    {claudeProfilesMessage}
+                    {codingAgentsMessage}
                   </FeedbackMessage>
                 )}
               </div>
@@ -716,11 +735,11 @@ export function SettingsScreen({ onOpenSidebar, onBack }: SettingsScreenProps) {
                 <PrimaryButton
                   type="submit"
                   size="md"
-                  disabled={!claudeProfilesDirty || !claudeProfilesValid || Boolean(saving)}
+                  disabled={!codingAgentsDirty || !codingAgentsValid || Boolean(saving)}
                   className="flex min-w-28 items-center justify-center gap-2"
                 >
-                  {saving === 'claude-profiles-save' ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
-                  Save profiles
+                  {saving === 'coding-agents-save' ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
+                  Save agents
                 </PrimaryButton>
               </div>
             </Surface>

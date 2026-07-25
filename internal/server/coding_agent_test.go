@@ -584,8 +584,11 @@ done
 		t.Fatal(err)
 	}
 	configDirectory := filepath.Join(t.TempDir(), "claude-work")
-	profiles := []project.ClaudeCodeProfile{{ID: "work", Name: "Work", ConfigDirectory: configDirectory}}
-	if _, err := store.UpdateSettingsValues(project.SettingsUpdate{ClaudeCodeProfiles: &profiles}); err != nil {
+	profiles := []project.CodingAgentSetting{
+		{ID: "work", Name: "Claude Work", Kind: project.CodingAgentKindClaude, ConfigDirectory: configDirectory},
+		{ID: "gpt", Name: "Claude GPT", Kind: project.CodingAgentKindClaudeGPT},
+	}
+	if _, err := store.UpdateSettingsValues(project.SettingsUpdate{CodingAgents: &profiles}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -605,7 +608,7 @@ done
 	if err := json.NewDecoder(response.Body).Decode(&configs); err != nil {
 		t.Fatal(err)
 	}
-	if len(configs) != 4 || configs[0].ID != codingAgentPi || configs[1].ID != codingAgentClaude || configs[2].ID != codingAgentClaudeGPT {
+	if len(configs) != 3 || configs[0].ID != codingAgentPi || configs[1].ID != claudeCodeProfileAgentID("work") || configs[2].ID != claudeCodeGPTProfileAgentID("gpt") {
 		t.Fatalf("coding agent configs = %#v", configs)
 	}
 	if len(configs[0].Models) != 3 || configs[0].Models[1].ID != "custom/model-a" || configs[0].Models[2].ID != "custom/model-b" {
@@ -638,8 +641,8 @@ done
 	if codingAgentChoiceExists(configs[2].Models, "opus") {
 		t.Fatalf("Claude GPT models unexpectedly contain Claude aliases: %#v", configs[2].Models)
 	}
-	if configs[3].ID != claudeCodeProfileAgentID("work") || configs[3].Label != "Claude Code · Work" || !codingAgentChoiceExists(configs[3].Models, "opus") {
-		t.Fatalf("configured Claude Code profile = %#v", configs[3])
+	if configs[1].Label != "Claude Work" || configs[2].Label != "Claude GPT" {
+		t.Fatalf("configured coding agent labels = %#v", configs)
 	}
 }
 
@@ -681,6 +684,10 @@ func TestNormalizeCodingAgentLaunchOptions(t *testing.T) {
 			name: "Claude GPT selection", agent: codingAgentClaudeGPT, model: "gpt-5.4", thinking: "high",
 			want: codingAgentLaunchOptions{Model: "gpt-5.4", ThinkingLevel: "high"},
 		},
+		{
+			name: "configured Claude GPT selection", agent: claudeCodeGPTProfileAgentID("gpt"), model: "gpt-5.4", thinking: "high",
+			want: codingAgentLaunchOptions{Model: "gpt-5.4", ThinkingLevel: "high"},
+		},
 		{name: "Claude GPT allows a server-selected model", agent: codingAgentClaudeGPT},
 		{name: "Claude GPT rejects Claude model", agent: codingAgentClaudeGPT, model: "opus", wantErr: true},
 		{name: "Claude rejects Pi-only level", agent: codingAgentClaude, thinking: "minimal", wantErr: true},
@@ -706,7 +713,7 @@ func TestNormalizeCodingAgentLaunchOptions(t *testing.T) {
 	}
 }
 
-func TestClaudeGPTCommandLoadsItsDefaultModelFromCLIProxyAPI(t *testing.T) {
+func TestConfiguredClaudeGPTCommandLoadsItsDefaultModelFromCLIProxyAPI(t *testing.T) {
 	directory := t.TempDir()
 	for _, name := range []string{codingAgentPi, codingAgentClaude} {
 		if err := os.WriteFile(filepath.Join(directory, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
@@ -722,7 +729,16 @@ func TestClaudeGPTCommandLoadsItsDefaultModelFromCLIProxyAPI(t *testing.T) {
 	}))
 	defer proxy.Close()
 
+	store, err := project.NewStore(filepath.Join(t.TempDir(), "data", "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents := []project.CodingAgentSetting{{ID: "gpt", Name: "GPT", Kind: project.CodingAgentKindClaudeGPT}}
+	if _, err := store.UpdateSettingsValues(project.SettingsUpdate{CodingAgents: &agents}); err != nil {
+		t.Fatal(err)
+	}
 	handler := &terminalHandler{
+		projects:                store,
 		envPath:                 "/usr/bin/env",
 		claudePluginPath:        "/plugin/kiwi-code",
 		claudeSandboxPluginPath: "/plugin/sandbox-exec",
@@ -735,7 +751,7 @@ func TestClaudeGPTCommandLoadsItsDefaultModelFromCLIProxyAPI(t *testing.T) {
 	_, args, notice, err := handler.commandForCodingAgentPaneWithOptions(
 		project.Project{ID: "project"},
 		project.Thread{ID: "thread"},
-		codingAgentClaudeGPT,
+		claudeCodeGPTProfileAgentID("gpt"),
 		"",
 		"kiwi-code-project-thread-tools",
 		codingAgentLaunchOptions{},
@@ -795,8 +811,8 @@ func TestConfiguredClaudeCodeProfileUsesTheDefaultClaudeLaunchConfiguration(t *t
 		t.Fatal(err)
 	}
 	profileDirectory := filepath.Join(t.TempDir(), "claude-work")
-	profiles := []project.ClaudeCodeProfile{{ID: "work", Name: "Work", ConfigDirectory: profileDirectory}}
-	if _, err := store.UpdateSettingsValues(project.SettingsUpdate{ClaudeCodeProfiles: &profiles}); err != nil {
+	profiles := []project.CodingAgentSetting{{ID: "work", Name: "Work", Kind: project.CodingAgentKindClaude, ConfigDirectory: profileDirectory}}
+	if _, err := store.UpdateSettingsValues(project.SettingsUpdate{CodingAgents: &profiles}); err != nil {
 		t.Fatal(err)
 	}
 	configDirectory := t.TempDir()
@@ -878,8 +894,8 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 		t.Fatal(err)
 	}
 	workConfigDirectory := filepath.Join(t.TempDir(), "claude-work")
-	profiles := []project.ClaudeCodeProfile{{ID: "work", Name: "Work", ConfigDirectory: workConfigDirectory}}
-	if _, err := store.UpdateSettingsValues(project.SettingsUpdate{ClaudeCodeProfiles: &profiles}); err != nil {
+	profiles := []project.CodingAgentSetting{{ID: "work", Name: "Work", Kind: project.CodingAgentKindClaude, ConfigDirectory: workConfigDirectory}}
+	if _, err := store.UpdateSettingsValues(project.SettingsUpdate{CodingAgents: &profiles}); err != nil {
 		t.Fatal(err)
 	}
 	handler := &terminalHandler{
