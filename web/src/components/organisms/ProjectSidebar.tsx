@@ -648,6 +648,8 @@ export function ProjectSidebar({
       ? hasChildren ? 'pl-8' : 'pl-3'
       : hasChildren ? 'pl-12' : 'pl-8'
     const menuOpen = threadMenuId === thread.id
+    // While the actions menu is open the row must stay fully opaque: any opacity below 1 turns the
+    // row into a stacking context, which traps the menu behind the rows rendered after it.
 
     return (
       <li
@@ -658,8 +660,8 @@ export function ProjectSidebar({
         data-parent-thread-id={thread.parentThreadId}
         onDragOver={bookmarksOnly || isChild || archived ? undefined : (event) => handleThreadDragOver(event, project.id, thread.id)}
         onDrop={bookmarksOnly || isChild || archived ? undefined : (event) => handleThreadDrop(event, project, thread.id)}
-        className={`${archived || closed ? 'opacity-75' : ''} ${
-          bookmarksOnly && !thread.bookmarked ? 'opacity-65' : ''
+        className={`${menuOpen ? 'relative z-40' : ''} ${!menuOpen && (archived || closed) ? 'opacity-75' : ''} ${
+          !menuOpen && bookmarksOnly && !thread.bookmarked ? 'opacity-65' : ''
         } ${draggedItem?.kind === 'thread' && draggedItem.id === thread.id ? 'opacity-45' : ''}`}
       >
         <div className="group/thread relative transition-opacity">
