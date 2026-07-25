@@ -159,6 +159,8 @@ func DefaultTheme() Theme {
 }
 
 const (
+	CodingAgentKindPi        = "pi"
+	CodingAgentKindPiNative  = "pi-native"
 	CodingAgentKindClaude    = "claude"
 	CodingAgentKindClaudeGPT = "claude-gpt"
 )
@@ -168,6 +170,14 @@ type CodingAgentSetting struct {
 	Name            string `json:"name"`
 	Kind            string `json:"kind"`
 	ConfigDirectory string `json:"configDirectory,omitempty"`
+	IsDefault       bool   `json:"isDefault"`
+}
+
+func defaultCodingAgentSettings() []CodingAgentSetting {
+	return []CodingAgentSetting{
+		{ID: CodingAgentKindPi, Name: "Pi", Kind: CodingAgentKindPi},
+		{ID: CodingAgentKindPiNative, Name: "Pi Native", Kind: CodingAgentKindPiNative, IsDefault: true},
+	}
 }
 
 // ClaudeCodeProfile is retained only to migrate settings written by versions
@@ -331,6 +341,7 @@ func NewStore(filePath string) (*Store, error) {
 		subAgentNestingDepth:          DefaultSubAgentNestingDepth,
 		workflowKeywordTrigger:        true,
 		workflowSizeGuideline:         DefaultWorkflowSizeGuideline,
+		codingAgents:                  defaultCodingAgentSettings(),
 		theme:                         DefaultTheme(),
 		usingDefaultTheme:             true,
 		profiles:                      defaultProfiles(),
@@ -1308,71 +1319,116 @@ func normalizeAbsoluteDirectoryPath(value, label string) (string, error) {
 }
 
 func normalizeCodingAgents(agents []CodingAgentSetting) ([]CodingAgentSetting, error) {
-	if len(agents) > MaxCodingAgents {
-		return nil, fmt.Errorf("at most %d coding agents are allowed", MaxCodingAgents)
-	}
-	normalized := make([]CodingAgentSetting, 0, len(agents))
+	normalized := make([]CodingAgentSetting, 0, len(agents)+2)
 	seenIDs := make(map[string]struct{}, len(agents))
 	seenNames := make(map[string]struct{}, len(agents))
 	seenDirectories := make(map[string]struct{}, len(agents))
+	seenPi := false
+	seenPiNative := false
+	customAgentCount := 0
+	defaultCount := 0
+
 	for _, agent := range agents {
-		agent.ID = strings.TrimSpace(agent.ID)
-		if agent.ID == "" {
-			return nil, errors.New("coding agent id is required")
-		}
-		if len(agent.ID) > maxCodingAgentIDLength {
-			return nil, fmt.Errorf("coding agent id must be %d characters or fewer", maxCodingAgentIDLength)
-		}
-		for _, character := range agent.ID {
-			if (character >= 'a' && character <= 'z') ||
-				(character >= 'A' && character <= 'Z') ||
-				(character >= '0' && character <= '9') || character == '-' || character == '_' {
-				continue
-			}
-			return nil, errors.New("coding agent id contains an invalid character")
-		}
-
-		agent.Name = strings.TrimSpace(agent.Name)
-		if agent.Name == "" {
-			return nil, errors.New("coding agent name is required")
-		}
-		if utf8.RuneCountInString(agent.Name) > maxCodingAgentNameLength {
-			return nil, fmt.Errorf("coding agent name must be %d characters or fewer", maxCodingAgentNameLength)
-		}
 		agent.Kind = strings.ToLower(strings.TrimSpace(agent.Kind))
-		if agent.Kind != CodingAgentKindClaude && agent.Kind != CodingAgentKindClaudeGPT {
-			return nil, errors.New("coding agent kind must be claude or claude-gpt")
-		}
-
-		if agent.Kind == CodingAgentKindClaude {
-			configDirectory, err := normalizeAbsoluteDirectoryPath(agent.ConfigDirectory, "Claude Code config directory")
-			if err != nil {
-				return nil, err
+		switch agent.Kind {
+		case CodingAgentKindPi:
+			if seenPi {
+				return nil, errors.New("Pi may appear only once in coding agents")
 			}
-			if configDirectory == "" {
-				return nil, errors.New("Claude Code config directory is required")
-			}
-			agent.ConfigDirectory = configDirectory
-		} else {
+			seenPi = true
+			agent.ID = CodingAgentKindPi
+			agent.Name = "Pi"
 			agent.ConfigDirectory = ""
+		case CodingAgentKindPiNative:
+			if seenPiNative {
+				return nil, errors.New("Pi Native may appear only once in coding agents")
+			}
+			seenPiNative = true
+			agent.ID = CodingAgentKindPiNative
+			agent.Name = "Pi Native"
+			agent.ConfigDirectory = ""
+		case CodingAgentKindClaude, CodingAgentKindClaudeGPT:
+			customAgentCount++
+			if customAgentCount > MaxCodingAgents {
+				return nil, fmt.Errorf("at most %d custom coding agents are allowed", MaxCodingAgents)
+			}
+			agent.ID = strings.TrimSpace(agent.ID)
+			if agent.ID == "" {
+				return nil, errors.New("coding agent id is required")
+			}
+			if len(agent.ID) > maxCodingAgentIDLength {
+				return nil, fmt.Errorf("coding agent id must be %d characters or fewer", maxCodingAgentIDLength)
+			}
+			for _, character := range agent.ID {
+				if (character >= 'a' && character <= 'z') ||
+					(character >= 'A' && character <= 'Z') ||
+					(character >= '0' && character <= '9') || character == '-' || character == '_' {
+					continue
+				}
+				return nil, errors.New("coding agent id contains an invalid character")
+			}
+
+			agent.Name = strings.TrimSpace(agent.Name)
+			if agent.Name == "" {
+				return nil, errors.New("coding agent name is required")
+			}
+			if utf8.RuneCountInString(agent.Name) > maxCodingAgentNameLength {
+				return nil, fmt.Errorf("coding agent name must be %d characters or fewer", maxCodingAgentNameLength)
+			}
+			if agent.Kind == CodingAgentKindClaude {
+				configDirectory, err := normalizeAbsoluteDirectoryPath(agent.ConfigDirectory, "Claude Code config directory")
+				if err != nil {
+					return nil, err
+				}
+				if configDirectory == "" {
+					return nil, errors.New("Claude Code config directory is required")
+				}
+				agent.ConfigDirectory = configDirectory
+			} else {
+				agent.ConfigDirectory = ""
+			}
+
+			foldedName := strings.ToLower(agent.Name)
+			if _, duplicate := seenIDs[agent.ID]; duplicate {
+				return nil, errors.New("coding agent ids must be unique")
+			}
+			if _, duplicate := seenNames[foldedName]; duplicate {
+				return nil, errors.New("coding agent names must be unique")
+			}
+			if agent.ConfigDirectory != "" {
+				if _, duplicate := seenDirectories[agent.ConfigDirectory]; duplicate {
+					return nil, errors.New("Claude Code config directories must be unique")
+				}
+				seenDirectories[agent.ConfigDirectory] = struct{}{}
+			}
+			seenIDs[agent.ID] = struct{}{}
+			seenNames[foldedName] = struct{}{}
+		default:
+			return nil, errors.New("coding agent kind must be pi, pi-native, claude, or claude-gpt")
 		}
 
-		foldedName := strings.ToLower(agent.Name)
-		if _, duplicate := seenIDs[agent.ID]; duplicate {
-			return nil, errors.New("coding agent ids must be unique")
+		if agent.IsDefault {
+			defaultCount++
 		}
-		if _, duplicate := seenNames[foldedName]; duplicate {
-			return nil, errors.New("coding agent names must be unique")
-		}
-		if agent.ConfigDirectory != "" {
-			if _, duplicate := seenDirectories[agent.ConfigDirectory]; duplicate {
-				return nil, errors.New("Claude Code config directories must be unique")
-			}
-			seenDirectories[agent.ConfigDirectory] = struct{}{}
-		}
-		seenIDs[agent.ID] = struct{}{}
-		seenNames[foldedName] = struct{}{}
 		normalized = append(normalized, agent)
+	}
+
+	if !seenPi {
+		normalized = append([]CodingAgentSetting{{ID: CodingAgentKindPi, Name: "Pi", Kind: CodingAgentKindPi}}, normalized...)
+	}
+	if !seenPiNative {
+		normalized = append(normalized, CodingAgentSetting{ID: CodingAgentKindPiNative, Name: "Pi Native", Kind: CodingAgentKindPiNative})
+	}
+	if defaultCount > 1 {
+		return nil, errors.New("exactly one coding agent may be the default")
+	}
+	if defaultCount == 0 {
+		for index := range normalized {
+			if normalized[index].Kind == CodingAgentKindPiNative {
+				normalized[index].IsDefault = true
+				break
+			}
+		}
 	}
 	return normalized, nil
 }

@@ -231,10 +231,7 @@ export function TerminalWorkspace({
     getSettings(controller.signal)
       .then((settings) => {
         if (controller.signal.aborted) return
-        const choices = [
-          ...configuredCodingAgentChoices(settings.codingAgents),
-          ...fallbackWorkspaceCodingAgents,
-        ]
+        const choices = configuredCodingAgentChoices(settings.codingAgents)
         setCodingAgentChoices(choices)
         setCodingAgent((current) => choices.some((choice) => choice.id === current) ? current : 'pi')
       })
