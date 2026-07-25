@@ -20,6 +20,7 @@ import { EmptyWorkspace } from './components/pages/EmptyWorkspace'
 import { NewThreadScreen } from './components/pages/NewThreadScreen'
 import { ProjectSettingsScreen } from './components/pages/ProjectSettingsScreen'
 import { SandboxSettingsScreen } from './components/pages/SandboxSettingsScreen'
+import { SessionLogScreen } from './components/pages/SessionLogScreen'
 import { SettingsScreen } from './components/pages/SettingsScreen'
 import { TmuxScreen } from './components/pages/TmuxScreen'
 import { TerminalWorkspace } from './components/pages/TerminalWorkspace'
@@ -29,6 +30,7 @@ import {
   PROJECT_ROUTE,
   PROJECT_SETTINGS_ROUTE,
   SANDBOX_SETTINGS_ROUTE,
+  SESSION_LOG_ROUTE,
   SETTINGS_ROUTE,
   THREAD_ROUTE,
   THREAD_SANDBOX_ROUTE,
@@ -251,6 +253,7 @@ export default function App() {
   const projectMatch = useMatch(PROJECT_ROUTE)
   const projectSettingsMatch = useMatch(PROJECT_SETTINGS_ROUTE)
   const cleanupMatch = useMatch(CLEANUP_ROUTE)
+  const sessionLogMatch = useMatch(SESSION_LOG_ROUTE)
   const settingsMatch = useMatch(SETTINGS_ROUTE)
   const tmuxMatch = useMatch(TMUX_ROUTE)
 
@@ -603,7 +606,7 @@ export default function App() {
     if (!profiles.some((profile) => profile.id === profileId)) return
     setActiveProfileId(profileId)
     setSidebarOpen(false)
-    if (cleanupMatch || settingsMatch || tmuxMatch) return
+    if (cleanupMatch || sessionLogMatch || settingsMatch || tmuxMatch) return
 
     const profileProjects = projects.filter((project) => project.profileId === profileId)
     const destination = rememberedWorkspacePath(profileProjects, lastWorkspacesRef.current[profileId] ?? null)
@@ -618,7 +621,7 @@ export default function App() {
       : [...current, profile])
     setActiveProfileId(profile.id)
     setSidebarOpen(false)
-    if (!cleanupMatch && !settingsMatch && !tmuxMatch) navigate('/')
+    if (!cleanupMatch && !sessionLogMatch && !settingsMatch && !tmuxMatch) navigate('/')
   }
 
   function handleCreated(project: Project) {
@@ -839,6 +842,7 @@ export default function App() {
         archivingThreadId={archivingThreadId}
         bookmarkingThreadId={bookmarkingThreadId}
         cleanupSelected={Boolean(cleanupMatch)}
+        sessionLogSelected={Boolean(sessionLogMatch)}
         tmuxSelected={Boolean(tmuxMatch)}
         settingsSelected={Boolean(settingsMatch)}
         isOpen={sidebarOpen}
@@ -857,6 +861,10 @@ export default function App() {
         }}
         onOpenCleanup={() => {
           navigate(CLEANUP_ROUTE)
+          setSidebarOpen(false)
+        }}
+        onOpenSessionLog={() => {
+          navigate(SESSION_LOG_ROUTE)
           setSidebarOpen(false)
         }}
         onOpenTmux={() => {
@@ -885,6 +893,15 @@ export default function App() {
               path={CLEANUP_ROUTE}
               element={(
                 <CleanupScreen
+                  onOpenSidebar={() => setSidebarOpen(true)}
+                  onBack={() => navigate(workspaceReturnDestination(), { replace: true })}
+                />
+              )}
+            />
+            <Route
+              path={SESSION_LOG_ROUTE}
+              element={(
+                <SessionLogScreen
                   onOpenSidebar={() => setSidebarOpen(true)}
                   onBack={() => navigate(workspaceReturnDestination(), { replace: true })}
                 />

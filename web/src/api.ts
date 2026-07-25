@@ -15,6 +15,7 @@ import type {
   Project,
   SandboxConfig,
   SandboxConfigState,
+  SessionClosureOverview,
   Thread,
   SavedWorkflow,
   TmuxBrowserSession,
@@ -129,6 +130,14 @@ export function updateThreadSandboxConfig(projectId: string, threadId: string, c
 
 export function getCleanupOverview(signal?: AbortSignal) {
   return request<CleanupOverview>('/api/cleanup', { signal })
+}
+
+export function getSessionClosureLog(signal?: AbortSignal) {
+  return request<SessionClosureOverview>('/api/session-closures', { signal, cache: 'no-store' })
+}
+
+export function touchThreadTmuxActivity(projectId: string, threadId: string, signal?: AbortSignal) {
+  return request<void>(`${threadPath(projectId, threadId)}/tmux/activity`, { method: 'PUT', signal })
 }
 
 export function getAgentSkillStatus(signal?: AbortSignal) {

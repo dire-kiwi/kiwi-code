@@ -24,6 +24,7 @@ import {
   GitFork,
   Globe2,
   GripVertical,
+  History,
   LoaderCircle,
   PanelLeftClose,
   PanelsTopLeft,
@@ -66,6 +67,7 @@ type ProjectSidebarProps = {
   archivingThreadId: string | null
   bookmarkingThreadId: string | null
   cleanupSelected: boolean
+  sessionLogSelected: boolean
   tmuxSelected: boolean
   settingsSelected: boolean
   isOpen: boolean
@@ -77,6 +79,7 @@ type ProjectSidebarProps = {
   onNewThread: (projectId: string) => void
   onOpenProjectSettings: (projectId: string) => void
   onOpenCleanup: () => void
+  onOpenSessionLog: () => void
   onOpenTmux: () => void
   onOpenSettings: () => void
   onProjectCreated: (project: Project) => void
@@ -173,6 +176,7 @@ export function ProjectSidebar({
   archivingThreadId,
   bookmarkingThreadId,
   cleanupSelected,
+  sessionLogSelected,
   tmuxSelected,
   settingsSelected,
   isOpen,
@@ -184,6 +188,7 @@ export function ProjectSidebar({
   onNewThread,
   onOpenProjectSettings,
   onOpenCleanup,
+  onOpenSessionLog,
   onOpenTmux,
   onOpenSettings,
   onProjectCreated,
@@ -1052,6 +1057,16 @@ export function ProjectSidebar({
           >
             <Clock3 size={13} className={cleanupSelected ? 'text-ghost-green' : 'text-ghost-dim'} />
             <span>Cleanup</span>
+          </SelectionButton>
+          <SelectionButton
+            type="button"
+            selected={sessionLogSelected}
+            selectionVariant="navigation-compact"
+            onClick={onOpenSessionLog}
+            aria-current={sessionLogSelected ? 'page' : undefined}
+          >
+            <History size={13} className={sessionLogSelected ? 'text-ghost-green' : 'text-ghost-dim'} />
+            <span>Session log</span>
           </SelectionButton>
           <SelectionButton
             type="button"

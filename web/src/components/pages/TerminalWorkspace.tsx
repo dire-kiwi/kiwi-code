@@ -11,7 +11,7 @@ import {
   Play,
   SquareTerminal,
 } from 'lucide-react'
-import { getSettings, runEnvironmentAction, threadEventsPath } from '../../api'
+import { getSettings, runEnvironmentAction, threadEventsPath, touchThreadTmuxActivity } from '../../api'
 import { claudeCodeProfileChoices, isCodingAgent } from '../../codingAgents'
 import { workspacePath } from '../../routes'
 import type {
@@ -216,6 +216,19 @@ export function TerminalWorkspace({
   const [runningEnvironmentAction, setRunningEnvironmentAction] = useState<string | null>(null)
   const [environmentActionError, setEnvironmentActionError] = useState('')
   const toolTabsRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const touch = () => {
+      void touchThreadTmuxActivity(project.id, thread.id, controller.signal).catch(() => {})
+    }
+    touch()
+    const interval = window.setInterval(touch, 5 * 60 * 1000)
+    return () => {
+      window.clearInterval(interval)
+      controller.abort()
+    }
+  }, [project.id, thread.id])
 
   useEffect(() => {
     const controller = new AbortController()
