@@ -4,7 +4,7 @@ import {
   KiwiSandbox,
   PROJECT_CONFIG_RELATIVE_PATH,
   configPaths,
-  relatedProjectsPrompt,
+  sandboxSystemPrompt,
 } from "../../core/src/index.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
@@ -116,8 +116,9 @@ export default function kiwiSandboxExtension(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async (event) => {
-    const config = await activeSandbox().validateConfig();
-    const context = relatedProjectsPrompt(config, activeSandbox().projectRoot);
+    const active = activeSandbox();
+    const config = await active.validateConfig();
+    const context = await sandboxSystemPrompt(config, active.projectRoot);
     if (context) return { systemPrompt: `${event.systemPrompt}\n\n${context}` };
   });
 

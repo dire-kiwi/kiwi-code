@@ -1,3 +1,4 @@
+export { sandboxSystemPrompt } from "./context.ts";
 export {
   GLOBAL_CONFIG_PATH,
   PROJECT_CONFIG_RELATIVE_PATH,
@@ -19,6 +20,11 @@ export {
   type PolicyDecision,
 } from "./policy.ts";
 export { createSeatbeltProfile } from "./profile.ts";
+export {
+  GIT_WORKTREES_PROMPT,
+  discoverGitWorktrees,
+  type GitWorktreeAccess,
+} from "./worktrees.ts";
 export {
   KiwiSandbox,
   type CommandOptions,

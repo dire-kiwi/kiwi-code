@@ -4,8 +4,10 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { configPaths, defaultConfig, GLOBAL_CONFIG_PATH, loadConfig, relatedProjectsPrompt } from "../src/config.ts";
+import { sandboxSystemPrompt } from "../src/context.ts";
 import { assertPathAllowed, assertWorkingDirectory, isSimpleCommand, resolveDecision } from "../src/policy.ts";
 import { createSeatbeltProfile } from "../src/profile.ts";
+import { discoverGitWorktrees, GIT_WORKTREES_PROMPT } from "../src/worktrees.ts";
 
 test("uses the requested global and project config paths", () => {
   assert.deepEqual(configPaths("/project"), [GLOBAL_CONFIG_PATH, "/project/.config/kiwi-sandbox.json"]);
@@ -39,6 +41,55 @@ test("related project prompt omits ordinary read and write roots", () => {
   assert.match(prompt!, /^Related Directories: \/workspace\/shared, /);
   assert.doesNotMatch(prompt!, /private-read|private-write|sandbox|filesystem|access/i);
   assert.equal(prompt!.match(/\/workspace\/shared/g)?.length, 1);
+});
+
+test("repository worktrees are writable and described without enumerating them", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "kiwi-sandbox-worktrees-"));
+  const repository = join(parent, "repository");
+  const linked = join(parent, "linked worktree");
+  const unrelated = join(parent, "unrelated");
+  const nested = join(repository, "nested");
+  const registration = join(repository, ".git", "worktrees", "linked");
+  const staleRegistration = join(repository, ".git", "worktrees", "stale");
+  await Promise.all([
+    mkdir(nested, { recursive: true }),
+    mkdir(linked),
+    mkdir(unrelated),
+    mkdir(join(repository, ".git"), { recursive: true }),
+  ]);
+  await writeFile(join(repository, ".git", "HEAD"), "ref: refs/heads/main\n");
+  assert.deepEqual((await discoverGitWorktrees(nested)).roots, [await realpath(repository)]);
+
+  await Promise.all([
+    mkdir(registration, { recursive: true }),
+    mkdir(staleRegistration, { recursive: true }),
+  ]);
+  await Promise.all([
+    writeFile(join(linked, ".git"), `gitdir: ${registration}\n`),
+    writeFile(join(registration, "commondir"), "../..\n"),
+    writeFile(join(registration, "gitdir"), `${linked}/.git\n`),
+    writeFile(join(registration, "HEAD"), "ref: refs/heads/linked\n"),
+    writeFile(join(staleRegistration, "gitdir"), `${parent}/missing/.git\n`),
+  ]);
+
+  const expectedRoots = [await realpath(linked), await realpath(repository)].sort();
+  const worktrees = await discoverGitWorktrees(nested);
+  assert.equal(worktrees.isRepository, true);
+  assert.deepEqual(worktrees.roots, expectedRoots);
+  assert.deepEqual((await discoverGitWorktrees(linked)).roots, expectedRoots);
+
+  const config = defaultConfig();
+  config.defaults = { read: [], write: [] };
+  config.commands = [{ pattern: "locked", files: { read: [], write: [] } }];
+  const decision = await resolveDecision(config, "locked", nested, [], nested, worktrees.roots);
+  await assertPathAllowed(join(linked, "new-file.txt"), decision, "write");
+  await assertPathAllowed(join(repository, "sibling.txt"), decision, "write");
+  await assert.rejects(() => assertPathAllowed(join(unrelated, "blocked.txt"), decision, "write"), /write access denied/);
+  assert.equal(await assertWorkingDirectory(nested, linked, [], worktrees.roots), await realpath(linked));
+
+  const prompt = await sandboxSystemPrompt(config, nested);
+  assert.equal(prompt, GIT_WORKTREES_PROMPT);
+  for (const root of worktrees.roots) assert.equal(prompt?.includes(root), false);
 });
 
 test("unknown configuration fields fail closed", async () => {
