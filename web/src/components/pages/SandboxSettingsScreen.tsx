@@ -42,8 +42,10 @@ type SandboxSettingsScreenProps = {
   scope: 'global' | 'thread'
   project?: Project
   thread?: Thread
-  onOpenSidebar: () => void
-  onBack: () => void
+  /** Render only the configuration body, for hosts that provide their own page chrome. */
+  embedded?: boolean
+  onOpenSidebar?: () => void
+  onBack?: () => void
 }
 
 type NetworkChoice = 'inherit' | 'allowed' | 'blocked'
@@ -133,6 +135,7 @@ export function SandboxSettingsScreen({
   scope,
   project,
   thread,
+  embedded = false,
   onOpenSidebar,
   onBack,
 }: SandboxSettingsScreenProps) {
@@ -231,27 +234,7 @@ export function SandboxSettingsScreen({
     ? 'Global sandbox configuration'
     : [project?.name, thread?.branch || thread?.title].filter(Boolean).join(' · ')
 
-  return (
-    <FormScreenTemplate
-      header={(
-        <ScreenHeader
-          title={title}
-          subtitle={subtitle}
-          backLabel={scope === 'global' ? 'Back to settings' : 'Back to workspace'}
-          backDisabled={saving}
-          onOpenSidebar={onOpenSidebar}
-          onBack={onBack}
-        />
-      )}
-    >
-      <div className="relative mx-auto w-full max-w-[44rem]">
-        <PageIntro icon={<Shield size={20} />} title={title}>
-          {scope === 'global'
-            ? 'The sandbox policy applied to every Pi and Claude Code session that Kiwi Code launches. Individual threads can override these values for their own git branch.'
-            : 'Sandbox overrides for this thread only. Because the thread works on its own git branch, the settings are stored inside the thread directory and travel with it. Anything you leave inherited comes from the global sandbox configuration.'}
-        </PageIntro>
-
-        {loading ? (
+  const body = loading ? (
           <LoadingPanel label="Loading sandbox configuration" />
         ) : !state || !draft ? (
           <LoadErrorPanel
@@ -656,8 +639,31 @@ export function SandboxSettingsScreen({
                 </div>
               </div>
             </Surface>
-          </form>
-        )}
+    </form>
+  )
+
+  if (embedded) return body
+
+  return (
+    <FormScreenTemplate
+      header={(
+        <ScreenHeader
+          title={title}
+          subtitle={subtitle}
+          backLabel={scope === 'global' ? 'Back to settings' : 'Back to workspace'}
+          backDisabled={saving}
+          onOpenSidebar={onOpenSidebar ?? (() => {})}
+          onBack={onBack ?? (() => {})}
+        />
+      )}
+    >
+      <div className="relative mx-auto w-full max-w-[44rem]">
+        <PageIntro icon={<Shield size={20} />} title={title}>
+          {scope === 'global'
+            ? 'The sandbox policy applied to every Pi and Claude Code session that Kiwi Code launches. Individual threads can override these values for their own git branch.'
+            : 'Sandbox overrides for this thread only. Because the thread works on its own git branch, the settings are stored inside the thread directory and travel with it. Anything you leave inherited comes from the global sandbox configuration.'}
+        </PageIntro>
+        {body}
       </div>
     </FormScreenTemplate>
   )
