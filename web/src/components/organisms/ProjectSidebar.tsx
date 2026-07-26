@@ -43,6 +43,7 @@ import {
   restartApplication,
   waitForApplicationRestart,
 } from '../../api'
+import { reloadFrontend } from '../../frontend-reload.mjs'
 import { formatCompactTokens, formatCompactUsd, usageDescription } from '../../lib/formatUsage'
 import { sidebarProjectActivityCounts, sidebarThreadActivity } from '../../sidebar-thread-activity.mjs'
 import { bookmarkedThreadPathIds, defaultVisibleRootThreadIds } from '../../sidebar-thread-visibility.mjs'
@@ -376,7 +377,7 @@ export function ProjectSidebar({
     try {
       const response = await restartApplication()
       await waitForApplicationRestart(response.instanceId)
-      window.location.reload()
+      await reloadFrontend()
     } catch (reason) {
       setRestarting(false)
       window.alert(reason instanceof Error ? reason.message : 'Could not restart Kiwi Code.')

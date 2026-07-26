@@ -52,8 +52,10 @@ test('preload prefers the legacy IPC handlers in a pre-rename Electron process',
   })
 
   assert.deepEqual([...runtime.bridges.keys()].sort(), [
+    'direMuxDesktopApp',
     'direMuxDesktopBrowser',
     'direMuxDesktopCodeServer',
+    'kiwiCodeDesktopApp',
     'kiwiCodeDesktopBrowser',
     'kiwiCodeDesktopCodeServer',
   ])
@@ -73,6 +75,24 @@ test('preload falls back when only the other desktop channel generation is regis
   assert.deepEqual(invoked, [
     'kiwi-code-desktop-browser:set-backend-origin',
     'dire-mux-desktop-browser:set-backend-origin',
+  ])
+})
+
+test('preload requests an acknowledged hard reload with channel fallback', async () => {
+  const invoked = []
+  const runtime = loadPreload({ KIWI_CODE_DESKTOP_URL: 'http://127.0.0.1:4000' }, async (channel) => {
+    invoked.push(channel)
+    if (channel.startsWith('kiwi-code-')) throw new Error(`No handler registered for '${channel}'`)
+    return { reloading: true }
+  })
+
+  assert.deepEqual(
+    await runtime.bridges.get('kiwiCodeDesktopApp').reloadFrontend(),
+    { reloading: true },
+  )
+  assert.deepEqual(invoked, [
+    'kiwi-code-desktop-app:reload-frontend',
+    'dire-mux-desktop-app:reload-frontend',
   ])
 })
 

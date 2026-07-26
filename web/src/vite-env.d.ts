@@ -17,6 +17,10 @@ type KiwiCodeDesktopBrowserBounds = {
 
 type KiwiCodeDesktopBrowserResult = void | Promise<unknown>
 
+interface KiwiCodeDesktopAppBridge {
+  reloadFrontend(): Promise<unknown>
+}
+
 type KiwiCodeDesktopBrowserState = {
   projectId: string | null
   threadId: string | null
@@ -58,8 +62,11 @@ interface KiwiCodeDesktopCodeServerBridge {
 }
 
 interface Window {
+  kiwiCodeDesktopApp?: KiwiCodeDesktopAppBridge
   kiwiCodeDesktopBrowser?: KiwiCodeDesktopBrowserBridge
   kiwiCodeDesktopCodeServer?: KiwiCodeDesktopCodeServerBridge
+  /** Compatibility bridge exposed by a desktop renderer loaded before the rename. */
+  direMuxDesktopApp?: KiwiCodeDesktopAppBridge
   /** Compatibility bridge exposed by a desktop renderer loaded before the rename. */
   direMuxDesktopBrowser?: KiwiCodeDesktopBrowserBridge
   /** Compatibility bridge exposed by a desktop renderer loaded before the rename. */

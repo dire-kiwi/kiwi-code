@@ -2,6 +2,12 @@
 
 const { contextBridge, ipcRenderer } = require('electron')
 
+const appIpcChannels = {
+  reloadFrontend: 'kiwi-code-desktop-app:reload-frontend',
+}
+const legacyAppIpcChannels = {
+  reloadFrontend: 'dire-mux-desktop-app:reload-frontend',
+}
 const browserIpcChannels = {
   show: 'kiwi-code-desktop-browser:show',
   hide: 'kiwi-code-desktop-browser:hide',
@@ -45,6 +51,7 @@ function compatibleChannelSets(current, legacy) {
 
 const browserChannelSets = compatibleChannelSets(browserIpcChannels, legacyBrowserIpcChannels)
 const codeServerChannelSets = compatibleChannelSets(codeServerIpcChannels, legacyCodeServerIpcChannels)
+const appChannelSets = compatibleChannelSets(appIpcChannels, legacyAppIpcChannels)
 
 function missingHandler(error) {
   const message = error instanceof Error ? error.message : String(error)
@@ -120,6 +127,14 @@ function createBrowserBridge() {
   })
 }
 
+function createAppBridge() {
+  return Object.freeze({
+    reloadFrontend() {
+      return invokeCompatible(appChannelSets, 'reloadFrontend')
+    },
+  })
+}
+
 function createCodeServerBridge() {
   return Object.freeze({
     show(options) {
@@ -144,6 +159,8 @@ function createCodeServerBridge() {
 }
 
 if (process.isMainFrame) {
+  contextBridge.exposeInMainWorld('kiwiCodeDesktopApp', createAppBridge())
+  contextBridge.exposeInMainWorld('direMuxDesktopApp', createAppBridge())
   contextBridge.exposeInMainWorld('kiwiCodeDesktopBrowser', createBrowserBridge())
   contextBridge.exposeInMainWorld('direMuxDesktopBrowser', createBrowserBridge())
   contextBridge.exposeInMainWorld('kiwiCodeDesktopCodeServer', createCodeServerBridge())
