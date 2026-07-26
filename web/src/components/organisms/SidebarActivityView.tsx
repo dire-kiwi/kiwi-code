@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Bookmark, CornerDownRight, Folder, Inbox, LoaderCircle, Plus, Search } from 'lucide-react'
 import { usageDescription } from '../../lib/formatUsage'
+import { projectsByMostRecentThread } from '../../new-thread-project-order.mjs'
 import { activityViewGroups, formatRelativeShort, type ActivityGroupEntry } from '../../sidebar-activity-groups.mjs'
 import type { PiThreadActivity, Project, Thread, ThreadUsageSnapshot } from '../../types'
 import { Button } from '../atoms/Button'
@@ -70,6 +71,7 @@ export function SidebarActivityView({
   }, [projectPickerOpen])
 
   const groups = useMemo(() => activityViewGroups(projects, piActivities), [piActivities, projects])
+  const newThreadProjects = useMemo(() => projectsByMostRecentThread(projects), [projects])
   const threadsByKey = useMemo(() => {
     const map = new Map<string, { project: Project; thread: Thread }>()
     for (const project of projects) {
@@ -228,7 +230,7 @@ export function SidebarActivityView({
                 New thread in…
               </p>
               <div className="max-h-56 overflow-y-auto">
-                {projects.map((project) => (
+                {newThreadProjects.map((project) => (
                   <Button
                     key={project.id}
                     role="menuitem"
