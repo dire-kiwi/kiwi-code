@@ -20,10 +20,11 @@ func TestHeadlessClientExercisesMultipleClientsEndToEnd(t *testing.T) {
 		projects:   terminal.projects,
 		terminal:   terminal,
 		piActivity: newPiActivityTracker(),
+		instanceID: newServerInstanceID(),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", serverState.health)
-	mux.HandleFunc("GET /api/events", serverState.streamEvents)
+	mux.HandleFunc("GET /api/state", serverState.serveStateSocket)
 	mux.HandleFunc("POST /api/projects", serverState.addProject)
 	mux.HandleFunc("DELETE /api/projects/{id}", serverState.deleteProject)
 	mux.HandleFunc("POST /api/projects/{id}/threads", serverState.addThread)
@@ -47,7 +48,7 @@ func TestHeadlessClientExercisesMultipleClientsEndToEnd(t *testing.T) {
 		t.Fatalf("headless client: %v\n%s", err, output.String())
 	}
 	for _, expected := range []string{
-		"opened 3 global event clients",
+		"opened 3 state WebSocket clients",
 		"working heartbeat and rapid status transitions",
 		"tmux output reached attached clients",
 		"project deletion reached every client and closed its terminal streams",
@@ -66,10 +67,15 @@ func TestHeadlessClientCanSkipTerminalChecks(t *testing.T) {
 	}
 	terminal := newTerminalHandlerUnreconciledWithOptions(store, originPolicy{}, "headless-client-test")
 	terminal.tmuxPath = ""
-	serverState := &Server{projects: store, terminal: terminal, piActivity: newPiActivityTracker()}
+	serverState := &Server{
+		projects:   store,
+		terminal:   terminal,
+		piActivity: newPiActivityTracker(),
+		instanceID: newServerInstanceID(),
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", serverState.health)
-	mux.HandleFunc("GET /api/events", serverState.streamEvents)
+	mux.HandleFunc("GET /api/state", serverState.serveStateSocket)
 	mux.HandleFunc("POST /api/projects", serverState.addProject)
 	mux.HandleFunc("DELETE /api/projects/{id}", serverState.deleteProject)
 	mux.HandleFunc("POST /api/projects/{id}/threads", serverState.addThread)

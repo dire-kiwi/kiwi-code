@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import {
   Archive,
   Clock3,
@@ -8,13 +7,14 @@ import {
   ShieldCheck,
   TriangleAlert,
 } from 'lucide-react'
-import { getCleanupOverview } from '../../api'
 import { classNames } from '../../lib/classNames'
 import type {
   CleanupOverview,
   ThreadCleanupOverview,
   WorktreeCleanupOverview,
 } from '../../types'
+import { useLastReadySubscriptionData, useSubscription } from '../../wire/react'
+import { CleanupTopic } from '../../wire/topics'
 import { GhostButton } from '../atoms/Button'
 import { StatusBadge } from '../atoms/StatusBadge'
 import { Surface } from '../atoms/Surface'
@@ -197,26 +197,10 @@ function WorktreeRow({ item, generatedAt }: { item: WorktreeCleanupOverview; gen
 }
 
 export function CleanupScreen({ onOpenSidebar, onBack }: CleanupScreenProps) {
-  const [overview, setOverview] = useState<CleanupOverview | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [loadKey, setLoadKey] = useState(0)
-
-  useEffect(() => {
-    const controller = new AbortController()
-    setLoading(true)
-    setError('')
-    getCleanupOverview(controller.signal)
-      .then(setOverview)
-      .catch((reason) => {
-        if (controller.signal.aborted) return
-        setError(reason instanceof Error ? reason.message : 'Could not load the cleanup queue.')
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false)
-      })
-    return () => controller.abort()
-  }, [loadKey])
+  const subscription = useSubscription(CleanupTopic, undefined)
+  const overview = useLastReadySubscriptionData(subscription) as CleanupOverview | null
+  const loading = subscription.state === 'loading'
+  const error = subscription.state === 'error' ? subscription.error.message : ''
 
   const blockedWorktrees = overview?.worktrees.filter((item) =>
     item.hasUncommittedChanges
@@ -240,7 +224,7 @@ export function CleanupScreen({ onOpenSidebar, onBack }: CleanupScreenProps) {
           <GhostButton
             type="button"
             size="md"
-            onClick={() => setLoadKey((current) => current + 1)}
+            onClick={subscription.retry}
             disabled={loading}
             className="flex items-center gap-2 px-3 disabled:opacity-45"
           >
@@ -257,7 +241,7 @@ export function CleanupScreen({ onOpenSidebar, onBack }: CleanupScreenProps) {
         ) : error && !overview ? (
           <LoadErrorPanel
             message={error}
-            onRetry={() => setLoadKey((current) => current + 1)}
+            onRetry={subscription.retry}
           />
         ) : overview ? (
           <div className="space-y-5">

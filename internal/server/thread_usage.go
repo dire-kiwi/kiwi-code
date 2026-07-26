@@ -307,6 +307,11 @@ func (t *threadUsageTracker) subscribe() (*broadcast.Subscription[struct{}], fun
 	return subscription, func() { subscription.Close() }
 }
 
+func (t *threadUsageTracker) subscribeLatest() (*broadcast.Subscription[struct{}], func()) {
+	subscription := t.changes.SubscribeLatest()
+	return subscription, func() { subscription.Close() }
+}
+
 func (t *threadUsageTracker) notify() {
 	if t != nil && t.changes != nil {
 		t.changes.Publish(struct{}{})

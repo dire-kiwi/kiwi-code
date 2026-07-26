@@ -14,7 +14,10 @@
     "predev:desktop": "npm run generate:theme",
     "dev:desktop": "node scripts/dev-stack.mjs --desktop",
     "run:desktop": "concurrently --kill-others --success command-desktop --names server,desktop \"cd .. && make run\" \"wait-on --timeout 30000 http-get://127.0.0.1:4000/api/health && KIWI_CODE_DESKTOP_URL=http://127.0.0.1:4000 node scripts/electron-launcher.mjs\"",
-    "test": "node --test scripts/*.test.mjs electron/*.test.cjs",
+    "test": "npm run test:node && npm run test:unit",
+    "test:node": "node --test scripts/*.test.mjs electron/*.test.cjs",
+    "test:e2e": "node --test --test-concurrency=1 e2e/app-pages.test.mjs",
+    "test:unit": "vitest run",
     "prebuild": "npm run generate:theme && npm run generate:browser-host",
     "build": "tsc --noEmit -p tsconfig.app.json && vite build",
     "preview": "vite preview"
@@ -25,6 +28,7 @@
     "@xterm/addon-fit": "latest",
     "@xterm/addon-web-links": "latest",
     "@xterm/xterm": "latest",
+    "effect": "^3.22.0",
     "fzf": "^0.5.2",
     "katex": "^0.16.47",
     "lucide-react": "latest",
@@ -36,15 +40,18 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "latest",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "@vitejs/plugin-react": "latest",
     "concurrently": "latest",
     "electron": "latest",
     "esbuild": "^0.27.4",
+    "jsdom": "^29.1.1",
     "tailwindcss": "latest",
     "typescript": "latest",
     "vite": "latest",
+    "vitest": "^4.1.10",
     "wait-on": "latest"
   }
 }

@@ -30,26 +30,28 @@ import {
   browserRecordingPlaybackUrl,
   browserStreamUrl,
   getBrowserFrame,
-  getBrowserStatus,
   performBrowserAction,
 } from '../../api'
 import { isDefaultBackendActive } from '../../backends'
 import type {
   BrowserActionOperation,
   BrowserActionParams,
+  BrowserViewBounds,
+  ConnectionStatus,
+} from '../../types'
+import type {
   BrowserCurrentPage,
   BrowserPage,
   BrowserRecording,
   BrowserStatusResult,
-  BrowserViewBounds,
-  ConnectionStatus,
-} from '../../types'
+} from '../../wire/domain'
+import { useSubscription } from '../../wire/react'
+import { BrowserStatusTopic } from '../../wire/topics'
 import { Button } from '../atoms/Button'
 import { IconButton } from '../atoms/IconButton'
 import { BaseInput } from '../atoms/Input'
 import { StatusBadge, type StatusBadgeTone } from '../atoms/StatusBadge'
 
-const statusPollIntervalMs = 5_000
 const framePollIntervalMs = 5_000
 
 export type BrowserPaneProps = {
@@ -60,123 +62,6 @@ export type BrowserPaneProps = {
   suppressed?: boolean
   onStatusChange?: (status: ConnectionStatus) => void
   onWorkspaceShortcut?: (index: number) => void
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object'
-}
-
-function optionalString(value: unknown) {
-  return typeof value === 'string' ? value : undefined
-}
-
-function optionalBoolean(value: unknown) {
-  return typeof value === 'boolean' ? value : undefined
-}
-
-function optionalNumber(value: unknown) {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function normalizeCapabilities(value: unknown) {
-  if (!isRecord(value)) return undefined
-  return {
-    nativeView: optionalBoolean(value.nativeView),
-    interactiveStream: optionalBoolean(value.interactiveStream),
-    preview: optionalBoolean(value.preview),
-    recording: optionalBoolean(value.recording),
-  }
-}
-
-function normalizePage(value: unknown): BrowserPage | null {
-  if (!isRecord(value) || typeof value.id !== 'string' || !value.id.trim()) return null
-  return {
-    id: value.id,
-    title: optionalString(value.title),
-    url: optionalString(value.url),
-  }
-}
-
-function normalizeCurrentPage(value: unknown): BrowserCurrentPage | undefined {
-  const page = normalizePage(value)
-  if (!page || !isRecord(value)) return undefined
-  return {
-    ...page,
-    canGoBack: optionalBoolean(value.canGoBack),
-    canGoForward: optionalBoolean(value.canGoForward),
-    loading: optionalBoolean(value.loading),
-  }
-}
-
-function normalizeRecording(value: unknown): BrowserRecording | null {
-  if (
-    !isRecord(value)
-    || typeof value.id !== 'string'
-    || typeof value.targetId !== 'string'
-    || typeof value.title !== 'string'
-    || typeof value.startedAt !== 'string'
-    || typeof value.state !== 'string'
-    || !['starting', 'recording', 'finalizing', 'completed'].includes(value.state)
-  ) return null
-  return {
-    id: value.id,
-    targetId: value.targetId,
-    title: value.title,
-    startedAt: value.startedAt,
-    state: value.state as BrowserRecording['state'],
-    finishedAt: optionalString(value.finishedAt),
-    durationMs: optionalNumber(value.durationMs),
-    bytes: optionalNumber(value.bytes),
-    mimeType: optionalString(value.mimeType),
-    filename: optionalString(value.filename),
-    idleTimeoutMs: optionalNumber(value.idleTimeoutMs),
-    idleDeadlineAt: optionalString(value.idleDeadlineAt),
-  }
-}
-
-function normalizeBrowserStatus(value: unknown): BrowserStatusResult {
-  if (!isRecord(value)) return {}
-  const result = isRecord(value.result) ? value.result : value
-  const providerStatus = isRecord(result.status) ? result.status : {}
-  const rawPages = Array.isArray(result.pages)
-    ? result.pages
-    : Array.isArray(result.pageList)
-      ? result.pageList
-      : undefined
-  const pages = rawPages
-    ?.map(normalizePage)
-    .filter((page): page is BrowserPage => Boolean(page))
-  const currentTargetId = optionalString(result.currentTargetId)
-    ?? optionalString(providerStatus.currentTargetId)
-  const selectedPage = pages?.find((page) => page.id === currentTargetId)
-  const normalizedCurrent = normalizeCurrentPage(result.current)
-  const currentDetails = isRecord(result.current)
-    ? result.current
-    : isRecord(result.currentPage)
-      ? result.currentPage
-      : {}
-  const current = normalizedCurrent ?? (selectedPage ? {
-    ...selectedPage,
-    canGoBack: optionalBoolean(currentDetails.canGoBack),
-    canGoForward: optionalBoolean(currentDetails.canGoForward),
-    loading: optionalBoolean(currentDetails.loading),
-  } : undefined)
-
-  return {
-    backend: optionalString(result.backend),
-    presentation: optionalString(result.presentation) ?? optionalString(providerStatus.presentation),
-    capabilities: normalizeCapabilities(result.capabilities) ?? normalizeCapabilities(providerStatus.capabilities),
-    reachable: optionalBoolean(result.reachable) ?? optionalBoolean(providerStatus.reachable),
-    running: optionalBoolean(result.running),
-    pages,
-    currentTargetId,
-    current,
-    recording: result.recording === null ? null : normalizeRecording(result.recording),
-    recordings: Array.isArray(result.recordings)
-      ? result.recordings.map(normalizeRecording).filter((item): item is BrowserRecording => Boolean(item))
-      : undefined,
-    error: optionalString(result.error),
-  }
 }
 
 function currentPageFor(
@@ -297,16 +182,32 @@ export function BrowserPane({
   const streamSocketRef = useRef<WebSocket | null>(null)
   const streamGenerationRef = useRef(0)
   const addressRef = useRef<HTMLInputElement>(null)
-  const statusAbortRef = useRef<AbortController | null>(null)
   const frameAbortRef = useRef<AbortController | null>(null)
   const actionAbortRef = useRef<AbortController | null>(null)
   const frameURLRef = useRef('')
-  const statusRef = useRef<BrowserStatusResult | null>(null)
 
-  const [status, setStatus] = useState<BrowserStatusResult | null>(null)
-  const [statusLoading, setStatusLoading] = useState(true)
-  const [statusError, setStatusError] = useState('')
-  const [statusFailureCount, setStatusFailureCount] = useState(0)
+  const statusSubscription = useSubscription(
+    BrowserStatusTopic,
+    { projectId, threadId },
+    { enabled: active },
+  )
+  const statusIdentity = `${projectId}\u0000${threadId}`
+  const [retainedStatus, setRetainedStatus] = useState<{
+    identity: string
+    data: BrowserStatusResult
+  } | null>(null)
+  const liveStatus: BrowserStatusResult | null = statusSubscription.state === 'ready'
+    ? statusSubscription.data
+    : null
+  const status = liveStatus ?? (
+    statusSubscription.state === 'loading' && retainedStatus?.identity === statusIdentity
+      ? retainedStatus.data
+      : null
+  )
+  const statusLoading = statusSubscription.state === 'loading'
+  const statusError = statusSubscription.state === 'error'
+    ? statusSubscription.error.message
+    : ''
   const [frameURL, setFrameURL] = useState('')
   const [frameLoading, setFrameLoading] = useState(false)
   const [frameError, setFrameError] = useState('')
@@ -325,8 +226,6 @@ export function BrowserPane({
   const [playbackRecording, setPlaybackRecording] = useState<BrowserRecording | null>(null)
   const [playbackLoading, setPlaybackLoading] = useState(false)
   const [playbackError, setPlaybackError] = useState('')
-
-  statusRef.current = status
 
   const pages = useMemo(() => {
     const result = [...(status?.pages ?? [])]
@@ -354,7 +253,7 @@ export function BrowserPane({
   const noSession = Boolean(status) && status?.running === false
   const tablessSession = status?.running === true && !currentPage
   const providerUnavailable = Boolean(status?.error)
-    || (Boolean(statusError) && (!status || statusFailureCount >= 3))
+    || Boolean(statusError)
     || (status?.reachable === false && !noSession)
   const connectionStatus = connectionStatusFor(
     status,
@@ -363,8 +262,14 @@ export function BrowserPane({
   )
 
   useEffect(() => {
+    if (!liveStatus) return
+    setRetainedStatus({ identity: statusIdentity, data: liveStatus })
+  }, [liveStatus, statusIdentity])
+
+  useEffect(() => {
+    if (!active) return
     onStatusChange?.(connectionStatus)
-  }, [connectionStatus, onStatusChange])
+  }, [active, connectionStatus, onStatusChange])
 
   useEffect(() => {
     if (!activeRecording) return
@@ -398,32 +303,6 @@ export function BrowserPane({
     setFrameURL('')
     if (previousURL) URL.revokeObjectURL(previousURL)
   }, [])
-
-  const refreshStatus = useCallback(async (foreground = false) => {
-    const controller = new AbortController()
-    statusAbortRef.current?.abort()
-    statusAbortRef.current = controller
-    if (foreground || !statusRef.current) setStatusLoading(true)
-
-    try {
-      const nextStatus = normalizeBrowserStatus(
-        await getBrowserStatus(projectId, threadId, controller.signal),
-      )
-      if (statusAbortRef.current !== controller) return
-      setStatus(nextStatus)
-      setStatusError('')
-      setStatusFailureCount(0)
-    } catch (reason) {
-      if (controller.signal.aborted || statusAbortRef.current !== controller) return
-      setStatusError(errorMessage(reason, 'Could not reach the browser provider.'))
-      setStatusFailureCount((count) => count + 1)
-    } finally {
-      if (statusAbortRef.current === controller) {
-        statusAbortRef.current = null
-        setStatusLoading(false)
-      }
-    }
-  }, [projectId, threadId])
 
   const refreshFrame = useCallback(async (foreground = false) => {
     const controller = new AbortController()
@@ -482,43 +361,14 @@ export function BrowserPane({
   }, [streamController])
 
   useEffect(() => {
-    if (!active) return
-    let disposed = false
-    let timer = 0
-    async function poll() {
-      await refreshStatus()
-      if (!disposed) timer = window.setTimeout(() => void poll(), statusPollIntervalMs)
-    }
-    void poll()
-    return () => {
-      disposed = true
-      window.clearTimeout(timer)
-      statusAbortRef.current?.abort()
-      statusAbortRef.current = null
-    }
-  }, [active, refreshStatus])
-
-  useEffect(() => {
     if (!desktopBridge) return
-    let refreshTimer = 0
-    const removeStateListener = desktopBridge.onState((nextState) => {
-      if (
-        !active ||
-        nextState.projectId !== projectId ||
-        nextState.threadId !== threadId
-      ) return
-      window.clearTimeout(refreshTimer)
-      refreshTimer = window.setTimeout(() => void refreshStatus(), 50)
-    })
     const removeShortcutListener = desktopBridge.onWorkspaceShortcut((index) => {
       if (active) onWorkspaceShortcut?.(index)
     })
     return () => {
-      window.clearTimeout(refreshTimer)
-      removeStateListener()
       removeShortcutListener()
     }
-  }, [active, desktopBridge, onWorkspaceShortcut, projectId, refreshStatus, threadId])
+  }, [active, desktopBridge, onWorkspaceShortcut])
 
   useEffect(() => {
     if (!active || suppressed || !usesStream || providerUnavailable || status?.running !== true || !currentPage) return
@@ -646,10 +496,8 @@ export function BrowserPane({
   }, [projectId, status?.backend, threadId])
 
   useEffect(() => () => {
-    statusAbortRef.current?.abort()
     frameAbortRef.current?.abort()
     actionAbortRef.current?.abort()
-    statusAbortRef.current = null
     frameAbortRef.current = null
     actionAbortRef.current = null
     if (frameURLRef.current) URL.revokeObjectURL(frameURLRef.current)
@@ -745,8 +593,6 @@ export function BrowserPane({
     try {
       await performBrowserAction(projectId, threadId, { operation, params }, controller.signal)
       if (controller.signal.aborted) return
-      await refreshStatus()
-      if (controller.signal.aborted) return
       if (usesFramePreview) await refreshFrame()
       if (controller.signal.aborted) return
       if (desktopBridge && operation === 'session.start') {
@@ -763,7 +609,7 @@ export function BrowserPane({
         setBusyOperation(null)
       }
     }
-  }, [desktopBridge, projectId, refreshFrame, refreshStatus, threadId, usesFramePreview])
+  }, [desktopBridge, projectId, refreshFrame, threadId, usesFramePreview])
 
   function handleNavigate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -826,7 +672,7 @@ export function BrowserPane({
       setStreamError('')
       setStreamFailed(false)
     }
-    void refreshStatus(true)
+    statusSubscription.retry()
     if (usesFramePreview) void refreshFrame(true)
   }
 

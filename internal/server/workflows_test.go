@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -433,6 +434,396 @@ func strconvQuote(value string) string {
 	return string(contents)
 }
 
+type workflowChildStopWriter struct {
+	once sync.Once
+	done chan struct{}
+}
+
+func (w *workflowChildStopWriter) Write(contents []byte) (int, error) {
+	return len(contents), nil
+}
+
+func (w *workflowChildStopWriter) Close() error {
+	w.once.Do(func() {
+		close(w.done)
+	})
+	return nil
+}
+
+func TestWorkflowProcessWatchesStopOnServerClose(t *testing.T) {
+	key := threadStatusKey{projectID: "project", threadID: "thread"}
+	stopped := make(chan struct{})
+	var stopOnce sync.Once
+	application := &Server{
+		terminal:  &terminalHandler{tmuxPath: "/unused/tmux"},
+		workflows: &workflowManager{},
+		workflowWatches: map[threadStatusKey]*workflowProcessWatch{
+			key: {
+				stop: func() {
+					stopOnce.Do(func() {
+						close(stopped)
+					})
+				},
+			},
+		},
+	}
+
+	if err := application.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("server close did not release the workflow process watch")
+	}
+
+	application.syncWorkflowProcessWatch(key.projectID, key.threadID, []workflowRunRecord{{
+		State:     workflowStateRunning,
+		CreatedAt: time.Now().UTC(),
+	}}, false)
+	application.queueWorkflowProcessReconcile(key.projectID, key.threadID)
+	application.workflowWatchMu.Lock()
+	watches := len(application.workflowWatches)
+	watchesStopped := application.workflowWatchesStopped
+	application.workflowWatchMu.Unlock()
+	application.workflowKickMu.Lock()
+	kicks := len(application.workflowKicks)
+	kicksStopped := application.workflowKicksStopped
+	application.workflowKickMu.Unlock()
+	if watches != 0 || kicks != 0 || !watchesStopped || !kicksStopped {
+		t.Fatalf("workflow lifecycle recreated after close: watches=%d kicks=%d watchStopped=%t kickStopped=%t",
+			watches, kicks, watchesStopped, kicksStopped)
+	}
+}
+
+func TestWorkflowProcessInspectionErrorKeepsRunActiveAndSchedulesRetry(t *testing.T) {
+	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := item.Threads[0]
+	workflows, err := newWorkflowManager(store.DataDirectory())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID := "wf-inspection-retry"
+	runDirectory, err := workflows.runDirectory(item.ID, thread.ID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scriptPath := filepath.Join(runDirectory, workflowScriptFileName)
+	startedAt := time.Now().UTC().Add(-time.Minute)
+	record := workflowRunRecord{
+		Version:    workflowRecordVersion,
+		ID:         runID,
+		ProjectID:  item.ID,
+		ThreadID:   thread.ID,
+		Token:      "inspection-retry-token",
+		State:      workflowStateRunning,
+		Attempt:    1,
+		Name:       "Inspection retry",
+		ScriptPath: scriptPath,
+		ProcessID:  "process-inspection-retry",
+		CreatedAt:  startedAt,
+		StartedAt:  &startedAt,
+		UpdatedAt:  startedAt,
+	}
+	if err := workflows.create(record, []byte("return null\n"), workflowRunnerManifest{
+		Version:    workflowManifestVersion,
+		RunID:      runID,
+		Attempt:    1,
+		Endpoint:   "http://127.0.0.1.invalid/api/thread",
+		Token:      record.Token,
+		ScriptPath: scriptPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	terminal := newTerminalHandlerUnreconciledWithOptions(store, originPolicy{}, "kcv-inspection-retry")
+	terminal.tmuxPath = filepath.Join(t.TempDir(), "missing-tmux")
+	application := &Server{
+		projects:     store,
+		terminal:     terminal,
+		workflows:    workflows,
+		stateChanges: newStateChangeBroker(),
+	}
+	defer application.stopWorkflowProcessWatches()
+
+	records, transient := application.reconcileWorkflowProcessesDetailed(item, thread, []workflowRunRecord{record})
+	if !transient || len(records) != 1 || records[0].State != workflowStateRunning {
+		t.Fatalf("transient workflow inspection = retry %t, records %#v", transient, records)
+	}
+	persisted, err := workflows.get(item.ID, thread.ID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.State != workflowStateRunning || persisted.FinishedAt != nil {
+		t.Fatalf("transient inspection settled workflow: %#v", persisted)
+	}
+
+	application.syncWorkflowProcessWatch(item.ID, thread.ID, records, transient)
+	application.workflowWatchMu.Lock()
+	watch := application.workflowWatches[threadStatusKey{projectID: item.ID, threadID: thread.ID}]
+	var retryDelay time.Duration
+	retryScheduled := false
+	if watch != nil {
+		retryDelay = watch.retryDelay
+		retryScheduled = watch.retry != nil
+	}
+	application.workflowWatchMu.Unlock()
+	if watch == nil || !retryScheduled || retryDelay != workflowProcessRetryMin {
+		t.Fatalf("transient inspection retry watch = %#v, scheduled=%t delay=%s",
+			watch, retryScheduled, retryDelay)
+	}
+}
+
+func TestWorkflowReconcileCannotFailANewerAttempt(t *testing.T) {
+	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := newIsolatedServerHandler(t, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := handler.(*Server)
+	t.Cleanup(func() {
+		_ = application.Close(context.Background())
+	})
+	thread := item.Threads[0]
+	runID := "wf-newer-attempt"
+	runDirectory, err := application.workflows.runDirectory(item.ID, thread.ID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	createdAt := now.Add(-time.Hour)
+	current := workflowRunRecord{
+		Version:    workflowRecordVersion,
+		ID:         runID,
+		ProjectID:  item.ID,
+		ThreadID:   thread.ID,
+		Token:      "newer-attempt-token",
+		State:      workflowStateQueued,
+		Attempt:    2,
+		Name:       "Newer attempt",
+		ScriptPath: filepath.Join(runDirectory, workflowScriptFileName),
+		CreatedAt:  createdAt,
+		UpdatedAt:  now,
+	}
+	if err := application.workflows.create(current, []byte("return null\n"), workflowRunnerManifest{
+		Version:    workflowManifestVersion,
+		RunID:      runID,
+		Attempt:    current.Attempt,
+		Endpoint:   "http://127.0.0.1.invalid/api/thread",
+		Token:      current.Token,
+		ScriptPath: current.ScriptPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	oldStartedAt := createdAt
+	stale := current
+	stale.State = workflowStateRunning
+	stale.Attempt = 1
+	stale.ProcessID = "old-process"
+	stale.StartedAt = &oldStartedAt
+	stale.UpdatedAt = createdAt
+	records, transient := application.reconcileWorkflowProcessesDetailed(item, thread, []workflowRunRecord{stale})
+	if transient {
+		t.Fatal("stale workflow attempt reconciliation reported a transient failure")
+	}
+	if len(records) != 1 || records[0].Attempt != current.Attempt || records[0].State != workflowStateQueued {
+		t.Fatalf("reconciled workflow records = %#v", records)
+	}
+	persisted, err := application.workflows.get(item.ID, thread.ID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Attempt != current.Attempt || persisted.State != workflowStateQueued ||
+		persisted.ProcessID != "" || persisted.FinishedAt != nil {
+		t.Fatalf("stale reconciliation changed the newer attempt: %#v", persisted)
+	}
+	if !workflowProcessIsStarting(persisted, now.Add(workflowProcessStartupGrace/2)) {
+		t.Fatalf("newer queued attempt did not receive a fresh startup grace period: %#v", persisted)
+	}
+}
+
+func TestWorkflowProcessWatchRecoversAfterRestartAndSettlesRunnerDisappearance(t *testing.T) {
+	_, socketName := isolatedTmuxServer(t)
+	dataDirectory := t.TempDir()
+	projectsPath := filepath.Join(dataDirectory, "projects.json")
+	store, err := project.NewStore(projectsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRestartContext, stopBeforeRestart := context.WithCancel(context.Background())
+	handler, err := NewWithOptions(store, Options{
+		TmuxSocketName: socketName,
+		CleanupContext: beforeRestartContext,
+		DisableCleanup: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRestart := handler.(*Server)
+	if beforeRestart.workflows.nodePath == "" {
+		stopBeforeRestart()
+		t.Skip("node is not installed")
+	}
+	thread := item.Threads[0]
+
+	runnerCommand := shellCommand(beforeRestart.workflows.nodePath, []string{
+		"-e", "setInterval(() => {}, 1000)",
+	})
+	window, err := beforeRestart.terminal.newProcessWindow(item, thread, "workflow-runner", runnerCommand)
+	if err != nil {
+		stopBeforeRestart()
+		t.Fatal(err)
+	}
+	runID := "wf-runner-gone"
+	createdAt := time.Now().UTC().Add(-workflowProcessStartupGrace - time.Second)
+	runDirectory, err := beforeRestart.workflows.runDirectory(item.ID, thread.ID, runID)
+	if err != nil {
+		stopBeforeRestart()
+		t.Fatal(err)
+	}
+	scriptPath := filepath.Join(runDirectory, workflowScriptFileName)
+	record := workflowRunRecord{
+		Version:       workflowRecordVersion,
+		ID:            runID,
+		ProjectID:     item.ID,
+		ThreadID:      thread.ID,
+		Token:         "runner-disappearance-token",
+		State:         workflowStateRunning,
+		Attempt:       1,
+		Name:          "Runner disappearance",
+		ScriptPath:    scriptPath,
+		ProcessID:     window.ID,
+		CreatedAt:     createdAt,
+		StartedAt:     &createdAt,
+		UpdatedAt:     createdAt,
+		CloseChildren: true,
+	}
+	manifest := workflowRunnerManifest{
+		Version:    workflowManifestVersion,
+		RunID:      runID,
+		Attempt:    1,
+		Endpoint:   "http://127.0.0.1.invalid/api/thread",
+		Token:      record.Token,
+		ScriptPath: scriptPath,
+	}
+	if err := beforeRestart.workflows.create(record, []byte("return null\n"), manifest); err != nil {
+		stopBeforeRestart()
+		t.Fatal(err)
+	}
+
+	child, err := store.AddThreadWithOptions(item.ID, "Workflow child", project.AddThreadOptions{
+		ParentThreadID:  thread.ID,
+		WorkflowRunID:   runID,
+		WorkflowAgentID: "agent-runner-gone",
+	})
+	if err != nil {
+		stopBeforeRestart()
+		t.Fatal(err)
+	}
+	stopBeforeRestart()
+
+	restartedStore, err := project.NewStore(projectsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedContext, stopRestarted := context.WithCancel(context.Background())
+	t.Cleanup(stopRestarted)
+	handler, err = NewWithOptions(restartedStore, Options{
+		TmuxSocketName: socketName,
+		CleanupContext: restartedContext,
+		DisableCleanup: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := handler.(*Server)
+
+	childDone := make(chan struct{})
+	childProcess := &piNativeProcess{
+		key:     piNativeProcessKey{ProjectID: item.ID, ThreadID: child.ID},
+		command: &exec.Cmd{},
+		stdin:   &workflowChildStopWriter{done: childDone},
+		done:    childDone,
+	}
+	application.terminal.nativePi.mu.Lock()
+	application.terminal.nativePi.processes[childProcess.key] = childProcess
+	application.terminal.nativePi.mu.Unlock()
+
+	application.workflowWatchMu.Lock()
+	_, lifecycleOwned := application.workflowWatches[threadStatusKey{projectID: item.ID, threadID: thread.ID}]
+	application.workflowWatchMu.Unlock()
+	if !lifecycleOwned {
+		t.Fatal("restarted server did not recover the workflow-owned process watch")
+	}
+	beforeDisappearance, err := application.workflows.get(item.ID, thread.ID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if beforeDisappearance.State != workflowStateRunning {
+		t.Fatalf("workflow settled before its runner disappeared: %#v", beforeDisappearance)
+	}
+
+	output, err := application.terminal.tmuxCommand("send-keys", "-t", window.TmuxID, "C-c").CombinedOutput()
+	if err != nil {
+		t.Fatalf("interrupt workflow runner: %v: %s", err, output)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	var settled workflowRunRecord
+	for time.Now().Before(deadline) {
+		settled, err = application.workflows.get(item.ID, thread.ID, runID)
+		if err == nil && settled.State == workflowStateFailed && channelClosed(childDone) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settled.State != workflowStateFailed ||
+		settled.Error != "Workflow process exited before reporting a final result." ||
+		settled.FinishedAt == nil {
+		t.Fatalf("workflow after runner disappearance = %#v", settled)
+	}
+	if !channelClosed(childDone) {
+		t.Fatal("workflow child Pi process was not stopped")
+	}
+
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		application.workflowWatchMu.Lock()
+		ownedWatches := len(application.workflowWatches)
+		application.workflowWatchMu.Unlock()
+		application.terminal.tmuxWatchMu.Lock()
+		tmuxWatches := len(application.terminal.tmuxWatches)
+		application.terminal.tmuxWatchMu.Unlock()
+		if ownedWatches == 0 && tmuxWatches == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("settled workflow retained its lifecycle-owned tmux watch")
+}
+
 func TestSavedWorkflowAPISavesListsAndRunsCommandsWithActivation(t *testing.T) {
 	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
 	if err != nil {
@@ -804,9 +1195,53 @@ func TestWorkflowPauseResumePreservesCompletedAgentValues(t *testing.T) {
 		t.Fatalf("idempotent pause status=%d stops=%d body=%s", pauseAgainResponse.Code, stops, pauseAgainResponse.Body.String())
 	}
 
+	resumeLaunchEntered := make(chan struct{})
+	resumeLaunchRelease := make(chan struct{})
+	blockingLauncher := func(_ project.Project, _ project.Thread, _ string, _ string) (processWindow, error) {
+		launches++
+		close(resumeLaunchEntered)
+		<-resumeLaunchRelease
+		return processWindow{ID: fmt.Sprintf("process-%d", launches)}, nil
+	}
+	application.workflowProcessLauncher = blockingLauncher
 	resume := httptest.NewRequest(http.MethodPost, basePath+"/"+record.ID+"/resume", bytes.NewBufferString(`{}`))
 	resumeResponse := httptest.NewRecorder()
-	handler.ServeHTTP(resumeResponse, resume)
+	resumeDone := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(resumeResponse, resume)
+		close(resumeDone)
+	}()
+	select {
+	case <-resumeLaunchEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("resume did not reach the workflow launcher")
+	}
+
+	queuedResume, err := application.workflows.get(item.ID, thread.ID, record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queuedResume.State != workflowStateQueued || queuedResume.Attempt != 2 ||
+		queuedResume.ProcessID != "" || queuedResume.StartedAt != nil ||
+		!workflowProcessIsStarting(queuedResume, time.Now()) {
+		t.Fatalf("workflow awaiting resumed launch = %#v", queuedResume)
+	}
+	// The injected launcher has already been captured by resumeWorkflow and is
+	// blocked above. Temporarily enable real reconciliation to prove that this
+	// queued attempt receives startup grace instead of being failed while its
+	// replacement process has not been persisted yet.
+	application.workflowProcessLauncher = nil
+	reconciled, transient := application.reconcileWorkflowProcessesDetailed(item, thread, []workflowRunRecord{queuedResume})
+	if transient || len(reconciled) != 1 || reconciled[0].State != workflowStateQueued {
+		t.Fatalf("workflow during resumed launch = transient %t, records %#v", transient, reconciled)
+	}
+	application.workflowProcessLauncher = blockingLauncher
+	close(resumeLaunchRelease)
+	select {
+	case <-resumeDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("resume did not finish after releasing the workflow launcher")
+	}
 	if resumeResponse.Code != http.StatusOK {
 		t.Fatalf("resume status = %d body=%s", resumeResponse.Code, resumeResponse.Body.String())
 	}
@@ -815,6 +1250,7 @@ func TestWorkflowPauseResumePreservesCompletedAgentValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	if resumed.State != workflowStateQueued || resumed.Attempt != 2 || launches != 2 ||
+		resumed.StartedAt != nil || !workflowProcessIsStarting(resumed, time.Now()) ||
 		resumed.Agents[0].State != workflowAgentStateFinished ||
 		resumed.Agents[1].State != workflowAgentStatePaused || resumed.Agents[1].ChildRunID != 0 || resumed.Agents[1].Response != nil ||
 		resumed.Agents[2].State != workflowAgentStatePaused || resumed.Agents[2].ValueOmitted {

@@ -14,9 +14,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/dire-kiwi/kiwi-code/internal/broadcast"
 	"github.com/dire-kiwi/kiwi-code/internal/browsercontrol"
 	"github.com/dire-kiwi/kiwi-code/internal/browserhost"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
@@ -35,17 +35,25 @@ type Server struct {
 	threadUsage               *threadUsageTracker
 	contextStatuses           *contextStatusTracker
 	threadMessages            *childThreadMessageStore
-	threadStatusChanges       *broadcast.Broker[threadStatusKey]
+	stateChanges              *stateChangeBroker
+	browserStateInvalidations browserStateInvalidationThrottle
 	workflows                 *workflowManager
 	plans                     *threadPlanManager
 	sessionClosures           *sessionClosureLog
 	agentSkills               *agentSkillInstaller
+	instanceIDOnce            sync.Once
 	instanceID                string
 	restart                   func()
 	allowChildThreadCreation  bool
 	childCreationBeforeCommit func(project.Thread)
 	workflowProcessLauncher   workflowProcessLauncher
 	workflowProcessStopper    workflowProcessStopper
+	workflowWatchMu           sync.Mutex
+	workflowWatches           map[threadStatusKey]*workflowProcessWatch
+	workflowWatchesStopped    bool
+	workflowKickMu            sync.Mutex
+	workflowKicks             map[threadStatusKey]*workflowProcessKick
+	workflowKicksStopped      bool
 	assets                    fs.FS
 	static                    http.Handler
 	handler                   http.Handler
@@ -126,7 +134,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 		threadUsage:         usage,
 		contextStatuses:     newContextStatusTracker(),
 		threadMessages:      newChildThreadMessageStore(),
-		threadStatusChanges: broadcast.NewBroker[threadStatusKey](broadcast.DefaultMaxPending),
+		stateChanges:        newStateChangeBroker(),
 		workflows:           workflows,
 		plans:               plans,
 		sessionClosures:     sessionClosures,
@@ -138,6 +146,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	}
 	server.allowChildThreadCreation = childThreadCreationEnabled
 	terminal.threadStatusChanged = server.notifyThreadStatusChanged
+	terminal.workflowChanged = server.queueWorkflowProcessReconcile
 	terminal.budgetReached = server.threadBudgetReached
 	terminal.nativePi.usageReporter = func(key piNativeProcessKey, sessionID string, totals threadUsageTotals) {
 		if err := server.threadUsage.report(key.ProjectID, key.ThreadID, sessionID, totals); err != nil {
@@ -152,10 +161,13 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	if err := server.recoverPendingThreadCreationRollbacks(); err != nil {
 		return nil, fmt.Errorf("recover pending thread creation rollbacks: %w", err)
 	}
+	server.recoverWorkflowProcessWatches()
+	server.stopWorkflowProcessWatchesOnContext(options.CleanupContext)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", server.health)
 	mux.HandleFunc("POST /api/restart", server.restartApplication)
+	mux.HandleFunc("GET /api/state", server.serveStateSocket)
 	mux.HandleFunc("GET /api/settings", server.getSettings)
 	mux.HandleFunc("PUT /api/settings", server.updateSettings)
 	mux.HandleFunc("GET /api/settings/agent-skills", server.getAgentSkillStatus)
@@ -171,12 +183,9 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("GET /api/tmux/terminal", server.terminal.serveTmuxBrowserTerminal)
 	mux.HandleFunc("GET /api/projects", server.listProjects)
 	mux.HandleFunc("GET /api/filesystem/directories", server.listDirectorySuggestions)
-	mux.HandleFunc("GET /api/events", server.streamEvents)
-	mux.HandleFunc("GET /api/projects/events", server.streamProjects)
 	mux.HandleFunc("POST /api/projects", server.addProject)
 	mux.HandleFunc("PUT /api/projects/order", server.reorderProjects)
 	mux.HandleFunc("GET /api/pi/activity", server.listPiActivity)
-	mux.HandleFunc("GET /api/pi/activity/events", server.streamPiActivity)
 	mux.HandleFunc("GET /api/thread-usage", server.listThreadUsage)
 	mux.HandleFunc("PATCH /api/projects/{id}", server.updateProject)
 	mux.HandleFunc("DELETE /api/projects/{id}", server.deleteProject)
@@ -229,7 +238,6 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("DELETE /api/projects/{id}/threads/{threadId}/pi/activity", server.acknowledgePiActivity)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/context/status", server.updateContextStatus)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/tmux/activity", server.touchThreadTmuxActivity)
-	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/events", server.streamThreadEvents)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/git/branches", server.listGitBranches)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/git/branches", server.createGitBranch)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/git/branches/switch", server.switchGitBranch)
@@ -294,6 +302,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Close shuts down server-owned browser processes and contexts.
 func (s *Server) Close(ctx context.Context) error {
+	s.stopWorkflowProcessWatches()
 	if s.browser == nil {
 		return nil
 	}
@@ -303,7 +312,7 @@ func (s *Server) Close(ctx context.Context) error {
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":     "ok",
-		"instanceId": s.instanceID,
+		"instanceId": s.serverInstanceID(),
 	})
 }
 
@@ -316,7 +325,7 @@ func (s *Server) restartApplication(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Connection", "close")
 	writeJSON(w, http.StatusAccepted, map[string]string{
 		"status":     "restarting",
-		"instanceId": s.instanceID,
+		"instanceId": s.serverInstanceID(),
 	})
 	s.restart()
 }
@@ -357,6 +366,15 @@ func (s *Server) recoverPendingThreadCreationRollbacks() error {
 
 func newServerInstanceID() string {
 	return strconv.FormatInt(time.Now().UnixNano(), 36) + "-" + strconv.Itoa(os.Getpid())
+}
+
+func (s *Server) serverInstanceID() string {
+	s.instanceIDOnce.Do(func() {
+		if strings.TrimSpace(s.instanceID) == "" {
+			s.instanceID = newServerInstanceID()
+		}
+	})
+	return s.instanceID
 }
 
 func (s *Server) listProfiles(w http.ResponseWriter, _ *http.Request) {
@@ -1023,6 +1041,7 @@ func (s *Server) deleteThreadTree(projectID, threadID string, archivedBefore *ti
 }
 
 func (s *Server) finishDeletedThreadRuntime(projectID, threadID, context string) {
+	s.refreshWorkflowProcessWatch(projectID, threadID)
 	if err := s.terminal.removeCodingAgentExitMarkersForThread(projectID, threadID); err != nil {
 		description := "deleted"
 		if context != "" {

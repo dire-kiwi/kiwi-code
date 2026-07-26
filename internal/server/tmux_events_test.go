@@ -43,13 +43,13 @@ func TestTmuxControlWatchIsSharedAndUsesCanonicalSessions(t *testing.T) {
 printf '%s\n' "$*" >> "$TMUX_WATCH_ARGS_FILE"
 case "$*" in
   *"has-session"*) exit 0 ;;
-  *"-C attach-session"*)
-    if IFS= read -r line; then
-      printf '%s\n' "$line" >> "$TMUX_WATCH_INPUT_FILE"
-    fi
-    printf '%%window-add @1\n'
-    printf '%%subscription-changed kiwi-code-status $1 @1 0 %%1 : node\n'
-    while IFS= read -r line; do :; done
+	  *"-C attach-session"*)
+	    if IFS= read -r line; then
+	      printf '%s\n' "$line" >> "$TMUX_WATCH_INPUT_FILE"
+	    fi
+	    printf '%%window-add @1\n'
+	    printf '%%subscription-changed kiwi-code-status $1 @1 0 %%1 : node\n'
+	    while IFS= read -r line; do :; done
     exit 0
     ;;
 esac
@@ -60,11 +60,15 @@ exit 1
 	}
 
 	updates := make(chan threadStatusKey, 8)
+	workflowUpdates := make(chan threadStatusKey, 8)
 	handler := &terminalHandler{
 		tmuxPath:   fakeTmux,
 		tmuxSocket: "watch-test",
 		threadStatusChanged: func(projectID, threadID string) {
 			updates <- threadStatusKey{projectID: projectID, threadID: threadID}
+		},
+		workflowChanged: func(projectID, threadID string) {
+			workflowUpdates <- threadStatusKey{projectID: projectID, threadID: threadID}
 		},
 	}
 
@@ -75,10 +79,33 @@ exit 1
 			t.Fatalf("control update = %#v", update)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("tmux control notification was not published")
+		t.Fatal("initial tmux control status was not published")
+	}
+	select {
+	case update := <-workflowUpdates:
+		if update != (threadStatusKey{projectID: "project", threadID: "thread"}) {
+			t.Fatalf("initial workflow reconciliation = %#v", update)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("process control watch did not run its initial workflow reconciliation")
 	}
 
 	waitForTmuxControlSubscriptions(t, inputPath, 2)
+	statusUpdateCount := 1
+	workflowUpdateCount := 1
+	updateDeadline := time.NewTimer(2 * time.Second)
+	defer updateDeadline.Stop()
+	for statusUpdateCount < 4 || workflowUpdateCount < 2 {
+		select {
+		case <-updates:
+			statusUpdateCount++
+		case <-workflowUpdates:
+			workflowUpdateCount++
+		case <-updateDeadline.C:
+			t.Fatalf("control notifications = status %d, workflow %d; want at least 4 and 2",
+				statusUpdateCount, workflowUpdateCount)
+		}
+	}
 	stopSecond := handler.watchThreadTmux("project", "thread")
 	terminalSession := tmuxSessionName("project", "thread", "terminal")
 	toolsSession := tmuxSessionName("project", "thread", "process")

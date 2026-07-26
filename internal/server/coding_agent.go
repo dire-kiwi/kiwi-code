@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -115,26 +114,33 @@ func explicitPiReasoningLevels(model piModelCapability) []string {
 }
 
 func (h *terminalHandler) listCodingAgents(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), codingAgentModelDiscoveryTimeout)
+	configs, err := h.codingAgentConfigs(r.Context(), r.URL.Query().Get("projectId"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "Project not found.")
+		return
+	}
+	writeJSON(w, http.StatusOK, configs)
+}
+
+func (h *terminalHandler) codingAgentConfigs(parent context.Context, projectID string) ([]codingAgentConfig, error) {
+	ctx, cancel := context.WithTimeout(parent, codingAgentModelDiscoveryTimeout)
 	defer cancel()
 
 	discoveryCwd := ""
-	if projectID := strings.TrimSpace(r.URL.Query().Get("projectId")); projectID != "" {
-		if h.projects == nil {
-			writeError(w, http.StatusNotFound, "Project not found.")
-			return
+	projectID = strings.TrimSpace(projectID)
+	if projectID != "" {
+		if h == nil || h.projects == nil {
+			return nil, project.ErrNotFound
 		}
 		item, err := h.projects.Get(projectID)
 		if err != nil {
-			writeError(w, http.StatusNotFound, "Project not found.")
-			return
+			return nil, err
 		}
 		discoveryCwd = item.Path
 	}
-
 	configuredAgents := []project.CodingAgentSetting{}
 	needsGPTModels := false
-	if h.projects != nil {
+	if h != nil && h.projects != nil {
 		for _, configured := range h.projects.GetSettings().CodingAgents {
 			if configured.Kind != project.CodingAgentKindClaude && configured.Kind != project.CodingAgentKindClaudeGPT {
 				continue
@@ -184,7 +190,7 @@ func (h *terminalHandler) listCodingAgents(w http.ResponseWriter, r *http.Reques
 		Models:         piModels,
 		ThinkingLevels: piThinkingLevels,
 	}}
-	if h.projects != nil {
+	if h != nil && h.projects != nil {
 		for _, configured := range configuredAgents {
 			models := claudeModels
 			thinkingLevels := claudeThinkingLevels
@@ -200,7 +206,7 @@ func (h *terminalHandler) listCodingAgents(w http.ResponseWriter, r *http.Reques
 			})
 		}
 	}
-	writeJSON(w, http.StatusOK, configs)
+	return configs, nil
 }
 
 func clonePiModelCapabilities(models []piModelCapability) []piModelCapability {
@@ -338,7 +344,10 @@ func discoverPiModelCapabilitiesFromRPCInDirectory(ctx context.Context, path, cw
 	if cwd != "" {
 		command.Dir = cwd
 	}
-	command.Env = append(os.Environ(), "NO_COLOR=1", "PI_SKIP_VERSION_CHECK=1")
+	// Cmd.Environ updates PWD to match Dir. Using os.Environ directly leaves
+	// project-scoped discovery with the server's PWD, and on platforms with
+	// canonical path aliases it can disagree with the actual working directory.
+	command.Env = append(command.Environ(), "NO_COLOR=1", "PI_SKIP_VERSION_CHECK=1")
 	command.Stdin = strings.NewReader("{\"type\":\"get_available_models\"}\n")
 	output, err := command.Output()
 	if err != nil {

@@ -4,9 +4,6 @@ import type {
   AppSettings,
   BrowserActionRequest,
   BrowserActionResponse,
-  BrowserStatusResult,
-  CleanupOverview,
-  CodingAgentConfig,
   DirectorySuggestion,
   GitBranchState,
   LocalEnvironment,
@@ -15,10 +12,8 @@ import type {
   Project,
   SandboxConfig,
   SandboxConfigState,
-  SessionClosureOverview,
   Thread,
   SavedWorkflow,
-  TmuxBrowserSession,
   TmuxWindow,
   WorkflowRun,
 } from './types'
@@ -84,10 +79,6 @@ export async function waitForApplicationRestart(instanceId: string, timeoutMs = 
   throw new Error('Timed out waiting for Kiwi Code to restart.')
 }
 
-export function getSettings(signal?: AbortSignal) {
-  return request<AppSettings>('/api/settings', { signal })
-}
-
 export function updateSettings(input: string | Partial<Pick<
   AppSettings,
   'worktreeBasePath' | 'archivedThreadRetentionDays' | 'orphanedWorktreeRetentionDays' | 'subAgentNestingDepth'
@@ -99,22 +90,11 @@ export function updateSettings(input: string | Partial<Pick<
   })
 }
 
-export function getGlobalSandboxConfig(signal?: AbortSignal) {
-  return request<SandboxConfigState>('/api/sandbox/config', { signal })
-}
-
 export function updateGlobalSandboxConfig(config: SandboxConfig) {
   return request<SandboxConfigState>('/api/sandbox/config', {
     method: 'PUT',
     body: JSON.stringify(config),
   })
-}
-
-export function getThreadSandboxConfig(projectId: string, threadId: string, signal?: AbortSignal) {
-  return request<SandboxConfigState>(
-    `/api/projects/${projectId}/threads/${threadId}/sandbox/config`,
-    { signal },
-  )
 }
 
 export function updateThreadSandboxConfig(projectId: string, threadId: string, config: SandboxConfig) {
@@ -127,33 +107,12 @@ export function updateThreadSandboxConfig(projectId: string, threadId: string, c
   )
 }
 
-export function getCleanupOverview(signal?: AbortSignal) {
-  return request<CleanupOverview>('/api/cleanup', { signal })
-}
-
-export function getSessionClosureLog(signal?: AbortSignal) {
-  return request<SessionClosureOverview>('/api/session-closures', { signal, cache: 'no-store' })
-}
-
 export function touchThreadTmuxActivity(projectId: string, threadId: string, signal?: AbortSignal) {
   return request<void>(`${threadPath(projectId, threadId)}/tmux/activity`, { method: 'PUT', signal })
 }
 
-export function getAgentSkillStatus(signal?: AbortSignal) {
-  return request<AgentSkillStatus>('/api/settings/agent-skills', { signal })
-}
-
 export function installAgentSkill() {
   return request<AgentSkillStatus>('/api/settings/agent-skills', { method: 'POST' })
-}
-
-export function listCodingAgents(signal?: AbortSignal, projectId?: string) {
-  const query = projectId ? `?${new URLSearchParams({ projectId }).toString()}` : ''
-  return request<CodingAgentConfig[]>(`/api/coding-agents${query}`, { signal })
-}
-
-export function listProfiles(signal?: AbortSignal) {
-  return request<Profile[]>('/api/profiles', { signal })
 }
 
 export function createProfile(name: string) {
@@ -161,14 +120,6 @@ export function createProfile(name: string) {
     method: 'POST',
     body: JSON.stringify({ name }),
   })
-}
-
-export function listProjects(signal?: AbortSignal) {
-  return request<Project[]>('/api/projects', { signal })
-}
-
-export function listTmuxSessions(signal?: AbortSignal) {
-  return request<TmuxBrowserSession[]>('/api/tmux/sessions', { signal })
 }
 
 export function createProject(input: { name: string; path: string; profileId: string }) {
@@ -273,10 +224,6 @@ function workflowPath(projectId: string, threadId: string, runId?: string) {
   return runId ? `${base}/${encodeURIComponent(runId)}` : base
 }
 
-export function getWorkflow(projectId: string, threadId: string, runId: string, signal?: AbortSignal) {
-  return request<WorkflowRun>(workflowPath(projectId, threadId, runId), { signal, cache: 'no-store' })
-}
-
 export function pauseWorkflow(projectId: string, threadId: string, runId: string) {
   return request<WorkflowRun>(`${workflowPath(projectId, threadId, runId)}/pause`, {
     method: 'POST',
@@ -350,10 +297,6 @@ export function acknowledgePiThreadActivity(projectId: string, threadId: string)
   return request<void>(`${threadPath(projectId, threadId)}/pi/activity`, { method: 'DELETE' })
 }
 
-export function threadEventsPath(projectId: string, threadId: string) {
-  return apiUrl(`${threadPath(projectId, threadId)}/events`)
-}
-
 export function threadPlanDownloadUrl(projectId: string, threadId: string, planId: string) {
   return apiUrl(`${threadPath(projectId, threadId)}/plans/${encodeURIComponent(planId)}`)
 }
@@ -384,13 +327,6 @@ export async function getThreadPlanMarkdown(
 
 function browserPath(projectId: string, threadId: string) {
   return `${threadPath(projectId, threadId)}/browser`
-}
-
-export function getBrowserStatus(projectId: string, threadId: string, signal?: AbortSignal) {
-  return request<BrowserStatusResult | BrowserActionResponse<BrowserStatusResult>>(browserPath(projectId, threadId), {
-    signal,
-    cache: 'no-store',
-  })
 }
 
 export function performBrowserAction<Result = unknown>(
@@ -444,10 +380,6 @@ export async function getBrowserFrame(
     throw new Error(message)
   }
   return response.blob()
-}
-
-export function listProjectGitBranches(projectId: string, signal?: AbortSignal) {
-  return request<GitBranchState>(`/api/projects/${encodeURIComponent(projectId)}/git/branches`, { signal })
 }
 
 function gitBranchesPath(projectId: string, threadId: string) {

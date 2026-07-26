@@ -1,0 +1,556 @@
+{
+  "protocolVersion": 1,
+  "serverMessages": [
+    {
+      "t": "ready",
+      "protocol": 1,
+      "instanceId": "fixture-instance",
+      "serverTime": "2026-07-26T12:34:56Z"
+    },
+    {
+      "t": "snap",
+      "id": 1,
+      "seq": 1,
+      "data": []
+    },
+    {
+      "t": "event",
+      "id": 1,
+      "seq": 2,
+      "data": {
+        "reserved": true
+      }
+    },
+    {
+      "t": "suberr",
+      "id": 2,
+      "error": "Fixture subscription was rejected."
+    },
+    {
+      "t": "subend",
+      "id": 3,
+      "reason": "Fixture subscription ended."
+    },
+    {
+      "t": "pong",
+      "ts": 1721997296000
+    }
+  ],
+  "topics": {
+    "agentActivity": [
+      {
+        "projectId": "project-1",
+        "threadId": "thread-1",
+        "state": "working",
+        "updatedAt": "2026-07-26T12:34:56Z"
+      }
+    ],
+    "agentSkills": {
+      "name": "kiwi-code-processes",
+      "path": "/workspace/skills",
+      "installed": true,
+      "upToDate": true,
+      "skills": [
+        {
+          "name": "kiwi-code-threads",
+          "path": "/workspace/skills/kiwi-code-threads",
+          "installed": true,
+          "upToDate": true
+        }
+      ]
+    },
+    "browser.recordings": [
+      {
+        "id": "rec-fixture",
+        "state": "completed",
+        "targetId": "page-fixture",
+        "title": "Fixture recording",
+        "startedAt": "2026-07-26T12:34:56Z",
+        "finishedAt": "2026-07-26T12:35:56Z",
+        "durationMs": 60000,
+        "bytes": 1024,
+        "mimeType": "video/webm",
+        "filename": "fixture.webm"
+      }
+    ],
+    "browser.status": {
+      "backend": "headless-chrome",
+      "presentation": "stream",
+      "capabilities": {
+        "nativeView": false,
+        "interactiveStream": true,
+        "preview": true,
+        "recording": true
+      },
+      "reachable": true,
+      "running": true,
+      "pages": [
+        {
+          "id": "page-fixture",
+          "title": "Fixture page",
+          "url": "https://example.test/"
+        }
+      ],
+      "currentTargetId": "page-fixture",
+      "current": {
+        "id": "page-fixture",
+        "title": "Fixture page",
+        "url": "https://example.test/",
+        "canGoBack": false,
+        "canGoForward": true,
+        "loading": false
+      },
+      "recording": {
+        "id": "rec-active",
+        "state": "recording",
+        "targetId": "page-fixture",
+        "title": "Active fixture recording",
+        "startedAt": "2026-07-26T12:33:56Z",
+        "idleTimeoutMs": 60000,
+        "idleDeadlineAt": "2026-07-26T12:34:56Z"
+      },
+      "recordings": [
+        {
+          "id": "rec-active",
+          "state": "recording",
+          "targetId": "page-fixture",
+          "title": "Active fixture recording",
+          "startedAt": "2026-07-26T12:33:56Z",
+          "idleTimeoutMs": 60000,
+          "idleDeadlineAt": "2026-07-26T12:34:56Z"
+        }
+      ]
+    },
+    "cleanup": {
+      "generatedAt": "2026-07-26T12:34:56Z",
+      "archivedThreadRetentionDays": 30,
+      "orphanedWorktreeRetentionDays": 30,
+      "threads": [
+        {
+          "projectId": "project-1",
+          "projectName": "Fixture project",
+          "threadId": "thread-archived",
+          "threadTitle": "Archived fixture thread",
+          "archivedAt": "2026-07-26T12:34:56Z",
+          "scheduledDeletionAt": "2026-07-27T12:34:56Z"
+        }
+      ],
+      "worktrees": [
+        {
+          "projectId": "project-1",
+          "projectName": "Fixture project",
+          "threadId": "thread-orphaned",
+          "threadTitle": "Orphaned fixture thread",
+          "worktreePath": "/workspace/worktrees/orphaned",
+          "branch": "fixture/orphaned",
+          "detachedAt": "2026-07-26T12:34:56Z",
+          "scheduledDeletionAt": "2026-07-27T12:34:56Z",
+          "hasUncommittedChanges": true,
+          "inspectionError": "Fixture inspection warning."
+        }
+      ]
+    },
+    "codingAgents": [
+      {
+        "id": "pi",
+        "label": "Pi",
+        "models": [
+          {
+            "id": "openai/gpt-5",
+            "label": "GPT-5"
+          }
+        ],
+        "thinkingLevels": [
+          {
+            "id": "high",
+            "label": "High"
+          }
+        ]
+      }
+    ],
+    "git.branches": {
+      "isRepository": true,
+      "current": "main",
+      "detached": false,
+      "branches": [
+        {
+          "name": "main",
+          "current": true
+        }
+      ]
+    },
+    "processWebServers": [
+      {
+        "projectId": "project-1",
+        "projectName": "Fixture project",
+        "threadId": "thread-1",
+        "threadTitle": "Fixture thread",
+        "processId": "process-1",
+        "processName": "Vite",
+        "url": "http://127.0.0.1:5173"
+      }
+    ],
+    "profiles": [
+      {
+        "id": "personal",
+        "name": "Personal"
+      }
+    ],
+    "projects": [
+      {
+        "id": "project-1",
+        "name": "Fixture project",
+        "path": "/workspace/fixture",
+        "profileId": "personal",
+        "host": "fixture-host",
+        "isGitRepo": true,
+        "createdAt": "2026-07-26T12:34:56Z",
+        "threads": [
+          {
+            "id": "thread-1",
+            "title": "Fixture thread",
+            "cwd": "/workspace/fixture",
+            "createdAt": "2026-07-26T12:34:56Z"
+          }
+        ],
+        "worktreeBranchPrefix": "kiwi-code/",
+        "environment": {
+          "name": "Local",
+          "setupScripts": {
+            "default": "",
+            "macos": "",
+            "linux": "",
+            "windows": ""
+          },
+          "cleanupScripts": {
+            "default": "",
+            "macos": "",
+            "linux": "",
+            "windows": ""
+          },
+          "variables": [],
+          "actions": []
+        },
+        "figmaMCPEnabled": false
+      }
+    ],
+    "sandboxConfig": {
+      "scope": "global",
+      "path": "/workspace/sandbox.json",
+      "exists": false,
+      "config": {},
+      "inherited": {
+        "defaults": {
+          "read": [
+            "$CWD",
+            "/bin",
+            "/sbin",
+            "/usr",
+            "/System",
+            "/Library",
+            "/opt/homebrew",
+            "/private/etc",
+            "/dev"
+          ],
+          "write": [
+            "$CWD",
+            "$TMPDIR"
+          ]
+        },
+        "commands": [],
+        "network": false,
+        "shell": "/bin/zsh",
+        "relatedProjects": []
+      },
+      "effective": {
+        "defaults": {
+          "read": [
+            "$CWD",
+            "/bin",
+            "/sbin",
+            "/usr",
+            "/System",
+            "/Library",
+            "/opt/homebrew",
+            "/private/etc",
+            "/dev"
+          ],
+          "write": [
+            "$CWD",
+            "$TMPDIR"
+          ]
+        },
+        "commands": [],
+        "network": false,
+        "shell": "/bin/zsh",
+        "relatedProjects": []
+      }
+    },
+    "sessionClosures": {
+      "generatedAt": "2026-07-26T12:34:56Z",
+      "inactivityHours": 24,
+      "events": [
+        {
+          "id": "closure-1",
+          "projectId": "project-1",
+          "projectName": "Fixture project",
+          "threadId": "thread-1",
+          "threadTitle": "Fixture thread",
+          "sessionNames": [
+            "fixture-terminal",
+            "fixture-tools"
+          ],
+          "lastActivityAt": "2026-07-26T12:33:56Z",
+          "closedAt": "2026-07-26T12:34:56Z",
+          "reason": "inactivity"
+        }
+      ]
+    },
+    "settings": {
+      "worktreeBasePath": "/workspace/worktrees",
+      "defaultWorktreeBasePath": "/workspace/worktrees",
+      "usingDefault": true,
+      "archivedThreadRetentionDays": 30,
+      "orphanedWorktreeRetentionDays": 30,
+      "subAgentNestingDepth": 1,
+      "maxSubAgentNestingDepth": 4,
+      "disableWorkflows": false,
+      "workflowKeywordTriggerEnabled": true,
+      "workflowSizeGuideline": "unrestricted",
+      "codingAgents": [
+        {
+          "id": "pi-native",
+          "name": "Pi Native",
+          "kind": "pi-native",
+          "isDefault": true
+        }
+      ],
+      "theme": {
+        "fontFamily": "\"JetBrains Mono Variable\", \"Symbols Nerd Font Mono\", monospace",
+        "fontSize": 13,
+        "colors": {
+          "canvas": "#1d1f21",
+          "sidebar": "#22252b",
+          "background": "#282c34",
+          "panel": "#24272e",
+          "raised": "#30343d",
+          "selected": "#30343d",
+          "border": "#454b57",
+          "foreground": "#ffffff",
+          "muted": "#a5a8a8",
+          "dim": "#81858a",
+          "cursor": "#ffffff",
+          "selectionBackground": "#ffffff",
+          "selectionForeground": "#282c34",
+          "black": "#1d1f21",
+          "red": "#cc6666",
+          "green": "#b5bd68",
+          "yellow": "#f0c674",
+          "blue": "#81a2be",
+          "magenta": "#b294bb",
+          "cyan": "#8abeb7",
+          "white": "#c5c8c6",
+          "brightBlack": "#666666",
+          "brightRed": "#d54e53",
+          "brightGreen": "#b9ca4a",
+          "brightYellow": "#e7c547",
+          "brightBlue": "#7aa6da",
+          "brightMagenta": "#c397d8",
+          "brightCyan": "#70c0b1",
+          "brightWhite": "#eaeaea"
+        }
+      },
+      "defaultTheme": {
+        "fontFamily": "\"JetBrains Mono Variable\", \"Symbols Nerd Font Mono\", monospace",
+        "fontSize": 13,
+        "colors": {
+          "canvas": "#1d1f21",
+          "sidebar": "#22252b",
+          "background": "#282c34",
+          "panel": "#24272e",
+          "raised": "#30343d",
+          "selected": "#30343d",
+          "border": "#454b57",
+          "foreground": "#ffffff",
+          "muted": "#a5a8a8",
+          "dim": "#81858a",
+          "cursor": "#ffffff",
+          "selectionBackground": "#ffffff",
+          "selectionForeground": "#282c34",
+          "black": "#1d1f21",
+          "red": "#cc6666",
+          "green": "#b5bd68",
+          "yellow": "#f0c674",
+          "blue": "#81a2be",
+          "magenta": "#b294bb",
+          "cyan": "#8abeb7",
+          "white": "#c5c8c6",
+          "brightBlack": "#666666",
+          "brightRed": "#d54e53",
+          "brightGreen": "#b9ca4a",
+          "brightYellow": "#e7c547",
+          "brightBlue": "#7aa6da",
+          "brightMagenta": "#c397d8",
+          "brightCyan": "#70c0b1",
+          "brightWhite": "#eaeaea"
+        }
+      },
+      "usingDefaultTheme": true
+    },
+    "thread.status": {
+      "gitBranches": {
+        "isRepository": true,
+        "current": "main",
+        "detached": false,
+        "branches": [
+          {
+            "name": "main",
+            "current": true
+          }
+        ]
+      },
+      "contextStatuses": {
+        "pi-native": {
+          "source": "pi-native",
+          "tokens": 32000,
+          "contextWindow": 128000,
+          "percent": 25,
+          "model": "openai/gpt-5",
+          "updatedAt": "2026-07-26T12:34:56Z"
+        }
+      },
+      "processes": [
+        {
+          "id": "process-1",
+          "index": 1,
+          "name": "Vite",
+          "currentCommand": "node",
+          "webServers": [
+            "http://127.0.0.1:5173"
+          ]
+        }
+      ],
+      "shellWindows": [
+        {
+          "index": 0,
+          "name": "shell",
+          "active": true
+        }
+      ],
+      "workflows": [
+        {
+          "id": "workflow-1",
+          "projectId": "project-1",
+          "threadId": "thread-1",
+          "state": "running",
+          "attempt": 1,
+          "name": "Fixture workflow",
+          "description": "Exercises the workflow snapshot schema.",
+          "whenToUse": "During protocol compatibility tests.",
+          "phases": [
+            {
+              "title": "Implement",
+              "detail": "Build the fixture.",
+              "model": "openai/gpt-5"
+            }
+          ],
+          "currentPhase": "Implement",
+          "scriptPath": "/workspace/workflow.mjs",
+          "processId": "process-1",
+          "createdAt": "2026-07-26T12:33:56Z",
+          "startedAt": "2026-07-26T12:33:56Z",
+          "updatedAt": "2026-07-26T12:34:56Z",
+          "result": {
+            "progress": 0.5
+          },
+          "logs": [
+            {
+              "message": "Workflow started.",
+              "createdAt": "2026-07-26T12:33:56Z"
+            }
+          ],
+          "agents": [
+            {
+              "id": "agent-1",
+              "label": "Implementer",
+              "phase": "Implement",
+              "state": "working",
+              "threadId": "child-thread-1",
+              "childRunId": 7,
+              "startedAt": "2026-07-26T12:33:56Z",
+              "value": {
+                "status": "working"
+              }
+            }
+          ]
+        }
+      ],
+      "plans": [
+        {
+          "id": "plan-1",
+          "projectId": "project-1",
+          "threadId": "thread-1",
+          "sourceThreadId": "thread-1",
+          "title": "Fixture plan",
+          "createdAt": "2026-07-26T12:34:56Z",
+          "sizeBytes": 2048
+        }
+      ],
+      "errors": {
+        "gitBranches": "Fixture error shape."
+      }
+    },
+    "threadUsage": [
+      {
+        "projectId": "project-1",
+        "threadId": "thread-1",
+        "own": {
+          "inputTokens": 1,
+          "outputTokens": 2,
+          "cacheReadTokens": 3,
+          "cacheWriteTokens": 4,
+          "totalTokens": 10,
+          "costUsd": 0.01
+        },
+        "children": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "totalTokens": 0,
+          "costUsd": 0
+        },
+        "total": {
+          "inputTokens": 1,
+          "outputTokens": 2,
+          "cacheReadTokens": 3,
+          "cacheWriteTokens": 4,
+          "totalTokens": 10,
+          "costUsd": 0.01
+        },
+        "limitReached": false
+      }
+    ],
+    "tmuxSessions": [
+      {
+        "name": "fixture-session",
+        "attached": true,
+        "kind": "shell",
+        "projectId": "project-1",
+        "projectName": "Fixture project",
+        "threadId": "thread-1",
+        "threadTitle": "Fixture thread",
+        "windows": [
+          {
+            "id": "@1",
+            "index": 0,
+            "name": "shell",
+            "active": true,
+            "paneCount": 1,
+            "currentCommand": "zsh"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,326 +1,74 @@
-export type Profile = {
-  id: string
-  name: string
-}
+import type { CodingAgent } from './wire/domain'
+
+// Reactive domain types are derived from the Effect schemas that validate
+// state-socket snapshots. Keep this module as the compatibility import surface
+// while the rest of the UI migrates to `wire/domain` directly.
+export type {
+  AgentContextStatus,
+  AgentContextStatusSource,
+  AgentSkillItemStatus,
+  AgentSkillStatus,
+  AppSettings,
+  BrowserCapabilities,
+  BrowserCurrentPage,
+  BrowserPage,
+  BrowserRecording,
+  BrowserStatusResult,
+  BuiltInCodingAgent,
+  CleanupOverview,
+  CodingAgent,
+  CodingAgentChoice,
+  CodingAgentConfig,
+  CodingAgentSetting,
+  ConfiguredClaudeAgent,
+  EffectiveSandboxConfig,
+  EnvironmentAction,
+  EnvironmentVariable,
+  GitBranch,
+  GitBranchState,
+  LocalEnvironment,
+  PiActivityState,
+  PiThreadActivity,
+  PlatformScripts,
+  ProcessWebServer,
+  ProcessWindow,
+  Profile,
+  Project,
+  SandboxCommandRule,
+  SandboxConfig,
+  SandboxConfigScope,
+  SandboxConfigState,
+  SandboxFileAccess,
+  SavedWorkflow,
+  SessionClosureEvent,
+  SessionClosureOverview,
+  ThemeColors,
+  ThemeSettings,
+  Thread,
+  ThreadCleanupOverview,
+  ThreadPlan,
+  ThreadStatusErrors,
+  ThreadStatusSnapshot,
+  ThreadUsageSnapshot,
+  ThreadUsageTotals,
+  TmuxBrowserSession,
+  TmuxBrowserWindow,
+  TmuxWindow,
+  WorkflowAgent,
+  WorkflowLogEntry,
+  WorkflowPhase,
+  WorkflowRun,
+  WorktreeCleanupOverview,
+} from './wire/domain'
 
 export type DirectorySuggestion = {
   name: string
   path: string
 }
 
-export type PlatformScripts = {
-  default: string
-  macos: string
-  linux: string
-  windows: string
-}
-
-export type EnvironmentVariable = {
-  name: string
-  value: string
-}
-
-export type EnvironmentAction = {
-  id: string
-  name: string
-  scripts: PlatformScripts
-}
-
-export type LocalEnvironment = {
-  name: string
-  setupScripts: PlatformScripts
-  cleanupScripts: PlatformScripts
-  variables: EnvironmentVariable[]
-  actions: EnvironmentAction[]
-}
-
-export type SandboxFileAccess = {
-  read: string[]
-  write: string[]
-}
-
-export type SandboxCommandRule = {
-  patterns: string[]
-  files?: SandboxFileAccess
-  network?: boolean
-}
-
-/** Sparse Kiwi Sandbox config: absent fields inherit from the previous layer. */
-export type SandboxConfig = {
-  defaults?: SandboxFileAccess
-  commands?: SandboxCommandRule[]
-  network?: boolean
-  shell?: string
-  relatedProjects?: string[]
-}
-
-export type EffectiveSandboxConfig = {
-  defaults: SandboxFileAccess
-  commands: SandboxCommandRule[]
-  network: boolean
-  shell: string
-  relatedProjects: string[]
-}
-
-export type SandboxConfigScope = 'global' | 'thread'
-
-export type SandboxConfigState = {
-  scope: SandboxConfigScope
-  path: string
-  exists: boolean
-  parseError?: string
-  globalParseError?: string
-  config: SandboxConfig
-  inherited: EffectiveSandboxConfig
-  effective: EffectiveSandboxConfig
-}
-
-export type Project = {
-  id: string
-  name: string
-  path: string
-  profileId: string
-  host: string
-  isGitRepo: boolean
-  createdAt: string
-  threads: Thread[]
-  subAgentNestingDepthOverride?: number | null
-  worktreeBranchPrefix: string
-  environment: LocalEnvironment
-  figmaMCPEnabled: boolean
-}
-
-export type Thread = {
-  id: string
-  title: string
-  cwd: string
-  createdAt: string
-  lastPromptAt?: string
-  parentThreadId?: string
-  agentModel?: string
-  agentThinkingLevel?: string
-  workflowRunId?: string
-  workflowAgentId?: string
-  worktree?: boolean
-  branch?: string
-  worktreePath?: string
-  autoNamed?: boolean
-  closedAt?: string
-  archivedAt?: string
-  bookmarked?: boolean
-  tokenLimit?: number
-  costLimitUsd?: number
-  nestedDepth?: number
-  rollbackPending?: boolean
-}
-
-export type ThreadUsageTotals = {
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-  cacheWriteTokens: number
-  totalTokens: number
-  costUsd: number
-}
-
-export type ThreadUsageSnapshot = {
-  projectId: string
-  threadId: string
-  own: ThreadUsageTotals
-  children: ThreadUsageTotals
-  total: ThreadUsageTotals
-  tokenLimit?: number
-  costLimitUsd?: number
-  limitReached: boolean
-  limitThreadId?: string
-  updatedAt?: string
-}
-
-export type ThemeColors = {
-  canvas: string
-  sidebar: string
-  background: string
-  panel: string
-  raised: string
-  selected: string
-  border: string
-  foreground: string
-  muted: string
-  dim: string
-  cursor: string
-  selectionBackground: string
-  selectionForeground: string
-  black: string
-  red: string
-  green: string
-  yellow: string
-  blue: string
-  magenta: string
-  cyan: string
-  white: string
-  brightBlack: string
-  brightRed: string
-  brightGreen: string
-  brightYellow: string
-  brightBlue: string
-  brightMagenta: string
-  brightCyan: string
-  brightWhite: string
-}
-
-export type ThemeSettings = {
-  fontFamily: string
-  fontSize: number
-  colors: ThemeColors
-}
-
-export type CodingAgentSetting = {
-  id: string
-  name: string
-  kind: 'pi' | 'pi-native' | 'claude' | 'claude-gpt'
-  configDirectory?: string
-  isDefault: boolean
-}
-
-export type AppSettings = {
-  worktreeBasePath: string
-  defaultWorktreeBasePath: string
-  usingDefault: boolean
-  archivedThreadRetentionDays: number
-  orphanedWorktreeRetentionDays: number
-  subAgentNestingDepth: number
-  maxSubAgentNestingDepth: number
-  disableWorkflows: boolean
-  workflowKeywordTriggerEnabled: boolean
-  workflowSizeGuideline: 'unrestricted' | 'small' | 'medium' | 'large'
-  codingAgents: CodingAgentSetting[]
-  theme: ThemeSettings
-  defaultTheme: ThemeSettings
-  usingDefaultTheme: boolean
-}
-
-export type ThreadCleanupOverview = {
-  projectId: string
-  projectName: string
-  threadId: string
-  threadTitle: string
-  archivedAt: string
-  scheduledDeletionAt: string | null
-}
-
-export type WorktreeCleanupOverview = {
-  projectId: string
-  projectName?: string
-  threadId: string
-  threadTitle?: string
-  worktreePath: string
-  branch?: string
-  detachedAt: string
-  scheduledDeletionAt: string | null
-  hasUncommittedChanges: boolean
-  inspectionError?: string
-}
-
-export type CleanupOverview = {
-  generatedAt: string
-  archivedThreadRetentionDays: number
-  orphanedWorktreeRetentionDays: number
-  threads: ThreadCleanupOverview[]
-  worktrees: WorktreeCleanupOverview[]
-}
-
-export type SessionClosureEvent = {
-  id: string
-  projectId: string
-  projectName: string
-  threadId: string
-  threadTitle: string
-  sessionNames: string[]
-  lastActivityAt: string
-  closedAt: string
-  reason: 'inactivity'
-}
-
-export type SessionClosureOverview = {
-  generatedAt: string
-  inactivityHours: number
-  events: SessionClosureEvent[]
-}
-
-export type AgentSkillItemStatus = {
-  name: string
-  path: string
-  installed: boolean
-  upToDate: boolean
-}
-
-export type AgentSkillStatus = AgentSkillItemStatus & {
-  skills?: AgentSkillItemStatus[]
-}
-
-export type GitBranch = {
-  name: string
-  current: boolean
-}
-
-export type GitBranchState = {
-  isRepository: boolean
-  current: string
-  detached: boolean
-  branches: GitBranch[]
-}
-
 export type TerminalTool = 'terminal' | 'nvim' | 'lazygit' | 'pi' | 'process'
 
 export type WorkspaceTool = TerminalTool | 'browser' | 'code'
-
-export type BrowserPage = {
-  id: string
-  title?: string
-  url?: string
-}
-
-export type BrowserCurrentPage = BrowserPage & {
-  canGoBack?: boolean
-  canGoForward?: boolean
-  loading?: boolean
-}
-
-export type BrowserCapabilities = {
-  nativeView?: boolean
-  interactiveStream?: boolean
-  preview?: boolean
-  recording?: boolean
-}
-
-export type BrowserRecording = {
-  id: string
-  state: 'starting' | 'recording' | 'finalizing' | 'completed'
-  targetId: string
-  title: string
-  startedAt: string
-  finishedAt?: string
-  durationMs?: number
-  bytes?: number
-  mimeType?: string
-  filename?: string
-  idleTimeoutMs?: number
-  idleDeadlineAt?: string
-}
-
-export type BrowserStatusResult = {
-  backend?: string
-  presentation?: 'native' | 'stream' | string
-  capabilities?: BrowserCapabilities
-  reachable?: boolean
-  running?: boolean
-  pages?: BrowserPage[]
-  currentTargetId?: string
-  current?: BrowserCurrentPage
-  recording?: BrowserRecording | null
-  recordings?: BrowserRecording[]
-  error?: string
-}
 
 export type BrowserActionOperation =
   | 'session.start'
@@ -364,38 +112,9 @@ export type BrowserViewBounds = {
   height: number
 }
 
-export type BuiltInCodingAgent = 'pi' | 'claude' | 'claude-gpt'
-
-export type ConfiguredClaudeAgent = `claude-profile-${string}` | `claude-gpt-profile-${string}`
-
-export type CodingAgent = BuiltInCodingAgent | ConfiguredClaudeAgent
-
 export type PiPresentation = 'native' | 'terminal'
 
-export type AgentContextStatusSource = 'pi-terminal' | 'pi-native' | 'claude-native'
-
-export type AgentContextStatus = {
-  source: AgentContextStatusSource
-  tokens: number | null
-  contextWindow: number
-  percent: number | null
-  model?: string
-  updatedAt: string
-}
-
 export type CodingAgentSelection = CodingAgent | 'pi-native' | 'claude-native'
-
-export type CodingAgentChoice = {
-  id: string
-  label: string
-}
-
-export type CodingAgentConfig = {
-  id: CodingAgent
-  label: string
-  models: CodingAgentChoice[]
-  thinkingLevels: CodingAgentChoice[]
-}
 
 export type CodingAgentStart = {
   agent: CodingAgent
@@ -407,132 +126,3 @@ export type CodingAgentStart = {
 }
 
 export type ConnectionStatus = 'connecting' | 'open' | 'closed' | 'error'
-
-export type PiActivityState = 'working' | 'finished'
-
-export type PiThreadActivity = {
-  projectId: string
-  threadId: string
-  state: PiActivityState
-  updatedAt: string
-}
-
-export type TmuxWindow = {
-  index: number
-  name: string
-  active: boolean
-}
-
-export type TmuxBrowserWindow = {
-  id: string
-  index: number
-  name: string
-  active: boolean
-  paneCount: number
-  currentCommand: string
-}
-
-export type TmuxBrowserSession = {
-  name: string
-  attached: boolean
-  kind?: 'shell' | 'tools'
-  projectId?: string
-  projectName?: string
-  threadId?: string
-  threadTitle?: string
-  windows: TmuxBrowserWindow[]
-}
-
-export type ProcessWindow = {
-  id: string
-  index: number
-  name: string
-  currentCommand: string
-  webServers: string[]
-}
-
-export type ProcessWebServer = {
-  projectId: string
-  projectName: string
-  threadId: string
-  threadTitle: string
-  processId: string
-  processName: string
-  url: string
-}
-
-export type WorkflowPhase = {
-  title: string
-  detail?: string
-  model?: string
-}
-
-export type WorkflowAgent = {
-  id: string
-  label: string
-  phase?: string
-  state: 'starting' | 'working' | 'paused' | 'finished' | 'failed'
-  threadId?: string
-  childRunId?: number
-  startedAt: string
-  finishedAt?: string
-  error?: string
-  value?: unknown
-  valueOmitted?: boolean
-}
-
-export type ThreadPlan = {
-  id: string
-  projectId: string
-  threadId: string
-  sourceThreadId: string
-  title: string
-  createdAt: string
-  sizeBytes: number
-}
-
-export type WorkflowRun = {
-  id: string
-  projectId: string
-  threadId: string
-  state: 'queued' | 'running' | 'paused' | 'finished' | 'failed' | 'stopped'
-  attempt?: number
-  name: string
-  description?: string
-  whenToUse?: string
-  phases?: WorkflowPhase[]
-  currentPhase?: string
-  scriptPath: string
-  processId?: string
-  createdAt: string
-  startedAt?: string
-  finishedAt?: string
-  updatedAt: string
-  error?: string
-  result?: unknown
-  agents: WorkflowAgent[]
-}
-
-export type SavedWorkflow = {
-  name: string
-  scope: 'project' | 'personal'
-  path: string
-}
-
-export type ThreadStatusErrors = {
-  gitBranches?: string
-  processes?: string
-  shellWindows?: string
-  workflows?: string
-  plans?: string
-}
-
-export type ThreadStatusSnapshot = {
-  gitBranches: GitBranchState | null
-  contextStatuses: Partial<Record<AgentContextStatusSource, AgentContextStatus>>
-  processes: ProcessWindow[]
-  shellWindows: TmuxWindow[]
-  workflows: WorkflowRun[]
-  plans: ThreadPlan[]
-  errors: ThreadStatusErrors
-}

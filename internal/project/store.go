@@ -429,8 +429,23 @@ func (s *Store) SubscribeChanges() (<-chan []Project, func()) {
 	return subscription.Events(), subscription.Close
 }
 
+// SubscribeLatestChanges reports authoritative project snapshots with a
+// depth-one pending slot. Mutation bursts replace stale pending snapshots
+// instead of disconnecting the consumer.
+func (s *Store) SubscribeLatestChanges() (<-chan []Project, func()) {
+	subscription := s.changes.SubscribeLatest()
+	return subscription.Events(), subscription.Close
+}
+
 func (s *Store) SubscribeProfileChanges() (<-chan []Profile, func()) {
 	subscription := s.profileChanges.Subscribe()
+	return subscription.Events(), subscription.Close
+}
+
+// SubscribeLatestProfileChanges is the coalescing snapshot counterpart to
+// SubscribeProfileChanges.
+func (s *Store) SubscribeLatestProfileChanges() (<-chan []Profile, func()) {
+	subscription := s.profileChanges.SubscribeLatest()
 	return subscription.Events(), subscription.Close
 }
 

@@ -1,34 +1,294 @@
 package headless
 
 import (
-	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/dire-kiwi/kiwi-code/internal/wire"
+	"github.com/gorilla/websocket"
 )
 
-func TestReadEventParsesNamedMultilineData(t *testing.T) {
-	event, err := readEvent(bufio.NewReader(strings.NewReader(
-		"event: projects\n" +
-			"data: [{\"id\":\"one\"}]\n" +
-			"data: \n\n",
-	)))
+func TestStateClientMessageShapes(t *testing.T) {
+	handshake, err := json.Marshal(stateClientMessage{
+		Type:     wire.ClientOpen,
+		Protocol: wire.ProtocolVersion,
+		Client:   "kiwi-code-headless",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if event.name != projectsEventName || string(event.data) != "[{\"id\":\"one\"}]\n" {
-		t.Fatalf("event = %#v", event)
+	if got, want := string(handshake), `{"t":"open","protocol":1,"client":"kiwi-code-headless"}`; got != want {
+		t.Fatalf("state handshake = %s, want %s", got, want)
+	}
+
+	topic := stateTopic{Tag: projectsTopic}
+	subscription, err := json.Marshal(stateClientMessage{
+		Type:  "sub",
+		ID:    projectsChannelID,
+		Topic: &topic,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(subscription), `{"t":"sub","id":1,"topic":{"tag":"projects"}}`; got != want {
+		t.Fatalf("state subscription = %s, want %s", got, want)
 	}
 }
 
-func TestReadBoundedLineRejectsOversizedInput(t *testing.T) {
-	_, err := readBoundedLine(bufio.NewReader(strings.NewReader("12345\n")), 4)
-	if err == nil || !strings.Contains(err.Error(), "exceeds") {
-		t.Fatalf("oversized line error = %v", err)
+func TestDecodeStateServerMessage(t *testing.T) {
+	message, err := decodeStateServerMessage([]byte(
+		`{"t":"snap","id":1,"seq":2,"data":[{"id":"one"}]}`,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.Type != "snap" || message.ID != projectsChannelID || message.Sequence != 2 ||
+		string(message.Data) != `[{"id":"one"}]` {
+		t.Fatalf("decoded state message = %#v", message)
+	}
+
+	for _, payload := range []string{
+		`{"t":"snap","id":1,"seq":2,"data":[],"unexpected":true}`,
+		`{"t":"snap","id":1,"seq":2,"data":[]}{}`,
+		`{"id":1}`,
+		`{"t":`,
+	} {
+		if _, err := decodeStateServerMessage([]byte(payload)); err == nil {
+			t.Fatalf("malformed state message was accepted: %s", payload)
+		}
+	}
+}
+
+func TestStateClientRetainsAnOutOfOrderTopicSnapshot(t *testing.T) {
+	client := &stateClient{
+		snapshots: make(chan stateSnapshot, 2),
+		errors:    make(chan error, 1),
+		pending:   make(map[string]stateSnapshot),
+	}
+	client.snapshots <- stateSnapshot{topic: activityTopic, data: []byte(`[]`)}
+	client.snapshots <- stateSnapshot{topic: projectsTopic, data: []byte(`[]`)}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := client.waitFor(ctx, projectsTopic, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.waitFor(ctx, activityTopic, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpenStateClientReadyHandshakeHonorsContext(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		context func() (context.Context, context.CancelFunc)
+		stop    bool
+		wantErr error
+	}{
+		{
+			name: "cancellation",
+			context: func() (context.Context, context.CancelFunc) {
+				return context.WithCancel(context.Background())
+			},
+			stop:    true,
+			wantErr: context.Canceled,
+		},
+		{
+			name: "deadline",
+			context: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.Background(), 500*time.Millisecond)
+			},
+			wantErr: context.DeadlineExceeded,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			clientOpen := make(chan struct{})
+			serverErrors := make(chan error, 1)
+			releaseServer := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+				connection, err := (&websocket.Upgrader{}).Upgrade(response, request, nil)
+				if err != nil {
+					serverErrors <- fmt.Errorf("upgrade: %w", err)
+					return
+				}
+				defer connection.Close()
+
+				messageType, payload, err := connection.ReadMessage()
+				if err != nil {
+					serverErrors <- fmt.Errorf("read open: %w", err)
+					return
+				}
+				if messageType != websocket.TextMessage {
+					serverErrors <- fmt.Errorf("open message type = %d, want text", messageType)
+					return
+				}
+				var message stateClientMessage
+				if err := json.Unmarshal(payload, &message); err != nil {
+					serverErrors <- fmt.Errorf("decode open: %w", err)
+					return
+				}
+				if message.Type != wire.ClientOpen {
+					serverErrors <- fmt.Errorf("open message type = %q, want %q", message.Type, wire.ClientOpen)
+					return
+				}
+				close(clientOpen)
+				<-releaseServer
+			}))
+			t.Cleanup(func() {
+				close(releaseServer)
+				server.Close()
+			})
+
+			baseURL, err := parseBaseURL(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := test.context()
+			defer cancel()
+			result := make(chan error, 1)
+			go func() {
+				client, openErr := openStateClient(ctx, baseURL)
+				if client != nil {
+					client.close()
+				}
+				result <- openErr
+			}()
+
+			select {
+			case <-clientOpen:
+			case serverErr := <-serverErrors:
+				t.Fatal(serverErr)
+			case <-time.After(2 * time.Second):
+				t.Fatal("server did not receive the client open message")
+			}
+			if test.stop {
+				cancel()
+			}
+
+			select {
+			case openErr := <-result:
+				if !errors.Is(openErr, test.wantErr) {
+					t.Fatalf("openStateClient error = %v, want %v", openErr, test.wantErr)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("openStateClient remained blocked waiting for ready")
+			}
+		})
+	}
+}
+
+func TestOpenStateClientAcceptsReadyAndSubscribes(t *testing.T) {
+	serverReady := make(chan error, 1)
+	releaseServer := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		connection, err := (&websocket.Upgrader{}).Upgrade(response, request, nil)
+		if err != nil {
+			serverReady <- fmt.Errorf("upgrade: %w", err)
+			return
+		}
+		defer connection.Close()
+
+		if _, _, err := connection.ReadMessage(); err != nil {
+			serverReady <- fmt.Errorf("read open: %w", err)
+			return
+		}
+		if err := connection.WriteJSON(wire.ReadyMessage{
+			Type:       wire.ServerReady,
+			Protocol:   wire.ProtocolVersion,
+			InstanceID: "test-instance",
+			ServerTime: time.Now().UTC(),
+		}); err != nil {
+			serverReady <- fmt.Errorf("write ready: %w", err)
+			return
+		}
+
+		subscriptions := make(map[uint32]string, 2)
+		for range 2 {
+			_, payload, err := connection.ReadMessage()
+			if err != nil {
+				serverReady <- fmt.Errorf("read subscription: %w", err)
+				return
+			}
+			var message stateClientMessage
+			if err := json.Unmarshal(payload, &message); err != nil {
+				serverReady <- fmt.Errorf("decode subscription: %w", err)
+				return
+			}
+			if message.Type != wire.ClientSub || message.Topic == nil {
+				serverReady <- fmt.Errorf("subscription = %#v", message)
+				return
+			}
+			subscriptions[message.ID] = message.Topic.Tag
+		}
+		if subscriptions[projectsChannelID] != projectsTopic ||
+			subscriptions[activityChannelID] != activityTopic {
+			serverReady <- fmt.Errorf("subscriptions = %#v", subscriptions)
+			return
+		}
+		if err := connection.WriteJSON(wire.SnapshotMessage{
+			Type: wire.ServerSnap,
+			ID:   projectsChannelID,
+			Seq:  1,
+			Data: json.RawMessage(`[]`),
+		}); err != nil {
+			serverReady <- fmt.Errorf("write projects snapshot: %w", err)
+			return
+		}
+		if err := connection.WriteJSON(wire.SnapshotMessage{
+			Type: wire.ServerSnap,
+			ID:   activityChannelID,
+			Seq:  1,
+			Data: json.RawMessage(`[]`),
+		}); err != nil {
+			serverReady <- fmt.Errorf("write activity snapshot: %w", err)
+			return
+		}
+		serverReady <- nil
+		<-releaseServer
+	}))
+	t.Cleanup(func() {
+		close(releaseServer)
+		server.Close()
+	})
+
+	baseURL, err := parseBaseURL(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := openStateClient(context.Background(), baseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(client.close)
+
+	if err := <-serverReady; err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := client.waitFor(ctx, projectsTopic, nil); err != nil {
+		t.Fatalf("wait for projects snapshot: %v", err)
+	}
+	if _, err := client.waitFor(ctx, activityTopic, nil); err != nil {
+		t.Fatalf("wait for activity snapshot: %v", err)
 	}
 }
 
 func TestActivitySnapshotContainsRejectsMalformedJSON(t *testing.T) {
 	if activitySnapshotContains([]byte("not-json"), "project", "thread", "") {
 		t.Fatal("malformed activity snapshot matched a cleared status")
+	}
+}
+
+func TestParseBaseURLRejectsNonHTTPServer(t *testing.T) {
+	if _, err := parseBaseURL("ws://127.0.0.1:4000"); err == nil || !strings.Contains(err.Error(), "http or https") {
+		t.Fatalf("parseBaseURL error = %v", err)
 	}
 }

@@ -217,6 +217,7 @@ func (s *Server) browserAction(w http.ResponseWriter, r *http.Request) {
 		s.writeBrowserProviderError(w, err)
 		return
 	}
+	s.notifyBrowserStateChanged(projectID, threadID)
 	writeJSON(w, http.StatusOK, browserActionOutput{Result: result})
 }
 
@@ -386,7 +387,9 @@ func (s *Server) browserStream(w http.ResponseWriter, r *http.Request) {
 				Operation:        "stream.input",
 				Params:           params,
 				ProtectedOrigins: protectedOrigins,
-			}); actionErr != nil && !errors.Is(actionErr, context.Canceled) {
+			}); actionErr == nil {
+				s.scheduleBrowserStateChanged(projectID, threadID)
+			} else if !errors.Is(actionErr, context.Canceled) {
 				// Input failures are intentionally not reflected with provider text.
 				// The next status/frame refresh will expose a sanitized state.
 			}

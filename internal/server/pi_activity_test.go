@@ -1,15 +1,12 @@
 package server
 
 import (
-	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -388,100 +385,6 @@ func TestChildSessionFinishingKeepsTheDrivingSessionWorking(t *testing.T) {
 	}
 }
 
-func TestPiActivityEventStream(t *testing.T) {
-	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	item, err := store.Add("Demo", t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	thread := item.Threads[0]
-	handler, err := newIsolatedServerHandler(t, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := httptest.NewServer(handler)
-	defer server.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	streamRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/pi/activity/events", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	streamResponse, err := server.Client().Do(streamRequest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer streamResponse.Body.Close()
-	if streamResponse.StatusCode != http.StatusOK {
-		t.Fatalf("stream Pi activity status = %d", streamResponse.StatusCode)
-	}
-	if contentType := streamResponse.Header.Get("Content-Type"); contentType != "text/event-stream" {
-		t.Fatalf("stream Pi activity content type = %q", contentType)
-	}
-
-	reader := bufio.NewReader(streamResponse.Body)
-	activities, err := readPiActivityEvent(reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(activities) != 0 {
-		t.Fatalf("unexpected initial activity: %#v", activities)
-	}
-
-	activityPath := server.URL + "/api/projects/" + item.ID + "/threads/" + thread.ID + "/pi/activity"
-	updateActivity := func(state piActivityState) {
-		t.Helper()
-		body := `{"state":"` + string(state) + `"}`
-		request, err := http.NewRequestWithContext(ctx, http.MethodPut, activityPath, bytes.NewBufferString(body))
-		if err != nil {
-			t.Fatal(err)
-		}
-		response, err := server.Client().Do(request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = response.Body.Close()
-		wantStatus := http.StatusOK
-		if state == piActivityIdle {
-			wantStatus = http.StatusNoContent
-		}
-		if response.StatusCode != wantStatus {
-			t.Fatalf("update Pi activity to %s status = %d, want %d", state, response.StatusCode, wantStatus)
-		}
-	}
-
-	updateActivity(piActivityWorking)
-	activities, err = readPiActivityEvent(reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(activities) != 1 || activities[0].State != piActivityWorking || activities[0].ThreadID != thread.ID {
-		t.Fatalf("unexpected streamed working activity: %#v", activities)
-	}
-
-	updateActivity(piActivityFinished)
-	activities, err = readPiActivityEvent(reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(activities) != 1 || activities[0].State != piActivityFinished || activities[0].ThreadID != thread.ID {
-		t.Fatalf("unexpected streamed finished activity: %#v", activities)
-	}
-
-	updateActivity(piActivityIdle)
-	activities, err = readPiActivityEvent(reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(activities) != 0 {
-		t.Fatalf("unexpected streamed idle activity: %#v", activities)
-	}
-}
-
 func TestPiActivitySubscriptionSignalsRapidTransitions(t *testing.T) {
 	tracker := newPiActivityTracker()
 	updates, unsubscribe := tracker.subscribe()
@@ -504,6 +407,26 @@ func TestPiActivitySubscriptionSignalsRapidTransitions(t *testing.T) {
 	}
 }
 
+func TestPiActivityLatestSubscriptionInvalidatesToCurrentState(t *testing.T) {
+	tracker := newPiActivityTracker()
+	updates, unsubscribe := tracker.subscribeLatest()
+	defer unsubscribe()
+
+	now := time.Now()
+	tracker.update("project", "thread", piActivityWorking, now)
+	tracker.update("project", "thread", piActivityFinished, now.Add(time.Millisecond))
+
+	select {
+	case <-updates:
+		activities := tracker.list(now.Add(2 * time.Millisecond))
+		if len(activities) != 1 || activities[0].State != piActivityFinished {
+			t.Fatalf("latest invalidation resolved to stale activity: %#v", activities)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for latest activity invalidation")
+	}
+}
+
 func TestPiActivitySubscriptionPublishesWorkingHeartbeats(t *testing.T) {
 	tracker := newPiActivityTracker()
 	updates, unsubscribe := tracker.subscribe()
@@ -520,59 +443,6 @@ func TestPiActivitySubscriptionPublishesWorkingHeartbeats(t *testing.T) {
 			}
 		case <-time.After(time.Second):
 			t.Fatalf("timed out waiting for heartbeat %d", index)
-		}
-	}
-}
-
-func TestPiActivityEventStreamPeriodicallyReconciles(t *testing.T) {
-	tracker := newPiActivityTracker()
-	now := time.Now()
-	tracker.update("project", "thread", piActivityWorking, now)
-	serverState := &Server{piActivity: tracker}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		serverState.streamPiActivityWithInterval(w, r, 20*time.Millisecond)
-	}))
-	defer server.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response, err := server.Client().Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-
-	reader := bufio.NewReader(response.Body)
-	activities, err := readPiActivityEvent(reader)
-	if err != nil {
-		t.Fatalf("read initial Pi activity event: %v", err)
-	}
-	if len(activities) != 1 || activities[0].State != piActivityWorking {
-		t.Fatalf("unexpected initial activity: %#v", activities)
-	}
-
-	// Simulate a dropped change notification. The periodic snapshot must still
-	// reconcile the client with the authoritative tracker state.
-	tracker.mu.Lock()
-	tracker.activities[piActivityKey{projectID: "project", threadID: "thread", agent: codingAgentPi}] = piThreadActivity{
-		ProjectID: "project",
-		ThreadID:  "thread",
-		State:     piActivityFinished,
-		UpdatedAt: now.Add(time.Second),
-	}
-	tracker.mu.Unlock()
-
-	for {
-		activities, err = readPiActivityEvent(reader)
-		if err != nil {
-			t.Fatalf("read periodic Pi activity event: %v", err)
-		}
-		if len(activities) == 1 && activities[0].State == piActivityFinished {
-			break
 		}
 	}
 }
@@ -640,23 +510,6 @@ func TestPromptOrderingStateExpiresAfterBoundedRetention(t *testing.T) {
 	tracker.list(now)
 	if got := len(tracker.promptOrder); got != 0 {
 		t.Fatalf("expired prompt ordering entries = %d, want 0", got)
-	}
-}
-
-func readPiActivityEvent(reader *bufio.Reader) ([]piThreadActivity, error) {
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return nil, err
-		}
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		var activities []piThreadActivity
-		if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data: "))), &activities); err != nil {
-			return nil, err
-		}
-		return activities, nil
 	}
 }
 

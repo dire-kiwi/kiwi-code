@@ -271,6 +271,7 @@ func (s *Server) closeInactiveTmuxSessions(now time.Time) error {
 					closeErrors = append(closeErrors, eventErr)
 				} else {
 					logSessionClosure(event)
+					s.notifyStateChanged(stateTopicSessionClosures, "", "")
 				}
 			}
 			if closeErr != nil && !errors.Is(closeErr, errTerminalStopping) {

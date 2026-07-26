@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -251,6 +252,18 @@ func (h *terminalHandler) processWindows(item project.Project, thread project.Th
 		return nil, err
 	}
 	return h.tmuxProcessWindows(tmuxSessionName(item.ID, thread.ID, "process"))
+}
+
+// processWindowsContext is the read-only state-subscription path. It avoids
+// reconciliation because subscribing must not mutate tmux state, and every
+// subprocess it starts is tied to the channel context so unsubscribe and
+// connection shutdown cannot wait on a stuck tmux command.
+func (h *terminalHandler) processWindowsContext(
+	ctx context.Context,
+	item project.Project,
+	thread project.Thread,
+) ([]processWindow, error) {
+	return h.tmuxProcessWindowsContext(ctx, tmuxSessionName(item.ID, thread.ID, "process"))
 }
 
 func (h *terminalHandler) processForRequest(item project.Project, thread project.Thread, processID string) (processWindow, tmuxWindowTarget, bool, error) {
@@ -600,7 +613,11 @@ func tmuxProcessIncarnationCondition(target tmuxWindowTarget) (string, error) {
 }
 
 func (h *terminalHandler) tmuxProcessWindows(sessionName string) ([]processWindow, error) {
-	exists, err := h.tmuxSessionExists(sessionName)
+	return h.tmuxProcessWindowsContext(context.Background(), sessionName)
+}
+
+func (h *terminalHandler) tmuxProcessWindowsContext(ctx context.Context, sessionName string) ([]processWindow, error) {
+	exists, err := h.tmuxSessionExistsContext(ctx, sessionName)
 	if err != nil {
 		return nil, err
 	}
@@ -610,19 +627,23 @@ func (h *terminalHandler) tmuxProcessWindows(sessionName string) ([]processWindo
 	if err := h.removeLegacyProcessWindows(sessionName); err != nil {
 		return nil, err
 	}
-	exists, err = h.tmuxSessionExists(sessionName)
+	exists, err = h.tmuxSessionExistsContext(ctx, sessionName)
 	if err != nil {
 		return nil, err
 	}
 	if !exists {
 		return []processWindow{}, nil
 	}
-	output, err := h.tmuxCommand(
+	output, err := h.tmuxCommandContext(
+		ctx,
 		"list-windows",
 		"-t", exactTmuxSessionTarget(sessionName),
 		"-F", "#{window_index}\t#{window_id}\t#{window_name}\t#{@kiwi-code-tool}\t#{@kiwi-code-process-id}\t#{pane_current_command}\t#{@kiwi-code-web-servers}\t#{pid}",
 	).CombinedOutput()
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		return nil, tmuxCommandError("list process windows", output, err)
 	}
 

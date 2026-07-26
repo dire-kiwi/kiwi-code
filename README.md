@@ -79,7 +79,7 @@ make run:desktop
 
 The desktop target uses the same all-interface `0.0.0.0:4000` default as `make run`, while Electron connects locally over `127.0.0.1`. Other devices can open `http://<this-machine's-LAN-or-Tailscale-IP>:4000`. Its server runs through the same supervised `make run` launcher, so the in-app restart control replaces the backend without closing the desktop window. Quitting Electron or stopping the command with `Ctrl-C` shuts down the server. It uses the same production data and tmux server as `make run` and has the same `main`-branch requirement. Set `KIWI_CODE_ADDR=127.0.0.1:4000` when launching it to restrict access to this machine.
 
-The **Backend** dropdown at the top of the project sidebar is available in both the normal web frontend and Electron. Choose **Add backend…** and enter another instance's HTTP or HTTPS origin, such as `http://workstation:4000`; a bare machine name defaults to HTTP port `4000`. Choices are saved in that frontend's browser storage. Switching reloads the current frontend and sends its API, event-stream, and WebSocket connections directly to the selected backend. An HTTPS frontend can only select an HTTPS backend because browsers block mixed active content.
+The **Backend** dropdown at the top of the project sidebar is available in both the normal web frontend and Electron. Choose **Add backend…** and enter another instance's HTTP or HTTPS origin, such as `http://workstation:4000`; a bare machine name defaults to HTTP port `4000`. Choices are saved in that frontend's browser storage. Switching reloads the current frontend and sends its API and WebSocket connections directly to the selected backend. An HTTPS frontend can only select an HTTPS backend because browsers block mixed active content.
 
 The **Browser** workspace supports two implementations behind the same per-thread API. Normal web/server launches default to a server-managed headless Chrome process with one isolated ephemeral browser context per thread and an interactive projected stream for mouse, wheel, keyboard, paste, and viewport input. Desktop launches explicitly retain the separate sandboxed Electron `WebContentsView` and its native guest surface. Remote sites never run in the trusted Kiwi Code renderer. Terminal Pi, Pi Native, Claude, and the visible workspace share the selected thread session; stopping it discards its site data. Select the implementation with `-browser-backend=headless|electron` or `KIWI_CODE_BROWSER_BACKEND`, and override Chrome discovery with `-chrome-binary` or `KIWI_CODE_CHROME_BIN`. Existing-profile Chrome integration is not supported. Both implementations can record the selected page as a bounded, video-only WebM without capturing Kiwi Code chrome, terminals, or other workspaces. Every recording requires a concise 2–12 word purpose title, remains available in the thread's Browser workspace for inline playback, range-based seeking, download, and deletion, and is retained for up to 24 hours subject to count and size limits. Agent-started recordings use an inactivity deadline so abandoned work is finalized automatically. The bundled `kiwi-code-in-app-browser` skill declares `context: fork`, so browser tasks run in a separate agent context while sharing the thread's browser profile; its Pi variant exposes progressively loaded `browser_*` tools through `browser_tool_search`. If `@dire-pi/chrome-devtools` or another `browser_*` extension is already installed, Kiwi Code leaves that extension active and prints a migration warning instead of loading ambiguous duplicate tools; disable the older package and run `/reload` to switch managed Pi sessions to the in-app backend.
 
@@ -93,7 +93,7 @@ Run the full development environment with:
 make dev
 ```
 
-Vite listens on port 5173 and the Go server listens independently on port 8080. Open [http://127.0.0.1:5173](http://127.0.0.1:5173) locally, or use `http://<this-machine's-LAN-IP>:5173` from another device. The browser calls the Go port directly; Vite does not proxy API, event-stream, or WebSocket traffic. Vite reloads the React frontend as its files change, and the Go development runner rebuilds and restarts the backend when `.go`, `go.mod`, or `go.sum` files change or the in-app restart control is used. Terminal panes reattach to their tmux sessions automatically after a backend restart.
+Vite listens on port 5173 and the Go server listens independently on port 8080. Open [http://127.0.0.1:5173](http://127.0.0.1:5173) locally, or use `http://<this-machine's-LAN-IP>:5173` from another device. The browser calls the Go port directly; Vite does not proxy API or WebSocket traffic. Vite reloads the React frontend as its files change, and the Go development runner rebuilds and restarts the backend when `.go`, `go.mod`, or `go.sum` files change or the in-app restart control is used. Terminal panes reattach to their tmux sessions automatically after a backend restart.
 
 Development mode cannot bind or target production port `4000` or use the canonical `kiwi-code` tmux socket. With no `--tmux-socket` option, the launcher derives a stable isolated socket name from the checkout path, so `make dev` cannot reach production sessions. Explicit socket names are still useful for parallel runs.
 
@@ -134,13 +134,13 @@ make test
 
 ## Headless multi-client check
 
-With a Kiwi Code server running, exercise the global event stream and tmux WebSocket routing without a browser:
+With a Kiwi Code server running, exercise the UI-state and tmux WebSockets without a browser:
 
 ```sh
 make headless-test
 ```
 
-After a health preflight, the client opens three simultaneous global event consumers, creates a temporary project and two threads, and verifies project/thread mutations plus Pi working heartbeats, finished, and idle snapshots on every consumer. It then attaches three clients to one tmux session and one client to another, verifies fan-out and isolation, and confirms that thread and project deletion close the affected terminal streams.
+After a health preflight, the client opens three simultaneous protocol-v1 state sockets, subscribes each one to `projects` and `agentActivity`, creates a temporary project and two threads, and verifies project/thread mutations plus Pi working heartbeats, finished, and idle snapshots on every socket. It then attaches three clients to one tmux session and one client to another, verifies fan-out and isolation, and confirms that thread and project deletion close the affected terminal streams.
 
 Use `go run ./cmd/headless-client -help` for options. Pass `-skip-terminal` when tmux is unavailable. When checking a server on another machine, pass `-project-path` with an absolute directory that exists on the server.
 
@@ -152,7 +152,7 @@ Kiwi Code does not enable tmux's native verbose logging, avoiding `tmux-client-*
 
 > **Security:** kiwi-code exposes terminal access and does not provide authentication. Backend switching intentionally accepts API and WebSocket clients from other HTTP(S) browser origins. Only use the all-interface default on a trusted network with trusted browser content, or bind it back to loopback with `KIWI_CODE_ADDR=127.0.0.1:4000`.
 
-## Event-streaming reports
+## Historical event-streaming reports
 
 - [Architecture review before the fix](reports/event-streaming-review.html)
 - [Implementation and verification report](reports/event-streaming-fix-report.html)
@@ -175,8 +175,7 @@ Kiwi Code does not enable tmux's native verbose logging, avoiding `tmux-client-*
 - `GET /api/tmux/terminal?session=…&window=…` upgrades to a PTY WebSocket attached to the selected existing window through an isolated linked view.
 - `GET /api/projects` lists saved projects.
 - `GET /api/filesystem/directories?path=…` returns matching local directories for project and settings path autocomplete.
-- `GET /api/events` streams independently ordered, named `projects`, `profiles`, `pi-activity`, and `thread-usage` snapshots to every connected client. This is the browser's primary global status stream. A stalled consumer is disconnected before its bounded backlog can grow indefinitely; EventSource reconnects and receives authoritative initial snapshots.
-- `GET /api/projects/events` is the legacy project-only snapshot stream.
+- `GET /api/state` upgrades to the origin-checked protocol-v1 UI-state WebSocket. A client sends `open`, then opens client-allocated channels for `projects`, `profiles`, `agentActivity`, `threadUsage`, `processWebServers`, `thread.status`, `settings`, `codingAgents`, `sandboxConfig`, `cleanup`, `sessionClosures`, `git.branches`, `browser.status`, `browser.recordings`, `tmuxSessions`, or `agentSkills`. Every subscription starts with an authoritative `snap`; later `snap` messages replace the channel state, and `resnap` requests recovery after a decode failure. Reconnects negotiate a fresh `ready` handshake and re-subscribe the live topics under fresh channel IDs, so no event cursor or replay buffer is required. The socket carries text JSON only and never starts an agent, browser session, or tmux session.
 - `POST /api/projects` adds an existing local directory, optionally using `profileId` (Personal by default).
 - `PUT /api/projects/order` replaces one profile's project order using `{"profileId":"personal","projectIds":["…"]}`.
 - `PATCH /api/projects/{id}` updates the supplied project fields. Use `profileId` to move profiles, an integer `subAgentNestingDepthOverride` from `0` through `4` for a project-specific delegation limit, `null` to inherit the global setting, or `environment` to replace the project's local setup, cleanup, variables, and actions configuration.
@@ -197,15 +196,14 @@ Kiwi Code does not enable tmux's native verbose logging, avoiding `tmux-client-*
 - `GET /api/projects/{id}/threads/{threadId}` returns one thread.
 - `PATCH /api/projects/{id}/threads/{threadId}` updates its title or archive state. Send `{"archived":true}` to archive it and `{"archived":false}` to restore it. The coding-agent integrations send `{"title":"…","autoGenerated":true}` so the generated title is applied only once and a managed worktree branch is renamed with it.
 - `PUT /api/projects/{id}/threads/{threadId}/limits` sets optional budgets with `{"tokenLimit":100000,"costLimitUsd":5}`; either value may be `null` for no limit. A main thread's limit includes all descendants.
-- `GET /api/thread-usage` returns the same authoritative own, child, and combined totals sent in the `thread-usage` event. Agent-only usage and budget endpoints accept cumulative Pi session reports and enforce limits.
+- `GET /api/thread-usage` returns the same authoritative own, child, and combined totals available from the state socket's `threadUsage` topic. Agent-only usage and budget endpoints accept cumulative Pi session reports and enforce limits.
 - `DELETE /api/projects/{id}/threads/{threadId}` stops all of the thread's tmux sessions, removes its record, and starts the unattached-worktree retention period for a managed worktree. Deleting a main thread first deletes all of its child threads through the same cleanup path.
 - `GET /api/pi/activity` returns the backward-compatible aggregate snapshot of active and completed coding-agent activity.
-- `GET /api/pi/activity/events` is the legacy activity-only snapshot stream.
 - `PUT /api/projects/{id}/threads/{threadId}/pi/activity` receives Pi lifecycle updates. A working update can include `promptStartedAt`; bundled integrations repeat the same timestamp on heartbeats so the persisted thread recency advances only once per user prompt.
 - `PUT /api/projects/{id}/threads/{threadId}/claude/activity` receives Claude Code lifecycle updates, uses the same optional `promptStartedAt`, and distinguishes the optional `agent: "claude-gpt"` source.
 - `DELETE /api/projects/{id}/threads/{threadId}/pi/activity` acknowledges completed coding-agent runs for the thread.
 - `PUT /api/projects/{id}/threads/{threadId}/context/status` receives a managed Pi presentation’s current context token estimate, window, percentage, and model. Pi’s bundled terminal extension reports here; Pi Native reads the equivalent `contextUsage` directly from its RPC session statistics.
-- `GET /api/projects/{id}/threads/{threadId}/events` streams named `thread-status` snapshots for Pi context status, Git branches, process shells, Shell tmux windows, retained plans, and workflow progress. Kiwi Code mutations wake the stream immediately, a shared tmux control-mode client reports window and command changes, and repository reconciliation detects Git changes made directly in a terminal without browser polling.
+- The state socket's `thread.status` topic provides authoritative snapshots for Pi context status, Git branches, process shells, Shell tmux windows, retained plans, and workflow progress. Kiwi Code mutations wake the topic immediately, a shared tmux control-mode client reports window and command changes, and repository reconciliation detects Git changes made directly in a terminal without browser polling.
 - `GET /api/projects/{id}/threads/{threadId}/browser` returns the thread's in-app browser status and tabs.
 - `POST /api/projects/{id}/threads/{threadId}/browser/actions` forwards bounded session, tab, navigation, semantic page, screenshot, and allowlisted page-CDP operations to the selected private headless-Chrome or authenticated Electron provider.
 - `GET /api/projects/{id}/threads/{threadId}/browser/frame` returns a no-store JPEG preview for clients that cannot use the native or streamed surface.

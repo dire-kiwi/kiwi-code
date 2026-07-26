@@ -50,6 +50,7 @@ func (s *Server) startCleanupLoop(ctx context.Context, interval time.Duration) {
 }
 
 func (s *Server) runCleanupCycle(now time.Time) error {
+	defer s.notifyStateChanged(stateTopicCleanup, "", "")
 	var cleanupErrors []error
 	if err := s.closeInactiveTmuxSessions(now); err != nil {
 		cleanupErrors = append(cleanupErrors, fmt.Errorf("close inactive tmux sessions: %w", err))
