@@ -450,14 +450,16 @@ export function TerminalWorkspace({
 
   return (
     <div
-      className="relative flex h-full min-w-0 bg-ghost-black"
+      className={`relative flex h-full min-w-0 bg-ghost-black ${
+        detailsExpanded ? 'thread-details-expanded' : ''
+      }`}
       onKeyDownCapture={onThreadInteraction}
       onPointerDownCapture={onThreadInteraction}
       onWheelCapture={onThreadInteraction}
     >
       <div className="flex min-w-0 flex-1 flex-col">
         <header className={`shrink-0 bg-ghost-panel/95 ${hasSecondaryTabs ? 'border-b border-ghost-border/70' : ''}`}>
-        <div className="relative flex min-h-[41px] items-center gap-3 pl-3 pr-12 md:px-3 lg:px-5">
+        <div className="desktop-titlebar-drag-region desktop-titlebar-workspace-right-safe relative flex min-h-[41px] items-center gap-3 pl-3 pr-12 md:px-3 lg:px-5">
           <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-ghost-border/70" />
           <OpenSidebarButton onClick={onOpenSidebar} shrink />
 

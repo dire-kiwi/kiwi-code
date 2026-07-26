@@ -252,6 +252,13 @@ async function createWindow() {
     minWidth: 960,
     minHeight: 640,
     backgroundColor: '#090b0f',
+    titleBarStyle: 'hidden',
+    ...(process.platform !== 'darwin' ? {
+      titleBarOverlay: {
+        color: '#00000000',
+        symbolColor: '#e8e8e8',
+      },
+    } : {}),
     icon: appIconPath,
     show: false,
   })

@@ -13,6 +13,12 @@ const recordings = fs.readFileSync(path.join(__dirname, 'browser-recordings.cjs'
 const recorderPreload = fs.readFileSync(path.join(__dirname, 'browser-recorder-preload.cjs'), 'utf8')
 const recorderRenderer = fs.readFileSync(path.join(__dirname, 'browser-recorder-renderer.js'), 'utf8')
 const preload = fs.readFileSync(path.join(__dirname, 'preload.cjs'), 'utf8')
+const rendererApp = fs.readFileSync(path.join(__dirname, '..', 'src', 'App.tsx'), 'utf8')
+const rendererStyles = fs.readFileSync(path.join(__dirname, '..', 'src', 'index.css'), 'utf8')
+const projectSidebar = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'organisms', 'ProjectSidebar.tsx'), 'utf8')
+const threadProjectSidebar = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'organisms', 'ThreadProjectSidebar.tsx'), 'utf8')
+const screenHeader = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'molecules', 'ScreenHeader.tsx'), 'utf8')
+const terminalWorkspace = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'pages', 'TerminalWorkspace.tsx'), 'utf8')
 
 test('desktop composes a secure trusted WebContentsView in a BaseWindow', () => {
   assert.match(main, /new BaseWindow\(/)
@@ -24,6 +30,25 @@ test('desktop composes a secure trusted WebContentsView in a BaseWindow', () => 
   assert.match(main, /event\.senderFrame !== contents\.mainFrame/)
   assert.match(main, /requireLoopbackHttpUrl/)
   assert.doesNotMatch(main, /new BrowserWindow\(/)
+})
+
+test('desktop integrates native window controls into draggable application chrome', () => {
+  assert.match(main, /titleBarStyle: 'hidden'/)
+  assert.match(main, /process\.platform !== 'darwin'/)
+  assert.match(main, /titleBarOverlay: \{\s+color: '#00000000',\s+symbolColor: '#e8e8e8',\s+\}/)
+  assert.doesNotMatch(main, /frame:\s*false/)
+  assert.match(preload, /platform: process\.platform/)
+  assert.match(rendererApp, /`desktop-shell desktop-shell-\$\{desktopApp\.platform \|\| 'unknown'\}`/)
+  assert.match(rendererStyles, /app-region: drag/)
+  assert.match(rendererStyles, /app-region: no-drag/)
+  assert.match(rendererStyles, /env\(titlebar-area-x, 0px\)/)
+  assert.match(rendererStyles, /env\(titlebar-area-width, 100vw\)/)
+  assert.match(rendererStyles, /env\(titlebar-area-height, 0px\)/)
+  assert.match(projectSidebar, /desktop-titlebar-drag-region flex/)
+  assert.match(projectSidebar, /desktop-titlebar-left-safe flex/)
+  assert.match(threadProjectSidebar, /desktop-titlebar-drag-region desktop-titlebar-right-column-safe/)
+  assert.match(screenHeader, /desktop-titlebar-drag-region desktop-titlebar-right-safe/)
+  assert.match(terminalWorkspace, /desktop-titlebar-drag-region desktop-titlebar-workspace-right-safe/)
 })
 
 test('guest tabs are isolated WebContentsViews with no preload or Node integration', () => {

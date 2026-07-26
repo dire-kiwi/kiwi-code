@@ -20,7 +20,7 @@ export function ScreenHeader({
   onBack,
 }: ScreenHeaderProps) {
   return (
-    <header className="flex h-[4.5rem] shrink-0 items-center gap-3 border-b border-ghost-border/70 bg-ghost-panel/95 px-3 sm:px-5">
+    <header className="desktop-titlebar-drag-region desktop-titlebar-right-safe flex h-[4.5rem] shrink-0 items-center gap-3 border-b border-ghost-border/70 bg-ghost-panel/95 px-3 sm:px-5">
       <OpenSidebarButton onClick={onOpenSidebar} shrink />
       <IconButton
         type="button"
