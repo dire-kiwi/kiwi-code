@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -54,11 +55,19 @@ func (h *terminalHandler) listTmuxSessions(w http.ResponseWriter, _ *http.Reques
 }
 
 func (h *terminalHandler) tmuxBrowserSessions() ([]tmuxBrowserSession, error) {
-	output, err := h.tmuxCommand(
+	return h.tmuxBrowserSessionsContext(context.Background())
+}
+
+func (h *terminalHandler) tmuxBrowserSessionsContext(ctx context.Context) ([]tmuxBrowserSession, error) {
+	output, err := h.tmuxCommandContext(
+		ctx,
 		"list-windows", "-a",
 		"-F", "#{session_name}\t#{?session_attached,1,0}\t#{window_id}\t#{window_index}\t#{window_name}\t#{window_active}\t#{window_panes}\t#{pane_current_command}\t#{pid}\t#{@kiwi-code-process-id}",
 	).CombinedOutput()
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		if isMissingTmuxServer(output, err) {
 			return []tmuxBrowserSession{}, nil
 		}

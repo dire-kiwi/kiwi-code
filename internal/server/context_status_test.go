@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dire-kiwi/kiwi-code/internal/broadcast"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
@@ -25,9 +24,8 @@ func TestContextStatusAPITracksEachPresentation(t *testing.T) {
 	}
 	thread := item.Threads[0]
 	application := &Server{
-		projects:            store,
-		contextStatuses:     newContextStatusTracker(),
-		threadStatusChanges: broadcast.NewBroker[threadStatusKey](broadcast.DefaultMaxPending),
+		projects:        store,
+		contextStatuses: newContextStatusTracker(),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/context/status", application.updateContextStatus)

@@ -85,6 +85,7 @@ func (s *Server) pauseWorkflow(w http.ResponseWriter, r *http.Request) {
 	if updateErr == nil {
 		record = updated
 	}
+	s.refreshWorkflowProcessWatch(projectID, threadID)
 	s.notifyThreadStatusChanged(projectID, threadID)
 	if processStopErr != nil || childStopErr != nil || updateErr != nil {
 		writeError(w, http.StatusInternalServerError, "The workflow was paused, but one or more runner processes could not be stopped. Retry pause before resuming.")
@@ -165,6 +166,7 @@ func (s *Server) resumeWorkflow(w http.ResponseWriter, r *http.Request) {
 			run.Attempt = 2
 		}
 		run.State = workflowStateQueued
+		run.StartedAt = nil
 		run.Error = ""
 		run.ProcessID = ""
 		run.FinishedAt = nil
@@ -216,6 +218,7 @@ func (s *Server) resumeWorkflow(w http.ResponseWriter, r *http.Request) {
 			}
 			return nil
 		})
+		s.refreshWorkflowProcessWatch(projectID, threadID)
 		s.notifyThreadStatusChanged(projectID, threadID)
 	}
 	if err := s.workflows.writeManifest(record, manifest); err != nil {
@@ -257,6 +260,7 @@ func (s *Server) resumeWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Could not finish resuming the workflow.")
 		return
 	}
+	s.refreshWorkflowProcessWatch(projectID, threadID)
 	s.notifyThreadStatusChanged(projectID, threadID)
 	writeJSON(w, http.StatusOK, workflowSnapshot(record))
 }

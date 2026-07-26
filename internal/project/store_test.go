@@ -1929,12 +1929,13 @@ func TestStoreDiscoversPreviouslyUntrackedManagedWorktrees(t *testing.T) {
 	if _, err := os.Stat(thread.WorktreePath); err != nil {
 		t.Fatalf("newly discovered worktree is missing: %v", err)
 	}
+	expectedDeletedPath := worktreeIdentityPath(thread.WorktreePath)
 
 	result, err = reloaded.CleanupOrphanedWorktrees(discoveredAt.Add(48 * time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Deleted) != 1 || result.Deleted[0] != thread.WorktreePath {
+	if len(result.Deleted) != 1 || result.Deleted[0] != expectedDeletedPath {
 		t.Fatalf("deleted discovered worktrees = %#v", result.Deleted)
 	}
 }

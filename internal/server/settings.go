@@ -48,5 +48,8 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	s.notifyStateChanged(stateTopicSettings, "", "")
+	s.notifyStateChanged(stateTopicCodingAgents, "", "")
+	s.notifyStateChanged(stateTopicCleanup, "", "")
 	writeJSON(w, http.StatusOK, settings)
 }

@@ -5,14 +5,14 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from 'react'
 import type { ITheme } from '@xterm/xterm'
-import { getSettings } from './api'
 import { DEFAULT_THEME } from './defaultTheme.generated'
 import type { ThemeColors, ThemeSettings } from './types'
+import { useSubscription } from './wire/react'
+import { SettingsTopic } from './wire/topics'
 
 export { DEFAULT_THEME } from './defaultTheme.generated'
 
@@ -106,27 +106,15 @@ const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeSettings>(DEFAULT_THEME)
-  const revisionRef = useRef(0)
+  const settings = useSubscription(SettingsTopic, undefined)
 
   const setTheme = useCallback((next: ThemeSettings) => {
-    revisionRef.current += 1
     setThemeState(next)
   }, [])
 
   useEffect(() => {
-    const controller = new AbortController()
-    const startingRevision = revisionRef.current
-    getSettings(controller.signal)
-      .then((settings) => {
-        if (revisionRef.current === startingRevision && settings.theme) {
-          setThemeState(settings.theme)
-        }
-      })
-      .catch(() => {
-        // The bundled defaults keep the UI usable while the backend is unavailable.
-      })
-    return () => controller.abort()
-  }, [])
+    if (settings.state === 'ready') setThemeState(settings.data.theme)
+  }, [settings])
 
   useLayoutEffect(() => applyTheme(theme), [theme])
 

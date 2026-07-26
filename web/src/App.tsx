@@ -4,14 +4,11 @@ import {
   acknowledgePiThreadActivity,
   deleteProject,
   deleteThread,
-  listProfiles,
-  listProjects,
   setThreadArchived,
   setThreadBookmarked,
   updateProjectOrder,
   updateThreadOrder,
 } from './api'
-import { apiUrl } from './apiUrl'
 import { isCodingAgent } from './codingAgents'
 import { WorkspaceLoadingState } from './components/molecules/WorkspaceLoadingState'
 import { ProjectSidebar } from './components/organisms/ProjectSidebar'
@@ -67,6 +64,16 @@ import type {
   WorkspaceTool,
   ThreadUsageSnapshot,
 } from './types'
+import { stateConnectionBanner } from './wire/connectionBanner'
+import { useApplicationInstance, useConnectionStatus, useSubscription } from './wire/react'
+import {
+  AgentActivityTopic,
+  ProcessWebServersTopic,
+  ProfilesTopic,
+  ProjectsTopic,
+  SettingsTopic,
+  ThreadUsageTopic,
+} from './wire/topics'
 
 const defaultWorkspaceTool: WorkspaceTool = 'pi'
 const activeProfileStorageKey = 'kiwi-code-active-profile'
@@ -111,62 +118,6 @@ function visibleProjectSnapshots(items: Project[]) {
   return items.map((project) => {
     const threads = project.threads.filter((thread) => !thread.rollbackPending)
     return threads.length === project.threads.length ? project : { ...project, threads }
-  })
-}
-
-function sameThreads(current: Thread[], next: Thread[]) {
-  if (current.length !== next.length) return false
-  return current.every((thread, index) => {
-    const candidate = next[index]
-    return candidate
-      && candidate.id === thread.id
-      && candidate.title === thread.title
-      && candidate.cwd === thread.cwd
-      && candidate.createdAt === thread.createdAt
-      && candidate.lastPromptAt === thread.lastPromptAt
-      && candidate.parentThreadId === thread.parentThreadId
-      && candidate.agentModel === thread.agentModel
-      && candidate.agentThinkingLevel === thread.agentThinkingLevel
-      && candidate.workflowRunId === thread.workflowRunId
-      && candidate.workflowAgentId === thread.workflowAgentId
-      && candidate.worktree === thread.worktree
-      && candidate.branch === thread.branch
-      && candidate.worktreePath === thread.worktreePath
-      && candidate.autoNamed === thread.autoNamed
-      && candidate.closedAt === thread.closedAt
-      && candidate.archivedAt === thread.archivedAt
-      && candidate.bookmarked === thread.bookmarked
-      && candidate.tokenLimit === thread.tokenLimit
-      && candidate.costLimitUsd === thread.costLimitUsd
-      && candidate.nestedDepth === thread.nestedDepth
-      && candidate.rollbackPending === thread.rollbackPending
-  })
-}
-
-function sameProfiles(current: Profile[], next: Profile[]) {
-  if (current.length !== next.length) return false
-  return current.every((profile, index) => {
-    const candidate = next[index]
-    return candidate && candidate.id === profile.id && candidate.name === profile.name
-  })
-}
-
-function sameProjects(current: Project[], next: Project[]) {
-  if (current.length !== next.length) return false
-  return current.every((project, index) => {
-    const candidate = next[index]
-    return candidate
-      && candidate.id === project.id
-      && candidate.name === project.name
-      && candidate.path === project.path
-      && candidate.profileId === project.profileId
-      && candidate.host === project.host
-      && candidate.isGitRepo === project.isGitRepo
-      && candidate.createdAt === project.createdAt
-      && candidate.subAgentNestingDepthOverride === project.subAgentNestingDepthOverride
-      && candidate.worktreeBranchPrefix === project.worktreeBranchPrefix
-      && candidate.figmaMCPEnabled === project.figmaMCPEnabled
-      && sameThreads(project.threads, candidate.threads)
   })
 }
 
@@ -265,7 +216,20 @@ export default function App() {
   const settingsSectionMatch = useMatch(SETTINGS_SECTION_ROUTE)
   const tmuxMatch = useMatch(TMUX_ROUTE)
 
+  const projectSubscription = useSubscription(ProjectsTopic, undefined)
+  const profileSubscription = useSubscription(ProfilesTopic, undefined)
+  const activitySubscription = useSubscription(AgentActivityTopic, undefined)
+  const usageSubscription = useSubscription(ThreadUsageTopic, undefined)
+  const processSubscription = useSubscription(ProcessWebServersTopic, undefined)
+  const settingsSubscription = useSubscription(SettingsTopic, undefined)
+  const stateConnection = useConnectionStatus()
+  const reloadForNewInstance = useCallback((current: string, previous?: string) => {
+    if (previous && current !== previous) window.location.reload()
+  }, [])
+  useApplicationInstance(reloadForNewInstance)
+
   const [profiles, setProfiles] = useState<Profile[]>([])
+  const [profilesHydrated, setProfilesHydrated] = useState(false)
   const [activeProfileId, setActiveProfileId] = useState(() => {
     try {
       return window.localStorage.getItem(activeProfileStorageKey) || 'personal'
@@ -274,9 +238,7 @@ export default function App() {
     }
   })
   const [projects, setProjects] = useState<Project[]>([])
-  const [projectsLoading, setProjectsLoading] = useState(true)
-  const [profilesLoading, setProfilesLoading] = useState(true)
-  const [loadError, setLoadError] = useState('')
+  const [projectsHydrated, setProjectsHydrated] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null)
   const [archivingThreadId, setArchivingThreadId] = useState<string | null>(null)
@@ -376,108 +338,36 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const controller = new AbortController()
-    const events = new EventSource(apiUrl('/api/events'))
-    let receivedProjectSnapshot = false
-    let receivedProfileSnapshot = false
-
-    function applyProjects(items: Project[]) {
-      const visibleItems = visibleProjectSnapshots(items)
-      setProjects((current) => sameProjects(current, visibleItems) ? current : visibleItems)
-      setLoadError('')
-      setProjectsLoading(false)
+    if (projectSubscription.state === 'ready') {
+      setProjects(visibleProjectSnapshots(projectSubscription.data as Project[]))
+      setProjectsHydrated(true)
     }
+  }, [projectSubscription])
 
-    function applyProfiles(items: Profile[]) {
-      setProfiles((current) => sameProfiles(current, items) ? current : items)
-      setLoadError('')
-      setProfilesLoading(false)
+  useEffect(() => {
+    if (profileSubscription.state === 'ready') {
+      setProfiles(profileSubscription.data as Profile[])
+      setProfilesHydrated(true)
     }
+  }, [profileSubscription])
 
-    function handleProjects(event: Event) {
-      try {
-        const items: unknown = JSON.parse((event as MessageEvent<string>).data)
-        if (!Array.isArray(items)) return
-        receivedProjectSnapshot = true
-        applyProjects(items as Project[])
-      } catch {
-        // Ignore a malformed event; EventSource keeps listening for the next snapshot.
-      }
+  useEffect(() => {
+    if (activitySubscription.state === 'ready') {
+      applyPiActivities(activitySubscription.data as PiThreadActivity[])
     }
+  }, [activitySubscription, applyPiActivities])
 
-    function handleProfiles(event: Event) {
-      try {
-        const items: unknown = JSON.parse((event as MessageEvent<string>).data)
-        if (!Array.isArray(items)) return
-        receivedProfileSnapshot = true
-        applyProfiles(items as Profile[])
-      } catch {
-        // Ignore a malformed event; EventSource keeps listening for the next snapshot.
-      }
+  useEffect(() => {
+    if (usageSubscription.state === 'ready') {
+      setUsageSnapshots(usageSubscription.data as ThreadUsageSnapshot[])
     }
+  }, [usageSubscription])
 
-    function handlePiActivity(event: Event) {
-      try {
-        const activities: unknown = JSON.parse((event as MessageEvent<string>).data)
-        if (Array.isArray(activities)) applyPiActivities(activities as PiThreadActivity[])
-      } catch {
-        // Ignore a malformed event; EventSource keeps listening for the next snapshot.
-      }
+  useEffect(() => {
+    if (processSubscription.state === 'ready') {
+      setProcessWebServers(processSubscription.data as ProcessWebServer[])
     }
-
-    function handleThreadUsage(event: Event) {
-      try {
-        const snapshots: unknown = JSON.parse((event as MessageEvent<string>).data)
-        if (Array.isArray(snapshots)) setUsageSnapshots(snapshots as ThreadUsageSnapshot[])
-      } catch {
-        // Ignore a malformed event; EventSource keeps listening for the next snapshot.
-      }
-    }
-
-    function handleProcesses(event: Event) {
-      try {
-        const webServers: unknown = JSON.parse((event as MessageEvent<string>).data)
-        if (Array.isArray(webServers)) setProcessWebServers(webServers as ProcessWebServer[])
-      } catch {
-        // Ignore a malformed event; EventSource keeps listening for the next snapshot.
-      }
-    }
-
-    events.addEventListener('projects', handleProjects)
-    events.addEventListener('profiles', handleProfiles)
-    events.addEventListener('pi-activity', handlePiActivity)
-    events.addEventListener('thread-usage', handleThreadUsage)
-    events.addEventListener('processes', handleProcesses)
-
-    listProjects(controller.signal)
-      .then((items) => {
-        if (!receivedProjectSnapshot) applyProjects(Array.isArray(items) ? items : [])
-      })
-      .catch((reason) => {
-        if (controller.signal.aborted || receivedProjectSnapshot) return
-        setLoadError(reason instanceof Error ? reason.message : 'Could not load projects.')
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setProjectsLoading(false)
-      })
-
-    listProfiles(controller.signal)
-      .then((items) => {
-        if (!receivedProfileSnapshot) applyProfiles(Array.isArray(items) ? items : [])
-      })
-      .catch((reason) => {
-        if (controller.signal.aborted || receivedProfileSnapshot) return
-        setLoadError(reason instanceof Error ? reason.message : 'Could not load profiles.')
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setProfilesLoading(false)
-      })
-
-    return () => {
-      controller.abort()
-      events.close()
-    }
-  }, [applyPiActivities])
+  }, [processSubscription])
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === workspaceProjectId) ?? null,
@@ -543,7 +433,40 @@ export default function App() {
   const activeThreadIdentity = selectedProject && selectedThread
     ? piActivityKey(selectedProject.id, selectedThread.id)
     : null
-  const loading = projectsLoading || profilesLoading
+  const projectsLoading = projectSubscription.state === 'loading'
+  const profilesLoading = profileSubscription.state === 'loading'
+  // Subscription snapshots become ready one render before the effects above
+  // copy them into mutation-friendly local state. Keep route guards suspended
+  // for that hydration render so direct project/thread deep links do not
+  // briefly look missing and redirect to the default workspace.
+  const loading = projectsLoading
+    || profilesLoading
+    || (projectSubscription.state === 'ready' && !projectsHydrated)
+    || (profileSubscription.state === 'ready' && !profilesHydrated)
+  const loadError = projectSubscription.state === 'error'
+    ? projectSubscription.error.message
+    : profileSubscription.state === 'error'
+      ? profileSubscription.error.message
+      : ''
+  const stateTopicError = [
+    projectSubscription,
+    profileSubscription,
+    activitySubscription,
+    usageSubscription,
+    processSubscription,
+    settingsSubscription,
+  ].flatMap((subscription) =>
+    subscription.state === 'error' ? [subscription.error.message] : [])[0] ?? ''
+
+  function retryGlobalState() {
+    if (projectSubscription.state === 'error') projectSubscription.retry()
+    if (profileSubscription.state === 'error') profileSubscription.retry()
+    if (activitySubscription.state === 'error') activitySubscription.retry()
+    if (usageSubscription.state === 'error') usageSubscription.retry()
+    if (processSubscription.state === 'error') processSubscription.retry()
+    if (settingsSubscription.state === 'error') settingsSubscription.retry()
+  }
+  const connectionBanner = stateConnectionBanner(stateConnection, stateTopicError)
 
   useEffect(() => {
     if (profilesLoading || profiles.length === 0 || profiles.some((profile) => profile.id === activeProfileId)) return
@@ -714,11 +637,8 @@ export default function App() {
     try {
       await updateProjectOrder(profileId, projectIds)
     } catch (reason) {
-      try {
-        setProjects(visibleProjectSnapshots(await listProjects()))
-      } catch {
-        setProjects((current) => projectsWithProfileOrder(current, profileId, previousProjectIds))
-      }
+      setProjects((current) => projectsWithProfileOrder(current, profileId, previousProjectIds))
+      projectSubscription.retry()
       window.alert(reason instanceof Error ? reason.message : 'Could not save the project order.')
     }
   }
@@ -731,11 +651,8 @@ export default function App() {
     try {
       await updateThreadOrder(projectId, threadIds)
     } catch (reason) {
-      try {
-        setProjects(visibleProjectSnapshots(await listProjects()))
-      } catch {
-        setProjects((current) => projectsWithThreadOrder(current, projectId, previousThreadIds))
-      }
+      setProjects((current) => projectsWithThreadOrder(current, projectId, previousThreadIds))
+      projectSubscription.retry()
       window.alert(reason instanceof Error ? reason.message : 'Could not save the thread order.')
     }
   }
@@ -858,6 +775,23 @@ export default function App() {
     <div className={`flex h-dvh min-h-[32rem] overflow-hidden bg-ghost-black text-ghost-bright-white antialiased ${
       desktopShellClassName
     }`}>
+      {connectionBanner && (
+        <div
+          role="status"
+          className="fixed left-1/2 top-2 z-[100] flex -translate-x-1/2 items-center gap-2 rounded-full border border-ghost-yellow/35 bg-ghost-black/90 px-3 py-1.5 font-mono text-[9px] text-ghost-yellow shadow-lg"
+        >
+          <span>{connectionBanner.message}</span>
+          {connectionBanner.canRetryTopics && (
+            <button
+              type="button"
+              onClick={retryGlobalState}
+              className="font-semibold text-ghost-bright-white hover:text-white"
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      )}
       <ProjectSidebar
         profiles={profiles}
         activeProfileId={activeProfileId}

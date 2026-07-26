@@ -24,6 +24,7 @@ type Subscription[T any] struct {
 	queue      []T
 	head       int
 	maxPending int
+	latestOnly bool
 	closed     bool
 	wake       chan struct{}
 	done       chan struct{}
@@ -45,9 +46,21 @@ func NewBroker[T any](maxPending int) *Broker[T] {
 // Subscribe registers a new subscription. Call Close when it is no longer
 // needed.
 func (b *Broker[T]) Subscribe() *Subscription[T] {
+	return b.subscribe(false)
+}
+
+// SubscribeLatest creates a snapshot-style subscription. While its consumer
+// is busy, one pending value is retained and newer values replace it. It never
+// disconnects because of producer bursts.
+func (b *Broker[T]) SubscribeLatest() *Subscription[T] {
+	return b.subscribe(true)
+}
+
+func (b *Broker[T]) subscribe(latestOnly bool) *Subscription[T] {
 	subscription := &Subscription[T]{
 		broker:     b,
 		maxPending: b.maxPending,
+		latestOnly: latestOnly,
 		wake:       make(chan struct{}, 1),
 		done:       make(chan struct{}),
 		events:     make(chan T),
@@ -67,9 +80,10 @@ func (b *Broker[T]) Subscribe() *Subscription[T] {
 	return subscription
 }
 
-// Publish queues value for every current subscriber. Values are delivered in
-// publish order. A subscriber whose bounded queue overflows is disconnected;
-// it cannot delay this publisher or any other subscriber.
+// Publish queues value for every current subscriber. Ordered subscriptions
+// receive every value and disconnect if their bounded queue overflows. Latest
+// subscriptions replace their one pending value and never overflow-disconnect.
+// Neither mode can delay this publisher or another subscriber.
 func (b *Broker[T]) Publish(value T) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -101,6 +115,10 @@ func (s *Subscription[T]) enqueue(value T) bool {
 	defer s.mu.Unlock()
 	if s.closed {
 		return false
+	}
+	if s.latestOnly && len(s.queue)-s.head > 0 {
+		s.queue[len(s.queue)-1] = value
+		return true
 	}
 	if len(s.queue)-s.head >= s.maxPending {
 		s.queue = nil

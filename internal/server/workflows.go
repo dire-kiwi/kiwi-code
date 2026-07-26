@@ -52,6 +52,8 @@ const (
 	workflowProcessStartupGrace     = 15 * time.Second
 	maxActiveWorkflowsPerThread     = 4
 	maxRetainedWorkflowsPerThread   = 25
+	workflowProcessRetryMin         = 250 * time.Millisecond
+	workflowProcessRetryMax         = 5 * time.Second
 	workflowTokenHeader             = "X-Kiwi-Code-Workflow-Token"
 	workflowStateQueued             = "queued"
 	workflowStateRunning            = "running"
@@ -72,6 +74,7 @@ var workflowRunnerSource []byte
 var (
 	errWorkflowRequestStorageLimit = errors.New("workflow retained request limit reached")
 	errWorkflowRetentionLimit      = errors.New("workflow active and paused retention limit reached")
+	errWorkflowProcessChanged      = errors.New("workflow process incarnation changed")
 )
 
 type workflowPhase struct {
@@ -685,6 +688,16 @@ func (m *workflowManager) runnerCommand(manifestPath, scriptPath, endpoint, envP
 type workflowProcessLauncher func(project.Project, project.Thread, string, string) (processWindow, error)
 type workflowProcessStopper func(project.Project, project.Thread, string) error
 
+type workflowProcessWatch struct {
+	stop       func()
+	retry      *time.Timer
+	retryDelay time.Duration
+}
+
+type workflowProcessKick struct {
+	dirty bool
+}
+
 func (h *terminalHandler) stopWorkflowProcess(item project.Project, thread project.Thread, processID string) error {
 	_, target, found, err := h.processForRequest(item, thread, processID)
 	if err != nil || !found {
@@ -713,11 +726,234 @@ func workflowChildThreadIDs(item project.Project, runID string) []string {
 	return children
 }
 
+func workflowProcessWatchState(records []workflowRunRecord, now time.Time) (bool, time.Time) {
+	active := false
+	var retryAt time.Time
+	for _, record := range records {
+		if !workflowIsActive(record.State) {
+			continue
+		}
+		active = true
+		candidate := workflowProcessStartupDeadline(record)
+		if candidate.After(now) && (retryAt.IsZero() || candidate.Before(retryAt)) {
+			retryAt = candidate
+		}
+	}
+	return active, retryAt
+}
+
+func workflowProcessStartupDeadline(record workflowRunRecord) time.Time {
+	if record.State != workflowStateQueued || record.StartedAt != nil {
+		return time.Time{}
+	}
+	attemptStartedAt := record.UpdatedAt
+	if attemptStartedAt.IsZero() {
+		attemptStartedAt = record.CreatedAt
+	}
+	return attemptStartedAt.Add(workflowProcessStartupGrace)
+}
+
+func workflowProcessIsStarting(record workflowRunRecord, now time.Time) bool {
+	return workflowProcessStartupDeadline(record).After(now)
+}
+
+func (s *Server) syncWorkflowProcessWatch(projectID, threadID string, records []workflowRunRecord, transient bool) {
+	if s == nil {
+		return
+	}
+	active, retryAt := workflowProcessWatchState(records, time.Now())
+	if s.workflowProcessLauncher != nil || s.terminal == nil || s.terminal.tmuxPath == "" {
+		active = false
+		retryAt = time.Time{}
+	}
+	key := threadStatusKey{projectID: projectID, threadID: threadID}
+
+	s.workflowWatchMu.Lock()
+	if s.workflowWatchesStopped {
+		active = false
+		retryAt = time.Time{}
+	}
+	watch := s.workflowWatches[key]
+	if !active {
+		if watch != nil {
+			delete(s.workflowWatches, key)
+		}
+		s.workflowWatchMu.Unlock()
+		if watch != nil {
+			if watch.retry != nil {
+				watch.retry.Stop()
+			}
+			watch.stop()
+		}
+		return
+	}
+	if watch == nil {
+		if s.workflowWatches == nil {
+			s.workflowWatches = make(map[threadStatusKey]*workflowProcessWatch)
+		}
+		watch = &workflowProcessWatch{
+			stop: s.terminal.watchThreadProcesses(projectID, threadID),
+		}
+		s.workflowWatches[key] = watch
+	}
+	if watch.retry != nil {
+		watch.retry.Stop()
+		watch.retry = nil
+	}
+	if transient {
+		if watch.retryDelay <= 0 {
+			watch.retryDelay = workflowProcessRetryMin
+		} else {
+			watch.retryDelay *= 2
+			if watch.retryDelay > workflowProcessRetryMax {
+				watch.retryDelay = workflowProcessRetryMax
+			}
+		}
+		transientRetryAt := time.Now().Add(watch.retryDelay)
+		if retryAt.IsZero() || transientRetryAt.Before(retryAt) {
+			retryAt = transientRetryAt
+		}
+	} else {
+		watch.retryDelay = 0
+	}
+	if !retryAt.IsZero() {
+		watch.retry = time.AfterFunc(time.Until(retryAt), func() {
+			s.queueWorkflowProcessReconcile(projectID, threadID)
+		})
+	}
+	s.workflowWatchMu.Unlock()
+}
+
+func (s *Server) refreshWorkflowProcessWatch(projectID, threadID string) {
+	s.queueWorkflowProcessReconcile(projectID, threadID)
+}
+
+func (s *Server) queueWorkflowProcessReconcile(projectID, threadID string) {
+	if s == nil || s.workflows == nil || s.workflowProcessLauncher != nil {
+		return
+	}
+	key := threadStatusKey{projectID: projectID, threadID: threadID}
+	s.workflowKickMu.Lock()
+	if s.workflowKicksStopped {
+		s.workflowKickMu.Unlock()
+		return
+	}
+	if kick := s.workflowKicks[key]; kick != nil {
+		kick.dirty = true
+		s.workflowKickMu.Unlock()
+		return
+	}
+	if s.workflowKicks == nil {
+		s.workflowKicks = make(map[threadStatusKey]*workflowProcessKick)
+	}
+	s.workflowKicks[key] = &workflowProcessKick{}
+	s.workflowKickMu.Unlock()
+
+	go s.runWorkflowProcessReconcile(key)
+}
+
+func (s *Server) runWorkflowProcessReconcile(key threadStatusKey) {
+	for {
+		s.reconcileThreadWorkflowProcesses(key.projectID, key.threadID)
+		s.workflowKickMu.Lock()
+		kick := s.workflowKicks[key]
+		if kick == nil {
+			s.workflowKickMu.Unlock()
+			return
+		}
+		if kick.dirty && !s.workflowKicksStopped {
+			kick.dirty = false
+			s.workflowKickMu.Unlock()
+			continue
+		}
+		delete(s.workflowKicks, key)
+		s.workflowKickMu.Unlock()
+		return
+	}
+}
+
+func (s *Server) reconcileThreadWorkflowProcesses(projectID, threadID string) {
+	if s == nil || s.workflows == nil {
+		return
+	}
+	item, thread, err := s.projects.GetThread(projectID, threadID)
+	if err != nil {
+		s.syncWorkflowProcessWatch(projectID, threadID, nil, false)
+		return
+	}
+	records, err := s.workflows.list(projectID, threadID)
+	if err != nil {
+		return
+	}
+	records, transient := s.reconcileWorkflowProcessesDetailed(item, thread, records)
+	s.syncWorkflowProcessWatch(projectID, threadID, records, transient)
+}
+
+func (s *Server) recoverWorkflowProcessWatches() {
+	if s == nil || s.workflows == nil {
+		return
+	}
+	for _, item := range s.projects.List() {
+		for _, thread := range item.Threads {
+			records, err := s.workflows.list(item.ID, thread.ID)
+			if err != nil {
+				continue
+			}
+			active, _ := workflowProcessWatchState(records, time.Now())
+			if active {
+				s.reconcileThreadWorkflowProcesses(item.ID, thread.ID)
+			}
+		}
+	}
+}
+
+func (s *Server) stopWorkflowProcessWatchesOnContext(ctx context.Context) {
+	if s == nil || ctx == nil || ctx.Done() == nil {
+		return
+	}
+	go func() {
+		<-ctx.Done()
+		s.stopWorkflowProcessWatches()
+	}()
+}
+
+func (s *Server) stopWorkflowProcessWatches() {
+	if s == nil {
+		return
+	}
+	s.workflowKickMu.Lock()
+	s.workflowKicksStopped = true
+	clear(s.workflowKicks)
+	s.workflowKickMu.Unlock()
+
+	s.workflowWatchMu.Lock()
+	s.workflowWatchesStopped = true
+	watches := make([]*workflowProcessWatch, 0, len(s.workflowWatches))
+	for key, watch := range s.workflowWatches {
+		watches = append(watches, watch)
+		delete(s.workflowWatches, key)
+	}
+	s.workflowWatchMu.Unlock()
+	for _, watch := range watches {
+		if watch.retry != nil {
+			watch.retry.Stop()
+		}
+		watch.stop()
+	}
+}
+
 func (s *Server) reconcileWorkflowProcesses(item project.Project, thread project.Thread, records []workflowRunRecord) []workflowRunRecord {
+	records, _ = s.reconcileWorkflowProcessesDetailed(item, thread, records)
+	return records
+}
+
+func (s *Server) reconcileWorkflowProcessesDetailed(item project.Project, thread project.Thread, records []workflowRunRecord) ([]workflowRunRecord, bool) {
 	// Injected launchers are test doubles without a tmux window to reconcile.
 	if s.workflowProcessLauncher != nil || s.terminal == nil || s.terminal.tmuxPath == "" {
-		return records
+		return records, false
 	}
+	transient := false
+recordLoop:
 	for index := range records {
 		record := records[index]
 		if !workflowIsActive(record.State) {
@@ -726,54 +962,80 @@ func (s *Server) reconcileWorkflowProcesses(item project.Project, thread project
 		if record.ProcessID == "" {
 			adopted := false
 			windows, listErr := s.terminal.processWindows(item, thread)
-			if listErr == nil {
-				suffix := strings.TrimPrefix(record.ID, "wf-")
-				expectedName := ""
-				if len(suffix) >= 6 {
-					expectedName = "workflow-" + suffix[:6]
-				}
-				for _, window := range windows {
-					if window.Name != expectedName {
-						continue
-					}
-					command := strings.TrimSpace(window.CurrentCommand)
-					nodeCommand := filepath.Base(s.workflows.nodePath)
-					processHealthy := time.Since(record.CreatedAt) < workflowProcessStartupGrace || command == nodeCommand || command == "env"
-					updated, updateErr := s.workflows.mutate(item.ID, thread.ID, record.ID, func(run *workflowRunRecord) error {
-						if workflowIsActive(run.State) && run.ProcessID == "" {
-							run.ProcessID = window.ID
-						}
-						return nil
-					})
-					if updateErr == nil {
-						record = updated
-						records[index] = updated
-						adopted = processHealthy
-						s.notifyThreadStatusChanged(item.ID, thread.ID)
-					}
-					break
-				}
+			if listErr != nil {
+				transient = true
+				continue
 			}
-			if adopted || (record.ProcessID == "" && time.Since(record.CreatedAt) < workflowProcessStartupGrace) {
+			suffix := strings.TrimPrefix(record.ID, "wf-")
+			expectedName := ""
+			if len(suffix) >= 6 {
+				expectedName = "workflow-" + suffix[:6]
+			}
+			for _, window := range windows {
+				if window.Name != expectedName {
+					continue
+				}
+				command := strings.TrimSpace(window.CurrentCommand)
+				nodeCommand := filepath.Base(s.workflows.nodePath)
+				starting := workflowProcessIsStarting(record, time.Now())
+				processHealthy := starting || command == nodeCommand || command == "env"
+				adoptedIncarnation := false
+				updated, updateErr := s.workflows.mutate(item.ID, thread.ID, record.ID, func(run *workflowRunRecord) error {
+					if !workflowIsActive(run.State) ||
+						run.Attempt != record.Attempt ||
+						run.ProcessID != record.ProcessID {
+						return errWorkflowProcessChanged
+					}
+					run.ProcessID = window.ID
+					adoptedIncarnation = true
+					return nil
+				})
+				if errors.Is(updateErr, errWorkflowProcessChanged) {
+					latest, getErr := s.workflows.get(item.ID, thread.ID, record.ID)
+					if getErr != nil {
+						transient = true
+					} else {
+						records[index] = latest
+					}
+					continue recordLoop
+				}
+				if updateErr != nil {
+					transient = true
+					continue recordLoop
+				}
+				record = updated
+				records[index] = updated
+				adopted = adoptedIncarnation && processHealthy
+				s.notifyThreadStatusChanged(item.ID, thread.ID)
+				break
+			}
+			starting := workflowProcessIsStarting(record, time.Now())
+			if adopted || (record.ProcessID == "" && starting) {
 				continue
 			}
 		} else {
 			window, _, found, err := s.terminal.processForRequest(item, thread, record.ProcessID)
 			if err != nil {
+				transient = true
 				continue
 			}
 			if found {
 				command := strings.TrimSpace(window.CurrentCommand)
 				nodeCommand := filepath.Base(s.workflows.nodePath)
-				if time.Since(record.CreatedAt) < workflowProcessStartupGrace || command == nodeCommand || command == "env" {
+				starting := workflowProcessIsStarting(record, time.Now())
+				if starting || command == nodeCommand || command == "env" {
 					continue
 				}
 			}
 		}
+		failed := false
 		updated, updateErr := s.workflows.mutate(item.ID, thread.ID, record.ID, func(run *workflowRunRecord) error {
-			if !workflowIsActive(run.State) {
-				return nil
+			if !workflowIsActive(run.State) ||
+				run.Attempt != record.Attempt ||
+				run.ProcessID != record.ProcessID {
+				return errWorkflowProcessChanged
 			}
+			failed = true
 			now := time.Now().UTC()
 			run.State = workflowStateFailed
 			run.Error = "Workflow process exited before reporting a final result."
@@ -781,18 +1043,32 @@ func (s *Server) reconcileWorkflowProcesses(item project.Project, thread project
 			compactSettledWorkflow(run)
 			return nil
 		})
-		if updateErr == nil {
-			records[index] = updated
-			if record.ProcessID != "" {
-				_ = s.terminal.stopWorkflowProcess(item, thread, record.ProcessID)
+		if errors.Is(updateErr, errWorkflowProcessChanged) {
+			latest, getErr := s.workflows.get(item.ID, thread.ID, record.ID)
+			if getErr != nil {
+				transient = true
+			} else {
+				records[index] = latest
 			}
-			for _, childID := range workflowChildThreadIDs(item, updated.ID) {
-				_ = s.terminal.nativePi.stopThread(item.ID, childID)
-			}
-			s.notifyThreadStatusChanged(item.ID, thread.ID)
+			continue
 		}
+		if updateErr != nil {
+			transient = true
+			continue
+		}
+		records[index] = updated
+		if !failed {
+			continue
+		}
+		if record.ProcessID != "" {
+			_ = s.terminal.stopWorkflowProcess(item, thread, record.ProcessID)
+		}
+		for _, childID := range workflowChildThreadIDs(item, updated.ID) {
+			_ = s.terminal.nativePi.stopThread(item.ID, childID)
+		}
+		s.notifyThreadStatusChanged(item.ID, thread.ID)
 	}
-	return records
+	return records, transient
 }
 
 func (s *Server) startWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -978,6 +1254,7 @@ func (s *Server) startWorkflow(w http.ResponseWriter, r *http.Request) {
 			run.FinishedAt = &now
 			return nil
 		})
+		s.refreshWorkflowProcessWatch(projectID, threadID)
 		s.notifyThreadStatusChanged(projectID, threadID)
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
@@ -995,6 +1272,7 @@ func (s *Server) startWorkflow(w http.ResponseWriter, r *http.Request) {
 			run.FinishedAt = &now
 			return nil
 		})
+		s.refreshWorkflowProcessWatch(projectID, threadID)
 		s.notifyThreadStatusChanged(projectID, threadID)
 		writeError(w, http.StatusServiceUnavailable, "Could not start the workflow process.")
 		return
@@ -1012,9 +1290,11 @@ func (s *Server) startWorkflow(w http.ResponseWriter, r *http.Request) {
 			stopper = s.terminal.stopWorkflowProcess
 		}
 		_ = stopper(item, thread, window.ID)
+		s.refreshWorkflowProcessWatch(projectID, threadID)
 		writeError(w, http.StatusInternalServerError, "Could not finish starting the workflow.")
 		return
 	}
+	s.refreshWorkflowProcessWatch(projectID, threadID)
 	s.notifyThreadStatusChanged(projectID, threadID)
 	writeJSON(w, http.StatusCreated, workflowSnapshot(record))
 }
@@ -1031,6 +1311,7 @@ func (s *Server) listWorkflows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	records = s.reconcileWorkflowProcesses(item, thread, records)
+	s.refreshWorkflowProcessWatch(item.ID, thread.ID)
 	snapshots := make([]workflowRunSnapshot, len(records))
 	for index, record := range records {
 		snapshots[index] = workflowSummarySnapshot(record)
@@ -1054,6 +1335,7 @@ func (s *Server) getWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	records := s.reconcileWorkflowProcesses(item, thread, []workflowRunRecord{record})
+	s.refreshWorkflowProcessWatch(item.ID, thread.ID)
 	writeJSON(w, http.StatusOK, workflowSnapshot(records[0]))
 }
 
@@ -1096,6 +1378,7 @@ func (s *Server) stopWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !needsCleanup {
+		s.refreshWorkflowProcessWatch(projectID, threadID)
 		writeJSON(w, http.StatusOK, workflowSnapshot(record))
 		return
 	}
@@ -1120,6 +1403,7 @@ func (s *Server) stopWorkflow(w http.ResponseWriter, r *http.Request) {
 	if updateErr == nil {
 		record = updated
 	}
+	s.refreshWorkflowProcessWatch(projectID, threadID)
 	s.notifyThreadStatusChanged(projectID, threadID)
 	if processStopErr != nil || childStopErr != nil || updateErr != nil {
 		writeError(w, http.StatusInternalServerError, "The workflow was marked stopped, but one or more runner processes could not be stopped. Retry stop to finish cleanup.")
@@ -1372,6 +1656,7 @@ func (s *Server) workflowRunnerEvent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	s.refreshWorkflowProcessWatch(projectID, threadID)
 	s.notifyThreadStatusChanged(projectID, threadID)
 	response := map[string]any{
 		"ok":        true,

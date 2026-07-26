@@ -10,7 +10,7 @@ import {
   type KeyboardEvent,
 } from 'react'
 import { ArrowDown, Bot } from 'lucide-react'
-import { getSettings, uploadPiImage } from '../../api'
+import { uploadPiImage } from '../../api'
 import { apiWebSocketUrl } from '../../apiUrl'
 import { piThinkingLevelIds } from '../../codingAgents'
 import { classNames } from '../../lib/classNames'
@@ -35,6 +35,8 @@ import {
   prunePromptPastes,
 } from '../../prompt-pastes.mjs'
 import type { AgentContextStatus, ConnectionStatus } from '../../types'
+import { useSubscription } from '../../wire/react'
+import { SettingsTopic } from '../../wire/topics'
 import { piNativeStyles } from './piNativeStyles'
 import {
   PiNativeActivityPanel,
@@ -269,6 +271,7 @@ export function PiNativePane({
   onStatusChange,
   onContextStatusChange,
 }: PiNativePaneProps) {
+  const settingsSubscription = useSubscription(SettingsTopic, undefined)
   const [messages, setMessages] = useState<PiAgentMessage[]>([])
   const [liveAssistant, setLiveAssistant] = useState<PiAgentMessage | null>(null)
   const [toolStates, setToolStates] = useState<Map<string, PiToolState>>(() => new Map())
@@ -360,17 +363,10 @@ export function PiNativePane({
   }, [projectId, threadId, workflowKeywordDismissed])
 
   useEffect(() => {
-    const controller = new AbortController()
-    getSettings(controller.signal)
-      .then((settings) => {
-        setWorkflowKeywordTriggerEnabled(settings.workflowKeywordTriggerEnabled)
-        setWorkflowsEnabled(!settings.disableWorkflows)
-      })
-      .catch(() => {
-        // Activation remains fail-closed on the backend if settings cannot be loaded.
-      })
-    return () => controller.abort()
-  }, [])
+    if (settingsSubscription.state !== 'ready') return
+    setWorkflowKeywordTriggerEnabled(settingsSubscription.data.workflowKeywordTriggerEnabled)
+    setWorkflowsEnabled(!settingsSubscription.data.disableWorkflows)
+  }, [settingsSubscription])
 
   const updateConnectionStatus = useCallback((status: ConnectionStatus) => {
     setConnectionStatus(status)

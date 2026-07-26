@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { Search } from 'lucide-react'
-import { getSettings } from '../../../api'
 import { classNames } from '../../../lib/classNames'
 import { projectSettingsPath, settingsPath } from '../../../routes'
 import { useTheme } from '../../../theme'
 import type { AppSettings, Profile, Project } from '../../../types'
+import { useSubscription } from '../../../wire/react'
+import { SettingsTopic } from '../../../wire/topics'
 import { TextInput } from '../../atoms/Input'
 import { LoadErrorPanel, LoadingPanel } from '../../molecules/AsyncStatePanel'
 import { ScreenHeader } from '../../molecules/ScreenHeader'
@@ -106,32 +107,34 @@ export function SettingsShell({
   const navigate = useNavigate()
   const { section } = useParams()
   const { setTheme: applyTheme } = useTheme()
+  const settingsSubscription = useSubscription(
+    SettingsTopic,
+    undefined,
+    { enabled: scope === 'global' },
+  )
 
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [settingsLoading, setSettingsLoading] = useState(scope === 'global')
   const [settingsError, setSettingsError] = useState('')
-  const [loadKey, setLoadKey] = useState(0)
   const [query, setQuery] = useState('')
 
   useEffect(() => {
     if (scope !== 'global') return
-    const controller = new AbortController()
-    setSettingsLoading(true)
+    if (settingsSubscription.state === 'loading') {
+      setSettingsLoading(true)
+      return
+    }
+    setSettingsLoading(false)
+    if (settingsSubscription.state === 'error') {
+      setSettings(null)
+      setSettingsError(settingsSubscription.error.message)
+      return
+    }
+    const next = settingsSubscription.data as AppSettings
+    setSettings(next)
     setSettingsError('')
-    getSettings(controller.signal)
-      .then((next) => {
-        setSettings(next)
-        applyTheme(next.theme)
-      })
-      .catch((reason) => {
-        if (controller.signal.aborted) return
-        setSettingsError(reason instanceof Error ? reason.message : 'Could not load settings.')
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setSettingsLoading(false)
-      })
-    return () => controller.abort()
-  }, [applyTheme, loadKey, scope])
+    applyTheme(next.theme)
+  }, [applyTheme, scope, settingsSubscription])
 
   if (scope === 'global' && !isGlobalSettingsSection(section)) {
     return <Navigate to={settingsPath(DEFAULT_GLOBAL_SETTINGS_SECTION)} replace />
@@ -178,7 +181,7 @@ export function SettingsShell({
       return (
         <LoadErrorPanel
           message={settingsError || 'Could not load settings.'}
-          onRetry={() => setLoadKey((current) => current + 1)}
+          onRetry={settingsSubscription.retry}
         />
       )
     }

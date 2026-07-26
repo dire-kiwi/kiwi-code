@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Circle, Download, LoaderCircle, Play, RefreshCw, Trash2, Video, X } from 'lucide-react'
 import {
   browserRecordingDownloadUrl,
   browserRecordingPlaybackUrl,
-  getBrowserStatus,
   performBrowserAction,
 } from '../../api'
-import type { BrowserActionResponse, BrowserRecording, BrowserStatusResult } from '../../types'
+import type { BrowserRecording } from '../../wire/domain'
+import { useSubscription } from '../../wire/react'
+import { BrowserRecordingsTopic } from '../../wire/topics'
 import { Button } from '../atoms/Button'
 import { IconButton } from '../atoms/IconButton'
 
@@ -16,19 +17,7 @@ export type ThreadRecordingsPanelProps = {
   active: boolean
 }
 
-function statusPayload(value: BrowserStatusResult | BrowserActionResponse<BrowserStatusResult>) {
-  return 'result' in value ? value.result : value
-}
-
-function recordingIsValid(value: unknown): value is BrowserRecording {
-  if (!value || typeof value !== 'object') return false
-  const recording = value as Partial<BrowserRecording>
-  return typeof recording.id === 'string'
-    && typeof recording.targetId === 'string'
-    && typeof recording.title === 'string'
-    && typeof recording.startedAt === 'string'
-    && ['starting', 'recording', 'finalizing', 'completed'].includes(recording.state ?? '')
-}
+const noRecordings: BrowserRecording[] = []
 
 function formatDuration(durationMs?: number) {
   const totalSeconds = Math.max(0, Math.round((durationMs ?? 0) / 1_000))
@@ -44,53 +33,37 @@ function formatBytes(bytes?: number) {
 }
 
 export function ThreadRecordingsPanel({ projectId, threadId, active }: ThreadRecordingsPanelProps) {
-  const [recording, setRecording] = useState<BrowserRecording | null>(null)
-  const [recordings, setRecordings] = useState<BrowserRecording[]>([])
+  const subscription = useSubscription(
+    BrowserRecordingsTopic,
+    { projectId, threadId },
+    { enabled: active },
+  )
+  const snapshot = subscription.state === 'ready' ? subscription.data : noRecordings
+  const recording = snapshot.find((item) => item.state !== 'completed') ?? null
+  const recordings = useMemo(
+    () => snapshot
+      .filter((item) => item.state === 'completed')
+      .sort((left, right) =>
+        Date.parse(right.finishedAt ?? right.startedAt)
+        - Date.parse(left.finishedAt ?? left.startedAt)),
+    [snapshot],
+  )
   const [playback, setPlayback] = useState<BrowserRecording | null>(null)
-  const [loading, setLoading] = useState(false)
   const [deletingId, setDeletingId] = useState('')
-  const [error, setError] = useState('')
-
-  async function load(signal?: AbortSignal, showLoading = false) {
-    if (showLoading) setLoading(true)
-    try {
-      const result = statusPayload(await getBrowserStatus(projectId, threadId, signal))
-      const nextActive = recordingIsValid(result.recording) && result.recording.state !== 'completed'
-        ? result.recording
-        : null
-      const nextRecordings = Array.isArray(result.recordings)
-        ? result.recordings
-          .filter(recordingIsValid)
-          .filter((item) => item.state === 'completed')
-          .sort((left, right) => Date.parse(right.finishedAt ?? right.startedAt) - Date.parse(left.finishedAt ?? left.startedAt))
-        : []
-      setRecording(nextActive)
-      setRecordings(nextRecordings)
-      setPlayback((current) => current && nextRecordings.some((item) => item.id === current.id) ? current : null)
-      setError('')
-    } catch (reason) {
-      if (signal?.aborted) return
-      setError(reason instanceof Error ? reason.message : 'Could not load browser recordings.')
-    } finally {
-      if (!signal?.aborted && showLoading) setLoading(false)
-    }
-  }
+  const [actionError, setActionError] = useState('')
+  const loading = subscription.state === 'loading'
+  const error = subscription.state === 'error' ? subscription.error.message : actionError
 
   useEffect(() => {
-    setRecording(null)
-    setRecordings([])
     setPlayback(null)
-    setError('')
-    if (!active) return
+    setActionError('')
+  }, [projectId, threadId])
 
-    const controller = new AbortController()
-    void load(controller.signal, true)
-    const interval = window.setInterval(() => void load(controller.signal), 5_000)
-    return () => {
-      controller.abort()
-      window.clearInterval(interval)
-    }
-  }, [active, projectId, threadId])
+  useEffect(() => {
+    setPlayback((current) => current && recordings.some((item) => item.id === current.id)
+      ? current
+      : null)
+  }, [recordings])
 
   function download(item: BrowserRecording) {
     const link = document.createElement('a')
@@ -103,19 +76,23 @@ export function ThreadRecordingsPanel({ projectId, threadId, active }: ThreadRec
   async function remove(item: BrowserRecording) {
     if (!window.confirm(`Delete “${item.title}”?`)) return
     setDeletingId(item.id)
-    setError('')
+    setActionError('')
     try {
       await performBrowserAction(projectId, threadId, {
         operation: 'recording.delete',
         params: { recordingId: item.id },
       })
       if (playback?.id === item.id) setPlayback(null)
-      await load()
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not delete the recording.')
+      setActionError(reason instanceof Error ? reason.message : 'Could not delete the recording.')
     } finally {
       setDeletingId('')
     }
+  }
+
+  function retry() {
+    setActionError('')
+    subscription.retry()
   }
 
   return (
@@ -135,7 +112,7 @@ export function ThreadRecordingsPanel({ projectId, threadId, active }: ThreadRec
             type="button"
             size="xs"
             variant="subtle"
-            onClick={() => void load(undefined, true)}
+            onClick={retry}
             disabled={loading}
             aria-label="Refresh browser recordings"
             title="Refresh recordings"

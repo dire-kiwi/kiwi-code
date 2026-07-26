@@ -6,13 +6,16 @@ import '@xterm/xterm/css/xterm.css'
 import './index.css'
 import App from './App'
 import { ThemeProvider } from './theme'
+import { StateSocketProvider } from './wire/react'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ThemeProvider>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    </ThemeProvider>
+    <StateSocketProvider>
+      <ThemeProvider>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </ThemeProvider>
+    </StateSocketProvider>
   </StrictMode>,
 )

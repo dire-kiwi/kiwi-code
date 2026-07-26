@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "tokensPerSecond": 0,
+  "maxRequests": 16,
+  "model": {
+    "id": "chat",
+    "name": "Kiwi E2E Fixture Chat",
+    "reasoning": true,
+    "thinkingLevelMap": {
+      "off": "off",
+      "low": "low",
+      "high": "high"
+    }
+  },
+  "titleSteps": [
+    {
+      "id": "first-turn-title",
+      "when": {
+        "textIncludes": "Read README.md and tell me the project name."
+      },
+      "text": "Read Fixture Project Name"
+    }
+  ],
+  "steps": [
+    {
+      "id": "inspect-readme",
+      "when": {
+        "modelId": "chat",
+        "lastUserText": "Read README.md and tell me the project name.",
+        "rolesSuffix": [
+          "user"
+        ]
+      },
+      "reply": {
+        "stopReason": "toolUse",
+        "content": [
+          {
+            "type": "thinking",
+            "thinking": "I should inspect README.md before answering."
+          },
+          {
+            "type": "toolCall",
+            "id": "fixture-read-readme-1",
+            "name": "read",
+            "arguments": {
+              "path": "README.md"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "answer-project-name",
+      "when": {
+        "modelId": "chat",
+        "lastUserText": "Read README.md and tell me the project name.",
+        "rolesSuffix": [
+          "user",
+          "assistant",
+          "toolResult"
+        ],
+        "lastToolResult": {
+          "toolCallId": "fixture-read-readme-1",
+          "toolName": "read",
+          "isError": false,
+          "textIncludes": "Kiwi Code"
+        }
+      },
+      "reply": {
+        "stopReason": "stop",
+        "content": [
+          {
+            "type": "text",
+            "text": "The project is Kiwi Code."
+          }
+        ]
+      }
+    },
+    {
+      "id": "answer-second-turn",
+      "when": {
+        "modelId": "chat",
+        "lastUserText": "Which tool did you use?",
+        "rolesSuffix": [
+          "assistant",
+          "user"
+        ]
+      },
+      "reply": {
+        "stopReason": "stop",
+        "content": [
+          {
+            "type": "text",
+            "text": "I used the read tool to inspect README.md."
+          }
+        ]
+      }
+    }
+  ]
+}
