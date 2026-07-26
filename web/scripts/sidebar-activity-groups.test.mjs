@@ -166,6 +166,22 @@ test('recent caps at the limit and reports the overflow', () => {
   assert.deepEqual(entryIds(groups.recent).at(0), 'p1:t0')
 })
 
+test('working entries reorder by user prompts instead of LLM activity', () => {
+  const projects = [
+    project('p1', [
+      thread('newer-prompt', { lastPromptAt: iso(1) }),
+      thread('newer-response', { lastPromptAt: iso(10) }),
+    ]),
+  ]
+  const activities = [
+    { projectId: 'p1', threadId: 'newer-prompt', state: 'working', updatedAt: iso(2) },
+    { projectId: 'p1', threadId: 'newer-response', state: 'working', updatedAt: iso(0) },
+  ]
+
+  const groups = activityViewGroups(projects, activities)
+  assert.deepEqual(entryIds(groups.working), ['p1:newer-prompt', 'p1:newer-response'])
+})
+
 test('working entries prefer the activity timestamp for display', () => {
   const projects = [project('p1', [thread('busy', { lastPromptAt: iso(30) })])]
   const activities = [

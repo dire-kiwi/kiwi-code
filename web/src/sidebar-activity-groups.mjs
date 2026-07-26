@@ -20,6 +20,10 @@ function byNewestFirst(left, right) {
   return right.at - left.at || left.order - right.order
 }
 
+function byPromptNewestFirst(left, right) {
+  return right.promptAt - left.promptAt || left.order - right.order
+}
+
 function publicEntry({ projectId, threadId, at }) {
   return { projectId, threadId, at }
 }
@@ -54,10 +58,12 @@ export function activityViewGroups(projects, activities, recentLimit = recentThr
       const key = entryKey(activity.projectId, displayThread.id)
       const found = threadsByKey.get(key)
       if (!found || found.thread.archivedAt || included.has(key)) continue
+      const promptAt = threadRecency(found.thread)
       const entry = {
         projectId: found.projectId,
         threadId: found.thread.id,
-        at: parsedTime(activity.updatedAt) ?? threadRecency(found.thread),
+        at: parsedTime(activity.updatedAt) ?? promptAt,
+        promptAt,
         order: found.order,
       }
       const current = entriesByKey.get(key)
@@ -65,7 +71,9 @@ export function activityViewGroups(projects, activities, recentLimit = recentThr
     }
     const entries = [...entriesByKey.values()]
     for (const entry of entries) included.add(entryKey(entry.projectId, entry.threadId))
-    return entries.sort(byNewestFirst)
+    // Working heartbeats refresh while the LLM responds. Keep that timestamp
+    // for the row display, but only let a user's latest prompt change ordering.
+    return entries.sort(state === 'working' ? byPromptNewestFirst : byNewestFirst)
   }
 
   const working = collectActivityEntries('working')
