@@ -1296,21 +1296,31 @@ func normalizeWorktreeBasePath(value string) (string, error) {
 	return normalizeAbsoluteDirectoryPath(value, "worktree base path")
 }
 
+// expandHomePath resolves a leading "~" against the current user's home
+// directory. Other values, including "~someone" for another user's home, are
+// returned untouched because only the current user's home can be resolved here.
+func expandHomePath(value string) (string, error) {
+	if value != "~" && !strings.HasPrefix(value, "~"+string(filepath.Separator)) {
+		return value, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory: %w", err)
+	}
+	if value == "~" {
+		return home, nil
+	}
+	return filepath.Join(home, strings.TrimPrefix(value, "~"+string(filepath.Separator))), nil
+}
+
 func normalizeAbsoluteDirectoryPath(value, label string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", nil
 	}
-	if value == "~" || strings.HasPrefix(value, "~"+string(filepath.Separator)) {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve home directory: %w", err)
-		}
-		if value == "~" {
-			value = home
-		} else {
-			value = filepath.Join(home, strings.TrimPrefix(value, "~"+string(filepath.Separator)))
-		}
+	value, err := expandHomePath(value)
+	if err != nil {
+		return "", err
 	}
 	if !filepath.IsAbs(value) {
 		return "", fmt.Errorf("%s must be absolute", label)
@@ -1501,6 +1511,11 @@ func (s *Store) Add(name, path string, profileIDs ...string) (result Project, er
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return Project{}, errors.New("project path is required")
+	}
+
+	path, err = expandHomePath(path)
+	if err != nil {
+		return Project{}, err
 	}
 
 	absPath, err := filepath.Abs(path)

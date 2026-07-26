@@ -53,6 +53,52 @@ func TestStorePersistsProjects(t *testing.T) {
 	}
 }
 
+func TestStoreAddExpandsHomePaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("home expansion is exercised on POSIX shells")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, "code", "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := NewStore(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := store.Add("Demo", "~/code/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPath := filepath.Join(home, "code", "demo")
+	if created.Path != wantPath {
+		t.Fatalf("project path = %q, want %q", created.Path, wantPath)
+	}
+	if len(created.Threads) != 1 || created.Threads[0].Cwd != wantPath {
+		t.Fatalf("unexpected initial thread: %#v", created.Threads)
+	}
+
+	// A literal "~" directory must never be created next to the working directory.
+	if _, err := os.Stat("~"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf(`stat "~" = %v, want ErrNotExist`, err)
+	}
+
+	// The expanded path is the same project, so adding it again must be rejected.
+	if _, err := store.Add("Duplicate", wantPath); err == nil {
+		t.Fatal("expected adding the expanded path again to fail")
+	}
+
+	homeProject, err := store.Add("Home", "~")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if homeProject.Path != filepath.Clean(home) {
+		t.Fatalf("home project path = %q, want %q", homeProject.Path, filepath.Clean(home))
+	}
+}
+
 func TestStoreMigratesDefaultWorktreeBranchPrefix(t *testing.T) {
 	dataFile := filepath.Join(t.TempDir(), "projects.json")
 	store, err := NewStore(dataFile)
