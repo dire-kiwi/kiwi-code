@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
 import { Clock3, History, RefreshCw, SquareTerminal } from 'lucide-react'
-import { getSessionClosureLog } from '../../api'
 import type { SessionClosureEvent, SessionClosureOverview } from '../../types'
+import { useSubscription } from '../../wire/react'
+import { SessionClosuresTopic } from '../../wire/topics'
 import { GhostButton } from '../atoms/Button'
 import { StatusBadge } from '../atoms/StatusBadge'
 import { Surface } from '../atoms/Surface'
@@ -75,26 +75,12 @@ function ClosureRow({ event }: { event: SessionClosureEvent }) {
 }
 
 export function SessionLogScreen({ onOpenSidebar, onBack }: SessionLogScreenProps) {
-  const [overview, setOverview] = useState<SessionClosureOverview | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [loadKey, setLoadKey] = useState(0)
-
-  useEffect(() => {
-    const controller = new AbortController()
-    setLoading(true)
-    setError('')
-    getSessionClosureLog(controller.signal)
-      .then(setOverview)
-      .catch((reason) => {
-        if (controller.signal.aborted) return
-        setError(reason instanceof Error ? reason.message : 'Could not load the session log.')
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false)
-      })
-    return () => controller.abort()
-  }, [loadKey])
+  const subscription = useSubscription(SessionClosuresTopic, undefined)
+  const overview = subscription.state === 'ready'
+    ? subscription.data as SessionClosureOverview
+    : null
+  const loading = subscription.state === 'loading'
+  const error = subscription.state === 'error' ? subscription.error.message : ''
 
   return (
     <FormScreenTemplate
@@ -113,7 +99,7 @@ export function SessionLogScreen({ onOpenSidebar, onBack }: SessionLogScreenProp
           <GhostButton
             type="button"
             size="md"
-            onClick={() => setLoadKey((current) => current + 1)}
+            onClick={subscription.retry}
             disabled={loading}
             className="flex items-center gap-2 px-3 disabled:opacity-45"
           >
@@ -129,7 +115,7 @@ export function SessionLogScreen({ onOpenSidebar, onBack }: SessionLogScreenProp
         {loading && !overview ? (
           <LoadingPanel label="Loading session log" />
         ) : error && !overview ? (
-          <LoadErrorPanel message={error} onRetry={() => setLoadKey((current) => current + 1)} />
+          <LoadErrorPanel message={error} onRetry={subscription.retry} />
         ) : overview ? (
           <div className="space-y-5">
             {error && (

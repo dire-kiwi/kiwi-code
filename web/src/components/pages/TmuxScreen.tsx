@@ -6,8 +6,9 @@ import {
   RefreshCw,
   SquareTerminal,
 } from 'lucide-react'
-import { listTmuxSessions } from '../../api'
 import type { ConnectionStatus, TmuxBrowserSession, TmuxBrowserWindow } from '../../types'
+import { useSubscription } from '../../wire/react'
+import { TmuxSessionsTopic } from '../../wire/topics'
 import { IconButton } from '../atoms/IconButton'
 import { Surface } from '../atoms/Surface'
 import { ScreenHeader } from '../molecules/ScreenHeader'
@@ -28,36 +29,25 @@ function sameTarget(selection: SelectedWindow | null, session: TmuxBrowserSessio
 }
 
 export function TmuxScreen({ onOpenSidebar, onBack }: TmuxScreenProps) {
-  const [sessions, setSessions] = useState<TmuxBrowserSession[]>([])
+  const subscription = useSubscription(TmuxSessionsTopic, undefined)
+  const sessions = subscription.state === 'ready'
+    ? subscription.data as TmuxBrowserSession[]
+    : []
   const [selection, setSelection] = useState<SelectedWindow | null>(null)
   const [terminalStatus, setTerminalStatus] = useState<ConnectionStatus>('closed')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [loadKey, setLoadKey] = useState(0)
+  const loading = subscription.state === 'loading'
+  const error = subscription.state === 'error' ? subscription.error.message : ''
 
   useEffect(() => {
-    const controller = new AbortController()
-    setLoading(true)
-    setError('')
-    listTmuxSessions(controller.signal)
-      .then((next) => {
-        setSessions(next)
-        setSelection((current) => {
-          if (!current) return null
-          const session = next.find((item) => item.name === current.session.name)
-          const window = session?.windows.find((item) => item.id === current.window.id)
-          return session && window ? { session, window } : null
-        })
-      })
-      .catch((reason) => {
-        if (controller.signal.aborted) return
-        setError(reason instanceof Error ? reason.message : 'Could not load tmux sessions.')
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false)
-      })
-    return () => controller.abort()
-  }, [loadKey])
+    if (subscription.state !== 'ready') return
+    const next = subscription.data as TmuxBrowserSession[]
+    setSelection((current) => {
+      if (!current) return null
+      const session = next.find((item) => item.name === current.session.name)
+      const window = session?.windows.find((item) => item.id === current.window.id)
+      return session && window ? { session, window } : null
+    })
+  }, [subscription])
 
   function attachWindow(session: TmuxBrowserSession, window: TmuxBrowserWindow) {
     setTerminalStatus('connecting')
@@ -99,7 +89,7 @@ export function TmuxScreen({ onOpenSidebar, onBack }: TmuxScreenProps) {
               type="button"
               size="sm"
               variant="ghost"
-              onClick={() => setLoadKey((value) => value + 1)}
+              onClick={subscription.retry}
               disabled={loading}
               aria-label="Refresh tmux sessions"
               title="Refresh sessions"
@@ -121,7 +111,7 @@ export function TmuxScreen({ onOpenSidebar, onBack }: TmuxScreenProps) {
                 <p className="text-[10px] leading-4 text-ghost-bright-red">{error}</p>
                 <button
                   type="button"
-                  onClick={() => setLoadKey((value) => value + 1)}
+                  onClick={subscription.retry}
                   className="mt-3 text-[10px] font-medium text-ghost-green hover:text-ghost-bright-green"
                 >
                   Try again

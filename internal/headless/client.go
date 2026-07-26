@@ -1,9 +1,8 @@
-// Package headless exercises the Kiwi Code HTTP, SSE, and terminal WebSocket
-// APIs without a browser.
+// Package headless exercises the Kiwi Code HTTP and WebSocket APIs without a
+// browser.
 package headless
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -19,14 +18,17 @@ import (
 	"time"
 
 	"github.com/dire-kiwi/kiwi-code/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/wire"
 	"github.com/gorilla/websocket"
 )
 
 const (
-	projectsEventName  = "projects"
-	activityEventName  = "pi-activity"
-	defaultClientCount = 3
-	maxEventBytes      = 8 << 20
+	projectsTopic        = "projects"
+	activityTopic        = "agentActivity"
+	projectsChannelID    = uint32(1)
+	activityChannelID    = uint32(2)
+	defaultClientCount   = 3
+	maxStateMessageBytes = 8 << 20
 )
 
 // Options configures a multi-client API check.
@@ -78,7 +80,7 @@ func Run(ctx context.Context, options Options) error {
 	}
 	defer removeProjectPath()
 
-	eventClients := make([]*eventClient, 0, options.Clients)
+	stateClients := make([]*stateClient, 0, options.Clients)
 	terminalClients := make([]*terminalClient, 0, options.Clients+1)
 	var createdProject *project.Project
 	activeThreadIDs := make(map[string]struct{})
@@ -86,7 +88,7 @@ func Run(ctx context.Context, options Options) error {
 		for _, client := range terminalClients {
 			client.close()
 		}
-		for _, client := range eventClients {
+		for _, client := range stateClients {
 			client.close()
 		}
 		if createdProject != nil {
@@ -102,24 +104,24 @@ func Run(ctx context.Context, options Options) error {
 	}()
 
 	for index := 0; index < options.Clients; index++ {
-		client, err := openEventClient(ctx, httpClient, baseURL)
+		client, err := openStateClient(ctx, baseURL)
 		if err != nil {
-			return fmt.Errorf("open global event client %d: %w", index+1, err)
+			return fmt.Errorf("open state WebSocket client %d: %w", index+1, err)
 		}
-		eventClients = append(eventClients, client)
+		stateClients = append(stateClients, client)
 	}
-	if err := waitForEveryClient(ctx, eventClients, func(client *eventClient) error {
-		if _, err := client.waitFor(ctx, projectsEventName, nil); err != nil {
+	if err := waitForEveryClient(ctx, stateClients, func(client *stateClient) error {
+		if _, err := client.waitFor(ctx, projectsTopic, nil); err != nil {
 			return fmt.Errorf("read initial projects: %w", err)
 		}
-		if _, err := client.waitFor(ctx, activityEventName, nil); err != nil {
+		if _, err := client.waitFor(ctx, activityTopic, nil); err != nil {
 			return fmt.Errorf("read initial activity: %w", err)
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
-	pass(options.Output, "opened %d global event clients", len(eventClients))
+	pass(options.Output, "opened %d state WebSocket clients", len(stateClients))
 
 	var item project.Project
 	name := fmt.Sprintf("headless-%d", time.Now().UnixNano())
@@ -133,7 +135,7 @@ func Run(ctx context.Context, options Options) error {
 	}
 	firstThread := item.Threads[0]
 	activeThreadIDs[firstThread.ID] = struct{}{}
-	if err := waitForEveryProjectSnapshot(ctx, eventClients, func(projects []project.Project) bool {
+	if err := waitForEveryProjectSnapshot(ctx, stateClients, func(projects []project.Project) bool {
 		return hasProject(projects, item.ID)
 	}); err != nil {
 		return fmt.Errorf("fan out project creation: %w", err)
@@ -147,7 +149,7 @@ func Run(ctx context.Context, options Options) error {
 		return fmt.Errorf("create isolation thread: %w", err)
 	}
 	activeThreadIDs[secondThread.ID] = struct{}{}
-	if err := waitForEveryProjectSnapshot(ctx, eventClients, func(projects []project.Project) bool {
+	if err := waitForEveryProjectSnapshot(ctx, stateClients, func(projects []project.Project) bool {
 		return hasThread(projects, item.ID, secondThread.ID, "Headless isolation")
 	}); err != nil {
 		return fmt.Errorf("fan out thread creation: %w", err)
@@ -159,28 +161,28 @@ func Run(ctx context.Context, options Options) error {
 		map[string]string{"state": "working"}, nil, http.StatusOK); err != nil {
 		return fmt.Errorf("set working activity: %w", err)
 	}
-	if err := waitForEveryActivitySnapshot(ctx, eventClients, item.ID, firstThread.ID, "working"); err != nil {
+	if err := waitForEveryActivitySnapshot(ctx, stateClients, item.ID, firstThread.ID, "working"); err != nil {
 		return fmt.Errorf("fan out working activity: %w", err)
 	}
 	if err := requestJSON(ctx, httpClient, baseURL, http.MethodPut, activityPath,
 		map[string]string{"state": "working"}, nil, http.StatusOK); err != nil {
 		return fmt.Errorf("send working heartbeat: %w", err)
 	}
-	if err := waitForEveryActivitySnapshot(ctx, eventClients, item.ID, firstThread.ID, "working"); err != nil {
+	if err := waitForEveryActivitySnapshot(ctx, stateClients, item.ID, firstThread.ID, "working"); err != nil {
 		return fmt.Errorf("fan out working heartbeat: %w", err)
 	}
 	if err := requestJSON(ctx, httpClient, baseURL, http.MethodPut, activityPath,
 		map[string]string{"state": "finished"}, nil, http.StatusOK); err != nil {
 		return fmt.Errorf("set finished activity: %w", err)
 	}
-	if err := waitForEveryActivitySnapshot(ctx, eventClients, item.ID, firstThread.ID, "finished"); err != nil {
+	if err := waitForEveryActivitySnapshot(ctx, stateClients, item.ID, firstThread.ID, "finished"); err != nil {
 		return fmt.Errorf("fan out finished activity: %w", err)
 	}
 	if err := requestJSON(ctx, httpClient, baseURL, http.MethodPut, activityPath,
 		map[string]string{"state": "idle"}, nil, http.StatusNoContent); err != nil {
 		return fmt.Errorf("set idle activity: %w", err)
 	}
-	if err := waitForEveryActivityCleared(ctx, eventClients, item.ID, firstThread.ID); err != nil {
+	if err := waitForEveryActivityCleared(ctx, stateClients, item.ID, firstThread.ID); err != nil {
 		return fmt.Errorf("fan out idle activity: %w", err)
 	}
 	pass(options.Output, "working heartbeat and rapid status transitions reached every global client in order")
@@ -233,7 +235,7 @@ func Run(ctx context.Context, options Options) error {
 		threadPath(item.ID, secondThread.ID), map[string]any{"title": "Headless renamed"}, nil, http.StatusOK); err != nil {
 		return fmt.Errorf("rename isolation thread: %w", err)
 	}
-	if err := waitForEveryProjectSnapshot(ctx, eventClients, func(projects []project.Project) bool {
+	if err := waitForEveryProjectSnapshot(ctx, stateClients, func(projects []project.Project) bool {
 		return hasThread(projects, item.ID, secondThread.ID, "Headless renamed")
 	}); err != nil {
 		return fmt.Errorf("fan out thread rename: %w", err)
@@ -243,7 +245,7 @@ func Run(ctx context.Context, options Options) error {
 		return fmt.Errorf("delete isolation thread: %w", err)
 	}
 	delete(activeThreadIDs, secondThread.ID)
-	if err := waitForEveryProjectSnapshot(ctx, eventClients, func(projects []project.Project) bool {
+	if err := waitForEveryProjectSnapshot(ctx, stateClients, func(projects []project.Project) bool {
 		return !hasThread(projects, item.ID, secondThread.ID, "")
 	}); err != nil {
 		return fmt.Errorf("fan out thread deletion: %w", err)
@@ -263,7 +265,7 @@ func Run(ctx context.Context, options Options) error {
 	}
 	createdProject = nil
 	delete(activeThreadIDs, firstThread.ID)
-	if err := waitForEveryProjectSnapshot(ctx, eventClients, func(projects []project.Project) bool {
+	if err := waitForEveryProjectSnapshot(ctx, stateClients, func(projects []project.Project) bool {
 		return !hasProject(projects, item.ID)
 	}); err != nil {
 		return fmt.Errorf("fan out project deletion: %w", err)
@@ -373,146 +375,316 @@ func requestJSON(ctx context.Context, client *http.Client, base *url.URL, method
 	return nil
 }
 
-type event struct {
-	name string
-	data []byte
+type stateTopic struct {
+	Tag string `json:"tag"`
 }
 
-type eventClient struct {
-	cancel context.CancelFunc
-	body   io.ReadCloser
-	events chan event
-	errors chan error
+type stateClientMessage struct {
+	Type     string      `json:"t"`
+	Protocol int         `json:"protocol,omitempty"`
+	Client   string      `json:"client,omitempty"`
+	ID       uint32      `json:"id,omitempty"`
+	Topic    *stateTopic `json:"topic,omitempty"`
 }
 
-func openEventClient(ctx context.Context, client *http.Client, base *url.URL) (*eventClient, error) {
-	streamContext, cancel := context.WithCancel(ctx)
-	request, err := http.NewRequestWithContext(streamContext, http.MethodGet, endpoint(base, "/api/events"), nil)
+type stateServerMessage struct {
+	Type       string          `json:"t"`
+	Protocol   int             `json:"protocol,omitempty"`
+	InstanceID string          `json:"instanceId,omitempty"`
+	ServerTime string          `json:"serverTime,omitempty"`
+	ID         uint32          `json:"id,omitempty"`
+	Sequence   uint64          `json:"seq,omitempty"`
+	Data       json.RawMessage `json:"data,omitempty"`
+	Error      string          `json:"error,omitempty"`
+	Reason     string          `json:"reason,omitempty"`
+	Timestamp  int64           `json:"ts,omitempty"`
+}
+
+type stateSnapshot struct {
+	topic string
+	data  []byte
+}
+
+type stateClient struct {
+	connection *websocket.Conn
+	cancel     context.CancelFunc
+	topics     map[uint32]string
+	snapshots  chan stateSnapshot
+	errors     chan error
+	pending    map[string]stateSnapshot
+	closeOnce  sync.Once
+}
+
+func openStateClient(ctx context.Context, base *url.URL) (*stateClient, error) {
+	websocketURL := *base
+	if websocketURL.Scheme == "https" {
+		websocketURL.Scheme = "wss"
+	} else {
+		websocketURL.Scheme = "ws"
+	}
+	websocketURL.Path = strings.TrimRight(base.Path, "/") + "/api/state"
+	websocketURL.RawQuery = ""
+	websocketURL.Fragment = ""
+
+	connection, response, err := websocket.DefaultDialer.DialContext(ctx, websocketURL.String(), nil)
 	if err != nil {
-		cancel()
+		if response != nil {
+			defer response.Body.Close()
+			detail, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
+			return nil, fmt.Errorf("dial state WebSocket returned %d: %s", response.StatusCode, detail)
+		}
 		return nil, err
 	}
-	request.Header.Set("Accept", "text/event-stream")
-	response, err := client.Do(request)
-	if err != nil {
-		cancel()
+	closeWithError := func(err error) (*stateClient, error) {
+		_ = connection.Close()
 		return nil, err
 	}
-	if response.StatusCode != http.StatusOK || !strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") {
-		defer response.Body.Close()
-		detail, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
-		cancel()
-		return nil, fmt.Errorf("GET /api/events returned %d %q: %s", response.StatusCode, response.Header.Get("Content-Type"), detail)
+	connection.SetReadLimit(maxStateMessageBytes)
+	if err := connection.WriteJSON(stateClientMessage{
+		Type:     wire.ClientOpen,
+		Protocol: wire.ProtocolVersion,
+		Client:   "kiwi-code-headless",
+	}); err != nil {
+		return closeWithError(fmt.Errorf("send state handshake: %w", err))
 	}
-	result := &eventClient{
-		cancel: cancel,
-		body:   response.Body,
-		events: make(chan event, 128),
-		errors: make(chan error, 1),
+
+	messageType, payload, err := connection.ReadMessage()
+	if err != nil {
+		return closeWithError(fmt.Errorf("read state handshake: %w", err))
 	}
-	go result.read(streamContext)
+	if messageType != websocket.TextMessage {
+		return closeWithError(errors.New("state handshake was not a text frame"))
+	}
+	ready, err := decodeStateServerMessage(payload)
+	if err != nil {
+		return closeWithError(fmt.Errorf("decode state handshake: %w", err))
+	}
+	if ready.Type != wire.ServerReady || ready.Protocol != wire.ProtocolVersion ||
+		ready.InstanceID == "" || ready.ServerTime == "" {
+		return closeWithError(fmt.Errorf("invalid state handshake: %#v", ready))
+	}
+
+	topics := map[uint32]string{
+		projectsChannelID: projectsTopic,
+		activityChannelID: activityTopic,
+	}
+	for _, subscription := range []struct {
+		id  uint32
+		tag string
+	}{
+		{id: projectsChannelID, tag: projectsTopic},
+		{id: activityChannelID, tag: activityTopic},
+	} {
+		topic := stateTopic{Tag: subscription.tag}
+		if err := connection.WriteJSON(stateClientMessage{
+			Type:  wire.ClientSub,
+			ID:    subscription.id,
+			Topic: &topic,
+		}); err != nil {
+			return closeWithError(fmt.Errorf("subscribe to %s: %w", subscription.tag, err))
+		}
+	}
+
+	readContext, cancel := context.WithCancel(ctx)
+	result := &stateClient{
+		connection: connection,
+		cancel:     cancel,
+		topics:     topics,
+		snapshots:  make(chan stateSnapshot, 128),
+		errors:     make(chan error, 1),
+		pending:    make(map[string]stateSnapshot, len(topics)),
+	}
+	go result.read(readContext)
 	return result, nil
 }
 
-func (c *eventClient) read(ctx context.Context) {
-	defer close(c.events)
-	reader := bufio.NewReader(c.body)
-	for {
-		item, err := readEvent(reader)
-		if err != nil {
-			select {
-			case c.errors <- err:
-			default:
-			}
-			return
+func decodeStateServerMessage(payload []byte) (stateServerMessage, error) {
+	if len(payload) > maxStateMessageBytes {
+		return stateServerMessage{}, fmt.Errorf("state message exceeds %d bytes", maxStateMessageBytes)
+	}
+	var header struct {
+		Type string `json:"t"`
+	}
+	if err := decodeStateJSON(payload, &header, false); err != nil {
+		return stateServerMessage{}, err
+	}
+	switch header.Type {
+	case wire.ServerReady:
+		var value wire.ReadyMessage
+		if err := decodeStateJSON(payload, &value, true); err != nil {
+			return stateServerMessage{}, err
 		}
-		select {
-		case c.events <- item:
-		case <-ctx.Done():
-			return
+		if value.Protocol == 0 || value.InstanceID == "" || value.ServerTime.IsZero() {
+			return stateServerMessage{}, errors.New("ready message is incomplete")
 		}
+		return stateServerMessage{
+			Type:       value.Type,
+			Protocol:   value.Protocol,
+			InstanceID: value.InstanceID,
+			ServerTime: value.ServerTime.Format(time.RFC3339Nano),
+		}, nil
+	case wire.ServerSnap:
+		var value wire.SnapshotMessage
+		if err := decodeStateJSON(payload, &value, true); err != nil {
+			return stateServerMessage{}, err
+		}
+		if value.ID == 0 || value.Seq == 0 || len(value.Data) == 0 {
+			return stateServerMessage{}, errors.New("snapshot message is incomplete")
+		}
+		return stateServerMessage{
+			Type: value.Type, ID: value.ID, Sequence: value.Seq, Data: value.Data,
+		}, nil
+	case wire.ServerSuberr:
+		var value wire.SubscribeErrorMessage
+		if err := decodeStateJSON(payload, &value, true); err != nil {
+			return stateServerMessage{}, err
+		}
+		if value.ID == 0 || value.Error == "" {
+			return stateServerMessage{}, errors.New("subscription error message is incomplete")
+		}
+		return stateServerMessage{Type: value.Type, ID: value.ID, Error: value.Error}, nil
+	case wire.ServerSubend:
+		var value wire.SubscribeEndMessage
+		if err := decodeStateJSON(payload, &value, true); err != nil {
+			return stateServerMessage{}, err
+		}
+		if value.ID == 0 || value.Reason == "" {
+			return stateServerMessage{}, errors.New("subscription end message is incomplete")
+		}
+		return stateServerMessage{Type: value.Type, ID: value.ID, Reason: value.Reason}, nil
+	case wire.ServerPong:
+		var value wire.PongMessage
+		if err := decodeStateJSON(payload, &value, true); err != nil {
+			return stateServerMessage{}, err
+		}
+		return stateServerMessage{Type: value.Type, Timestamp: value.Timestamp}, nil
+	default:
+		return stateServerMessage{}, fmt.Errorf("unknown state message type %q", header.Type)
 	}
 }
 
-func readEvent(reader *bufio.Reader) (event, error) {
-	var result event
-	var data strings.Builder
-	totalBytes := 0
-	for {
-		line, err := readBoundedLine(reader, maxEventBytes-totalBytes)
-		if err != nil {
-			return event{}, err
-		}
-		totalBytes += len(line)
-		line = strings.TrimRight(line, "\r\n")
-		if line == "" {
-			if result.name != "" || data.Len() > 0 {
-				result.data = []byte(strings.TrimSuffix(data.String(), "\n"))
-				return result, nil
-			}
-			continue
-		}
-		if value, ok := strings.CutPrefix(line, "event:"); ok {
-			result.name = strings.TrimSpace(value)
-		}
-		if value, ok := strings.CutPrefix(line, "data:"); ok {
-			data.WriteString(strings.TrimPrefix(value, " "))
-			data.WriteByte('\n')
-		}
+func decodeStateJSON(payload []byte, target any, disallowUnknown bool) error {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	if disallowUnknown {
+		decoder.DisallowUnknownFields()
 	}
-}
-
-func readBoundedLine(reader *bufio.Reader, remaining int) (string, error) {
-	if remaining <= 0 {
-		return "", fmt.Errorf("SSE event exceeds %d bytes", maxEventBytes)
+	if err := decoder.Decode(target); err != nil {
+		return err
 	}
-	var line []byte
-	for {
-		fragment, err := reader.ReadSlice('\n')
-		if len(line)+len(fragment) > remaining {
-			return "", fmt.Errorf("SSE event exceeds %d bytes", maxEventBytes)
-		}
-		line = append(line, fragment...)
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return string(line), nil
+			return errors.New("multiple JSON values")
 		}
-		if !errors.Is(err, bufio.ErrBufferFull) {
-			return "", err
+		return err
+	}
+	return nil
+}
+
+func (c *stateClient) read(ctx context.Context) {
+	defer close(c.snapshots)
+	sequences := make(map[uint32]uint64, len(c.topics))
+	for {
+		messageType, payload, err := c.connection.ReadMessage()
+		if err != nil {
+			if ctx.Err() == nil {
+				c.reportError(fmt.Errorf("read state WebSocket: %w", err))
+			}
+			return
+		}
+		if messageType != websocket.TextMessage {
+			c.reportError(errors.New("state WebSocket received a non-text frame"))
+			return
+		}
+		message, err := decodeStateServerMessage(payload)
+		if err != nil {
+			c.reportError(fmt.Errorf("decode state message: %w", err))
+			return
+		}
+		switch message.Type {
+		case wire.ServerSnap:
+			topic, exists := c.topics[message.ID]
+			if !exists {
+				c.reportError(fmt.Errorf("snapshot used unknown channel %d", message.ID))
+				return
+			}
+			if message.Sequence <= sequences[message.ID] {
+				c.reportError(fmt.Errorf("invalid snapshot sequence for channel %d: %d", message.ID, message.Sequence))
+				return
+			}
+			sequences[message.ID] = message.Sequence
+			snapshot := stateSnapshot{topic: topic, data: append([]byte(nil), message.Data...)}
+			select {
+			case c.snapshots <- snapshot:
+			case <-ctx.Done():
+				return
+			}
+		case wire.ServerSuberr:
+			c.reportError(fmt.Errorf("state subscription %d failed: %s", message.ID, message.Error))
+			return
+		case wire.ServerSubend:
+			c.reportError(fmt.Errorf("state subscription %d ended: %s", message.ID, message.Reason))
+			return
+		case wire.ServerPong:
+			continue
+		default:
+			c.reportError(fmt.Errorf("unexpected state message type %q", message.Type))
+			return
 		}
 	}
 }
 
-func (c *eventClient) waitFor(ctx context.Context, name string, predicate func([]byte) bool) (event, error) {
+func (c *stateClient) reportError(err error) {
+	select {
+	case c.errors <- err:
+	default:
+	}
+}
+
+func (c *stateClient) waitFor(ctx context.Context, topic string, predicate func([]byte) bool) (stateSnapshot, error) {
 	for {
+		if snapshot, exists := c.pending[topic]; exists {
+			delete(c.pending, topic)
+			if predicate == nil || predicate(snapshot.data) {
+				return snapshot, nil
+			}
+		}
 		select {
-		case item, ok := <-c.events:
+		case snapshot, ok := <-c.snapshots:
 			if !ok {
 				select {
 				case err := <-c.errors:
-					return event{}, err
+					return stateSnapshot{}, err
 				default:
-					return event{}, io.EOF
+					return stateSnapshot{}, io.EOF
 				}
 			}
-			if item.name == name && (predicate == nil || predicate(item.data)) {
-				return item, nil
+			if snapshot.topic == topic && (predicate == nil || predicate(snapshot.data)) {
+				return snapshot, nil
+			}
+			if snapshot.topic != topic {
+				c.pending[snapshot.topic] = snapshot
 			}
 		case err := <-c.errors:
-			return event{}, err
+			return stateSnapshot{}, err
 		case <-ctx.Done():
-			return event{}, ctx.Err()
+			return stateSnapshot{}, ctx.Err()
 		}
 	}
 }
 
-func (c *eventClient) close() {
-	c.cancel()
-	_ = c.body.Close()
+func (c *stateClient) close() {
+	c.closeOnce.Do(func() {
+		c.cancel()
+		_ = c.connection.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseNormalClosure, "headless check complete"), time.Now().Add(time.Second))
+		_ = c.connection.Close()
+	})
 }
 
-func waitForEveryProjectSnapshot(ctx context.Context, clients []*eventClient, predicate func([]project.Project) bool) error {
-	return waitForEveryClient(ctx, clients, func(client *eventClient) error {
-		_, err := client.waitFor(ctx, projectsEventName, func(data []byte) bool {
+func waitForEveryProjectSnapshot(ctx context.Context, clients []*stateClient, predicate func([]project.Project) bool) error {
+	return waitForEveryClient(ctx, clients, func(client *stateClient) error {
+		_, err := client.waitFor(ctx, projectsTopic, func(data []byte) bool {
 			var projects []project.Project
 			return json.Unmarshal(data, &projects) == nil && predicate(projects)
 		})
@@ -520,18 +692,18 @@ func waitForEveryProjectSnapshot(ctx context.Context, clients []*eventClient, pr
 	})
 }
 
-func waitForEveryActivitySnapshot(ctx context.Context, clients []*eventClient, projectID, threadID, state string) error {
-	return waitForEveryClient(ctx, clients, func(client *eventClient) error {
-		_, err := client.waitFor(ctx, activityEventName, func(data []byte) bool {
+func waitForEveryActivitySnapshot(ctx context.Context, clients []*stateClient, projectID, threadID, state string) error {
+	return waitForEveryClient(ctx, clients, func(client *stateClient) error {
+		_, err := client.waitFor(ctx, activityTopic, func(data []byte) bool {
 			return activitySnapshotContains(data, projectID, threadID, state)
 		})
 		return err
 	})
 }
 
-func waitForEveryActivityCleared(ctx context.Context, clients []*eventClient, projectID, threadID string) error {
-	return waitForEveryClient(ctx, clients, func(client *eventClient) error {
-		_, err := client.waitFor(ctx, activityEventName, func(data []byte) bool {
+func waitForEveryActivityCleared(ctx context.Context, clients []*stateClient, projectID, threadID string) error {
+	return waitForEveryClient(ctx, clients, func(client *stateClient) error {
+		_, err := client.waitFor(ctx, activityTopic, func(data []byte) bool {
 			activities, ok := decodeActivitySnapshot(data)
 			if !ok {
 				return false
@@ -570,14 +742,14 @@ func activitiesContain(activities []activityStatus, projectID, threadID, state s
 	return false
 }
 
-func waitForEveryClient(ctx context.Context, clients []*eventClient, wait func(*eventClient) error) error {
+func waitForEveryClient(ctx context.Context, clients []*stateClient, wait func(*stateClient) error) error {
 	type result struct {
 		index int
 		err   error
 	}
 	results := make(chan result, len(clients))
 	for index, client := range clients {
-		go func(index int, client *eventClient) {
+		go func(index int, client *stateClient) {
 			results <- result{index: index, err: wait(client)}
 		}(index, client)
 	}

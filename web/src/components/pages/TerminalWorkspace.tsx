@@ -11,7 +11,7 @@ import {
   Play,
   SquareTerminal,
 } from 'lucide-react'
-import { getSettings, runEnvironmentAction, threadEventsPath, touchThreadTmuxActivity } from '../../api'
+import { runEnvironmentAction, touchThreadTmuxActivity } from '../../api'
 import { configuredCodingAgentChoices, isCodingAgent } from '../../codingAgents'
 import { workspacePath } from '../../routes'
 import type {
@@ -44,6 +44,8 @@ import { TerminalSession } from '../organisms/TerminalSession'
 import { ThreadPlanViewer } from '../organisms/ThreadPlanViewer'
 import { ThreadProjectSidebar } from '../organisms/ThreadProjectSidebar'
 import { TmuxWindowTabs } from '../organisms/TmuxWindowTabs'
+import { useSubscription } from '../../wire/react'
+import { SettingsTopic, ThreadStatusTopic } from '../../wire/topics'
 
 type TerminalWorkspaceProps = {
   project: Project
@@ -147,6 +149,11 @@ export function TerminalWorkspace({
 }: TerminalWorkspaceProps) {
   const navigate = useNavigate()
   const readOnlySubagent = Boolean(thread.parentThreadId)
+  const settingsSubscription = useSubscription(SettingsTopic, undefined)
+  const statusSubscription = useSubscription(ThreadStatusTopic, {
+    projectId: project.id,
+    threadId: thread.id,
+  })
   const [codingAgentChoices, setCodingAgentChoices] = useState(() => {
     if (!initialCodingAgent || fallbackWorkspaceCodingAgents.some((agent) => agent.id === initialCodingAgent)) {
       return fallbackWorkspaceCodingAgents
@@ -207,7 +214,6 @@ export function TerminalWorkspace({
   const [threadPlans, setThreadPlans] = useState<ThreadPlan[]>([])
   const [plansError, setPlansError] = useState('')
   const [selectedPlan, setSelectedPlan] = useState<ThreadPlan | null>(null)
-  const [statusReloadKey, setStatusReloadKey] = useState(0)
   const [branchOverlayOpen, setBranchOverlayOpen] = useState(false)
   const [runningEnvironmentAction, setRunningEnvironmentAction] = useState<string | null>(null)
   const [environmentActionError, setEnvironmentActionError] = useState('')
@@ -227,19 +233,11 @@ export function TerminalWorkspace({
   }, [project.id, thread.id])
 
   useEffect(() => {
-    const controller = new AbortController()
-    getSettings(controller.signal)
-      .then((settings) => {
-        if (controller.signal.aborted) return
-        const choices = configuredCodingAgentChoices(settings.codingAgents)
-        setCodingAgentChoices(choices)
-        setCodingAgent((current) => choices.some((choice) => choice.id === current) ? current : 'pi')
-      })
-      .catch(() => {
-        // Keep the built-in choices when settings are temporarily unavailable.
-      })
-    return () => controller.abort()
-  }, [])
+    if (settingsSubscription.state !== 'ready') return
+    const choices = configuredCodingAgentChoices(settingsSubscription.data.codingAgents)
+    setCodingAgentChoices(choices)
+    setCodingAgent((current) => choices.some((choice) => choice.id === current) ? current : 'pi')
+  }, [settingsSubscription])
 
   const markToolOpened = useCallback((tool: WorkspaceTool) => {
     setOpenedTools((current) => (current.includes(tool) ? current : [...current, tool]))
@@ -332,47 +330,14 @@ export function TerminalWorkspace({
   }, [activeTool, markToolOpened])
 
   useEffect(() => {
-    const events = new EventSource(threadEventsPath(project.id, thread.id))
-    setProcessesLoading(true)
-    setBranchesLoading(true)
-    setShellWindowsLoading(true)
-    setThreadPlans([])
-    setPlansError('')
-
-    function handleStatus(event: Event) {
-      try {
-        const value: unknown = JSON.parse((event as MessageEvent<string>).data)
-        if (!value || typeof value !== 'object') return
-        const snapshot = value as ThreadStatusSnapshot
-        if (!Array.isArray(snapshot.processes) || !Array.isArray(snapshot.shellWindows) || !Array.isArray(snapshot.workflows)) return
-
-        setProcessWindows(snapshot.processes)
-        setSelectedProcessId((current) =>
-          current && snapshot.processes.some((window) => window.id === current)
-            ? current
-            : snapshot.processes[0]?.id ?? null,
-        )
-        setBranchState(snapshot.gitBranches)
-        setContextStatuses(snapshot.contextStatuses ?? {})
-        setShellWindows(snapshot.shellWindows)
-        setWorkflowRuns(snapshot.workflows)
-        setThreadPlans(Array.isArray(snapshot.plans) ? snapshot.plans : [])
-        setProcessesError(snapshot.errors?.processes ?? '')
-        setBranchesError(snapshot.errors?.gitBranches ?? '')
-        setShellWindowsError(snapshot.errors?.shellWindows ?? '')
-        setWorkflowsError(snapshot.errors?.workflows ?? '')
-        setPlansError(snapshot.errors?.plans ?? '')
-        setProcessesLoading(false)
-        setBranchesLoading(false)
-        setShellWindowsLoading(false)
-      } catch {
-        // Ignore a malformed event; the next authoritative snapshot replaces it.
-      }
+    if (statusSubscription.state === 'loading') {
+      setProcessesLoading(true)
+      setBranchesLoading(true)
+      setShellWindowsLoading(true)
+      return
     }
-
-    events.addEventListener('thread-status', handleStatus)
-    events.onerror = () => {
-      const message = 'Live thread status disconnected; reconnecting…'
+    if (statusSubscription.state === 'error') {
+      const message = statusSubscription.error.message
       setProcessesError(message)
       setBranchesError(message)
       setShellWindowsError(message)
@@ -381,9 +346,29 @@ export function TerminalWorkspace({
       setProcessesLoading(false)
       setBranchesLoading(false)
       setShellWindowsLoading(false)
+      return
     }
-    return () => events.close()
-  }, [project.id, statusReloadKey, thread.id])
+    const snapshot: ThreadStatusSnapshot = statusSubscription.data
+    setProcessWindows(snapshot.processes as ProcessWindow[])
+    setSelectedProcessId((current) =>
+      current && snapshot.processes.some((window) => window.id === current)
+        ? current
+        : snapshot.processes[0]?.id ?? null,
+    )
+    setBranchState(snapshot.gitBranches)
+    setContextStatuses(snapshot.contextStatuses)
+    setShellWindows(snapshot.shellWindows as TmuxWindow[])
+    setWorkflowRuns(snapshot.workflows as WorkflowRun[])
+    setThreadPlans(snapshot.plans as ThreadPlan[])
+    setProcessesError(snapshot.errors.processes ?? '')
+    setBranchesError(snapshot.errors.gitBranches ?? '')
+    setShellWindowsError(snapshot.errors.shellWindows ?? '')
+    setWorkflowsError(snapshot.errors.workflows ?? '')
+    setPlansError(snapshot.errors.plans ?? '')
+    setProcessesLoading(false)
+    setBranchesLoading(false)
+    setShellWindowsLoading(false)
+  }, [statusSubscription])
 
   useEffect(() => {
     setNativeContextStatus(null)
@@ -647,7 +632,7 @@ export function TerminalWorkspace({
             loading={shellWindowsLoading}
             error={shellWindowsError}
             onWindowsChange={setShellWindows}
-            onRetry={() => setStatusReloadKey((value) => value + 1)}
+            onRetry={statusSubscription.retry}
           />
         )}
         {activeTool === 'process' && (
@@ -657,7 +642,7 @@ export function TerminalWorkspace({
             loading={processesLoading}
             error={processesError}
             onSelect={setSelectedProcessId}
-            onRetry={() => setStatusReloadKey((value) => value + 1)}
+            onRetry={statusSubscription.retry}
           />
         )}
       </header>
@@ -862,7 +847,7 @@ export function TerminalWorkspace({
           loading={branchesLoading}
           loadError={branchesError}
           onBranchStateChange={setBranchState}
-          onRetry={() => setStatusReloadKey((value) => value + 1)}
+          onRetry={statusSubscription.retry}
           onOverlayOpenChange={setBranchOverlayOpen}
         />
       </div>

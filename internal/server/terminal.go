@@ -3096,15 +3096,23 @@ func (h *terminalHandler) shellWindows(item project.Project, thread project.Thre
 // existingShellWindows observes shell state without creating a terminal
 // session merely because a browser subscribed to status events.
 func (h *terminalHandler) existingShellWindows(item project.Project, thread project.Thread) ([]tmuxWindow, error) {
+	return h.existingShellWindowsContext(context.Background(), item, thread)
+}
+
+func (h *terminalHandler) existingShellWindowsContext(
+	ctx context.Context,
+	item project.Project,
+	thread project.Thread,
+) ([]tmuxWindow, error) {
 	sessionName := tmuxSessionName(item.ID, thread.ID, "terminal")
-	exists, err := h.tmuxSessionExists(sessionName)
+	exists, err := h.tmuxSessionExistsContext(ctx, sessionName)
 	if err != nil {
 		return nil, err
 	}
 	if !exists {
 		return []tmuxWindow{}, nil
 	}
-	return h.tmuxWindows(sessionName)
+	return h.tmuxWindowsContext(ctx, sessionName)
 }
 
 func (h *terminalHandler) newShellWindow(item project.Project, thread project.Thread) (windows []tmuxWindow, err error) {
@@ -3399,12 +3407,20 @@ func (h *terminalHandler) setTmuxWindowOption(target, option, value string) erro
 }
 
 func (h *terminalHandler) tmuxWindows(sessionName string) ([]tmuxWindow, error) {
-	output, err := h.tmuxCommand(
+	return h.tmuxWindowsContext(context.Background(), sessionName)
+}
+
+func (h *terminalHandler) tmuxWindowsContext(ctx context.Context, sessionName string) ([]tmuxWindow, error) {
+	output, err := h.tmuxCommandContext(
+		ctx,
 		"list-windows",
 		"-t", exactTmuxSessionTarget(sessionName),
 		"-F", "#{window_index}\t#{window_name}\t#{window_active}",
 	).CombinedOutput()
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		return nil, tmuxCommandError("list tmux windows", output, err)
 	}
 
@@ -3921,11 +3937,18 @@ func (h *terminalHandler) clearLocalTerminalStopLocked(ref terminalStopMarkerRef
 }
 
 func (h *terminalHandler) tmuxSessionExists(sessionName string) (bool, error) {
-	err := h.tmuxCommand("has-session", "-t", exactTmuxSessionTarget(sessionName)).Run()
+	return h.tmuxSessionExistsContext(context.Background(), sessionName)
+}
+
+func (h *terminalHandler) tmuxSessionExistsContext(ctx context.Context, sessionName string) (bool, error) {
+	err := h.tmuxCommandContext(ctx, "has-session", "-t", exactTmuxSessionTarget(sessionName)).Run()
 	if err == nil {
 		return true, nil
 	}
 
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return false, ctxErr
+	}
 	var exitError *exec.ExitError
 	if errors.As(err, &exitError) {
 		return false, nil

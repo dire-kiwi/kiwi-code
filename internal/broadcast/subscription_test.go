@@ -33,6 +33,38 @@ func TestBrokerPreservesOrderForEverySubscriber(t *testing.T) {
 	}
 }
 
+func TestLatestSubscriptionCoalescesWithoutDisconnecting(t *testing.T) {
+	broker := NewBroker[int](1)
+	subscription := broker.SubscribeLatest()
+	defer subscription.Close()
+
+	for value := 0; value < 10_000; value++ {
+		broker.Publish(value)
+	}
+
+	broker.mu.Lock()
+	_, stillSubscribed := broker.subscribers[subscription]
+	broker.mu.Unlock()
+	if !stillSubscribed {
+		t.Fatal("latest subscription disconnected under a snapshot burst")
+	}
+
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case value, open := <-subscription.Events():
+			if !open {
+				t.Fatal("latest subscription closed under a snapshot burst")
+			}
+			if value == 9_999 {
+				return
+			}
+		case <-deadline:
+			t.Fatal("latest subscription did not converge to the newest value")
+		}
+	}
+}
+
 func TestSlowSubscriberDisconnectsWithoutBlockingOthers(t *testing.T) {
 	broker := NewBroker[int](4)
 	slow := broker.Subscribe()

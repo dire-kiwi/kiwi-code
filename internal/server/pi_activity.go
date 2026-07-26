@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"sort"
 	"sync"
@@ -23,7 +22,6 @@ const (
 	// slow request or a busy host cannot prune a genuinely working thread and
 	// make the sidebar indicator flicker mid-turn.
 	piWorkingTimeout           = 25 * time.Second
-	piActivitySnapshotInterval = 5 * time.Second
 	piActivityOrderRetention   = 30 * time.Minute
 	maxPiActivityTokenLength   = 200
 	maxPiActivityRetiredTokens = 64
@@ -68,7 +66,7 @@ type piActivityTracker struct {
 	// retired-token history covers requests that remain in flight across turns
 	// without growing for the lifetime of the server.
 	promptOrder map[piActivityKey]*piActivityPromptOrder
-	// Changes are invalidations rather than historical snapshots. Stream
+	// Changes are invalidations rather than historical snapshots. State
 	// consumers always reread current state, so an authoritative snapshot can
 	// never be followed by an older queued payload.
 	changes *broadcast.Broker[struct{}]
@@ -240,6 +238,11 @@ func (t *piActivityTracker) subscribe() (<-chan struct{}, func()) {
 	return subscription.Events(), subscription.Close
 }
 
+func (t *piActivityTracker) subscribeLatest() (<-chan struct{}, func()) {
+	subscription := t.changes.SubscribeLatest()
+	return subscription.Events(), subscription.Close
+}
+
 func (t *piActivityTracker) notifyLocked() {
 	t.changes.Publish(struct{}{})
 }
@@ -375,54 +378,6 @@ func (t *piActivityTracker) removeProject(projectID string) {
 
 func (s *Server) listPiActivity(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.clientPiActivities(s.piActivity.list(time.Now())))
-}
-
-func (s *Server) streamPiActivity(w http.ResponseWriter, r *http.Request) {
-	s.streamPiActivityWithInterval(w, r, piActivitySnapshotInterval)
-}
-
-func (s *Server) streamPiActivityWithInterval(w http.ResponseWriter, r *http.Request, snapshotInterval time.Duration) {
-	flusher, ok := prepareEventStream(w, "Pi activity streaming is unavailable.")
-	if !ok {
-		return
-	}
-
-	updates, unsubscribe := s.piActivity.subscribe()
-	defer unsubscribe()
-	if err := writePiActivityEvent(w, s.clientPiActivities(s.piActivity.list(time.Now()))); err != nil {
-		return
-	}
-	flusher.Flush()
-
-	ticker := time.NewTicker(snapshotInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case _, open := <-updates:
-			if !open || writePiActivityEvent(w, s.clientPiActivities(s.piActivity.list(time.Now()))) != nil {
-				return
-			}
-			flusher.Flush()
-		case <-ticker.C:
-			// Periodic snapshots reconcile clients that missed a transition while
-			// disconnected or while optimistically acknowledging an earlier state.
-			if err := writePiActivityEvent(w, s.clientPiActivities(s.piActivity.list(time.Now()))); err != nil {
-				return
-			}
-			flusher.Flush()
-		}
-	}
-}
-
-func writePiActivityEvent(w http.ResponseWriter, activities []piThreadActivity) error {
-	payload, err := json.Marshal(activities)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "data: %s\n\n", payload)
-	return err
 }
 
 func (s *Server) updatePiActivity(w http.ResponseWriter, r *http.Request) {

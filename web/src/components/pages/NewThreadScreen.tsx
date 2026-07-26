@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
   type ChangeEvent,
   type ClipboardEvent,
@@ -15,7 +16,7 @@ import {
   Plus,
   X,
 } from 'lucide-react'
-import { createThread, getSettings, listCodingAgents, listProjectGitBranches, uploadPiImage } from '../../api'
+import { createThread, uploadPiImage } from '../../api'
 import {
   codingAgentSelectionForSetting,
   defaultCodingAgentSelection,
@@ -53,6 +54,8 @@ import type {
   Project,
   Thread,
 } from '../../types'
+import { useSubscription } from '../../wire/react'
+import { CodingAgentsTopic, GitBranchesTopic, SettingsTopic } from '../../wire/topics'
 import { GhostButton, PrimaryButton } from '../atoms/Button'
 import { TextArea } from '../atoms/Input'
 import { Select } from '../atoms/Select'
@@ -171,6 +174,14 @@ export function NewThreadScreen({
   onCancel,
   onCreated,
 }: NewThreadScreenProps) {
+  const codingAgentsSubscription = useSubscription(CodingAgentsTopic, { projectId: project.id })
+  const settingsSubscription = useSubscription(SettingsTopic, undefined)
+  const branchesSubscription = useSubscription(
+    GitBranchesTopic,
+    { projectId: project.id },
+    { enabled: project.isGitRepo },
+  )
+  const settingsInitializedRef = useRef(false)
   const [rememberedPreferences] = useState(() => rememberedNewThreadPreferences(project.id))
   const [location, setLocation] = useState<ThreadLocation>(() => {
     if (!project.isGitRepo) return 'project'
@@ -180,7 +191,6 @@ export function NewThreadScreen({
   const [branchState, setBranchState] = useState<GitBranchState | null>(null)
   const [branchesLoading, setBranchesLoading] = useState(project.isGitRepo)
   const [branchLoadError, setBranchLoadError] = useState('')
-  const [branchReload, setBranchReload] = useState(0)
   const [codingAgents, setCodingAgents] = useState<CodingAgentConfig[]>(fallbackCodingAgentConfigs)
   const [codingAgentsLoading, setCodingAgentsLoading] = useState(true)
   const [codingAgentsError, setCodingAgentsError] = useState('')
@@ -193,9 +203,13 @@ export function NewThreadScreen({
   const initialAgentModel = agentModels[codingAgentIdForSelection(codingAgent)]
   const [model, setModel] = useState(initialAgentModel?.model ?? '')
   const [thinkingLevel, setThinkingLevel] = useState(initialAgentModel?.thinkingLevel ?? '')
-  const [settings, setSettings] = useState<AppSettings | null>(null)
-  const [settingsLoading, setSettingsLoading] = useState(true)
-  const [settingsError, setSettingsError] = useState('')
+  const settings: AppSettings | null = settingsSubscription.state === 'ready'
+    ? settingsSubscription.data
+    : null
+  const settingsLoading = settingsSubscription.state === 'loading'
+  const settingsError = settingsSubscription.state === 'error'
+    ? settingsSubscription.error.message
+    : ''
   const [nestedDepth, setNestedDepth] = useState<number | 'inherit'>('inherit')
   const [initialPrompt, setInitialPrompt] = useState(() => readNewThreadDraft(project.id))
   const [initialPromptPastes, setInitialPromptPastes] = useState(() => (
@@ -216,51 +230,35 @@ export function NewThreadScreen({
   }, [initialPrompt, initialPromptPastes, project.id])
 
   useEffect(() => {
-    const controller = new AbortController()
-    setCodingAgentsLoading(true)
+    if (codingAgentsSubscription.state === 'loading') {
+      setCodingAgentsLoading(true)
+      return
+    }
+    setCodingAgentsLoading(false)
+    if (codingAgentsSubscription.state === 'error') {
+      setCodingAgentsError(codingAgentsSubscription.error.message)
+      return
+    }
     setCodingAgentsError('')
-    listCodingAgents(controller.signal, project.id)
-      .then((configs) => {
-        if (controller.signal.aborted || configs.length === 0) return
-        setCodingAgents(configs)
-        setCodingAgent((current) => configs.some((config) =>
-          config.id === codingAgentIdForSelection(current)) ? current : 'pi-native')
-      })
-      .catch((reason) => {
-        if (controller.signal.aborted) return
-        setCodingAgentsError(reason instanceof Error ? reason.message : 'Could not load coding-agent models.')
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setCodingAgentsLoading(false)
-      })
-    return () => controller.abort()
-  }, [])
+    const configs = codingAgentsSubscription.data as CodingAgentConfig[]
+    if (configs.length === 0) return
+    setCodingAgents(configs)
+    setCodingAgent((current) => configs.some((config) =>
+      config.id === codingAgentIdForSelection(current)) ? current : 'pi-native')
+  }, [codingAgentsSubscription])
 
   useEffect(() => {
-    const controller = new AbortController()
-    setSettingsLoading(true)
-    setSettingsError('')
-    getSettings(controller.signal)
-      .then((next) => {
-        if (controller.signal.aborted) return
-        setSettings(next)
-        const availableAgents = next.codingAgents.map(codingAgentSelectionForSetting)
-        const configuredDefault = defaultCodingAgentSelection(next.codingAgents)
-        const nextAgent = availableAgents.includes(configuredDefault) ? configuredDefault : 'pi-native'
-        const rememberedModel = agentModels[codingAgentIdForSelection(nextAgent)]
-        setCodingAgent(nextAgent)
-        setModel(rememberedModel?.model ?? '')
-        setThinkingLevel(rememberedModel?.thinkingLevel ?? '')
-      })
-      .catch((reason) => {
-        if (controller.signal.aborted) return
-        setSettingsError(reason instanceof Error ? reason.message : 'Could not load sub-agent settings.')
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setSettingsLoading(false)
-      })
-    return () => controller.abort()
-  }, [])
+    if (settingsSubscription.state !== 'ready' || settingsInitializedRef.current) return
+    settingsInitializedRef.current = true
+    const next = settingsSubscription.data
+    const availableAgents = next.codingAgents.map(codingAgentSelectionForSetting)
+    const configuredDefault = defaultCodingAgentSelection(next.codingAgents)
+    const nextAgent = availableAgents.includes(configuredDefault) ? configuredDefault : 'pi-native'
+    const rememberedModel = agentModels[codingAgentIdForSelection(nextAgent)]
+    setCodingAgent(nextAgent)
+    setModel(rememberedModel?.model ?? '')
+    setThinkingLevel(rememberedModel?.thinkingLevel ?? '')
+  }, [agentModels, settingsSubscription])
 
   useEffect(() => {
     if (codingAgentsLoading) return
@@ -289,36 +287,31 @@ export function NewThreadScreen({
       setBranchesLoading(false)
       return
     }
-
-    const controller = new AbortController()
-    setBranchesLoading(true)
+    if (branchesSubscription.state === 'loading') {
+      setBranchesLoading(true)
+      return
+    }
+    setBranchesLoading(false)
+    if (branchesSubscription.state === 'error') {
+      setBranchLoadError(branchesSubscription.error.message)
+      return
+    }
+    const next = branchesSubscription.data as GitBranchState
+    setBranchState(next)
+    if (!next.isRepository) {
+      setBaseBranch('')
+      setBranchLoadError('This project is no longer inside a Git repository.')
+      return
+    }
     setBranchLoadError('')
-    listProjectGitBranches(project.id, controller.signal)
-      .then((next) => {
-        if (controller.signal.aborted) return
-        setBranchState(next)
-        if (!next.isRepository) {
-          setBaseBranch('')
-          setBranchLoadError('This project is no longer inside a Git repository.')
-          return
-        }
-        setBaseBranch((current) => {
-          if (next.branches.some((branch) => branch.name === current)) return current
-          if (!next.detached && next.branches.some((branch) => branch.name === next.current)) {
-            return next.current
-          }
-          return next.branches[0]?.name ?? ''
-        })
-      })
-      .catch((reason) => {
-        if (controller.signal.aborted) return
-        setBranchLoadError(reason instanceof Error ? reason.message : 'Could not load Git branches.')
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setBranchesLoading(false)
-      })
-    return () => controller.abort()
-  }, [branchReload, project.id, project.isGitRepo])
+    setBaseBranch((current) => {
+      if (next.branches.some((branch) => branch.name === current)) return current
+      if (!next.detached && next.branches.some((branch) => branch.name === next.current)) {
+        return next.current
+      }
+      return next.branches[0]?.name ?? ''
+    })
+  }, [branchesSubscription, project.isGitRepo])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -648,7 +641,7 @@ export function NewThreadScreen({
             branchLoadError={branchLoadError}
             onChange={setLocation}
             onBaseBranchChange={setBaseBranch}
-            onReloadBranches={() => setBranchReload((current) => current + 1)}
+            onReloadBranches={branchesSubscription.retry}
           />
 
           <fieldset className="mt-6">

@@ -13,8 +13,6 @@ import {
   Trash2,
 } from 'lucide-react'
 import {
-  getGlobalSandboxConfig,
-  getThreadSandboxConfig,
   updateGlobalSandboxConfig,
   updateThreadSandboxConfig,
 } from '../../api'
@@ -25,6 +23,8 @@ import type {
   SandboxConfigState,
   Thread,
 } from '../../types'
+import { useSubscription } from '../../wire/react'
+import { SandboxConfigTopic } from '../../wire/topics'
 import { GhostButton, PrimaryButton } from '../atoms/Button'
 import { TextArea, TextInput } from '../atoms/Input'
 import { Select } from '../atoms/Select'
@@ -139,10 +139,15 @@ export function SandboxSettingsScreen({
   onOpenSidebar,
   onBack,
 }: SandboxSettingsScreenProps) {
+  const projectId = project?.id
+  const threadId = thread?.id
+  const sandboxParams = scope === 'thread' && projectId && threadId
+    ? { scope: 'thread' as const, projectId, threadId }
+    : { scope: 'global' as const }
+  const subscription = useSubscription(SandboxConfigTopic, sandboxParams)
   const [state, setState] = useState<SandboxConfigState | null>(null)
   const [loadError, setLoadError] = useState('')
   const [loading, setLoading] = useState(true)
-  const [loadKey, setLoadKey] = useState(0)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [baseline, setBaseline] = useState('')
   const [saving, setSaving] = useState(false)
@@ -154,30 +159,21 @@ export function SandboxSettingsScreen({
     return ruleKeyRef.current
   }
 
-  const projectId = project?.id
-  const threadId = thread?.id
-
   useEffect(() => {
-    const controller = new AbortController()
-    setLoading(true)
+    if (subscription.state === 'loading') {
+      setLoading(true)
+      return
+    }
+    setLoading(false)
+    if (subscription.state === 'error') {
+      setState(null)
+      setDraft(null)
+      setLoadError(subscription.error.message)
+      return
+    }
     setLoadError('')
-    setSaveError('')
-    setSaveMessage('')
-    const promise = scope === 'thread' && projectId && threadId
-      ? getThreadSandboxConfig(projectId, threadId, controller.signal)
-      : getGlobalSandboxConfig(controller.signal)
-    promise
-      .then((next) => {
-        setState(next)
-        setLoading(false)
-      })
-      .catch((reason) => {
-        if (controller.signal.aborted) return
-        setLoadError(reason instanceof Error ? reason.message : 'Could not load the sandbox configuration.')
-        setLoading(false)
-      })
-    return () => controller.abort()
-  }, [scope, projectId, threadId, loadKey])
+    setState(subscription.data as SandboxConfigState)
+  }, [subscription])
 
   useEffect(() => {
     if (!state) return
@@ -239,7 +235,7 @@ export function SandboxSettingsScreen({
         ) : !state || !draft ? (
           <LoadErrorPanel
             message={loadError || 'Could not load the sandbox configuration.'}
-            onRetry={() => setLoadKey((current) => current + 1)}
+            onRetry={subscription.retry}
           />
         ) : (
           <form onSubmit={(event) => void handleSubmit(event)} className="space-y-5">

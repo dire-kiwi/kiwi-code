@@ -518,6 +518,7 @@ func (s *Server) updateGlobalSandboxConfig(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "Could not save the sandbox configuration.")
 		return
 	}
+	s.notifyStateChanged(stateTopicSandboxConfig, "", "")
 	state, err := globalSandboxConfigState()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not load the sandbox configuration.")
@@ -562,6 +563,7 @@ func (s *Server) updateThreadSandboxConfig(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "Could not save the sandbox configuration.")
 		return
 	}
+	s.notifyStateChanged(stateTopicSandboxConfig, r.PathValue("id"), r.PathValue("threadId"))
 	state, err := threadSandboxConfigState(thread)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not load the sandbox configuration.")

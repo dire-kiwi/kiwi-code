@@ -221,5 +221,6 @@ func (s *Server) installAgentSkill(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Could not install agent skills.")
 		return
 	}
+	s.notifyStateChanged(stateTopicAgentSkills, "", "")
 	writeJSON(w, http.StatusOK, status)
 }

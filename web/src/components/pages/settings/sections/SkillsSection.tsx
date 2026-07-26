@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Check, Download, LoaderCircle, Sparkles } from 'lucide-react'
-import { getAgentSkillStatus, installAgentSkill } from '../../../../api'
+import { installAgentSkill } from '../../../../api'
 import type { AgentSkillStatus } from '../../../../types'
 import { PrimaryButton } from '../../../atoms/Button'
 import { StatusBadge } from '../../../atoms/StatusBadge'
@@ -9,31 +9,32 @@ import { LoadErrorPanel, LoadingPanel } from '../../../molecules/AsyncStatePanel
 import { FeedbackMessage } from '../../../molecules/FeedbackMessage'
 import { InfoCallout } from '../../../molecules/InfoCallout'
 import { SectionHeader } from '../../../molecules/SectionHeader'
+import { useSubscription } from '../../../../wire/react'
+import { AgentSkillsTopic } from '../../../../wire/topics'
 
 export function SkillsSection() {
+  const subscription = useSubscription(AgentSkillsTopic, undefined)
   const [agentSkill, setAgentSkill] = useState<AgentSkillStatus | null>(null)
   const [loading, setLoading] = useState(true)
-  const [loadKey, setLoadKey] = useState(0)
   const [loadError, setLoadError] = useState('')
   const [installing, setInstalling] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
 
   useEffect(() => {
-    const controller = new AbortController()
-    setLoading(true)
+    if (subscription.state === 'loading') {
+      setLoading(true)
+      return
+    }
+    setLoading(false)
+    if (subscription.state === 'error') {
+      setAgentSkill(null)
+      setLoadError(subscription.error.message)
+      return
+    }
     setLoadError('')
-    getAgentSkillStatus(controller.signal)
-      .then((skill) => setAgentSkill(skill))
-      .catch((reason) => {
-        if (controller.signal.aborted) return
-        setLoadError(reason instanceof Error ? reason.message : 'Could not load the agent skill status.')
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false)
-      })
-    return () => controller.abort()
-  }, [loadKey])
+    setAgentSkill(subscription.data as AgentSkillStatus)
+  }, [subscription])
 
   async function handleInstall() {
     if (installing) return
@@ -56,7 +57,7 @@ export function SkillsSection() {
     return (
       <LoadErrorPanel
         message={loadError || 'Could not load the agent skill status.'}
-        onRetry={() => setLoadKey((current) => current + 1)}
+        onRetry={subscription.retry}
       />
     )
   }
