@@ -10,14 +10,12 @@ import {
 import {
   Activity,
   Archive,
-  ArchiveRestore,
   Bookmark,
   ChevronDown,
   ChevronRight,
   ChevronUp,
   Clock3,
   CornerDownRight,
-  EllipsisVertical,
   ExternalLink,
   Folder,
   FolderGit2,
@@ -56,6 +54,7 @@ import { SelectionButton } from '../atoms/SelectionButton'
 import { Select } from '../atoms/Select'
 import { BackendSwitcher } from '../molecules/BackendSwitcher'
 import { ProjectPathAutocomplete } from '../molecules/ProjectPathAutocomplete'
+import { ThreadActionsMenu } from '../molecules/ThreadActionsMenu'
 import { SidebarActivityView } from './SidebarActivityView'
 
 type ProjectSidebarProps = {
@@ -315,19 +314,6 @@ export function ProjectSidebar({
   useEffect(() => {
     writeStoredValue(webServersCollapsedStorageKey, String(webServersCollapsed))
   }, [webServersCollapsed])
-
-  useEffect(() => {
-    if (!threadMenuId) return
-
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target
-      if (target instanceof Element && target.closest('[data-thread-menu]')) return
-      setThreadMenuId(null)
-    }
-
-    document.addEventListener('pointerdown', handlePointerDown, true)
-    return () => document.removeEventListener('pointerdown', handlePointerDown, true)
-  }, [threadMenuId])
 
   useEffect(() => {
     if (!selectedThreadId) return
@@ -754,66 +740,20 @@ export function ProjectSidebar({
                 ? <LoaderCircle size={11} className="animate-spin" />
                 : <Bookmark size={11} fill={thread.bookmarked ? 'currentColor' : 'none'} />}
             </IconButton>
-            <div className="relative" data-thread-menu>
-              <IconButton
-                type="button"
-                size="xs"
-                variant="subtle"
-                onClick={() => setThreadMenuId((current) => current === thread.id ? null : thread.id)}
-                aria-haspopup="menu"
-                aria-expanded={menuOpen}
-                aria-label={`Actions for ${thread.title}`}
-                title="Thread actions"
-                className={menuOpen || selected
-                  ? undefined
-                  : 'opacity-0 transition group-hover/thread:opacity-100 group-focus-within/thread:opacity-100'}
-              >
-                <EllipsisVertical size={12} />
-              </IconButton>
-              {menuOpen && (
-                <div
-                  role="menu"
-                  aria-label={`Actions for ${thread.title}`}
-                  onKeyDown={(event) => {
-                    if (event.key !== 'Escape') return
-                    event.stopPropagation()
-                    setThreadMenuId(null)
-                  }}
-                  className="absolute right-0 top-[calc(100%+2px)] z-30 w-40 rounded-lg border border-ghost-border/90 bg-ghost-panel p-1 shadow-2xl"
-                >
-                  <Button
-                    role="menuitem"
-                    type="button"
-                    variant="subtle"
-                    disabled={Boolean(archivingThreadId || deletingThreadId || bookmarkingThreadId)}
-                    onClick={() => {
-                      setThreadMenuId(null)
-                      onArchiveThread(project, thread, !archived)
-                    }}
-                    className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px]"
-                  >
-                    {archivingThreadId === thread.id
-                      ? <LoaderCircle size={12} className="animate-spin" />
-                      : archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}
-                    {archived ? 'Restore thread' : 'Archive thread'}
-                  </Button>
-                  <Button
-                    role="menuitem"
-                    type="button"
-                    variant="danger"
-                    disabled={Boolean(deletingThreadId || archivingThreadId || bookmarkingThreadId)}
-                    onClick={() => {
-                      setThreadMenuId(null)
-                      onDeleteThread(project, thread)
-                    }}
-                    className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px]"
-                  >
-                    {deletingThreadId === thread.id ? <LoaderCircle size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                    Delete thread
-                  </Button>
-                </div>
-              )}
-            </div>
+            <ThreadActionsMenu
+              threadTitle={thread.title}
+              archived={archived}
+              archiving={archivingThreadId === thread.id}
+              deleting={deletingThreadId === thread.id}
+              disabled={Boolean(archivingThreadId || deletingThreadId || bookmarkingThreadId)}
+              open={menuOpen}
+              onOpenChange={(open) => setThreadMenuId(open ? thread.id : null)}
+              onArchive={() => onArchiveThread(project, thread, !archived)}
+              onDelete={() => onDeleteThread(project, thread)}
+              triggerClassName={menuOpen || selected
+                ? undefined
+                : 'opacity-0 transition group-hover/thread:opacity-100 group-focus-within/thread:opacity-100'}
+            />
           </div>
           {!bookmarksOnly && !isChild && !archived && dropTarget?.kind === 'thread' && dropTarget.projectId === project.id && dropTarget.id === thread.id && dropTarget.position === 'after' && (
             <span className="pointer-events-none absolute inset-x-2 bottom-0 z-20 h-0.5 rounded-full bg-ghost-green shadow-[0_0_7px_rgba(181,189,104,0.8)]" />
@@ -1060,10 +1000,15 @@ export function ProjectSidebar({
               piActivities={piActivities}
               usageSnapshots={usageSnapshots}
               selectedThreadId={selectedThreadId}
+              deletingThreadId={deletingThreadId}
+              archivingThreadId={archivingThreadId}
+              bookmarkingThreadId={bookmarkingThreadId}
               onSelectThread={onSelectThread}
               onNewThread={onNewThread}
               onOpenFinder={onOpenFinder}
               onShowAllThreads={() => setViewMode('tree')}
+              onArchiveThread={onArchiveThread}
+              onDeleteThread={onDeleteThread}
             />
           ) : bookmarksOnly && visibleProjects.length === 0 ? (
             <div className="mx-1 mt-2 rounded-lg border border-dashed border-ghost-border/70 px-3 py-6 text-center">
