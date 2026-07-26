@@ -129,6 +129,7 @@ function createBrowserBridge() {
 
 function createAppBridge() {
   return Object.freeze({
+    platform: process.platform,
     reloadFrontend() {
       return invokeCompatible(appChannelSets, 'reloadFrontend')
     },

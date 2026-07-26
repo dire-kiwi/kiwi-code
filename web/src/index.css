@@ -70,6 +70,57 @@ input:focus-visible {
   scrollbar-width: thin;
 }
 
+.desktop-shell {
+  --desktop-titlebar-right-inset:
+    calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+}
+
+.desktop-shell .desktop-titlebar-drag-region {
+  app-region: drag;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.desktop-shell .desktop-titlebar-drag-region :is(
+  a,
+  button,
+  input,
+  label,
+  select,
+  textarea,
+  [role="button"],
+  [role="group"],
+  [role="tab"],
+  [role="tablist"]
+) {
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-shell .desktop-titlebar-left-safe {
+  padding-left: max(0.75rem, calc(env(titlebar-area-x, 0px) + 0.75rem));
+}
+
+.desktop-shell-darwin .desktop-titlebar-left-safe {
+  padding-left: 4rem;
+}
+
+.desktop-shell .desktop-titlebar-right-safe {
+  padding-right: max(0.75rem, var(--desktop-titlebar-right-inset));
+}
+
+.desktop-shell .desktop-titlebar-workspace-right-safe {
+  padding-right: max(0.75rem, calc(var(--desktop-titlebar-right-inset) - 3rem));
+}
+
+.desktop-shell .thread-details-expanded .desktop-titlebar-workspace-right-safe {
+  padding-right: max(0.75rem, calc(var(--desktop-titlebar-right-inset) - 19rem));
+}
+
+.desktop-shell:not(.desktop-shell-darwin) .desktop-titlebar-right-column-safe {
+  padding-top: env(titlebar-area-height, 0px);
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

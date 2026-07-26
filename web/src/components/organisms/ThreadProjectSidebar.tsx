@@ -203,7 +203,7 @@ export function ThreadProjectSidebar({
         }`}
         aria-label="Thread and project details"
       >
-      <header className={`flex h-[4.5rem] shrink-0 items-center border-b border-ghost-border/70 ${
+      <header className={`desktop-titlebar-drag-region desktop-titlebar-right-column-safe flex h-[4.5rem] shrink-0 items-center border-b border-ghost-border/70 ${
         expanded ? 'justify-between gap-2 pl-4 pr-2' : 'justify-center px-2'
       }`}>
         {expanded && (

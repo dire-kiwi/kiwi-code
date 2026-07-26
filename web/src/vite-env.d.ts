@@ -18,6 +18,7 @@ type KiwiCodeDesktopBrowserBounds = {
 type KiwiCodeDesktopBrowserResult = void | Promise<unknown>
 
 interface KiwiCodeDesktopAppBridge {
+  platform: string
   reloadFrontend(): Promise<unknown>
 }
 

@@ -847,8 +847,8 @@ export function ProjectSidebar({
           isOpen ? 'visible translate-x-0' : 'invisible -translate-x-full'
         }`}
       >
-        <header className="flex h-[4.5rem] shrink-0 flex-col justify-center gap-1 border-b border-ghost-border/70 px-3">
-          <div className="flex items-center justify-between gap-2">
+        <header className="desktop-titlebar-drag-region flex h-[4.5rem] shrink-0 flex-col justify-center gap-1 border-b border-ghost-border/70 px-3">
+          <div className="desktop-titlebar-left-safe flex items-center justify-between gap-2">
             <h1 className="min-w-0 truncate text-xs font-semibold text-ghost-bright-white">
               {viewMode === 'activity' ? 'Threads' : 'Projects'}
             </h1>

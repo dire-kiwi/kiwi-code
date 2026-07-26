@@ -249,6 +249,10 @@ function rememberedWorkspacePath(projects: Project[], lastWorkspace: LastWorkspa
 export default function App() {
   const navigate = useNavigate()
   const routeLocation = useLocation()
+  const desktopApp = window.kiwiCodeDesktopApp ?? window.direMuxDesktopApp
+  const desktopShellClassName = desktopApp
+    ? `desktop-shell desktop-shell-${desktopApp.platform || 'unknown'}`
+    : ''
   const workspaceMatch = useMatch(WORKSPACE_ROUTE)
   const newThreadMatch = useMatch(NEW_THREAD_ROUTE)
   const threadMatch = useMatch(THREAD_ROUTE)
@@ -851,7 +855,9 @@ export default function App() {
     : defaultWorkspacePath ?? '/'
 
   return (
-    <div className="flex h-dvh min-h-[32rem] overflow-hidden bg-ghost-black text-ghost-bright-white antialiased">
+    <div className={`flex h-dvh min-h-[32rem] overflow-hidden bg-ghost-black text-ghost-bright-white antialiased ${
+      desktopShellClassName
+    }`}>
       <ProjectSidebar
         profiles={profiles}
         activeProfileId={activeProfileId}
