@@ -203,8 +203,9 @@ test('every Kiwi Code page renders and real Pi follows the deterministic chat fi
 
     await renderedPage('new thread page', async () => {
       await openPage(harness, `${projectPrefix}/threads/new`)
-      await waitForExactText(page, 'h1', 'Start a new thread')
-      await waitForExactText(page, 'label[for="thread-coding-agent"]', 'Agent')
+      await waitForExactText(page, 'p', 'New thread')
+      await page.waitForSelector('#thread-coding-agent')
+      await page.waitForSelector('#thread-initial-prompt')
     })
 
     await renderedPage('thread sandbox page', async () => {
@@ -245,7 +246,8 @@ test('every Kiwi Code page renders and real Pi follows the deterministic chat fi
     let chatThreadID
     await renderedPage('Pi Native workspace page with real fixture chat', async () => {
       await openPage(harness, `${projectPrefix}/threads/new`)
-      await waitForExactText(page, 'h1', 'Start a new thread')
+      await waitForExactText(page, 'p', 'New thread')
+      await page.waitForSelector('#thread-initial-prompt')
 
       await selectOption(page, '#thread-coding-agent', 'Pi Native')
       await selectOption(page, '#thread-agent-model', fixture.model.name, { contains: true })

@@ -10,9 +10,10 @@ import {
 } from 'react'
 import {
   Bot,
+  Folder,
+  GitBranch,
   ImagePlus,
   LoaderCircle,
-  Network,
   Plus,
   X,
 } from 'lucide-react'
@@ -32,6 +33,7 @@ import {
   piNativePromptImagePolicy,
   validateImageAdditions,
 } from '../../lib/promptImages'
+import { classNames } from '../../lib/classNames'
 import {
   readNewThreadDraft,
   readNewThreadPastes,
@@ -60,15 +62,11 @@ import { GhostButton, PrimaryButton } from '../atoms/Button'
 import { TextArea } from '../atoms/Input'
 import { Select } from '../atoms/Select'
 import { Surface } from '../atoms/Surface'
-import { AgentModelControls } from '../molecules/AgentModelControls'
 import { FeedbackMessage } from '../molecules/FeedbackMessage'
-import { PageIntro } from '../molecules/PageIntro'
 import { ScreenHeader } from '../molecules/ScreenHeader'
-import {
-  ThreadLocationPicker,
-  type ThreadLocation,
-} from '../organisms/ThreadLocationPicker'
 import { FormScreenTemplate } from '../templates/FormScreenTemplate'
+
+export type ThreadLocation = 'project' | 'worktree'
 
 type NewThreadScreenProps = {
   project: Project
@@ -78,6 +76,11 @@ type NewThreadScreenProps = {
 }
 
 const INITIAL_PROMPT_MAX_LENGTH = 12_000
+
+// Matches the Pi composer footer treatment: dim mono label beside a borderless
+// inline Select, with hairline dividers between neighbouring controls.
+const inlineSettingClass = 'flex h-[26px] min-w-0 items-center gap-1 whitespace-nowrap font-mono text-[8px] text-ghost-dim'
+const inlineDividerClass = 'ml-[7px] border-l border-ghost-border/55 pl-[7px]'
 
 type AgentModelPreferences = {
   model: string
@@ -207,9 +210,6 @@ export function NewThreadScreen({
     ? settingsSubscription.data
     : null
   const settingsLoading = settingsSubscription.state === 'loading'
-  const settingsError = settingsSubscription.state === 'error'
-    ? settingsSubscription.error.message
-    : ''
   const [nestedDepth, setNestedDepth] = useState<number | 'inherit'>('inherit')
   const [initialPrompt, setInitialPrompt] = useState(() => readNewThreadDraft(project.id))
   const [initialPromptPastes, setInitialPromptPastes] = useState(() => (
@@ -466,6 +466,39 @@ export function NewThreadScreen({
   const submitDisabled = submitting
     || selectedAgentModelsUnavailable
     || (location === 'worktree' && (branchesLoading || Boolean(branchLoadError) || !baseBranch))
+  const modelSelectOptions = selectedAgent.models.map((option) => ({
+    value: option.id,
+    label: option.label,
+  }))
+  const thinkingSelectOptions = selectedAgent.thinkingLevels.map((option) => ({
+    value: option.id,
+    label: option.label,
+  }))
+  // One flat dropdown covers both choices: the project folder, or a worktree
+  // from any local branch. Picking a branch selects the worktree location too.
+  const workdirValue = location === 'project' ? 'project' : `worktree:${baseBranch}`
+  const workdirOptions = [
+    { value: 'project', label: 'project folder' },
+    ...(project.isGitRepo
+      ? (branchState?.branches ?? []).map((branch) => ({
+          value: `worktree:${branch.name}`,
+          label: `worktree · ${branch.name}${branch.current ? ' (current)' : ''}`,
+        }))
+      : []),
+  ]
+  if (!workdirOptions.some((option) => option.value === workdirValue)) {
+    workdirOptions.unshift({
+      value: workdirValue,
+      label: `worktree · ${branchesLoading ? 'loading…' : 'select branch'}`,
+    })
+  }
+  const settingsNotice = selectedAgentModelsUnavailable
+    ? 'CLIProxyAPI did not return any GPT models. Make sure it is running and its client key is configured.'
+    : codingAgentsError
+      ? 'Could not refresh available models. Agent defaults and built-in choices are still available.'
+      : location === 'worktree' && branchLoadError
+        ? branchLoadError
+        : ''
 
   function handleInitialPromptKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (
@@ -496,6 +529,17 @@ export function NewThreadScreen({
       const remembered = nextAgentModels[nextAgentId]
       setModel(remembered?.model ?? nextConfig?.models[0]?.id ?? '')
       setThinkingLevel(remembered?.thinkingLevel ?? nextConfig?.thinkingLevels[0]?.id ?? '')
+    }
+    setError('')
+  }
+
+  function handleWorkdirChange(value: string) {
+    if (value === 'project') {
+      setLocation('project')
+    } else if (value.startsWith('worktree:')) {
+      setLocation('worktree')
+      const branch = value.slice('worktree:'.length)
+      if (branch) setBaseBranch(branch)
     }
     setError('')
   }
@@ -533,73 +577,165 @@ export function NewThreadScreen({
         onSubmit={(event) => void handleSubmit(event)}
         className="relative mx-auto w-full max-w-[38rem]"
       >
-        <PageIntro icon={<Plus size={20} />} title="Start a new thread">
-          Choose where the thread should work, then optionally give a coding agent its first task.
-        </PageIntro>
-
         <Surface variant="elevated-panel" className="p-4 sm:p-5">
-          <div className="rounded-xl border border-ghost-green/20 bg-ghost-green/[0.05] px-3.5 py-3">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ghost-green">Automatic naming</p>
-            <p className="mt-1.5 text-[10px] leading-4 text-ghost-muted">
-              When you send the first prompt, {selectedAgentLabel} uses it to generate a concise title and, for a worktree, a matching branch name.
-            </p>
-          </div>
-
-          <fieldset className="mt-6">
-            <legend className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ghost-dim">
-              Coding agent
-            </legend>
-
-            <label htmlFor="thread-coding-agent" className="mt-2.5 block text-xs font-medium text-ghost-bright-white">
-              Agent
-            </label>
-            <div className="mt-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-y-1 border-b border-ghost-border/45 px-0.5 pb-2">
+            <div className="flex h-[26px] min-w-0 items-center">
               <Select
                 id="thread-coding-agent"
+                variant="inline"
+                aria-label="Coding agent"
                 value={codingAgent}
                 options={configuredAgentOptions}
                 onChange={(agent) => handleCodingAgentChange(agent as CodingAgentSelection)}
                 disabled={submitting}
-                leadingIcon={<Bot size={12} />}
+                leadingIcon={<Bot size={11} />}
               />
             </div>
-
-            <AgentModelControls
-              variant="form"
-              className="mt-4 grid gap-3 sm:grid-cols-2"
-              modelId="thread-agent-model"
-              thinkingId="thread-agent-thinking"
-              model={model}
-              modelOptions={selectedAgent.models.map((option) => ({ value: option.id, label: option.label }))}
-              modelDisabled={submitting || selectedAgentModelsUnavailable}
-              onModelChange={handleModelChange}
-              thinking={thinkingLevel}
-              thinkingOptions={selectedAgent.thinkingLevels.map((option) => ({ value: option.id, label: option.label }))}
-              thinkingDisabled={submitting}
-              onThinkingChange={handleThinkingLevelChange}
-            />
-
-            <p className="mt-2 text-[9px] leading-4 text-ghost-faint">
-              {codingAgentsLoading
-                ? 'Loading models available to your coding agents…'
-                : selectedAgentModelsUnavailable
-                  ? 'CLIProxyAPI did not return any GPT models. Make sure it is running and its client key is configured.'
-                  : codingAgentsError
-                    ? 'Could not refresh available models. Agent defaults and built-in choices are still available.'
-                    : 'Model and thinking settings apply when this thread starts the agent.'}
-            </p>
-          </fieldset>
-
-          <fieldset className="mt-6">
-            <legend className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ghost-dim">
-              Sub-agent delegation
-            </legend>
-            <label htmlFor="thread-sub-agent-depth" className="mt-2.5 block text-xs font-medium text-ghost-bright-white">
-              Maximum depth
+            <label className={classNames(inlineSettingClass, inlineDividerClass)}>
+              <span>Model</span>
+              <Select
+                id="thread-agent-model"
+                variant="inline"
+                value={model}
+                options={modelSelectOptions.some((option) => option.value === model)
+                  ? modelSelectOptions
+                  : [{ value: model, label: 'Select model' }, ...modelSelectOptions]}
+                onChange={handleModelChange}
+                disabled={submitting || selectedAgentModelsUnavailable}
+                style={{ maxWidth: '7.5rem' }}
+              />
             </label>
-            <div className="mt-2">
+            <label className={classNames(inlineSettingClass, inlineDividerClass)}>
+              <span>Thinking</span>
+              <Select
+                id="thread-agent-thinking"
+                variant="inline"
+                value={thinkingLevel}
+                options={thinkingSelectOptions.some((option) => option.value === thinkingLevel)
+                  ? thinkingSelectOptions
+                  : [{ value: thinkingLevel, label: 'Default' }, ...thinkingSelectOptions]}
+                onChange={handleThinkingLevelChange}
+                disabled={submitting}
+                style={{ maxWidth: '90px' }}
+              />
+            </label>
+            <div className={classNames('flex h-[26px] min-w-0 items-center', inlineDividerClass)}>
+              <Select
+                id="thread-working-directory"
+                variant="inline"
+                aria-label="Working directory"
+                value={workdirValue}
+                options={workdirOptions}
+                onChange={handleWorkdirChange}
+                disabled={submitting || !project.isGitRepo}
+                leadingIcon={location === 'worktree' ? <GitBranch size={11} /> : <Folder size={11} />}
+                style={{ maxWidth: '10rem' }}
+              />
+            </div>
+          </div>
+
+          {settingsNotice && (
+            <p className="mt-2 text-[9px] leading-4 text-ghost-faint">
+              {settingsNotice}
+              {location === 'worktree' && Boolean(branchLoadError) && (
+                <button
+                  type="button"
+                  onClick={branchesSubscription.retry}
+                  className="ml-2 font-medium text-ghost-muted underline transition hover:text-ghost-bright-white"
+                >
+                  Retry
+                </button>
+              )}
+            </p>
+          )}
+
+          <label htmlFor="thread-initial-prompt" className="sr-only">
+            Initial prompt (optional)
+          </label>
+          <TextArea
+            id="thread-initial-prompt"
+            value={initialPrompt}
+            onChange={(event) => handleInitialPromptChange(event.target.value)}
+            onPaste={handleInitialPromptPaste}
+            onKeyDown={handleInitialPromptKeyDown}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={handleInitialPromptDrop}
+            disabled={submitting}
+            rows={6}
+            maxLength={INITIAL_PROMPT_MAX_LENGTH}
+            placeholder="Describe what you want to build, investigate, or change…"
+            aria-describedby="thread-initial-prompt-help"
+            className="mt-3 min-h-40"
+            autoFocus
+          />
+
+          {initialPromptImages.length > 0 && (
+            <ul className="mt-2 grid gap-2 sm:grid-cols-2" aria-label="Attached images">
+              {initialPromptImages.map((image) => (
+                <li
+                  key={image.id}
+                  className="flex min-w-0 items-center gap-2.5 rounded-lg border border-ghost-border/70 bg-ghost-black/35 p-2"
+                >
+                  <img
+                    src={image.previewUrl}
+                    alt=""
+                    className="size-11 shrink-0 rounded-md border border-ghost-border/65 object-cover"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[10px] text-ghost-bright-white" title={image.file.name}>
+                      {image.file.name || 'Pasted image'}
+                    </span>
+                    <span className="mt-0.5 block text-[9px] text-ghost-faint">
+                      {formatImageSize(image.file.size)}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (submitting) return
+                      removeInitialPromptImage(image.id)
+                      setError('')
+                    }}
+                    disabled={submitting}
+                    aria-label={`Remove ${image.file.name || 'pasted image'}`}
+                    className="grid size-7 shrink-0 place-items-center rounded-md text-ghost-faint transition hover:bg-ghost-raised hover:text-ghost-bright-white disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <X size={13} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-y-1 px-0.5">
+            <label
+              title="Paste or drop images into the prompt · PNG, JPEG, GIF, WebP · 50 MB max"
+              className={classNames(
+                'flex h-6 items-center gap-1 rounded-[5px] px-1 font-mono text-[9px] transition',
+                submitting
+                  ? 'cursor-not-allowed text-ghost-muted opacity-55'
+                  : 'cursor-pointer text-ghost-muted hover:bg-ghost-raised/70 hover:text-ghost-bright-white',
+              )}
+            >
+              <ImagePlus size={11} className="text-ghost-green" />
+              Add images
+              <input
+                type="file"
+                accept={PI_IMAGE_ACCEPT}
+                multiple
+                disabled={submitting}
+                onChange={handleImageInput}
+                className="sr-only"
+              />
+            </label>
+            <label
+              title="Controls how deeply child agents from this thread may delegate. It can reduce, but not exceed, the project limit."
+              className={classNames(inlineSettingClass, inlineDividerClass)}
+            >
+              <span>Depth</span>
               <Select
                 id="thread-sub-agent-depth"
+                variant="inline"
                 value={nestedDepth === 'inherit' ? nestedDepth : String(nestedDepth)}
                 options={[
                   {
@@ -620,120 +756,17 @@ export function NewThreadScreen({
                   setError('')
                 }}
                 disabled={submitting || (settingsLoading && effectiveNestingDepth === null)}
-                aria-describedby="thread-sub-agent-depth-help"
-                leadingIcon={<Network size={12} />}
               />
-            </div>
-            <p id="thread-sub-agent-depth-help" className="mt-2 text-[9px] leading-4 text-ghost-faint">
-              {settingsError && effectiveNestingDepth === null
-                ? 'Could not load the project limit. This thread can still inherit the project setting.'
-                : 'Controls how deeply child agents from this thread may delegate. It can reduce, but not exceed, the project limit.'}
-            </p>
-          </fieldset>
-
-          <ThreadLocationPicker
-            project={project}
-            value={location}
-            disabled={submitting}
-            baseBranch={baseBranch}
-            branchState={branchState}
-            branchesLoading={branchesLoading}
-            branchLoadError={branchLoadError}
-            onChange={setLocation}
-            onBaseBranchChange={setBaseBranch}
-            onReloadBranches={branchesSubscription.retry}
-          />
-
-          <fieldset className="mt-6">
-            <legend className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ghost-dim">
-              First task
-            </legend>
-            <label htmlFor="thread-initial-prompt" className="mt-2.5 block text-xs font-medium text-ghost-bright-white">
-              Initial prompt <span className="font-normal text-ghost-faint">(optional)</span>
             </label>
-            <TextArea
-              id="thread-initial-prompt"
-              value={initialPrompt}
-              onChange={(event) => handleInitialPromptChange(event.target.value)}
-              onPaste={handleInitialPromptPaste}
-              onKeyDown={handleInitialPromptKeyDown}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={handleInitialPromptDrop}
-              disabled={submitting}
-              rows={5}
-              maxLength={INITIAL_PROMPT_MAX_LENGTH}
-              placeholder="Describe what you want to build, investigate, or change…"
-              aria-describedby="thread-initial-prompt-help"
-              className="mt-2 min-h-32"
-              autoFocus
-            />
+            <span className="ml-auto pl-3 font-mono text-[8px] text-ghost-faint">⌘Enter to create</span>
+          </div>
 
-            {initialPromptImages.length > 0 && (
-              <ul className="mt-2 grid gap-2 sm:grid-cols-2" aria-label="Attached images">
-                {initialPromptImages.map((image) => (
-                  <li
-                    key={image.id}
-                    className="flex min-w-0 items-center gap-2.5 rounded-lg border border-ghost-border/70 bg-ghost-black/35 p-2"
-                  >
-                    <img
-                      src={image.previewUrl}
-                      alt=""
-                      className="size-11 shrink-0 rounded-md border border-ghost-border/65 object-cover"
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[10px] text-ghost-bright-white" title={image.file.name}>
-                        {image.file.name || 'Pasted image'}
-                      </span>
-                      <span className="mt-0.5 block text-[9px] text-ghost-faint">
-                        {formatImageSize(image.file.size)}
-                      </span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (submitting) return
-                        removeInitialPromptImage(image.id)
-                        setError('')
-                      }}
-                      disabled={submitting}
-                      aria-label={`Remove ${image.file.name || 'pasted image'}`}
-                      className="grid size-7 shrink-0 place-items-center rounded-md text-ghost-faint transition hover:bg-ghost-raised hover:text-ghost-bright-white disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      <X size={13} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-              <label
-                className={`inline-flex h-7 items-center gap-1.5 rounded-md border border-ghost-border/75 px-2.5 text-[9px] font-medium transition ${
-                  submitting
-                    ? 'cursor-not-allowed opacity-40'
-                    : 'cursor-pointer text-ghost-muted hover:border-ghost-green/45 hover:bg-ghost-green/[0.08] hover:text-ghost-bright-white'
-                }`}
-              >
-                <ImagePlus size={12} className="text-ghost-green" />
-                Add images
-                <input
-                  type="file"
-                  accept={PI_IMAGE_ACCEPT}
-                  multiple
-                  disabled={submitting}
-                  onChange={handleImageInput}
-                  className="sr-only"
-                />
-              </label>
-              <span className="text-[9px] text-ghost-faint">Paste or drop images · PNG, JPEG, GIF, WebP · 50 MB max</span>
-            </div>
-            <p id="thread-initial-prompt-help" className="mt-2 text-[9px] leading-4 text-ghost-faint">
-              Add text or images to give {selectedAgentLabel} its first task immediately. Leave both blank to open {selectedAgentLabel} without sending a prompt. Press ⌘Enter in this field to create the thread.
-            </p>
-          </fieldset>
+          <p id="thread-initial-prompt-help" className="mt-2 px-0.5 text-[9px] leading-4 text-ghost-faint">
+            {selectedAgentLabel} uses the first prompt to name the thread{location === 'worktree' ? ' and its branch' : ''}. Leave it blank to open {selectedAgentLabel} without a task.
+          </p>
 
           {error && (
-            <FeedbackMessage role="alert" tone="error" className="mt-4">
+            <FeedbackMessage role="alert" tone="error" className="mt-3">
               {error}
             </FeedbackMessage>
           )}
