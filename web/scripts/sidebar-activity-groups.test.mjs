@@ -156,6 +156,39 @@ test('sections sort newest first across projects', () => {
   assert.deepEqual(entryIds(groups.recent), ['p2:newer', 'p1:older'])
 })
 
+test('subthreads stay directly below their parent in activity sections', () => {
+  const projects = [
+    project('p1', [
+      thread('working-parent', { lastPromptAt: iso(30) }),
+      thread('working-child', { parentThreadId: 'working-parent', lastPromptAt: iso(3) }),
+      thread('working-grandchild', { parentThreadId: 'working-child', lastPromptAt: iso(1) }),
+      thread('other-working', { lastPromptAt: iso(2) }),
+      thread('pinned-parent', { bookmarked: true, lastPromptAt: iso(30) }),
+      thread('pinned-child', { parentThreadId: 'pinned-parent', bookmarked: true, lastPromptAt: iso(3) }),
+      thread('other-pinned', { bookmarked: true, lastPromptAt: iso(4) }),
+    ]),
+  ]
+  const activities = [
+    { projectId: 'p1', threadId: 'working-parent', state: 'working', updatedAt: iso(30) },
+    { projectId: 'p1', threadId: 'working-child', state: 'working', updatedAt: iso(3) },
+    { projectId: 'p1', threadId: 'working-grandchild', state: 'working', updatedAt: iso(1) },
+    { projectId: 'p1', threadId: 'other-working', state: 'working', updatedAt: iso(2) },
+  ]
+
+  const groups = activityViewGroups(projects, activities)
+  assert.deepEqual(entryIds(groups.working), [
+    'p1:working-parent',
+    'p1:working-child',
+    'p1:working-grandchild',
+    'p1:other-working',
+  ])
+  assert.deepEqual(entryIds(groups.pinned), [
+    'p1:pinned-parent',
+    'p1:pinned-child',
+    'p1:other-pinned',
+  ])
+})
+
 test('recent caps at the limit and reports the overflow', () => {
   const threads = Array.from({ length: recentThreadLimit + 3 }, (_, index) =>
     thread(`t${index}`, { lastPromptAt: iso(index + 1) }))
