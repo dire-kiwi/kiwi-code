@@ -6,8 +6,52 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/dire-kiwi/kiwi-code/internal/browsercontrol"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/wire"
 )
+
+const browserRecordingStatusTestJSON = `{
+	"recording":{
+		"id":"rec-active",
+		"state":"recording",
+		"targetId":"page-1",
+		"title":"Active recording",
+		"startedAt":"2026-07-26T00:00:00Z"
+	},
+	"recordings":[
+		{
+			"id":"rec-active",
+			"state":"recording",
+			"targetId":"page-1",
+			"title":"Active recording",
+			"startedAt":"2026-07-26T00:00:00Z"
+		},
+		{
+			"id":"rec-active",
+			"state":"recording",
+			"targetId":"page-1",
+			"title":"Duplicate active recording",
+			"startedAt":"2026-07-26T00:00:01Z"
+		},
+		{
+			"id":"rec-complete",
+			"state":"completed",
+			"targetId":"page-2",
+			"title":"Completed recording",
+			"startedAt":"2026-07-25T00:00:00Z",
+			"finishedAt":"2026-07-25T00:01:00Z"
+		},
+		{
+			"id":"rec-complete",
+			"state":"completed",
+			"targetId":"page-2",
+			"title":"Duplicate completed recording",
+			"startedAt":"2026-07-25T00:00:00Z",
+			"finishedAt":"2026-07-25T00:01:00Z"
+		}
+	]
+}`
 
 func TestNormalizeBrowserStateSnapshotNoSession(t *testing.T) {
 	snapshot := normalizeBrowserStateSnapshot(json.RawMessage(`{
@@ -70,36 +114,98 @@ func TestBrowserStateSnapshotUnavailableProvider(t *testing.T) {
 	assertBrowserSnapshotShape(t, snapshot, false)
 }
 
-func TestBrowserRecordingSnapshotIncludesActiveAndCompletedWithoutDuplicates(t *testing.T) {
-	snapshot := normalizeBrowserStateSnapshot(json.RawMessage(`{
-		"recording":{
-			"id":"rec-active",
-			"state":"recording",
-			"targetId":"page-1",
-			"title":"Active recording",
-			"startedAt":"2026-07-26T00:00:00Z"
+func TestNormalizeBrowserRecordingHistoryDeduplicatesProviderIDs(t *testing.T) {
+	snapshot := normalizeBrowserStateSnapshot(json.RawMessage(browserRecordingStatusTestJSON))
+	if snapshot.Recording == nil || snapshot.Recording.ID != "rec-active" {
+		t.Fatalf("active recording = %#v", snapshot.Recording)
+	}
+	if len(snapshot.Recordings) != 2 ||
+		snapshot.Recordings[0].ID != "rec-active" ||
+		snapshot.Recordings[1].ID != "rec-complete" {
+		t.Fatalf("recording history = %#v", snapshot.Recordings)
+	}
+}
+
+func TestBrowserStatusTopicIncludesActiveAndHistoricalRecordings(t *testing.T) {
+	status := json.RawMessage(browserRecordingStatusTestJSON)
+	provider := browserActionTestProvider{action: func(_ context.Context, request browsercontrol.Request) (json.RawMessage, error) {
+		if request.Operation != "session.status" {
+			return nil, browsercontrol.ErrProvider
+		}
+		return status, nil
+	}}
+	application, item, thread := newBrowserServerTestFixture(t, provider)
+	connection, closeServer := openStateTestSocket(t, application)
+	defer closeServer()
+	defer connection.Close()
+	if ready := readStateTestMessage(t, connection); ready.Type != wire.ServerReady {
+		t.Fatalf("ready = %#v", ready)
+	}
+
+	writeStateTestMessage(t, connection, map[string]any{
+		"t":  wire.ClientSub,
+		"id": uint32(1),
+		"topic": map[string]any{
+			"tag":       stateTopicBrowserStatus,
+			"projectId": item.ID,
+			"threadId":  thread.ID,
 		},
-		"recordings":[
-			{
-				"id":"rec-active",
-				"state":"recording",
-				"targetId":"page-1",
-				"title":"Active recording",
-				"startedAt":"2026-07-26T00:00:00Z"
-			},
-			{
-				"id":"rec-complete",
-				"state":"completed",
-				"targetId":"page-2",
-				"title":"Completed recording",
-				"startedAt":"2026-07-25T00:00:00Z",
-				"finishedAt":"2026-07-25T00:01:00Z"
-			}
-		]
-	}`))
-	recordings := browserStateRecordingList(snapshot)
-	if len(recordings) != 2 || recordings[0].ID != "rec-active" || recordings[1].ID != "rec-complete" {
-		t.Fatalf("recording list = %#v", recordings)
+	})
+	message := readStateTestMessage(t, connection)
+	if message.Type != wire.ServerSnap || message.ID != 1 || message.Seq != 1 {
+		t.Fatalf("browser status snapshot message = %#v", message)
+	}
+	var snapshot browserStateSnapshot
+	if err := json.Unmarshal(message.Data, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Recording == nil || snapshot.Recording.ID != "rec-active" {
+		t.Fatalf("active recording = %#v", snapshot.Recording)
+	}
+	if len(snapshot.Recordings) != 2 ||
+		snapshot.Recordings[0].ID != "rec-active" ||
+		snapshot.Recordings[1].ID != "rec-complete" {
+		t.Fatalf("browser.status recordings = %#v", snapshot.Recordings)
+	}
+}
+
+func TestLegacyBrowserRecordingsTopicProjectsStatusRecordings(t *testing.T) {
+	status := json.RawMessage(browserRecordingStatusTestJSON)
+	provider := browserActionTestProvider{action: func(_ context.Context, request browsercontrol.Request) (json.RawMessage, error) {
+		if request.Operation != "session.status" {
+			return nil, browsercontrol.ErrProvider
+		}
+		return status, nil
+	}}
+	application, item, thread := newBrowserServerTestFixture(t, provider)
+	connection, closeServer := openStateTestSocket(t, application)
+	defer closeServer()
+	defer connection.Close()
+	if ready := readStateTestMessage(t, connection); ready.Type != wire.ServerReady {
+		t.Fatalf("ready = %#v", ready)
+	}
+
+	writeStateTestMessage(t, connection, map[string]any{
+		"t":  wire.ClientSub,
+		"id": uint32(1),
+		"topic": map[string]any{
+			"tag":       stateTopicBrowserRecordings,
+			"projectId": item.ID,
+			"threadId":  thread.ID,
+		},
+	})
+	message := readStateTestMessage(t, connection)
+	if message.Type != wire.ServerSnap || message.ID != 1 || message.Seq != 1 {
+		t.Fatalf("browser recordings snapshot message = %#v", message)
+	}
+	var recordings []browserStateRecording
+	if err := json.Unmarshal(message.Data, &recordings); err != nil {
+		t.Fatal(err)
+	}
+	if len(recordings) != 2 ||
+		recordings[0].ID != "rec-active" ||
+		recordings[1].ID != "rec-complete" {
+		t.Fatalf("legacy browser.recordings snapshot = %#v", recordings)
 	}
 }
 

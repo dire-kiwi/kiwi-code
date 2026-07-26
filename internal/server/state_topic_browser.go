@@ -92,6 +92,9 @@ func (s *Server) openBrowserStatusTopic(
 	})
 }
 
+// browser.recordings remains a protocol-v1 compatibility alias. New clients
+// consume recordings from browser.status, while both views share one status
+// notification source and provider read.
 func (s *Server) openBrowserRecordingsTopic(
 	ctx context.Context,
 	projectID string,
@@ -112,12 +115,7 @@ func (s *Server) openBrowserStateTopic(
 	channel *stateChannel,
 	projectSnapshot func(browserStateSnapshot) any,
 ) error {
-	changes, events := s.subscribeStateChanges(
-		projectID,
-		threadID,
-		stateTopicBrowserStatus,
-		stateTopicBrowserRecordings,
-	)
+	changes, events := s.subscribeStateChanges(projectID, threadID, stateTopicBrowserStatus)
 	if changes != nil {
 		defer changes.Close()
 	}
@@ -165,6 +163,23 @@ func (s *Server) openBrowserStateTopic(
 			}
 		}
 	}
+}
+
+func browserStateRecordingList(snapshot browserStateSnapshot) []browserStateRecording {
+	result := make([]browserStateRecording, 0, len(snapshot.Recordings)+1)
+	seen := make(map[string]struct{}, len(snapshot.Recordings)+1)
+	if snapshot.Recording != nil {
+		result = append(result, *snapshot.Recording)
+		seen[snapshot.Recording.ID] = struct{}{}
+	}
+	for _, recording := range snapshot.Recordings {
+		if _, exists := seen[recording.ID]; exists {
+			continue
+		}
+		seen[recording.ID] = struct{}{}
+		result = append(result, recording)
+	}
+	return result
 }
 
 func (s *Server) readBrowserStateSnapshot(
@@ -296,23 +311,6 @@ func normalizeBrowserStateSnapshot(raw json.RawMessage) browserStateSnapshot {
 		snapshot.Recordings = append(snapshot.Recordings, recording)
 	}
 	return snapshot
-}
-
-func browserStateRecordingList(snapshot browserStateSnapshot) []browserStateRecording {
-	result := make([]browserStateRecording, 0, len(snapshot.Recordings)+1)
-	seen := make(map[string]struct{}, len(snapshot.Recordings)+1)
-	if snapshot.Recording != nil {
-		result = append(result, *snapshot.Recording)
-		seen[snapshot.Recording.ID] = struct{}{}
-	}
-	for _, recording := range snapshot.Recordings {
-		if _, exists := seen[recording.ID]; exists {
-			continue
-		}
-		seen[recording.ID] = struct{}{}
-		result = append(result, recording)
-	}
-	return result
 }
 
 func normalizeBrowserStatePage(raw json.RawMessage) (browserStatePage, bool) {
@@ -465,5 +463,4 @@ func browserStateErrorMessage(err error) string {
 
 func (s *Server) notifyBrowserStateChanged(projectID, threadID string) {
 	s.notifyStateChanged(stateTopicBrowserStatus, projectID, threadID)
-	s.notifyStateChanged(stateTopicBrowserRecordings, projectID, threadID)
 }

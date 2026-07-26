@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useMatch, useNavigate } from 'react-router-dom'
 import {
   acknowledgePiThreadActivity,
@@ -10,6 +10,7 @@ import {
   updateThreadOrder,
 } from './api'
 import { isCodingAgent } from './codingAgents'
+import { guardedStoredStateCodec, useStoredState } from './lib/storedState'
 import { WorkspaceLoadingState } from './components/molecules/WorkspaceLoadingState'
 import { ProjectSidebar } from './components/organisms/ProjectSidebar'
 import { ProjectThreadFinder } from './components/organisms/ProjectThreadFinder'
@@ -53,7 +54,7 @@ import {
   samePiActivities,
   type PiActivityAcknowledgement,
 } from './pi-activity-reconciliation.mjs'
-import { activityDisplayThreadId } from './sidebar-thread-activity.mjs'
+import { createSidebarThreadIndex } from './sidebar-thread-index.mjs'
 import type {
   CodingAgentStart,
   PiThreadActivity,
@@ -65,7 +66,12 @@ import type {
   ThreadUsageSnapshot,
 } from './types'
 import { stateConnectionBanner } from './wire/connectionBanner'
-import { useApplicationInstance, useConnectionStatus, useSubscription } from './wire/react'
+import {
+  useApplicationInstance,
+  useConnectionStatus,
+  useLastReadySubscriptionData,
+  useSubscription,
+} from './wire/react'
 import {
   AgentActivityTopic,
   ProcessWebServersTopic,
@@ -77,6 +83,10 @@ import {
 
 const defaultWorkspaceTool: WorkspaceTool = 'pi'
 const activeProfileStorageKey = 'kiwi-code-active-profile'
+const activeProfileCodec = guardedStoredStateCodec(
+  (raw) => raw,
+  (value): value is string => typeof value === 'string' && value.length > 0,
+)
 
 type NewThreadStart = CodingAgentStart & {
   kind: 'new-thread-start'
@@ -288,13 +298,11 @@ export default function App() {
 
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [profilesHydrated, setProfilesHydrated] = useState(false)
-  const [activeProfileId, setActiveProfileId] = useState(() => {
-    try {
-      return window.localStorage.getItem(activeProfileStorageKey) || 'personal'
-    } catch {
-      return 'personal'
-    }
-  })
+  const [activeProfileId, setActiveProfileId] = useStoredState(
+    activeProfileStorageKey,
+    'personal',
+    activeProfileCodec,
+  )
   const [projects, setProjects] = useState<Project[]>([])
   const [projectsHydrated, setProjectsHydrated] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -305,15 +313,36 @@ export default function App() {
   const [projectFinderOpen, setProjectFinderOpen] = useState(false)
   const [detailsSidebarExpanded, setDetailsSidebarExpanded] = useState(false)
   const [piActivities, setPiActivities] = useState<PiThreadActivity[]>([])
-  const [processWebServers, setProcessWebServers] = useState<ProcessWebServer[]>([])
-  const [usageSnapshots, setUsageSnapshots] = useState<ThreadUsageSnapshot[]>([])
+  const processWebServers = (
+    useLastReadySubscriptionData(processSubscription) as ProcessWebServer[] | null
+  ) ?? []
+  const usageSnapshots = (
+    useLastReadySubscriptionData(usageSubscription) as ThreadUsageSnapshot[] | null
+  ) ?? []
   const lastWorkspacesRef = useRef<Record<string, LastWorkspace>>({})
   const piActivitiesRef = useRef<PiThreadActivity[]>([])
   const projectsRef = useRef<Project[]>(projects)
   projectsRef.current = projects
+  const threadIndex = useMemo(
+    () => createSidebarThreadIndex(projects, piActivities),
+    [piActivities, projects],
+  )
+  const threadIndexRef = useRef(threadIndex)
+  threadIndexRef.current = threadIndex
   const piAcknowledgementsRef = useRef(new Map<string, PiActivityAcknowledgement>())
   const failedPiAcknowledgementsRef = useRef(new Map<string, string>())
   const previousActiveThreadRef = useRef<string | null>(null)
+  const replaceProjectSnapshots = useCallback((nextProjects: Project[]) => {
+    if (sameProjects(projectsRef.current, nextProjects)) return
+    projectsRef.current = nextProjects
+    threadIndexRef.current = createSidebarThreadIndex(nextProjects, piActivitiesRef.current)
+    setProjects(nextProjects)
+  }, [])
+  const replacePiActivities = useCallback((nextActivities: PiThreadActivity[]) => {
+    piActivitiesRef.current = nextActivities
+    threadIndexRef.current = createSidebarThreadIndex(projectsRef.current, nextActivities)
+    setPiActivities(nextActivities)
+  }, [])
 
   const workspaceProjectId = workspaceMatch?.params.projectId
   const workspaceThreadId = workspaceMatch?.params.threadId
@@ -339,32 +368,24 @@ export default function App() {
     const nextActivities = piActivitiesRef.current.filter((item) =>
       item.projectId !== projectId || item.threadId !== activity.threadId,
     )
-    piActivitiesRef.current = nextActivities
-    setPiActivities(nextActivities)
+    replacePiActivities(nextActivities)
     void acknowledgePiThreadActivity(projectId, activity.threadId).catch(() => {
       if (piAcknowledgementsRef.current.get(key) !== acknowledgement) return
       piAcknowledgementsRef.current.delete(key)
       failedPiAcknowledgementsRef.current.set(key, version)
       const restoredActivities = restoreAcknowledgedPiActivity(piActivitiesRef.current, acknowledgement)
       if (!samePiActivities(piActivitiesRef.current, restoredActivities)) {
-        piActivitiesRef.current = restoredActivities
-        setPiActivities(restoredActivities)
+        replacePiActivities(restoredActivities)
       }
     })
-  }, [])
+  }, [replacePiActivities])
 
   const acknowledgeThreadActivity = useCallback((
     projectId: string,
     threadId: string,
     retryFailed = false,
   ) => {
-    const project = projectsRef.current.find((item) => item.id === projectId)
-    if (!project) return
-    const activities = piActivitiesRef.current.filter((activity) =>
-      activity.projectId === projectId
-        && activity.state === 'finished'
-        && activityDisplayThreadId(project.threads, activity) === threadId,
-    )
+    const activities = threadIndexRef.current.finishedActivities(projectId, threadId)
     for (const activity of activities) queuePiAcknowledgement(projectId, activity, retryFailed)
   }, [queuePiAcknowledgement])
 
@@ -378,10 +399,9 @@ export default function App() {
       piAcknowledgementsRef.current,
     )
     if (!samePiActivities(piActivitiesRef.current, visibleActivities)) {
-      piActivitiesRef.current = visibleActivities
-      setPiActivities(visibleActivities)
+      replacePiActivities(visibleActivities)
     }
-  }, [])
+  }, [replacePiActivities])
 
   useEffect(() => {
     function handleProjectFinderShortcut(event: KeyboardEvent) {
@@ -397,11 +417,10 @@ export default function App() {
 
   useEffect(() => {
     if (projectSubscription.state === 'ready') {
-      const next = visibleProjectSnapshots(projectSubscription.data as Project[])
-      setProjects((current) => sameProjects(current, next) ? current : next)
+      replaceProjectSnapshots(visibleProjectSnapshots(projectSubscription.data as Project[]))
       setProjectsHydrated(true)
     }
-  }, [projectSubscription])
+  }, [projectSubscription, replaceProjectSnapshots])
 
   useEffect(() => {
     if (profileSubscription.state === 'ready') {
@@ -417,32 +436,16 @@ export default function App() {
     }
   }, [activitySubscription, applyPiActivities])
 
-  useEffect(() => {
-    if (usageSubscription.state === 'ready') {
-      const next = usageSubscription.data as ThreadUsageSnapshot[]
-      startTransition(() => setUsageSnapshots((current) => (
-        JSON.stringify(current) === JSON.stringify(next) ? current : next
-      )))
-    }
-  }, [usageSubscription])
-
-  useEffect(() => {
-    if (processSubscription.state === 'ready') {
-      const next = processSubscription.data as ProcessWebServer[]
-      startTransition(() => setProcessWebServers((current) => (
-        JSON.stringify(current) === JSON.stringify(next) ? current : next
-      )))
-    }
-  }, [processSubscription])
-
   const selectedProject = useMemo(
-    () => projects.find((project) => project.id === workspaceProjectId) ?? null,
-    [projects, workspaceProjectId],
+    () => workspaceProjectId ? threadIndex.projectById.get(workspaceProjectId) ?? null : null,
+    [threadIndex, workspaceProjectId],
   )
 
   const selectedThread = useMemo(
-    () => selectedProject?.threads.find((thread) => thread.id === workspaceThreadId) ?? null,
-    [selectedProject, workspaceThreadId],
+    () => selectedProject && workspaceThreadId
+      ? threadIndex.entry(selectedProject.id, workspaceThreadId)?.thread ?? null
+      : null,
+    [selectedProject, threadIndex, workspaceThreadId],
   )
 
   const pendingThreadStart = newThreadStartFromState(routeLocation.state)
@@ -453,30 +456,32 @@ export default function App() {
     : null
 
   const newThreadProject = useMemo(
-    () => projects.find((project) => project.id === newThreadMatch?.params.projectId) ?? null,
-    [newThreadMatch?.params.projectId, projects],
+    () => threadIndex.projectById.get(newThreadMatch?.params.projectId ?? '') ?? null,
+    [newThreadMatch?.params.projectId, threadIndex],
   )
 
   const legacyProject = useMemo(
-    () => projects.find((project) => project.id === threadMatch?.params.projectId) ?? null,
-    [projects, threadMatch?.params.projectId],
+    () => threadIndex.projectById.get(threadMatch?.params.projectId ?? '') ?? null,
+    [threadIndex, threadMatch?.params.projectId],
   )
 
   const legacyThread = useMemo(
-    () => legacyProject?.threads.find((thread) => thread.id === threadMatch?.params.threadId) ?? null,
-    [legacyProject, threadMatch?.params.threadId],
+    () => legacyProject
+      ? threadIndex.entry(legacyProject.id, threadMatch?.params.threadId ?? '')?.thread ?? null
+      : null,
+    [legacyProject, threadIndex, threadMatch?.params.threadId],
   )
 
   const landingProject = useMemo(
-    () => projects.find((project) => project.id === projectMatch?.params.projectId) ?? null,
-    [projectMatch?.params.projectId, projects],
+    () => threadIndex.projectById.get(projectMatch?.params.projectId ?? '') ?? null,
+    [projectMatch?.params.projectId, threadIndex],
   )
 
   const settingsProjectId = projectSettingsSectionMatch?.params.projectId
     ?? projectSettingsMatch?.params.projectId
   const settingsProject = useMemo(
-    () => projects.find((project) => project.id === settingsProjectId) ?? null,
-    [settingsProjectId, projects],
+    () => threadIndex.projectById.get(settingsProjectId ?? '') ?? null,
+    [settingsProjectId, threadIndex],
   )
 
   const activeProfile = useMemo(
@@ -562,14 +567,6 @@ export default function App() {
     window.addEventListener('keydown', handleNewThreadShortcut, true)
     return () => window.removeEventListener('keydown', handleNewThreadShortcut, true)
   }, [navigate, newThreadProjectId, routedProjectId])
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(activeProfileStorageKey, activeProfileId)
-    } catch {
-      // Profile selection still works when browser storage is unavailable.
-    }
-  }, [activeProfileId])
 
   useEffect(() => {
     if (activeThreadIdentity && previousActiveThreadRef.current !== activeThreadIdentity && selectedProject && selectedThread) {
@@ -783,15 +780,9 @@ export default function App() {
   }
 
   async function handleDeleteThread(project: Project, thread: Thread) {
-    const descendantIds = new Set<string>()
-    const collectDescendants = (parentId: string) => {
-      for (const candidate of project.threads) {
-        if (candidate.parentThreadId !== parentId || descendantIds.has(candidate.id)) continue
-        descendantIds.add(candidate.id)
-        collectDescendants(candidate.id)
-      }
-    }
-    collectDescendants(thread.id)
+    const descendantIds = new Set(
+      threadIndex.tree(project.id)?.descendants(thread.id).map((candidate) => candidate.id) ?? [],
+    )
     const childNotice = descendantIds.size > 0
       ? `\n${descendantIds.size} agent ${descendantIds.size === 1 ? 'thread' : 'threads'} will also be deleted.`
       : ''

@@ -434,6 +434,470 @@ func strconvQuote(value string) string {
 	return string(contents)
 }
 
+type workflowOperationTestHarness struct {
+	store       *project.Store
+	item        project.Project
+	thread      project.Thread
+	handler     http.Handler
+	application *Server
+	basePath    string
+}
+
+func newWorkflowOperationTestHarness(t *testing.T) workflowOperationTestHarness {
+	t.Helper()
+	store, err := project.NewStore(filepath.Join(t.TempDir(), "data", "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := newIsolatedServerHandler(t, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := handler.(*Server)
+	// These tests only need to characterize command construction and injected
+	// launchers. Keeping the paths synthetic avoids depending on the host's
+	// Node permission-model version.
+	application.workflows.nodePath = "/test/node"
+	application.workflows.permissionFlag = "--permission"
+	application.workflows.allowNet = false
+	t.Cleanup(application.terminal.nativePi.stopAll)
+	thread := item.Threads[0]
+	return workflowOperationTestHarness{
+		store:       store,
+		item:        item,
+		thread:      thread,
+		handler:     handler,
+		application: application,
+		basePath:    "/api/projects/" + item.ID + "/threads/" + thread.ID + "/workflows",
+	}
+}
+
+func (h workflowOperationTestHarness) createRecord(
+	t *testing.T,
+	runID, state, processID string,
+	agents []workflowAgentRecord,
+) workflowRunRecord {
+	t.Helper()
+	directory, err := h.application.workflows.runDirectory(h.item.ID, h.thread.ID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	record := workflowRunRecord{
+		Version:       workflowRecordVersion,
+		ID:            runID,
+		ProjectID:     h.item.ID,
+		ThreadID:      h.thread.ID,
+		Token:         "token-" + runID,
+		State:         state,
+		Attempt:       1,
+		Name:          "Operation test",
+		ScriptPath:    filepath.Join(directory, workflowScriptFileName),
+		ProcessID:     processID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		Agents:        agents,
+		CloseChildren: true,
+	}
+	if state == workflowStateRunning {
+		record.StartedAt = &now
+	}
+	manifest := workflowRunnerManifest{
+		Version:         workflowManifestVersion,
+		RunID:           runID,
+		Attempt:         record.Attempt,
+		Endpoint:        "http://127.0.0.1.invalid/api/thread",
+		Token:           record.Token,
+		ScriptPath:      record.ScriptPath,
+		CloseOnComplete: true,
+		MaxConcurrency:  16,
+	}
+	if err := h.application.workflows.create(
+		record,
+		[]byte("export const meta = { name: 'operation', description: 'operation test' }\nreturn null\n"),
+		manifest,
+	); err != nil {
+		t.Fatal(err)
+	}
+	return record
+}
+
+func installWorkflowOperationFakePi(t *testing.T, application *Server) {
+	t.Helper()
+	fakePi := filepath.Join(t.TempDir(), "fake-pi")
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *'"type":"get_available_models"'*)
+      printf '%s\n' '{"type":"response","command":"get_available_models","success":true,"data":{"models":[{"provider":"custom","id":"model-a","name":"Model A","reasoning":true}]}}'
+      ;;
+    *'"type":"prompt"'*)
+      printf '%s\n' '{"type":"response","command":"prompt","success":true}'
+      printf '%s\n' '{"type":"agent_start"}'
+      ;;
+    *'"type":"get_state"'*)
+      printf '%s\n' '{"type":"response","command":"get_state","success":true,"data":{"isStreaming":true}}'
+      ;;
+    *'"type":"get_messages"'*)
+      printf '%s\n' '{"type":"response","command":"get_messages","success":true,"data":{"messages":[]}}'
+      ;;
+    *'"type":"get_session_stats"'*)
+      printf '%s\n' '{"type":"response","command":"get_session_stats","success":true,"data":{}}'
+      ;;
+    *'"type":"get_commands"'*)
+      printf '%s\n' '{"type":"response","command":"get_commands","success":true,"data":{"commands":[]}}'
+      ;;
+  esac
+done
+`
+	if err := os.WriteFile(fakePi, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	application.terminal.nativePi.piPath = fakePi
+}
+
+func TestWorkflowAgentCreateRetryReturnsSameDurableChild(t *testing.T) {
+	harness := newWorkflowOperationTestHarness(t)
+	installWorkflowOperationFakePi(t, harness.application)
+	startedAt := time.Now().UTC()
+	record := harness.createRecord(t, "wf-agent-idempotency", workflowStateRunning, "", []workflowAgentRecord{{
+		ID:        "agent-0001",
+		Label:     "Durable child",
+		State:     workflowAgentStateStarting,
+		StartedAt: startedAt,
+	}})
+	path := harness.basePath + "/" + record.ID + "/agents/agent-0001"
+	body := `{"title":"Durable workflow child","prompt":"Keep running","agent":"pi","model":"custom/model-a","worktree":false}`
+
+	post := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
+		request.Header.Set(workflowTokenHeader, record.Token)
+		response := httptest.NewRecorder()
+		harness.handler.ServeHTTP(response, request)
+		return response
+	}
+	first := post()
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first workflow agent status = %d body=%s", first.Code, first.Body.String())
+	}
+	if contentType := first.Header().Get("Content-Type"); contentType != "application/json" {
+		t.Fatalf("first workflow agent Content-Type = %q", contentType)
+	}
+	retry := post()
+	if retry.Code != http.StatusCreated {
+		t.Fatalf("retried workflow agent status = %d body=%s", retry.Code, retry.Body.String())
+	}
+	if contentType := retry.Header().Get("Content-Type"); contentType != "application/json" {
+		t.Fatalf("retried workflow agent Content-Type = %q", contentType)
+	}
+	if !bytes.Equal(first.Body.Bytes(), retry.Body.Bytes()) {
+		t.Fatalf("retried workflow agent changed response:\nfirst: %s\nretry: %s", first.Body.String(), retry.Body.String())
+	}
+
+	var created childThreadRunResponse
+	if err := json.Unmarshal(first.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Thread.ID == "" || created.Run.ID == 0 || created.Agent != codingAgentPi {
+		t.Fatalf("created workflow agent = %#v", created)
+	}
+	reloaded, err := project.NewStore(filepath.Join(harness.store.DataDirectory(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := reloaded.Get(harness.item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches := 0
+	for _, child := range persisted.Threads {
+		if child.WorkflowRunID == record.ID && child.WorkflowAgentID == "agent-0001" {
+			matches++
+			if child.ID != created.Thread.ID || child.ParentThreadID != harness.thread.ID ||
+				child.RollbackPending || child.ClosedAt != nil || child.ArchivedAt != nil {
+				t.Fatalf("durable workflow child = %#v", child)
+			}
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("durable workflow child count = %d, threads = %#v", matches, persisted.Threads)
+	}
+	bound, err := harness.application.workflows.get(harness.item.ID, harness.thread.ID, record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bound.Agents) != 1 || bound.Agents[0].ThreadID != created.Thread.ID ||
+		bound.Agents[0].ChildRunID != created.Run.ID || bound.Agents[0].Response == nil {
+		t.Fatalf("persisted workflow agent binding = %#v", bound.Agents)
+	}
+}
+
+func TestWorkflowCleanupFailureRetainsProcessIDUntilRetry(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		action    string
+		wantState string
+	}{
+		{name: "pause", action: "pause", wantState: workflowStatePaused},
+		{name: "stop", action: "stop", wantState: workflowStateStopped},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			harness := newWorkflowOperationTestHarness(t)
+			runID := "wf-cleanup-" + test.action
+			record := harness.createRecord(t, runID, workflowStateRunning, "process-retained", nil)
+			attempts := 0
+			harness.application.workflowProcessLauncher = func(project.Project, project.Thread, string, string) (processWindow, error) {
+				return processWindow{}, errors.New("unused")
+			}
+			harness.application.workflowProcessStopper = func(_ project.Project, _ project.Thread, processID string) error {
+				attempts++
+				if processID != "process-retained" {
+					t.Fatalf("cleanup process ID = %q", processID)
+				}
+				if attempts == 1 {
+					return errors.New("injected cleanup failure")
+				}
+				return nil
+			}
+			post := func() *httptest.ResponseRecorder {
+				response := httptest.NewRecorder()
+				harness.handler.ServeHTTP(response, httptest.NewRequest(
+					http.MethodPost,
+					harness.basePath+"/"+record.ID+"/"+test.action,
+					bytes.NewBufferString(`{}`),
+				))
+				return response
+			}
+
+			first := post()
+			if first.Code != http.StatusInternalServerError {
+				t.Fatalf("first %s status = %d body=%s", test.action, first.Code, first.Body.String())
+			}
+			retained, err := harness.application.workflows.get(harness.item.ID, harness.thread.ID, record.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if retained.State != test.wantState || retained.ProcessID != "process-retained" {
+				t.Fatalf("workflow after failed %s cleanup = %#v", test.action, retained)
+			}
+
+			retry := post()
+			if retry.Code != http.StatusOK {
+				t.Fatalf("retried %s status = %d body=%s", test.action, retry.Code, retry.Body.String())
+			}
+			cleaned, err := harness.application.workflows.get(harness.item.ID, harness.thread.ID, record.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cleaned.State != test.wantState || cleaned.ProcessID != "" || attempts != 2 {
+				t.Fatalf("workflow after retried %s cleanup = %#v, attempts=%d", test.action, cleaned, attempts)
+			}
+		})
+	}
+}
+
+func TestWorkflowLaunchFailurePersistsTruncatedFailedRun(t *testing.T) {
+	harness := newWorkflowOperationTestHarness(t)
+	launchError := strings.Repeat("launch failure ", maxWorkflowErrorBytes)
+	harness.application.workflowProcessLauncher = func(project.Project, project.Thread, string, string) (processWindow, error) {
+		return processWindow{}, errors.New(launchError)
+	}
+	harness.application.workflows.setActivation(harness.item.ID, harness.thread.ID, "prompt", "small")
+	request := httptest.NewRequest(
+		http.MethodPost,
+		harness.basePath,
+		bytes.NewBufferString(`{"script":"export const meta = { name: 'failure', description: 'failure' }\nreturn null\n"}`),
+	)
+	request.Header.Set(agentTokenHeader, harness.application.terminal.agentToken)
+	response := httptest.NewRecorder()
+	harness.handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("launch failure status = %d body=%s", response.Code, response.Body.String())
+	}
+
+	runs, err := harness.application.workflows.list(harness.item.ID, harness.thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("persisted workflow count = %d, runs=%#v", len(runs), runs)
+	}
+	run := runs[0]
+	if run.State != workflowStateFailed || run.FinishedAt == nil || run.ProcessID != "" ||
+		run.Error != truncateWorkflowText(launchError, maxWorkflowErrorBytes) ||
+		len(run.Error) != maxWorkflowErrorBytes {
+		t.Fatalf("persisted launch failure = %#v", run)
+	}
+}
+
+func TestWorkflowResumeLaunchFailureRestoresPausedCompletedValues(t *testing.T) {
+	harness := newWorkflowOperationTestHarness(t)
+	finishedAt := time.Now().UTC().Add(-time.Minute)
+	completedResponse := childThreadRunResponse{
+		Thread: project.Thread{ID: "completed-child"},
+		Run:    piNativeRunSnapshot{ID: 41, State: "finished", Output: `{"ok":true}`},
+		Agent:  codingAgentPi,
+	}
+	record := harness.createRecord(t, "wf-resume-launch-failure", workflowStatePaused, "", []workflowAgentRecord{
+		{
+			ID:         "agent-completed",
+			Label:      "Completed",
+			State:      workflowAgentStateFinished,
+			ThreadID:   completedResponse.Thread.ID,
+			ChildRunID: completedResponse.Run.ID,
+			StartedAt:  finishedAt.Add(-time.Minute),
+			FinishedAt: &finishedAt,
+			Value:      json.RawMessage(`{"ok":true}`),
+			Response:   &completedResponse,
+		},
+		{
+			ID:         "agent-incomplete",
+			Label:      "Incomplete",
+			State:      workflowAgentStatePaused,
+			ThreadID:   "incomplete-child",
+			ChildRunID: 42,
+			StartedAt:  finishedAt,
+			Error:      "stale error",
+			Output:     "stale output",
+			Value:      json.RawMessage(`{"stale":true}`),
+			Response:   &childThreadRunResponse{Thread: project.Thread{ID: "incomplete-child"}, Run: piNativeRunSnapshot{ID: 42}},
+		},
+	})
+	launchError := strings.Repeat("resume failure ", maxWorkflowErrorBytes)
+	launches := 0
+	harness.application.workflowProcessLauncher = func(project.Project, project.Thread, string, string) (processWindow, error) {
+		launches++
+		return processWindow{}, errors.New(launchError)
+	}
+	response := httptest.NewRecorder()
+	harness.handler.ServeHTTP(response, httptest.NewRequest(
+		http.MethodPost,
+		harness.basePath+"/"+record.ID+"/resume",
+		bytes.NewBufferString(`{}`),
+	))
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("resume launch failure status = %d body=%s", response.Code, response.Body.String())
+	}
+	paused, err := harness.application.workflows.get(harness.item.ID, harness.thread.ID, record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paused.State != workflowStatePaused || paused.Attempt != 2 || paused.ProcessID != "" ||
+		paused.FinishedAt != nil || paused.Error != truncateWorkflowText(launchError, maxWorkflowErrorBytes) ||
+		launches != 1 {
+		t.Fatalf("workflow after resume launch failure = %#v, launches=%d", paused, launches)
+	}
+	completed := paused.Agents[0]
+	var completedValue struct {
+		OK bool `json:"ok"`
+	}
+	valueErr := json.Unmarshal(completed.Value, &completedValue)
+	if completed.State != workflowAgentStateFinished || completed.ThreadID != "completed-child" ||
+		completed.ChildRunID != 41 || completed.FinishedAt == nil ||
+		valueErr != nil || !completedValue.OK || completed.Response == nil ||
+		completed.Response.Run.ID != 41 {
+		t.Fatalf("completed agent changed after resume launch failure = %#v, value error=%v", completed, valueErr)
+	}
+	incomplete := paused.Agents[1]
+	if incomplete.State != workflowAgentStatePaused || incomplete.ChildRunID != 0 ||
+		incomplete.Error != "" || incomplete.Output != "" || len(incomplete.Value) != 0 ||
+		incomplete.Response != nil || incomplete.FinishedAt != nil {
+		t.Fatalf("incomplete agent was not reset before restored pause = %#v", incomplete)
+	}
+}
+
+func TestSavedWorkflowInvocationExactJSONAndStartErrorParity(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	harness := newWorkflowOperationTestHarness(t)
+	directory := filepath.Join(harness.item.Path, savedWorkflowDirectory)
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := "export const meta = { name: 'operation-saved', description: 'operation saved' }\nreturn args\n"
+	if err := os.WriteFile(filepath.Join(directory, "operation-saved.js"), []byte(script), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	savedPath := harness.basePath + "/commands/run/operation-saved"
+	for _, test := range []struct {
+		name string
+		path string
+		body string
+		want int
+	}{
+		{name: "unknown saved name", path: harness.basePath + "/commands/run/missing-operation", body: `{}`, want: http.StatusNotFound},
+		{name: "unknown field", path: savedPath, body: `{"unexpected":true}`, want: http.StatusBadRequest},
+		{name: "trailing JSON", path: savedPath, body: `{} {}`, want: http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, test.path, bytes.NewBufferString(test.body))
+			request.Header.Set(agentTokenHeader, harness.application.terminal.agentToken)
+			response := httptest.NewRecorder()
+			harness.handler.ServeHTTP(response, request)
+			if response.Code != test.want {
+				t.Fatalf("status = %d, want %d, body=%s", response.Code, test.want, response.Body.String())
+			}
+			if contentType := response.Header().Get("Content-Type"); contentType != "application/json" {
+				t.Fatalf("Content-Type = %q", contentType)
+			}
+		})
+	}
+
+	dynamicRequest := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequest(
+			http.MethodPost,
+			harness.basePath,
+			bytes.NewReader([]byte(`{"script":`+strconvQuote(script)+`}`)),
+		)
+		request.Header.Set(agentTokenHeader, harness.application.terminal.agentToken)
+		response := httptest.NewRecorder()
+		harness.handler.ServeHTTP(response, request)
+		return response
+	}
+	savedRequest := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, savedPath, bytes.NewBufferString(`{}`))
+		request.Header.Set(agentTokenHeader, harness.application.terminal.agentToken)
+		response := httptest.NewRecorder()
+		harness.handler.ServeHTTP(response, request)
+		return response
+	}
+	assertParity := func(name string, dynamic, saved *httptest.ResponseRecorder) {
+		t.Helper()
+		if dynamic.Code != saved.Code || dynamic.Body.String() != saved.Body.String() ||
+			dynamic.Header().Get("Content-Type") != "application/json" ||
+			saved.Header().Get("Content-Type") != "application/json" {
+			t.Fatalf("%s parity:\ndynamic status=%d type=%q body=%s\nsaved status=%d type=%q body=%s",
+				name,
+				dynamic.Code, dynamic.Header().Get("Content-Type"), dynamic.Body.String(),
+				saved.Code, saved.Header().Get("Content-Type"), saved.Body.String(),
+			)
+		}
+	}
+
+	harness.application.workflows.clearActivation(harness.item.ID, harness.thread.ID)
+	dynamicActivation := dynamicRequest()
+	savedActivation := savedRequest()
+	if dynamicActivation.Code != http.StatusConflict {
+		t.Fatalf("activation failure status = %d body=%s", dynamicActivation.Code, dynamicActivation.Body.String())
+	}
+	assertParity("activation error", dynamicActivation, savedActivation)
+
+	harness.application.workflowProcessLauncher = func(project.Project, project.Thread, string, string) (processWindow, error) {
+		return processWindow{}, errors.New("injected parity launch failure")
+	}
+	harness.application.workflows.setActivation(harness.item.ID, harness.thread.ID, "prompt", "small")
+	dynamicRuntime := dynamicRequest()
+	harness.application.workflows.setActivation(harness.item.ID, harness.thread.ID, "saved", "small")
+	savedRuntime := savedRequest()
+	if dynamicRuntime.Code != http.StatusServiceUnavailable {
+		t.Fatalf("runtime failure status = %d body=%s", dynamicRuntime.Code, dynamicRuntime.Body.String())
+	}
+	assertParity("runtime error", dynamicRuntime, savedRuntime)
+}
+
 type workflowChildStopWriter struct {
 	once sync.Once
 	done chan struct{}
@@ -759,10 +1223,13 @@ func TestWorkflowProcessWatchRecoversAfterRestartAndSettlesRunnerDisappearance(t
 
 	childDone := make(chan struct{})
 	childProcess := &piNativeProcess{
-		key:     piNativeProcessKey{ProjectID: item.ID, ThreadID: child.ID},
-		command: &exec.Cmd{},
-		stdin:   &workflowChildStopWriter{done: childDone},
-		done:    childDone,
+		nativeProcessCore: &nativeProcessCore{
+			key:     piNativeProcessKey{ProjectID: item.ID, ThreadID: child.ID},
+			spec:    piProcessSpec,
+			command: &exec.Cmd{},
+			stdin:   &workflowChildStopWriter{done: childDone},
+			done:    childDone,
+		},
 	}
 	application.terminal.nativePi.mu.Lock()
 	application.terminal.nativePi.processes[childProcess.key] = childProcess

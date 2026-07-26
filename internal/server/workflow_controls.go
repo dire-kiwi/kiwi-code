@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
@@ -64,20 +63,9 @@ func (s *Server) pauseWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
-	var processStopErr error
-	if record.ProcessID != "" {
-		stopper := s.workflowProcessStopper
-		if stopper == nil {
-			stopper = s.terminal.stopWorkflowProcess
-		}
-		processStopErr = stopper(item, thread, record.ProcessID)
-	}
-	var childStopErr error
-	for _, childID := range workflowChildThreadIDs(item, record.ID) {
-		childStopErr = errors.Join(childStopErr, s.terminal.nativePi.stopThread(projectID, childID))
-	}
+	runtimeErr := s.stopWorkflowRuntime(item, thread, record)
 	updated, updateErr := s.workflows.mutate(projectID, threadID, runID, func(run *workflowRunRecord) error {
-		if run.State == workflowStatePaused && processStopErr == nil && childStopErr == nil {
+		if run.State == workflowStatePaused && runtimeErr == nil {
 			run.ProcessID = ""
 		}
 		return nil
@@ -85,9 +73,8 @@ func (s *Server) pauseWorkflow(w http.ResponseWriter, r *http.Request) {
 	if updateErr == nil {
 		record = updated
 	}
-	s.refreshWorkflowProcessWatch(projectID, threadID)
-	s.notifyThreadStatusChanged(projectID, threadID)
-	if processStopErr != nil || childStopErr != nil || updateErr != nil {
+	s.workflowLifecycleChanged(projectID, threadID)
+	if errors.Join(runtimeErr, updateErr) != nil {
 		writeError(w, http.StatusInternalServerError, "The workflow was paused, but one or more runner processes could not be stopped. Retry pause before resuming.")
 		return
 	}
@@ -190,56 +177,21 @@ func (s *Server) resumeWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
-	manifest := workflowRunnerManifest{
-		Version:              workflowManifestVersion,
-		RunID:                record.ID,
-		Attempt:              record.Attempt,
-		Endpoint:             threadEndpointURL(r, projectID, threadID),
-		Token:                record.Token,
-		ScriptPath:           record.ScriptPath,
-		HasArgs:              record.HasArgs,
-		Args:                 cloneRawMessage(record.Args),
-		DefaultModel:         record.DefaultModel,
-		DefaultThinkingLevel: record.DefaultEffort,
-		CloseOnComplete:      record.CloseChildren,
-		MaxConcurrency:       16,
-	}
-	pauseAgain := func(message string) {
-		_, _ = s.workflows.mutate(projectID, threadID, runID, func(run *workflowRunRecord) error {
-			if workflowIsActive(run.State) {
-				run.State = workflowStatePaused
-				run.Error = truncateWorkflowText(message, maxWorkflowErrorBytes)
-				run.ProcessID = ""
-				for index := range run.Agents {
-					if run.Agents[index].State != workflowAgentStateFinished {
-						run.Agents[index].State = workflowAgentStatePaused
-					}
-				}
-			}
-			return nil
-		})
-		s.refreshWorkflowProcessWatch(projectID, threadID)
-		s.notifyThreadStatusChanged(projectID, threadID)
-	}
+	manifest := workflowManifest(record, threadEndpointURL(r, projectID, threadID))
 	if err := s.workflows.writeManifest(record, manifest); err != nil {
-		pauseAgain(err.Error())
+		s.failWorkflowResume(record, err)
 		writeError(w, http.StatusInternalServerError, "Could not prepare the workflow to resume.")
 		return
 	}
-	manifestPath := filepath.Join(filepath.Dir(record.ScriptPath), workflowManifestFileName)
-	command, err := s.workflows.runnerCommand(manifestPath, record.ScriptPath, manifest.Endpoint, s.terminal.envPath)
+	command, err := s.workflowRunnerCommand(record, manifest.Endpoint)
 	if err != nil {
-		pauseAgain(err.Error())
+		s.failWorkflowResume(record, err)
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-	launcher := s.workflowProcessLauncher
-	if launcher == nil {
-		launcher = s.terminal.newProcessWindow
-	}
-	window, err := launcher(item, thread, "workflow-"+strings.TrimPrefix(runID, "wf-")[:6], command)
+	window, err := s.launchWorkflowWindow(item, thread, record, command)
 	if err != nil {
-		pauseAgain(err.Error())
+		s.failWorkflowResume(record, err)
 		writeError(w, http.StatusServiceUnavailable, "Could not resume the workflow process.")
 		return
 	}
@@ -251,16 +203,11 @@ func (s *Server) resumeWorkflow(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		stopper := s.workflowProcessStopper
-		if stopper == nil {
-			stopper = s.terminal.stopWorkflowProcess
-		}
-		_ = stopper(item, thread, window.ID)
-		pauseAgain(err.Error())
+		_ = s.workflowStopper()(item, thread, window.ID)
+		s.failWorkflowResume(record, err)
 		writeError(w, http.StatusInternalServerError, "Could not finish resuming the workflow.")
 		return
 	}
-	s.refreshWorkflowProcessWatch(projectID, threadID)
-	s.notifyThreadStatusChanged(projectID, threadID)
+	s.workflowLifecycleChanged(projectID, threadID)
 	writeJSON(w, http.StatusOK, workflowSnapshot(record))
 }

@@ -164,7 +164,9 @@ func TestPiNativeProcessReportsValidSessionStats(t *testing.T) {
 	var sessionID string
 	var totals threadUsageTotals
 	process := &piNativeProcess{
-		key: piNativeProcessKey{ProjectID: "project", ThreadID: "thread"},
+		nativeProcessCore: &nativeProcessCore{
+			key: piNativeProcessKey{ProjectID: "project", ThreadID: "thread"},
+		},
 		usageReporter: func(_ piNativeProcessKey, reportedSessionID string, reported threadUsageTotals) {
 			sessionID, totals = reportedSessionID, reported
 		},

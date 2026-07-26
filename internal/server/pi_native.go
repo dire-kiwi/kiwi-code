@@ -20,7 +20,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/dire-kiwi/kiwi-code/internal/broadcast"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
 	"github.com/gorilla/websocket"
 )
@@ -36,11 +35,6 @@ const (
 	piNativeMaxTrackedOutput        = 1 << 20
 	piNativeStopTimeout             = 3 * time.Second
 )
-
-type piNativeProcessKey struct {
-	ProjectID string
-	ThreadID  string
-}
 
 type piNativeManager struct {
 	mu               sync.Mutex
@@ -62,23 +56,22 @@ type piNativeManager struct {
 }
 
 type piNativeProcess struct {
-	key              piNativeProcessKey
+	*nativeProcessCore
 	launchOptions    codingAgentLaunchOptions
 	sessionDirectory string
-	command          *exec.Cmd
-	stdin            io.WriteCloser
-	events           *broadcast.Broker[[]byte]
-	done             chan struct{}
-	writeMu          sync.Mutex
-	exitMu           sync.RWMutex
-	exitText         string
-	request          atomic.Uint64
-	stopping         atomic.Bool
 	runMu            sync.RWMutex
 	nextRun          uint64
 	activeRun        uint64
 	runs             map[uint64]piNativeRunSnapshot
 	usageReporter    func(piNativeProcessKey, string, threadUsageTotals)
+}
+
+var piProcessSpec = nativeProcessSpec{
+	displayName:         "Pi",
+	endedMessage:        "Pi session ended.",
+	unexpectedMessage:   "Pi exited unexpectedly. Reconnect to resume the saved conversation.",
+	writeAfterExitError: "native Pi process ended",
+	stopTimeout:         piNativeStopTimeout,
 }
 
 type piNativeRPCImage struct {
@@ -187,15 +180,10 @@ func (m *piNativeManager) resolveFigmaMCPURL(item project.Project) string {
 }
 
 func (m *piNativeManager) stopOnContext(ctx context.Context) {
-	if m == nil || ctx == nil || ctx.Done() == nil {
+	if m == nil {
 		return
 	}
-	m.contextWatchOnce.Do(func() {
-		go func() {
-			<-ctx.Done()
-			m.stopAll()
-		}()
-	})
+	stopNativeProcessesOnContext(ctx, &m.contextWatchOnce, m.stopAll)
 }
 
 func piNativeBrowserEventCoalesceKey(payload []byte) string {
@@ -436,38 +424,13 @@ func (h *terminalHandler) startPiNativeProcess(
 		return nil, fmt.Errorf("resolve sub-agent nesting context: %w", err)
 	}
 
-	// Acquire the durable per-thread lease in the established sessionMu ->
-	// mutation order, then release the global lock while Pi starts. This keeps
-	// an unrelated tmux attach from waiting for model/session startup while the
-	// durable lease still serializes this exact thread across backend processes.
-	h.sessionMu.Lock()
-	mutation, err := h.lockTerminalMutationLocked(item.ID, thread.ID)
-	if err != nil {
-		h.sessionMu.Unlock()
-		return nil, err
-	}
-	if err := h.ensureTerminalThreadActiveLocked(item.ID, thread.ID); err != nil {
-		releaseErr := mutation.Release()
-		h.sessionMu.Unlock()
-		return nil, errors.Join(err, releaseErr)
-	}
-	h.sessionMu.Unlock()
-
-	process, startErr := h.nativePi.getOrStart(item, thread, threadEndpoint, launchOptions)
-	// Release the per-thread lease before reacquiring sessionMu so cleanup code
-	// that follows the canonical lock order cannot deadlock with this fence.
-	releaseErr := mutation.Release()
-	h.sessionMu.Lock()
-	fenceErr := h.finishTerminalThreadMutationLocked(item, thread)
-	h.sessionMu.Unlock()
-
-	if combined := errors.Join(startErr, fenceErr, releaseErr); combined != nil {
+	return withTerminalThreadMutation(h, item, thread, func() (*piNativeProcess, error) {
+		return h.nativePi.getOrStart(item, thread, threadEndpoint, launchOptions)
+	}, func(process *piNativeProcess) {
 		if process != nil {
 			_ = h.nativePi.stopThread(item.ID, thread.ID)
 		}
-		return nil, combined
-	}
-	return process, nil
+	})
 }
 
 func (h *terminalHandler) restartPiNativeProcess(
@@ -488,31 +451,13 @@ func (h *terminalHandler) restartPiNativeProcess(
 		return nil, fmt.Errorf("resolve sub-agent nesting context: %w", err)
 	}
 
-	h.sessionMu.Lock()
-	mutation, err := h.lockTerminalMutationLocked(item.ID, thread.ID)
-	if err != nil {
-		h.sessionMu.Unlock()
-		return nil, err
-	}
-	if err := h.ensureTerminalThreadActiveLocked(item.ID, thread.ID); err != nil {
-		releaseErr := mutation.Release()
-		h.sessionMu.Unlock()
-		return nil, errors.Join(err, releaseErr)
-	}
-	h.sessionMu.Unlock()
-	process, restartErr := h.nativePi.restart(expected, item, thread, threadEndpoint, launchOptions)
-	releaseErr := mutation.Release()
-	h.sessionMu.Lock()
-	fenceErr := h.finishTerminalThreadMutationLocked(item, thread)
-	h.sessionMu.Unlock()
-
-	if combined := errors.Join(restartErr, fenceErr, releaseErr); combined != nil {
+	return withTerminalThreadMutation(h, item, thread, func() (*piNativeProcess, error) {
+		return h.nativePi.restart(expected, item, thread, threadEndpoint, launchOptions)
+	}, func(process *piNativeProcess) {
 		if process != nil && process != expected {
 			_ = h.nativePi.stopThread(item.ID, thread.ID)
 		}
-		return nil, combined
-	}
-	return process, nil
+	})
 }
 
 func (m *piNativeManager) getOrStart(
@@ -696,37 +641,19 @@ func (m *piNativeManager) startProcess(
 			"PI_SKIP_VERSION_CHECK=1",
 		)...,
 	)
-	stdin, err := command.StdinPipe()
+	core, stdout, stderr, err := startNativeCommand(key, piProcessSpec, command)
 	if err != nil {
-		return nil, fmt.Errorf("open native Pi input: %w", err)
-	}
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		_ = stdin.Close()
-		return nil, fmt.Errorf("open native Pi output: %w", err)
-	}
-	stderr, err := command.StderrPipe()
-	if err != nil {
-		_ = stdin.Close()
-		return nil, fmt.Errorf("open native Pi diagnostics: %w", err)
-	}
-	if err := command.Start(); err != nil {
-		_ = stdin.Close()
-		return nil, fmt.Errorf("start native Pi: %w", err)
+		return nil, err
 	}
 
 	process := &piNativeProcess{
-		key:              key,
-		launchOptions:    launchOptions,
-		sessionDirectory: sessionDirectory,
-		command:          command,
-		stdin:            stdin,
-		events:           broadcast.NewBroker[[]byte](broadcast.DefaultMaxPending * 2),
-		done:             make(chan struct{}),
-		runs:             make(map[uint64]piNativeRunSnapshot),
-		usageReporter:    m.usageReporter,
+		nativeProcessCore: core,
+		launchOptions:     launchOptions,
+		sessionDirectory:  sessionDirectory,
+		runs:              make(map[uint64]piNativeRunSnapshot),
+		usageReporter:     m.usageReporter,
 	}
-	process.readOutput(stdout)
+	process.readOutput(stdout, process.publishPiEvent)
 	process.readDiagnostics(stderr)
 	return process, nil
 }
@@ -1025,42 +952,6 @@ func validPiNativePathSegment(value string) error {
 		return errors.New("invalid native Pi session identity")
 	}
 	return nil
-}
-
-func (p *piNativeProcess) readOutput(output io.Reader) {
-	go func() {
-		reader := bufio.NewReader(output)
-		for {
-			line, err := reader.ReadBytes('\n')
-			line = bytes.TrimSuffix(line, []byte{'\n'})
-			line = bytes.TrimSuffix(line, []byte{'\r'})
-			if len(line) > 0 {
-				p.publishPiEvent(line)
-			}
-			if err != nil {
-				if !errors.Is(err, io.EOF) {
-					log.Printf("read native Pi output: project=%q thread=%q error=%v", p.key.ProjectID, p.key.ThreadID, err)
-				}
-				return
-			}
-		}
-	}()
-}
-
-func (p *piNativeProcess) readDiagnostics(output io.Reader) {
-	go func() {
-		scanner := bufio.NewScanner(output)
-		scanner.Buffer(make([]byte, 64*1024), 1<<20)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line != "" {
-				log.Printf("native Pi: project=%q thread=%q %s", p.key.ProjectID, p.key.ThreadID, line)
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			log.Printf("read native Pi diagnostics: project=%q thread=%q error=%v", p.key.ProjectID, p.key.ThreadID, err)
-		}
-	}()
 }
 
 func (p *piNativeProcess) publishPiEvent(payload []byte) {
@@ -1486,20 +1377,7 @@ func (p *piNativeProcess) pruneRunsLocked() {
 }
 
 func (p *piNativeProcess) run(onExit func()) {
-	go func() {
-		err := p.command.Wait()
-		message := "Pi session ended."
-		if err != nil && !p.stopping.Load() {
-			message = "Pi exited unexpectedly. Reconnect to resume the saved conversation."
-			log.Printf("native Pi exited: project=%q thread=%q error=%v", p.key.ProjectID, p.key.ThreadID, err)
-		}
-		p.failActiveRun(message)
-		p.exitMu.Lock()
-		p.exitText = message
-		p.exitMu.Unlock()
-		close(p.done)
-		onExit()
-	}()
+	p.nativeProcessCore.run(p.failActiveRun, onExit)
 }
 
 func (p *piNativeProcess) send(command piNativeRPCCommand) error {
@@ -1507,15 +1385,7 @@ func (p *piNativeProcess) send(command piNativeRPCCommand) error {
 	if err != nil {
 		return err
 	}
-	payload = append(payload, '\n')
-
-	p.writeMu.Lock()
-	defer p.writeMu.Unlock()
-	if channelClosed(p.done) {
-		return errors.New("native Pi process ended")
-	}
-	_, err = p.stdin.Write(payload)
-	return err
+	return p.writeLine(payload)
 }
 
 func (p *piNativeProcess) requestSnapshot(command string) error {
@@ -1538,37 +1408,17 @@ func (p *piNativeProcess) refresh() error {
 }
 
 func (p *piNativeProcess) exitMessage() string {
-	p.exitMu.RLock()
-	defer p.exitMu.RUnlock()
-	if p.exitText == "" {
-		return "Pi session ended."
+	if p == nil {
+		return piProcessSpec.endedMessage
 	}
-	return p.exitText
+	return p.nativeProcessCore.exitMessage()
 }
 
 func (p *piNativeProcess) stop() error {
-	if p == nil || channelClosed(p.done) {
+	if p == nil {
 		return nil
 	}
-	p.stopping.Store(true)
-	_ = p.stdin.Close()
-	if p.command.Process != nil {
-		_ = p.command.Process.Signal(os.Interrupt)
-	}
-	timer := time.NewTimer(piNativeStopTimeout)
-	defer timer.Stop()
-	select {
-	case <-p.done:
-		return nil
-	case <-timer.C:
-		if p.command.Process != nil {
-			if err := p.command.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-				return err
-			}
-		}
-		<-p.done
-		return nil
-	}
+	return p.nativeProcessCore.stop()
 }
 
 func (m *piNativeManager) childRun(projectID, threadID string, runID uint64) (piNativeRunSnapshot, bool) {
@@ -1684,18 +1534,11 @@ func (m *piNativeManager) stopProject(projectID string) error {
 		return nil
 	}
 	m.mu.Lock()
-	processes := make([]*piNativeProcess, 0)
-	for key, process := range m.processes {
-		if key.ProjectID == projectID {
-			processes = append(processes, process)
-		}
-	}
+	processes := collectNativeProcesses(m.processes, func(key nativeProcessKey) bool {
+		return key.ProjectID == projectID
+	})
 	m.mu.Unlock()
-	var stopErrors []error
-	for _, process := range processes {
-		stopErrors = append(stopErrors, process.stop())
-	}
-	return errors.Join(stopErrors...)
+	return stopNativeProcessSet(processes, (*piNativeProcess).stop)
 }
 
 func (m *piNativeManager) removeThread(projectID, threadID string) error {
@@ -1759,10 +1602,7 @@ func (m *piNativeManager) stopAll() {
 		return
 	}
 	m.mu.Lock()
-	processes := make([]*piNativeProcess, 0, len(m.processes))
-	for _, process := range m.processes {
-		processes = append(processes, process)
-	}
+	processes := collectNativeProcesses(m.processes, func(nativeProcessKey) bool { return true })
 	m.mu.Unlock()
 	for _, process := range processes {
 		if err := process.stop(); err != nil {

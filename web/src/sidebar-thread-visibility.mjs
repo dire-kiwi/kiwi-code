@@ -1,3 +1,5 @@
+import { createThreadTreeIndex } from './sidebar-thread-index.mjs'
+
 export const collapsedRootThreadLimit = 5
 
 function parsedTime(value) {
@@ -10,28 +12,14 @@ function threadRecency(thread) {
   return parsedTime(thread.lastPromptAt) ?? parsedTime(thread.createdAt) ?? 0
 }
 
-function rootThreadId(threadsById, threadId) {
-  let current = threadsById.get(threadId)
-  if (!current) return null
-
-  const visited = new Set()
-  while (current.parentThreadId) {
-    if (visited.has(current.id)) return null
-    visited.add(current.id)
-    const parent = threadsById.get(current.parentThreadId)
-    if (!parent) return null
-    current = parent
-  }
-  return current.id
-}
-
 export function defaultVisibleRootThreadIds(
   threads,
   activities,
   projectId,
   limit = collapsedRootThreadLimit,
+  tree = createThreadTreeIndex(threads),
 ) {
-  const activeRoots = threads.filter((thread) => !thread.parentThreadId && !thread.archivedAt)
+  const activeRoots = tree.roots.filter((thread) => !thread.archivedAt)
   const boundedLimit = Number.isInteger(limit) && limit > 0 ? limit : 0
   const recentIds = new Set(
     activeRoots
@@ -42,19 +30,18 @@ export function defaultVisibleRootThreadIds(
   )
 
   const activeRootIds = new Set(activeRoots.map((thread) => thread.id))
-  const threadsById = new Map(threads.map((thread) => [thread.id, thread]))
   const attentionRootIds = new Set()
   for (const activity of activities) {
     if (
       activity.projectId !== projectId
       || (activity.state !== 'working' && activity.state !== 'finished')
     ) continue
-    const rootId = rootThreadId(threadsById, activity.threadId)
+    const rootId = tree.rootId(activity.threadId)
     if (rootId && activeRootIds.has(rootId)) attentionRootIds.add(rootId)
   }
   for (const thread of threads) {
     if (!thread.bookmarked) continue
-    const rootId = rootThreadId(threadsById, thread.id)
+    const rootId = tree.rootId(thread.id)
     if (rootId && activeRootIds.has(rootId)) attentionRootIds.add(rootId)
   }
 
@@ -63,20 +50,6 @@ export function defaultVisibleRootThreadIds(
     .map((thread) => thread.id)
 }
 
-export function bookmarkedThreadPathIds(threads) {
-  const threadsById = new Map(threads.map((thread) => [thread.id, thread]))
-  const visibleIds = new Set()
-
-  for (const thread of threads) {
-    if (!thread.bookmarked) continue
-    let current = thread
-    const visited = new Set()
-    while (current && !visited.has(current.id)) {
-      visibleIds.add(current.id)
-      visited.add(current.id)
-      current = current.parentThreadId ? threadsById.get(current.parentThreadId) : null
-    }
-  }
-
-  return threads.filter((thread) => visibleIds.has(thread.id)).map((thread) => thread.id)
+export function bookmarkedThreadPathIds(threads, tree = createThreadTreeIndex(threads)) {
+  return tree.bookmarkedPathIds()
 }

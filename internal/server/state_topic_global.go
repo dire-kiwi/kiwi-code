@@ -14,57 +14,22 @@ const (
 func (s *Server) openProjectsTopic(ctx context.Context, channel *stateChannel) error {
 	updates, unsubscribe := s.projects.SubscribeLatestChanges()
 	defer unsubscribe()
-	if err := channel.Snapshot(clientProjects(s.projects.List())); err != nil {
-		return err
-	}
-	ticker := time.NewTicker(stateProjectReconcileInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case _, open := <-updates:
-			if !open {
-				return stateTopicFailure("Project updates ended.")
-			}
-			if err := channel.Snapshot(clientProjects(s.projects.List())); err != nil {
-				return err
-			}
-		case <-ticker.C:
-			if err := channel.Snapshot(clientProjects(s.projects.List())); err != nil {
-				return err
-			}
-		case <-channel.Resnap():
-			if err := channel.Snapshot(clientProjects(s.projects.List())); err != nil {
-				return err
-			}
-		}
-	}
+	return runSnapshotTopic(ctx, channel, updates, snapshotTopicOptions{
+		updatesEnded:      "Project updates ended.",
+		reconcileInterval: stateProjectReconcileInterval,
+	}, func() error {
+		return channel.Snapshot(clientProjects(s.projects.List()))
+	})
 }
 
 func (s *Server) openProfilesTopic(ctx context.Context, channel *stateChannel) error {
 	updates, unsubscribe := s.projects.SubscribeLatestProfileChanges()
 	defer unsubscribe()
-	if err := channel.Snapshot(s.projects.ListProfiles()); err != nil {
-		return err
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case _, open := <-updates:
-			if !open {
-				return stateTopicFailure("Profile updates ended.")
-			}
-			if err := channel.Snapshot(s.projects.ListProfiles()); err != nil {
-				return err
-			}
-		case <-channel.Resnap():
-			if err := channel.Snapshot(s.projects.ListProfiles()); err != nil {
-				return err
-			}
-		}
-	}
+	return runSnapshotTopic(ctx, channel, updates, snapshotTopicOptions{
+		updatesEnded: "Profile updates ended.",
+	}, func() error {
+		return channel.Snapshot(s.projects.ListProfiles())
+	})
 }
 
 func (s *Server) openAgentActivityTopic(ctx context.Context, channel *stateChannel) error {
@@ -73,35 +38,12 @@ func (s *Server) openAgentActivityTopic(ctx context.Context, channel *stateChann
 	}
 	updates, unsubscribe := s.piActivity.subscribeLatest()
 	defer unsubscribe()
-	snapshot := func() error {
+	return runSnapshotTopic(ctx, channel, updates, snapshotTopicOptions{
+		updatesEnded:      "Agent activity updates ended.",
+		reconcileInterval: stateActivityReconcileInterval,
+	}, func() error {
 		return channel.Snapshot(s.clientPiActivities(s.piActivity.list(time.Now())))
-	}
-	if err := snapshot(); err != nil {
-		return err
-	}
-	ticker := time.NewTicker(stateActivityReconcileInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case _, open := <-updates:
-			if !open {
-				return stateTopicFailure("Agent activity updates ended.")
-			}
-			if err := snapshot(); err != nil {
-				return err
-			}
-		case <-ticker.C:
-			if err := snapshot(); err != nil {
-				return err
-			}
-		case <-channel.Resnap():
-			if err := snapshot(); err != nil {
-				return err
-			}
-		}
-	}
+	})
 }
 
 func (s *Server) openThreadUsageTopic(ctx context.Context, channel *stateChannel) error {

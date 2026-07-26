@@ -3,6 +3,7 @@ import { Bookmark, CornerDownRight, Folder, Inbox, LoaderCircle, Plus, Search } 
 import { usageDescription } from '../../lib/formatUsage'
 import { projectsByMostRecentThread } from '../../new-thread-project-order.mjs'
 import { activityViewGroups, formatRelativeShort, type ActivityGroupEntry } from '../../sidebar-activity-groups.mjs'
+import type { SidebarThreadIndex } from '../../sidebar-thread-index.mjs'
 import type { PiThreadActivity, Project, Thread, ThreadUsageSnapshot } from '../../types'
 import { Button } from '../atoms/Button'
 import { IconButton } from '../atoms/IconButton'
@@ -14,6 +15,7 @@ type SectionKind = 'working' | 'needsReview' | 'pinned' | 'recent'
 type SidebarActivityViewProps = {
   projects: Project[]
   piActivities: PiThreadActivity[]
+  threadIndex: SidebarThreadIndex<Thread, Project, PiThreadActivity>
   usageSnapshots: ThreadUsageSnapshot[]
   selectedThreadId: string | null
   deletingThreadId: string | null
@@ -37,6 +39,7 @@ const sectionStateDescriptions: Record<SectionKind, string> = {
 export function SidebarActivityView({
   projects,
   piActivities,
+  threadIndex,
   usageSnapshots,
   selectedThreadId,
   deletingThreadId,
@@ -70,15 +73,11 @@ export function SidebarActivityView({
     return () => document.removeEventListener('pointerdown', handlePointerDown, true)
   }, [projectPickerOpen])
 
-  const groups = useMemo(() => activityViewGroups(projects, piActivities), [piActivities, projects])
+  const groups = useMemo(
+    () => activityViewGroups(projects, piActivities, undefined, threadIndex),
+    [piActivities, projects, threadIndex],
+  )
   const newThreadProjects = useMemo(() => projectsByMostRecentThread(projects), [projects])
-  const threadsByKey = useMemo(() => {
-    const map = new Map<string, { project: Project; thread: Thread }>()
-    for (const project of projects) {
-      for (const thread of project.threads) map.set(`${project.id}\0${thread.id}`, { project, thread })
-    }
-    return map
-  }, [projects])
   const usageByKey = useMemo(() => new Map(
     usageSnapshots.map((snapshot) => [`${snapshot.projectId}\0${snapshot.threadId}`, snapshot]),
   ), [usageSnapshots])
@@ -91,12 +90,12 @@ export function SidebarActivityView({
 
   function renderEntry(kind: SectionKind, entry: ActivityGroupEntry) {
     const key = `${entry.projectId}\0${entry.threadId}`
-    const found = threadsByKey.get(key)
+    const found = threadIndex.entry(entry.projectId, entry.threadId)
     if (!found) return null
     const { project, thread } = found
     const selected = thread.id === selectedThreadId
     const parent = thread.parentThreadId
-      ? project.threads.find((candidate) => candidate.id === thread.parentThreadId)
+      ? threadIndex.tree(project.id)?.byId.get(thread.parentThreadId)
       : undefined
     const usage = usageByKey.get(key)
     const stateDescription = sectionStateDescriptions[kind]

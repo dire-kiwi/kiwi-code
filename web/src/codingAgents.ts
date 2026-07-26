@@ -5,6 +5,7 @@ import type {
   CodingAgentSelection,
   CodingAgentSetting,
   ConfiguredClaudeAgent,
+  PiPresentation,
 } from './types'
 
 const configuredClaudeAgentPattern = /^claude-(?:gpt-)?profile-[A-Za-z0-9_-]{1,64}$/
@@ -40,6 +41,36 @@ export function isClaudeGPTCodingAgent(value: unknown) {
 
 export function isCodingAgentSelection(value: unknown): value is CodingAgentSelection {
   return value === 'pi-native' || value === 'claude-native' || isCodingAgent(value)
+}
+
+export function isNativeCodingAgentSelection(
+  selection: CodingAgentSelection,
+): selection is 'pi-native' | 'claude-native' {
+  return selection === 'pi-native' || selection === 'claude-native'
+}
+
+export function codingAgentTargetForSelection(selection: CodingAgentSelection): {
+  agent: CodingAgent
+  presentation: PiPresentation
+} {
+  if (selection === 'pi-native') return { agent: 'pi', presentation: 'native' }
+  if (selection === 'claude-native') return { agent: 'claude', presentation: 'native' }
+  return { agent: selection, presentation: 'terminal' }
+}
+
+export function codingAgentSelectionForTarget(
+  agent: CodingAgent,
+  presentation: PiPresentation = 'terminal',
+): CodingAgentSelection {
+  if (presentation === 'native' && agent === 'pi') return 'pi-native'
+  if (presentation === 'native' && agent === 'claude') return 'claude-native'
+  return agent
+}
+
+export function nativeCodingAgentLabel(selection: CodingAgentSelection): string | null {
+  if (selection === 'pi-native') return 'Pi Native'
+  if (selection === 'claude-native') return 'Claude Native'
+  return null
 }
 
 export function configuredCodingAgentChoices(agents: CodingAgentSetting[]) {

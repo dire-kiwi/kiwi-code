@@ -1,3 +1,5 @@
+import type { ThreadTreeIndex } from './sidebar-thread-index.mjs'
+
 export type SidebarVisibilityThread = {
   id: string
   createdAt: string
@@ -20,8 +22,10 @@ export function defaultVisibleRootThreadIds(
   activities: readonly SidebarVisibilityActivity[],
   projectId: string,
   limit?: number,
+  tree?: ThreadTreeIndex<SidebarVisibilityThread>,
 ): string[]
 
 export function bookmarkedThreadPathIds(
   threads: readonly SidebarVisibilityThread[],
+  tree?: ThreadTreeIndex<SidebarVisibilityThread>,
 ): string[]

@@ -16,12 +16,21 @@ import { claudeModelChoices, claudeThinkingLevelIds } from '../../codingAgents'
 import { classNames } from '../../lib/classNames'
 import { formatDuration } from '../../lib/formatDuration'
 import {
+  formatNativeActivityAge,
+  formatNativeActivityClock,
+  nativeConnectionDescription,
+  nativeResponseDescription,
+  NATIVE_AGENT_RESPONSE_STALE_AFTER_MS,
+} from '../../lib/nativeAgentDiagnostics'
+import {
   imageFilesFromClipboard,
   isSupportedPiImageType,
   piNativePromptImagePolicy,
 } from '../../lib/promptImages'
 import { readClaudeNativeDraft, writeClaudeNativeDraft } from '../../lib/promptDrafts'
 import { useImageAttachments } from '../../lib/useImageAttachments'
+import { useNativeActivityLog } from '../../lib/useNativeActivityLog'
+import { useNativeAgentSocket } from '../../lib/useNativeAgentSocket'
 import type { AgentContextStatus, ConnectionStatus } from '../../types'
 import { piNativeStyles } from './piNativeStyles'
 import {
@@ -139,14 +148,6 @@ type ClaudeSessionStats = {
   turns: number
 }
 
-type ClaudeActivityRecord = {
-  id: number
-  at: number
-  event: string
-  summary: string
-  repeats: number
-}
-
 type ClaudeEventStamp = {
   at: number
   label: string
@@ -154,10 +155,6 @@ type ClaudeEventStamp = {
 
 type ComposerSuggestion = PiNativeComposerSuggestion & { completion: string }
 
-const RECONNECT_STABLE_AFTER_MS = 5_000
-const CLAUDE_INSPECTION_INTERVAL_MS = 4_000
-const CLAUDE_RESPONSE_STALE_AFTER_MS = 12_000
-const CLAUDE_ACTIVITY_LOG_LIMIT = 24
 const CLAUDE_PENDING_PROMPT_MATCH_MS = 30_000
 const CLAUDE_DEFAULT_CONTEXT_WINDOW = 200_000
 
@@ -222,7 +219,7 @@ export function ClaudeNativePane({
   const [notice, setNotice] = useState('')
   const [showJumpToLatest, setShowJumpToLatest] = useState(false)
   const [activityExpanded, setActivityExpanded] = useState(false)
-  const [activityLog, setActivityLog] = useState<ClaudeActivityRecord[]>([])
+  const { activityLog, appendActivity } = useNativeActivityLog()
   const [latestEvent, setLatestEvent] = useState<ClaudeEventStamp | null>(null)
   const [latestWorkEvent, setLatestWorkEvent] = useState<ClaudeEventStamp | null>(null)
   const [runPhase, setRunPhase] = useState('Idle')
@@ -233,14 +230,10 @@ export function ClaudeNativePane({
   const [lastProbeLatency, setLastProbeLatency] = useState<number | null>(null)
   const [lastProbeSentAt, setLastProbeSentAt] = useState<number | null>(null)
   const [clockNow, setClockNow] = useState(() => Date.now())
-  const [connectionAttempt, setConnectionAttempt] = useState(0)
-  const socketRef = useRef<WebSocket | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
   const activeRef = useRef(active)
   const atBottomRef = useRef(true)
-  const reconnectAttemptsRef = useRef(0)
-  const activitySequenceRef = useRef(0)
   const entrySequenceRef = useRef(0)
   const seenEventsRef = useRef<Set<string>>(new Set())
   const isStreamingRef = useRef(false)
@@ -276,22 +269,6 @@ export function ClaudeNativePane({
   const updateConnectionStatus = useCallback((status: ConnectionStatus) => {
     setConnectionStatus(status)
     onStatusChangeRef.current(status)
-  }, [])
-
-  const appendActivity = useCallback((event: string, summary: string, at = Date.now()) => {
-    setActivityLog((current) => {
-      const latest = current[0]
-      if (latest && latest.event === event && latest.summary === summary && at - latest.at < 1_500) {
-        return [{ ...latest, at, repeats: latest.repeats + 1 }, ...current.slice(1)]
-      }
-      return [{
-        id: activitySequenceRef.current += 1,
-        at,
-        event,
-        summary,
-        repeats: 1,
-      }, ...current].slice(0, CLAUDE_ACTIVITY_LOG_LIMIT)
-    })
   }, [])
 
   const updateRunPhase = useCallback((phase: string, event?: string, summary?: string, at = Date.now()) => {
@@ -651,22 +628,7 @@ export function ClaudeNativePane({
     writeClaudeNativeDraft(projectId, threadId, draft)
   }, [draft, projectId, threadId])
 
-  useEffect(() => {
-    let disposed = false
-    let reconnectTimer: ReturnType<typeof window.setTimeout> | undefined
-    let stableTimer: ReturnType<typeof window.setTimeout> | undefined
-    let inspectionTimer: ReturnType<typeof window.setInterval> | undefined
-    let claudeReady = false
-    let reconnectAllowed = true
-    updateConnectionStatus('connecting')
-    onContextStatusChangeRef.current(null)
-    setConnectedAt(null)
-    setLastClaudeResponseAt(null)
-    setLastProbeLatency(null)
-    setLastProbeSentAt(null)
-    probeSentAtRef.current = null
-    setError('')
-
+  const nativeSocketUrl = useMemo(() => {
     const params = new URLSearchParams()
     if (initialModelRef.current) params.set('model', initialModelRef.current)
     if (initialThinkingRef.current) params.set('thinking', initialThinkingRef.current)
@@ -674,82 +636,31 @@ export function ClaudeNativePane({
       `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/claude/native`,
     )
     url.search = params.toString()
-    const socket = new WebSocket(url)
-    socketRef.current = socket
+    return url.toString()
+  }, [projectId, threadId])
 
-    socket.addEventListener('open', () => {
-      if (disposed) {
-        socket.close(1000, 'Native Claude pane closed')
-        return
-      }
-      stableTimer = window.setTimeout(() => {
-        if (!disposed && socket.readyState === WebSocket.OPEN) reconnectAttemptsRef.current = 0
-      }, RECONNECT_STABLE_AFTER_MS)
-      inspectionTimer = window.setInterval(() => {
-        const now = Date.now()
-        const pendingSince = probeSentAtRef.current
-        if (
-          disposed
-          || !claudeReady
-          || socket.readyState !== WebSocket.OPEN
-          || (pendingSince !== null && now - pendingSince <= CLAUDE_RESPONSE_STALE_AFTER_MS)
-        ) return
-        markProbeSent(now)
-        socket.send(JSON.stringify({ type: 'get_state' }))
-      }, CLAUDE_INSPECTION_INTERVAL_MS)
-    })
+  const resetConnectionDiagnostics = useCallback(() => {
+    setConnectedAt(null)
+    setLastClaudeResponseAt(null)
+    setLastProbeLatency(null)
+    setLastProbeSentAt(null)
+    setError('')
+  }, [])
 
-    socket.addEventListener('message', (messageEvent) => {
-      if (disposed || typeof messageEvent.data !== 'string') return
-      try {
-        const event = JSON.parse(messageEvent.data) as ClaudeEvent
-        if (event.type === 'claude_native_ready') claudeReady = true
-        if (event.type === 'claude_native_fatal') reconnectAllowed = false
-        handleEvent(event, socket)
-      } catch {
-        setError('Claude sent an unreadable conversation update.')
-      }
-    })
-
-    socket.addEventListener('error', () => {
-      if (!disposed) {
-        appendActivity('connection_error', 'The native Claude WebSocket reported an error.')
-        onContextStatusChangeRef.current(null)
-        updateConnectionStatus('error')
-      }
-    })
-
-    socket.addEventListener('close', () => {
-      claudeReady = false
-      if (stableTimer !== undefined) window.clearTimeout(stableTimer)
-      if (inspectionTimer !== undefined) window.clearInterval(inspectionTimer)
-      if (disposed) return
-      if (!reconnectAllowed) {
-        appendActivity('connection_closed', 'Connection closed; automatic reconnect is disabled for this startup error.')
-        onContextStatusChangeRef.current(null)
-        updateConnectionStatus('error')
-        return
-      }
-      appendActivity('connection_closed', 'Connection lost; Kiwi Code is reconnecting.')
-      onContextStatusChangeRef.current(null)
-      updateConnectionStatus('connecting')
-      const delay = Math.min(250 * 2 ** reconnectAttemptsRef.current, 2_000)
-      reconnectAttemptsRef.current += 1
-      reconnectTimer = window.setTimeout(() => {
-        if (!disposed) setConnectionAttempt((value) => value + 1)
-      }, delay)
-    })
-
-    return () => {
-      disposed = true
-      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
-      if (stableTimer !== undefined) window.clearTimeout(stableTimer)
-      if (inspectionTimer !== undefined) window.clearInterval(inspectionTimer)
-      if (socket.readyState < WebSocket.CLOSING) socket.close(1000, 'Native Claude pane closed')
-      if (socketRef.current === socket) socketRef.current = null
-      onContextStatusChangeRef.current(null)
-    }
-  }, [appendActivity, connectionAttempt, handleEvent, markProbeSent, projectId, threadId, updateConnectionStatus])
+  const { send: sendSocketCommand, socketRef } = useNativeAgentSocket<ClaudeEvent>({
+    agentName: 'Claude',
+    fatalEventType: 'claude_native_fatal',
+    onActivity: appendActivity,
+    onAttempt: resetConnectionDiagnostics,
+    onContextReset: () => onContextStatusChangeRef.current(null),
+    onError: setError,
+    onEvent: handleEvent,
+    onProbeSent: markProbeSent,
+    onStatusChange: updateConnectionStatus,
+    probeSentAtRef,
+    readyEventType: 'claude_native_ready',
+    url: nativeSocketUrl,
+  })
 
   const timeline = useMemo(
     () => buildTimeline(messages, toolResults, runSummaries, liveText),
@@ -793,16 +704,6 @@ export function ClaudeNativePane({
     const frame = window.requestAnimationFrame(() => textareaRef.current?.focus())
     return () => window.cancelAnimationFrame(frame)
   }, [active])
-
-  function sendSocketCommand(command: Record<string, unknown> & { type: string }): boolean {
-    const socket = socketRef.current
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      setError('Claude is still connecting.')
-      return false
-    }
-    socket.send(JSON.stringify(command))
-    return true
-  }
 
   function clearSubmittedDraft() {
     setDraft('')
@@ -1063,14 +964,14 @@ export function ClaudeNativePane({
   const workEventAge = latestWorkEvent === null ? null : Math.max(0, clockNow - latestWorkEvent.at)
   const bridgeResponsive = connectionStatus === 'open'
     && responseAge !== null
-    && responseAge <= CLAUDE_RESPONSE_STALE_AFTER_MS
+    && responseAge <= NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
   const responseOverdue = connectionStatus === 'open' && (
     responseAge !== null
-      ? responseAge > CLAUDE_RESPONSE_STALE_AFTER_MS
-      : connectedAt !== null && clockNow - connectedAt > CLAUDE_RESPONSE_STALE_AFTER_MS
+      ? responseAge > NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
+      : connectedAt !== null && clockNow - connectedAt > NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
   )
   const probePending = lastProbeSentAt !== null
-    && clockNow - lastProbeSentAt <= CLAUDE_RESPONSE_STALE_AFTER_MS
+    && clockNow - lastProbeSentAt <= NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
   const bridgeTone: PiStatusTone = bridgeResponsive ? 'healthy' : responseOverdue ? 'warning' : 'idle'
   const monitorTone: PiStatusTone = connectionStatus === 'error' || connectionStatus === 'closed'
     ? 'error'
@@ -1089,10 +990,10 @@ export function ClaudeNativePane({
       `Captured: ${new Date().toISOString()}`,
       `Transport: ${connectionStatus}`,
       `Agent: ${isStreaming ? `${runPhase} for ${formatDuration(runElapsed)}` : 'idle'}`,
-      `Claude bridge: ${bridgeResponseDescription(responseAge, connectedAt, clockNow)}`,
+      `Claude bridge: ${nativeResponseDescription('bridge', responseAge, connectedAt, clockNow)}`,
       `Last probe latency: ${lastProbeLatency === null ? 'unknown' : `${lastProbeLatency}ms`}`,
-      `Last event: ${latestEvent ? `${latestEvent.label} (${formatActivityAge(clockNow - latestEvent.at)})` : 'none'}`,
-      `Last work event: ${latestWorkEvent ? `${latestWorkEvent.label} (${formatActivityAge(clockNow - latestWorkEvent.at)})` : 'none'}`,
+      `Last event: ${latestEvent ? `${latestEvent.label} (${formatNativeActivityAge(clockNow - latestEvent.at)})` : 'none'}`,
+      `Last work event: ${latestWorkEvent ? `${latestWorkEvent.label} (${formatNativeActivityAge(clockNow - latestWorkEvent.at)})` : 'none'}`,
       `Run events observed: ${runEventCount}`,
       '',
       'Recent lifecycle events:',
@@ -1115,12 +1016,12 @@ export function ClaudeNativePane({
         {
           label: 'Transport',
           tone: connectionStatus === 'open' ? 'healthy' : monitorTone,
-          value: connectionDescription(connectionStatus),
+          value: nativeConnectionDescription(connectionStatus),
         },
         {
           label: 'Claude bridge',
           tone: bridgeTone,
-          value: bridgeResponseDescription(responseAge, connectedAt, clockNow),
+          value: nativeResponseDescription('bridge', responseAge, connectedAt, clockNow),
           detail: lastProbeLatency !== null ? `${lastProbeLatency}ms round trip` : undefined,
         },
         {
@@ -1131,17 +1032,17 @@ export function ClaudeNativePane({
         },
         {
           label: 'Last work event',
-          tone: workEventAge !== null && workEventAge < CLAUDE_RESPONSE_STALE_AFTER_MS
+          tone: workEventAge !== null && workEventAge < NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
             ? 'working'
             : 'idle',
           value: latestWorkEvent ? <code>{latestWorkEvent.label}</code> : 'No agent events observed yet',
-          detail: latestWorkEvent ? formatActivityAge(workEventAge ?? 0) : undefined,
+          detail: latestWorkEvent ? formatNativeActivityAge(workEventAge ?? 0) : undefined,
         },
       ]}
       sessionUsage={<ClaudeSessionUsage stats={sessionStats} />}
       activityLog={activityLog.map((entry) => ({
         ...entry,
-        clock: formatActivityClock(entry.at),
+        clock: formatNativeActivityClock(entry.at),
       }))}
       onInspect={inspectNow}
       onCopy={() => void copyActivityDiagnostics()}
@@ -1271,42 +1172,6 @@ function appendPendingUserMessage(
     blocks: [{ type: 'text', text }],
     pending: true,
   }])
-}
-
-function connectionDescription(status: ConnectionStatus): string {
-  switch (status) {
-    case 'open': return 'WebSocket connected'
-    case 'connecting': return 'WebSocket reconnecting'
-    case 'error': return 'WebSocket error'
-    case 'closed': return 'WebSocket closed'
-  }
-}
-
-function bridgeResponseDescription(responseAge: number | null, connectedAt: number | null, now: number): string {
-  if (responseAge !== null) {
-    return responseAge <= CLAUDE_RESPONSE_STALE_AFTER_MS
-      ? `Responded ${formatActivityAge(responseAge)}`
-      : `Last response ${formatActivityAge(responseAge)}`
-  }
-  if (connectedAt === null) return 'Waiting for a connection'
-  const wait = Math.max(0, now - connectedAt)
-  return wait <= CLAUDE_RESPONSE_STALE_AFTER_MS
-    ? 'Waiting for the first bridge response'
-    : `No bridge response for ${formatDuration(wait)}`
-}
-
-function formatActivityAge(ageMs: number): string {
-  const safeAge = Math.max(0, ageMs)
-  if (safeAge < 1_500) return 'just now'
-  return `${formatDuration(safeAge)} ago`
-}
-
-function formatActivityClock(timestamp: number): string {
-  return new Intl.DateTimeFormat(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(timestamp)
 }
 
 function claudeEventLabel(event: ClaudeEvent): string {

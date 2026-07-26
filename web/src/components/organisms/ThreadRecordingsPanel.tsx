@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Circle, Download, LoaderCircle, Play, RefreshCw, Trash2, Video, X } from 'lucide-react'
 import {
-  browserRecordingDownloadUrl,
   browserRecordingPlaybackUrl,
   performBrowserAction,
 } from '../../api'
-import type { BrowserRecording } from '../../wire/domain'
+import {
+  downloadBrowserRecording,
+  formatRecordingBytes,
+  formatRecordingDuration,
+} from '../../lib/browserRecording'
+import type { BrowserRecording, BrowserStatusResult } from '../../wire/domain'
 import { useSubscription } from '../../wire/react'
-import { BrowserRecordingsTopic } from '../../wire/topics'
+import { BrowserStatusTopic } from '../../wire/topics'
 import { Button } from '../atoms/Button'
 import { IconButton } from '../atoms/IconButton'
 
@@ -19,26 +23,26 @@ export type ThreadRecordingsPanelProps = {
 
 const noRecordings: BrowserRecording[] = []
 
-function formatDuration(durationMs?: number) {
-  const totalSeconds = Math.max(0, Math.round((durationMs ?? 0) / 1_000))
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  return `${minutes}:${String(seconds).padStart(2, '0')}`
-}
-
-function formatBytes(bytes?: number) {
-  if (!bytes || bytes < 1) return ''
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`
+function recordingsFromBrowserStatus(status: BrowserStatusResult) {
+  const seen = new Set<string>()
+  return [status.recording, ...status.recordings].filter((item): item is BrowserRecording => {
+    if (item === null || seen.has(item.id)) return false
+    seen.add(item.id)
+    return true
+  })
 }
 
 export function ThreadRecordingsPanel({ projectId, threadId, active }: ThreadRecordingsPanelProps) {
   const subscription = useSubscription(
-    BrowserRecordingsTopic,
+    BrowserStatusTopic,
     { projectId, threadId },
     { enabled: active },
   )
-  const snapshot = subscription.state === 'ready' ? subscription.data : noRecordings
+  const status = subscription.state === 'ready' ? subscription.data : null
+  const snapshot = useMemo(
+    () => status === null ? noRecordings : recordingsFromBrowserStatus(status),
+    [status],
+  )
   const recording = snapshot.find((item) => item.state !== 'completed') ?? null
   const recordings = useMemo(
     () => snapshot
@@ -66,11 +70,7 @@ export function ThreadRecordingsPanel({ projectId, threadId, active }: ThreadRec
   }, [recordings])
 
   function download(item: BrowserRecording) {
-    const link = document.createElement('a')
-    link.href = browserRecordingDownloadUrl(projectId, threadId, item.id)
-    link.download = `${item.title}.webm`
-    link.rel = 'noopener'
-    link.click()
+    downloadBrowserRecording(projectId, threadId, item)
   }
 
   async function remove(item: BrowserRecording) {
@@ -186,8 +186,8 @@ export function ThreadRecordingsPanel({ projectId, threadId, active }: ThreadRec
                 </IconButton>
               </div>
               <div className="mt-1 flex items-center gap-1 pl-[18px] font-mono text-[8px] text-ghost-faint">
-                <span>{formatDuration(item.durationMs)}</span>
-                {formatBytes(item.bytes) && <><span aria-hidden="true">·</span><span>{formatBytes(item.bytes)}</span></>}
+                <span>{formatRecordingDuration(item.durationMs, 'round')}</span>
+                {formatRecordingBytes(item.bytes, true) && <><span aria-hidden="true">·</span><span>{formatRecordingBytes(item.bytes, true)}</span></>}
                 {item.finishedAt && <><span aria-hidden="true">·</span><span>{new Date(item.finishedAt).toLocaleString()}</span></>}
               </div>
             </li>

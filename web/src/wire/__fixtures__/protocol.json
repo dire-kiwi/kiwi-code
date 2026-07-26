@@ -61,12 +61,21 @@
     },
     "browser.recordings": [
       {
-        "id": "rec-fixture",
+        "id": "rec-active",
+        "state": "recording",
+        "targetId": "page-fixture",
+        "title": "Active fixture recording",
+        "startedAt": "2026-07-26T12:33:56Z",
+        "idleTimeoutMs": 60000,
+        "idleDeadlineAt": "2026-07-26T12:34:56Z"
+      },
+      {
+        "id": "rec-complete",
         "state": "completed",
         "targetId": "page-fixture",
-        "title": "Fixture recording",
-        "startedAt": "2026-07-26T12:34:56Z",
-        "finishedAt": "2026-07-26T12:35:56Z",
+        "title": "Completed fixture recording",
+        "startedAt": "2026-07-26T12:32:56Z",
+        "finishedAt": "2026-07-26T12:34:56Z",
         "durationMs": 60000,
         "bytes": 1024,
         "mimeType": "video/webm",
@@ -118,6 +127,18 @@
           "startedAt": "2026-07-26T12:33:56Z",
           "idleTimeoutMs": 60000,
           "idleDeadlineAt": "2026-07-26T12:34:56Z"
+        },
+        {
+          "id": "rec-complete",
+          "state": "completed",
+          "targetId": "page-fixture",
+          "title": "Completed fixture recording",
+          "startedAt": "2026-07-26T12:32:56Z",
+          "finishedAt": "2026-07-26T12:34:56Z",
+          "durationMs": 60000,
+          "bytes": 1024,
+          "mimeType": "video/webm",
+          "filename": "fixture.webm"
         }
       ]
     },

@@ -94,6 +94,53 @@ func TestDecodeClientMessageRejectsInvalidShapes(t *testing.T) {
 	}
 }
 
+func TestJSONDecodeModes(t *testing.T) {
+	type value struct {
+		Type string `json:"t"`
+	}
+
+	var header value
+	if err := Decode([]byte(`{"T":"snap","extra":true}`), &header); err != nil || header.Type != "snap" {
+		t.Fatalf("Decode() = %#v, %v", header, err)
+	}
+	if err := Decode([]byte(`{"t":"snap"} {}`), &value{}); err == nil {
+		t.Fatal("Decode() accepted multiple JSON values")
+	}
+
+	header = value{}
+	if err := DecodeDisallowUnknown([]byte(`{"T":"snap"}`), &header); err != nil || header.Type != "snap" {
+		t.Fatalf("DecodeDisallowUnknown() = %#v, %v", header, err)
+	}
+	header = value{}
+	if err := DecodeDisallowUnknown([]byte(`{"t":"first","t":"second"}`), &header); err != nil || header.Type != "second" {
+		t.Fatalf("DecodeDisallowUnknown() duplicate handling = %#v, %v", header, err)
+	}
+	for _, payload := range []string{
+		`{"t":"snap","extra":true}`,
+		`{"t":"snap"} {}`,
+	} {
+		if err := DecodeDisallowUnknown([]byte(payload), &value{}); err == nil {
+			t.Fatalf("DecodeDisallowUnknown(%s) succeeded", payload)
+		}
+	}
+
+	header = value{}
+	if err := DecodeExactObject([]byte(`{"t":"snap"}`), &header, "t"); err != nil || header.Type != "snap" {
+		t.Fatalf("DecodeExactObject() = %#v, %v", header, err)
+	}
+	for _, payload := range []string{
+		`{"T":"snap"}`,
+		`{"t":"snap","t":"snap"}`,
+		`{"t":"snap","extra":true}`,
+		`{"t":"snap"} {}`,
+		`[]`,
+	} {
+		if err := DecodeExactObject([]byte(payload), &value{}, "t"); err == nil {
+			t.Fatalf("DecodeExactObject(%s) succeeded", payload)
+		}
+	}
+}
+
 func TestEncodeServerEnvelope(t *testing.T) {
 	payload, err := Encode(SnapshotMessage{
 		Type: ServerSnap,
