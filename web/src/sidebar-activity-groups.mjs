@@ -20,7 +20,16 @@ function byNewestFirst(left, right) {
   return right.at - left.at || left.order - right.order
 }
 
-function orderThreadFamilies(entries, threadsByKey) {
+function byPromptNewestFirst(left, right) {
+  return right.promptAt - left.promptAt || left.order - right.order
+}
+
+function orderThreadFamilies(
+  entries,
+  threadsByKey,
+  recencyValue = (entry) => entry.at,
+  byEntryRecency = byNewestFirst,
+) {
   if (entries.length < 2) return entries
 
   const entriesByKey = new Map(entries.map((entry) => [entryKey(entry.projectId, entry.threadId), entry]))
@@ -50,9 +59,9 @@ function orderThreadFamilies(entries, threadsByKey) {
     const key = entryKey(entry.projectId, entry.threadId)
     const cached = newestInFamily.get(key)
     if (cached !== undefined) return cached
-    if (visiting.has(key)) return entry.at
+    if (visiting.has(key)) return recencyValue(entry)
     const nextVisiting = new Set(visiting).add(key)
-    let newest = entry.at
+    let newest = recencyValue(entry)
     for (const child of childrenByKey.get(key) ?? []) {
       newest = Math.max(newest, familyRecency(child, nextVisiting))
     }
@@ -60,7 +69,7 @@ function orderThreadFamilies(entries, threadsByKey) {
     return newest
   }
   const byFamilyRecency = (left, right) =>
-    familyRecency(right) - familyRecency(left) || byNewestFirst(left, right)
+    familyRecency(right) - familyRecency(left) || byEntryRecency(left, right)
 
   const ordered = []
   const appended = new Set()
@@ -76,7 +85,7 @@ function orderThreadFamilies(entries, threadsByKey) {
   for (const root of roots.sort(byFamilyRecency)) appendFamily(root)
   // Cyclic relationships are rejected by the backend, but keep every row
   // visible if malformed data ever reaches the client.
-  for (const entry of entries.sort(byNewestFirst)) appendFamily(entry)
+  for (const entry of entries.sort(byEntryRecency)) appendFamily(entry)
   return ordered
 }
 
@@ -116,10 +125,12 @@ export function activityViewGroups(projects, activities, recentLimit = recentThr
       const key = entryKey(activity.projectId, displayThread.id)
       const found = threadsByKey.get(key)
       if (!found || found.thread.archivedAt || included.has(key)) continue
+      const promptAt = threadRecency(found.thread)
       const entry = {
         projectId: found.projectId,
         threadId: found.thread.id,
-        at: parsedTime(activity.updatedAt) ?? threadRecency(found.thread),
+        at: parsedTime(activity.updatedAt) ?? promptAt,
+        promptAt,
         order: found.order,
       }
       const current = entriesByKey.get(key)
@@ -127,7 +138,11 @@ export function activityViewGroups(projects, activities, recentLimit = recentThr
     }
     const entries = [...entriesByKey.values()]
     for (const entry of entries) included.add(entryKey(entry.projectId, entry.threadId))
-    return orderThreadFamilies(entries, threadsByKey)
+    // Working heartbeats refresh while the LLM responds. Keep that timestamp
+    // for the row display, but only let a user's latest prompt change ordering.
+    return state === 'working'
+      ? orderThreadFamilies(entries, threadsByKey, (entry) => entry.promptAt, byPromptNewestFirst)
+      : orderThreadFamilies(entries, threadsByKey)
   }
 
   const working = collectActivityEntries('working')

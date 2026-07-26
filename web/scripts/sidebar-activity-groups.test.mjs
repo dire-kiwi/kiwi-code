@@ -169,10 +169,10 @@ test('subthreads stay directly below their parent in activity sections', () => {
     ]),
   ]
   const activities = [
-    { projectId: 'p1', threadId: 'working-parent', state: 'working', updatedAt: iso(30) },
-    { projectId: 'p1', threadId: 'working-child', state: 'working', updatedAt: iso(3) },
-    { projectId: 'p1', threadId: 'working-grandchild', state: 'working', updatedAt: iso(1) },
-    { projectId: 'p1', threadId: 'other-working', state: 'working', updatedAt: iso(2) },
+    { projectId: 'p1', threadId: 'working-parent', state: 'working', updatedAt: iso(10) },
+    { projectId: 'p1', threadId: 'working-child', state: 'working', updatedAt: iso(8) },
+    { projectId: 'p1', threadId: 'working-grandchild', state: 'working', updatedAt: iso(7) },
+    { projectId: 'p1', threadId: 'other-working', state: 'working', updatedAt: iso(0) },
   ]
 
   const groups = activityViewGroups(projects, activities)
@@ -197,6 +197,22 @@ test('recent caps at the limit and reports the overflow', () => {
   assert.equal(groups.recent.length, recentThreadLimit)
   assert.equal(groups.hiddenRecentCount, 3)
   assert.deepEqual(entryIds(groups.recent).at(0), 'p1:t0')
+})
+
+test('working entries reorder by user prompts instead of LLM activity', () => {
+  const projects = [
+    project('p1', [
+      thread('newer-prompt', { lastPromptAt: iso(1) }),
+      thread('newer-response', { lastPromptAt: iso(10) }),
+    ]),
+  ]
+  const activities = [
+    { projectId: 'p1', threadId: 'newer-prompt', state: 'working', updatedAt: iso(2) },
+    { projectId: 'p1', threadId: 'newer-response', state: 'working', updatedAt: iso(0) },
+  ]
+
+  const groups = activityViewGroups(projects, activities)
+  assert.deepEqual(entryIds(groups.working), ['p1:newer-prompt', 'p1:newer-response'])
 })
 
 test('working entries prefer the activity timestamp for display', () => {
