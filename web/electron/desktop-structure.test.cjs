@@ -117,6 +117,9 @@ test('Code uses a separately sandboxed WebContentsView and private loopback code
 })
 
 test('preload exposes only the narrow native view APIs', () => {
+  assert.match(preload, /exposeInMainWorld\('kiwiCodeDesktopApp'/)
+  assert.match(preload, /reloadFrontend\(\)/)
+  assert.match(preload, /invokeCompatible\(appChannelSets, 'reloadFrontend'\)/)
   assert.match(preload, /exposeInMainWorld\('kiwiCodeDesktopBrowser'/)
   assert.match(preload, /show\(options\)/)
   assert.match(preload, /hide\(options\)/)
@@ -132,4 +135,14 @@ test('preload exposes only the narrow native view APIs', () => {
   assert.match(main, /validateBackendOrigin/)
   assert.match(main, /setRendererBackendOrigin/)
   assert.match(main, /codeServerWorkspace\?\.addProtectedOrigin\(origin\)/)
+})
+
+test('desktop reloads only the trusted frontend while preserving native sessions', () => {
+  assert.match(main, /appView\.webContents\.on\('before-input-event'/)
+  assert.match(main, /interceptFrontendReloadShortcut\(event, input, requestFrontendReload\)/)
+  assert.match(main, /onFrontendReload: requestFrontendReload/)
+  assert.match(main, /setImmediate\(\(\) => reloadFrontend\(/)
+  assert.match(sessions, /interceptFrontendReloadShortcut\(event, input, this\.onFrontendReload\)/)
+  assert.match(codeServer, /interceptFrontendReloadShortcut\(event, input, this\.onFrontendReload\)/)
+  assert.doesNotMatch(main, /app\.relaunch\(/)
 })

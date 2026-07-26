@@ -11,6 +11,7 @@ const {
   parseKeyChord,
   validateBounds,
 } = require('./browser-helpers.cjs')
+const { interceptFrontendReloadShortcut } = require('./frontend-reload.cjs')
 
 const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024
 const MAX_EXPRESSION_CHARS = 100_000
@@ -276,7 +277,7 @@ async function waitForDocumentReady(tab, timeoutMs, expectedLoaderId) {
 }
 
 class BrowserSession {
-  constructor({ key, projectId, threadId, partition, WebContentsView, hostWindow, appView, protectedOrigins, recordingManager, onChanged, onPopup, onWorkspaceShortcut, isViewActive }) {
+  constructor({ key, projectId, threadId, partition, WebContentsView, hostWindow, appView, protectedOrigins, recordingManager, onChanged, onPopup, onWorkspaceShortcut, onFrontendReload = () => {}, isViewActive }) {
     this.key = key
     this.projectId = projectId
     this.threadId = threadId
@@ -289,6 +290,7 @@ class BrowserSession {
     this.onChanged = onChanged
     this.onPopup = onPopup
     this.onWorkspaceShortcut = onWorkspaceShortcut
+    this.onFrontendReload = onFrontendReload
     this.isViewActive = isViewActive
     this.tabs = new Map()
     this.currentTargetId = null
@@ -424,6 +426,7 @@ class BrowserSession {
       return { action: 'deny' }
     })
     view.webContents.on('before-input-event', (event, input) => {
+      if (interceptFrontendReloadShortcut(event, input, this.onFrontendReload)) return
       const index = Number(input.key)
       if (
         input.type === 'keyDown' &&
@@ -1016,13 +1019,14 @@ class BrowserSession {
 }
 
 class BrowserWorkspaceManager {
-  constructor({ WebContentsView, hostWindow, appView, desktopOrigin, apiOrigin, recordingManager, onState, onWorkspaceShortcut = () => {} }) {
+  constructor({ WebContentsView, hostWindow, appView, desktopOrigin, apiOrigin, recordingManager, onState, onWorkspaceShortcut = () => {}, onFrontendReload = () => {} }) {
     this.WebContentsView = WebContentsView
     this.hostWindow = hostWindow
     this.appView = appView
     this.recordingManager = recordingManager ?? EMPTY_RECORDING_MANAGER
     this.onState = onState
     this.onWorkspaceShortcut = onWorkspaceShortcut
+    this.onFrontendReload = onFrontendReload
     this.sessions = new Map()
     this.queues = new Map()
     this.protectedOrigins = new Set([desktopOrigin, apiOrigin].filter(Boolean))
@@ -1089,6 +1093,7 @@ class BrowserWorkspaceManager {
         }).catch((error) => console.error('Could not open controlled browser tab:', error))
       },
       onWorkspaceShortcut: this.onWorkspaceShortcut,
+      onFrontendReload: this.onFrontendReload,
       isViewActive: (view) => this.attachedView === view,
     })
     this.sessions.set(key, browserSession)

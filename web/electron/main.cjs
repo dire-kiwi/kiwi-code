@@ -18,6 +18,10 @@ const {
   navigationOrigin,
   requireLoopbackHttpUrl,
 } = require('./browser-helpers.cjs')
+const {
+  interceptFrontendReloadShortcut,
+  reloadFrontend,
+} = require('./frontend-reload.cjs')
 
 const desktopUrl = requireLoopbackHttpUrl(
   process.env.KIWI_CODE_DESKTOP_URL || 'http://127.0.0.1:5173',
@@ -30,6 +34,13 @@ const apiOrigin = process.env.KIWI_CODE_API_ORIGIN
 const appIconPath = path.join(__dirname, 'icon.png')
 const preloadPath = path.join(__dirname, 'preload.cjs')
 
+const appIpcChannels = {
+  reloadFrontend: 'kiwi-code-desktop-app:reload-frontend',
+}
+const legacyAppIpcChannels = {
+  reloadFrontend: 'dire-mux-desktop-app:reload-frontend',
+}
+const appIpcChannelSets = [appIpcChannels, legacyAppIpcChannels]
 const browserIpcChannels = {
   show: 'kiwi-code-desktop-browser:show',
   hide: 'kiwi-code-desktop-browser:hide',
@@ -143,7 +154,7 @@ function validateBackendOrigin(value) {
 }
 
 function registerIpc() {
-  const trustedInvoke = (target, unavailableMessage, handler) => async (event, payload) => {
+  const trustedContents = (event) => {
     const contents = trustedView?.webContents
     if (
       !contents ||
@@ -151,11 +162,32 @@ function registerIpc() {
       event.senderFrame !== contents.mainFrame ||
       navigationOrigin(event.senderFrame?.url) !== desktopOrigin
     ) {
+      return null
+    }
+    return contents
+  }
+  const trustedInvoke = (target, unavailableMessage, handler) => async (event, payload) => {
+    if (!trustedContents(event)) {
       throw new BrowserProviderError('unauthorized', 'Untrusted IPC sender.', 403)
     }
     const current = target()
     if (!current) throw new BrowserProviderError('session_not_found', unavailableMessage, 404)
     return handler(current, payload)
+  }
+  for (const channels of appIpcChannelSets) {
+    ipcMain.handle(channels.reloadFrontend, (event) => {
+      if (!trustedContents(event)) {
+        throw new BrowserProviderError('unauthorized', 'Untrusted IPC sender.', 403)
+      }
+      const currentView = trustedView
+      const currentBrowserWorkspace = workspace
+      const currentCodeWorkspace = codeServerWorkspace
+      setImmediate(() => reloadFrontend(
+        currentView,
+        [currentBrowserWorkspace, currentCodeWorkspace],
+      ))
+      return { reloading: true }
+    })
   }
   const browserInvoke = (handler) => trustedInvoke(
     () => workspace,
@@ -237,7 +269,13 @@ async function createWindow() {
 
   const currentRecordingManager = new BrowserRecordingManager({ app, BaseWindow, WebContentsView })
   await currentRecordingManager.initialize()
-  const currentWorkspace = new BrowserWorkspaceManager({
+  let currentWorkspace = null
+  let currentCodeServerWorkspace = null
+  const requestFrontendReload = () => reloadFrontend(
+    appView,
+    [currentWorkspace, currentCodeServerWorkspace],
+  )
+  currentWorkspace = new BrowserWorkspaceManager({
     WebContentsView,
     hostWindow: window,
     appView,
@@ -254,8 +292,9 @@ async function createWindow() {
         for (const channels of browserIpcChannelSets) appView.webContents.send(channels.workspaceShortcut, index)
       }
     },
+    onFrontendReload: requestFrontendReload,
   })
-  const currentCodeServerWorkspace = new CodeServerWorkspaceManager({
+  currentCodeServerWorkspace = new CodeServerWorkspaceManager({
     app,
     WebContentsView,
     hostWindow: window,
@@ -275,6 +314,7 @@ async function createWindow() {
         for (const channels of codeServerIpcChannelSets) appView.webContents.send(channels.workspaceShortcut, index)
       }
     },
+    onFrontendReload: requestFrontendReload,
   })
   workspace = currentWorkspace
   recordingManager = currentRecordingManager
@@ -306,6 +346,9 @@ async function createWindow() {
   appView.webContents.on('render-process-gone', () => {
     currentWorkspace.detachActiveView()
     currentCodeServerWorkspace.detachActiveView()
+  })
+  appView.webContents.on('before-input-event', (event, input) => {
+    interceptFrontendReloadShortcut(event, input, requestFrontendReload)
   })
 
   const currentProvider = new BrowserProviderServer({ app, workspace: currentWorkspace })

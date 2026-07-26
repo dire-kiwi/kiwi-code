@@ -11,6 +11,7 @@ const {
   requireLoopbackHttpUrl,
   validateBounds,
 } = require('./browser-helpers.cjs')
+const { interceptFrontendReloadShortcut } = require('./frontend-reload.cjs')
 
 const CODE_SERVER_PARTITION = 'kiwi-code-code-server'
 const THEME_EXTENSION_ROOT = path.join(__dirname, 'code-server-extension')
@@ -122,6 +123,7 @@ class CodeServerWorkspaceManager {
     protectedOrigins = [],
     onState = () => {},
     onWorkspaceShortcut = () => {},
+    onFrontendReload = () => {},
     onBeforeAttach = () => {},
     onServiceOrigin = () => {},
     openExternal = () => {},
@@ -140,6 +142,7 @@ class CodeServerWorkspaceManager {
     this.protectedOrigins = new Set(protectedOrigins.filter(Boolean))
     this.onState = onState
     this.onWorkspaceShortcut = onWorkspaceShortcut
+    this.onFrontendReload = onFrontendReload
     this.onBeforeAttach = onBeforeAttach
     this.onServiceOrigin = onServiceOrigin
     this.openExternal = openExternal
@@ -463,6 +466,7 @@ class CodeServerWorkspaceManager {
       return { action: 'deny' }
     })
     view.webContents.on('before-input-event', (event, input) => {
+      if (interceptFrontendReloadShortcut(event, input, this.onFrontendReload)) return
       const index = Number(input.key)
       if (
         input.type === 'keyDown' &&
