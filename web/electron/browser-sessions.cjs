@@ -1135,6 +1135,15 @@ class BrowserWorkspaceManager {
       throw new BrowserProviderError('unsupported_operation', 'Unsupported browser operation.')
     }
     const key = this.key(action.projectId, action.threadId)
+    if (action.operation === 'session.status') {
+      // A backend restart can abandon an Electron operation that remains at
+      // the head of this thread's queue. Status is a read-only snapshot and
+      // must stay available so the reloaded renderer can reattach its view.
+      const browserSession = this.sessions.get(key)
+      return browserSession && !browserSession.stopped
+        ? browserSession.status()
+        : this.noSessionStatus(action.projectId, action.threadId)
+    }
     if (action.operation === 'session.stop') {
       // Interrupt waits and in-flight WebContents operations before stop reaches
       // the head of the per-session queue.
@@ -1147,9 +1156,6 @@ class BrowserWorkspaceManager {
       }
       if (!PASSIVE_RECORDING_ACTIVITY_OPERATIONS.has(action.operation)) {
         this.recordingManager.touch(action.projectId, action.threadId)
-      }
-      if (action.operation === 'session.status') {
-        return browserSession ? browserSession.status() : this.noSessionStatus(action.projectId, action.threadId)
       }
       if (action.operation === 'session.disconnect') {
         if (!browserSession) {
