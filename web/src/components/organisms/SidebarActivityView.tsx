@@ -6,6 +6,7 @@ import type { PiThreadActivity, Project, Thread, ThreadUsageSnapshot } from '../
 import { Button } from '../atoms/Button'
 import { IconButton } from '../atoms/IconButton'
 import { SelectionButton } from '../atoms/SelectionButton'
+import { ThreadActionsMenu } from '../molecules/ThreadActionsMenu'
 
 type SectionKind = 'working' | 'needsReview' | 'pinned' | 'recent'
 
@@ -14,10 +15,15 @@ type SidebarActivityViewProps = {
   piActivities: PiThreadActivity[]
   usageSnapshots: ThreadUsageSnapshot[]
   selectedThreadId: string | null
+  deletingThreadId: string | null
+  archivingThreadId: string | null
+  bookmarkingThreadId: string | null
   onSelectThread: (projectId: string, threadId: string) => void
   onNewThread: (projectId: string) => void
   onOpenFinder: () => void
   onShowAllThreads: () => void
+  onArchiveThread: (project: Project, thread: Thread, archived: boolean) => void
+  onDeleteThread: (project: Project, thread: Thread) => void
 }
 
 const sectionStateDescriptions: Record<SectionKind, string> = {
@@ -32,13 +38,19 @@ export function SidebarActivityView({
   piActivities,
   usageSnapshots,
   selectedThreadId,
+  deletingThreadId,
+  archivingThreadId,
+  bookmarkingThreadId,
   onSelectThread,
   onNewThread,
   onOpenFinder,
   onShowAllThreads,
+  onArchiveThread,
+  onDeleteThread,
 }: SidebarActivityViewProps) {
   const [now, setNow] = useState(() => Date.now())
   const [projectPickerOpen, setProjectPickerOpen] = useState(false)
+  const [threadMenuKey, setThreadMenuKey] = useState<string | null>(null)
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000)
     return () => window.clearInterval(timer)
@@ -93,46 +105,68 @@ export function SidebarActivityView({
       usage ? `Usage: ${usageDescription(usage.own)}${usage.limitReached ? ' — limit reached' : ''}` : '',
     ].filter(Boolean).join('\n')
     const elapsed = formatRelativeShort(entry.at, now)
+    const archived = Boolean(thread.archivedAt)
+    const menuOpen = threadMenuKey === key
+    // The open menu needs its row on top; an opacity below 1 would create a
+    // stacking context that traps the menu behind later rows.
 
     return (
-      <li key={key}>
-        <SelectionButton
-          type="button"
-          selected={selected}
-          selectionVariant="navigation"
-          onClick={() => onSelectThread(project.id, thread.id)}
-          aria-current={selected ? 'page' : undefined}
-          title={title}
-          className="pl-2 pr-2"
-        >
-          {thread.parentThreadId && (
-            <CornerDownRight size={11} className="shrink-0 text-ghost-cyan" aria-hidden="true" />
-          )}
-          {kind === 'working' && (
-            <LoaderCircle size={11} className="shrink-0 animate-spin text-ghost-green" aria-hidden="true" />
-          )}
-          {kind === 'needsReview' && (
-            <span
-              className="size-1.5 shrink-0 rounded-full bg-ghost-green shadow-[0_0_6px_rgba(181,189,104,0.7)]"
-              aria-hidden="true"
+      <li key={key} className={menuOpen ? 'relative z-40' : undefined}>
+        <div className="group/thread relative">
+          <SelectionButton
+            type="button"
+            selected={selected}
+            selectionVariant="navigation"
+            onClick={() => onSelectThread(project.id, thread.id)}
+            aria-current={selected ? 'page' : undefined}
+            title={title}
+            className="pl-2 pr-8"
+          >
+            {thread.parentThreadId && (
+              <CornerDownRight size={11} className="shrink-0 text-ghost-cyan" aria-hidden="true" />
+            )}
+            {kind === 'working' && (
+              <LoaderCircle size={11} className="shrink-0 animate-spin text-ghost-green" aria-hidden="true" />
+            )}
+            {kind === 'needsReview' && (
+              <span
+                className="size-1.5 shrink-0 rounded-full bg-ghost-green shadow-[0_0_6px_rgba(181,189,104,0.7)]"
+                aria-hidden="true"
+              />
+            )}
+            {kind === 'pinned' && (
+              <Bookmark size={11} className="shrink-0 text-ghost-green" fill="currentColor" aria-hidden="true" />
+            )}
+            <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+            {stateDescription && <span className="sr-only">{stateDescription}</span>}
+            {showProjectTags && (
+              <span className="max-w-20 shrink-0 truncate rounded border border-ghost-border/65 px-1 py-0.5 font-mono text-[9px] leading-none text-ghost-dim">
+                {project.name}
+              </span>
+            )}
+            {elapsed && (
+              <span className="w-6 shrink-0 text-right font-mono text-[9px] leading-none text-ghost-faint">
+                {elapsed}
+              </span>
+            )}
+          </SelectionButton>
+          <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center">
+            <ThreadActionsMenu
+              threadTitle={thread.title}
+              archived={archived}
+              archiving={archivingThreadId === thread.id}
+              deleting={deletingThreadId === thread.id}
+              disabled={Boolean(archivingThreadId || deletingThreadId || bookmarkingThreadId)}
+              open={menuOpen}
+              onOpenChange={(open) => setThreadMenuKey(open ? key : null)}
+              onArchive={() => onArchiveThread(project, thread, !archived)}
+              onDelete={() => onDeleteThread(project, thread)}
+              triggerClassName={menuOpen || selected
+                ? undefined
+                : 'opacity-0 transition group-hover/thread:opacity-100 group-focus-within/thread:opacity-100'}
             />
-          )}
-          {kind === 'pinned' && (
-            <Bookmark size={11} className="shrink-0 text-ghost-green" fill="currentColor" aria-hidden="true" />
-          )}
-          <span className="min-w-0 flex-1 truncate">{thread.title}</span>
-          {stateDescription && <span className="sr-only">{stateDescription}</span>}
-          {showProjectTags && (
-            <span className="max-w-20 shrink-0 truncate rounded border border-ghost-border/65 px-1 py-0.5 font-mono text-[9px] leading-none text-ghost-dim">
-              {project.name}
-            </span>
-          )}
-          {elapsed && (
-            <span className="w-6 shrink-0 text-right font-mono text-[9px] leading-none text-ghost-faint">
-              {elapsed}
-            </span>
-          )}
-        </SelectionButton>
+          </div>
+        </div>
       </li>
     )
   }
