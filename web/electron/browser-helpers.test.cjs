@@ -191,6 +191,79 @@ test('no-session status and preview preserve the provider compatibility contract
   )
 })
 
+test('session status resolves while another operation remains queued', async () => {
+  const manager = new BrowserWorkspaceManager({
+    WebContentsView: class {},
+    hostWindow: { getContentSize: () => [1440, 900], contentView: {} },
+    appView: {},
+    desktopOrigin: 'http://127.0.0.1:4000',
+    apiOrigin: 'http://127.0.0.1:4000',
+    onState() {},
+  })
+  const key = manager.key('p', 't')
+  const expected = { backend: 'electron', running: true }
+  manager.sessions.set(key, {
+    stopped: false,
+    async status() {
+      return expected
+    },
+  })
+
+  let releaseQueued
+  let markQueuedStarted
+  const queuedStarted = new Promise((resolve) => { markQueuedStarted = resolve })
+  const queued = manager.serialized('p', 't', async () => {
+    markQueuedStarted()
+    await new Promise((resolve) => { releaseQueued = resolve })
+  })
+  await queuedStarted
+
+  const pending = Symbol('pending')
+  try {
+    const status = await Promise.race([
+      manager.perform({ projectId: 'p', threadId: 't', operation: 'session.status', params: {} }),
+      new Promise((resolve) => setImmediate(() => resolve(pending))),
+    ])
+    assert.notEqual(status, pending, 'status waited for the per-thread operation queue')
+    assert.equal(manager.queues.has(key), true)
+    assert.deepEqual(status, expected)
+  } finally {
+    releaseQueued()
+    await queued
+  }
+})
+
+test('session status reports no session while a stopped session awaits queue cleanup', async () => {
+  const manager = new BrowserWorkspaceManager({
+    WebContentsView: class {},
+    hostWindow: { getContentSize: () => [1440, 900], contentView: {} },
+    appView: {},
+    desktopOrigin: 'http://127.0.0.1:4000',
+    apiOrigin: 'http://127.0.0.1:4000',
+    onState() {},
+  })
+  let statusCalled = false
+  manager.sessions.set(manager.key('p', 't'), {
+    stopped: true,
+    status() {
+      statusCalled = true
+      return { running: true }
+    },
+  })
+
+  const status = await manager.perform({
+    projectId: 'p',
+    threadId: 't',
+    operation: 'session.status',
+    params: {},
+  })
+
+  assert.equal(statusCalled, false)
+  assert.equal(status.running, false)
+  assert.equal(status.status.reachable, false)
+  assert.equal(status.backend, 'electron')
+})
+
 test('each restarted thread session receives a fresh ephemeral partition', () => {
   const manager = new BrowserWorkspaceManager({
     WebContentsView: class {},
