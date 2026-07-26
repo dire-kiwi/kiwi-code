@@ -109,10 +109,10 @@ async function sendActivity(state, token, timeoutMs = requestTimeoutMs, promptSt
   }, timeoutMs)
 }
 
-async function sendActivityWithRetry(state, token, session, timeoutMs, attempts) {
+async function sendActivityWithRetry(state, token, promptStartedAt, session, timeoutMs, attempts) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      await sendActivity(state, token, timeoutMs, '', session)
+      await sendActivity(state, token, timeoutMs, promptStartedAt, session)
       return true
     } catch {
       if (attempt < attempts - 1) await sleep(150)
@@ -137,10 +137,20 @@ function sleep(ms) {
 
 async function heartbeat(input) {
   if (!threadEndpoint()) return
-  const token = String(input.prompt_id || `${Date.now()}-${process.pid}`)
-  const promptStartedAt = new Date().toISOString()
-  const parentPid = process.ppid
-  await writeState(input, { token, state: 'working' })
+  const pinnedToken = input.kiwi_activity_token ? String(input.kiwi_activity_token) : ''
+  const token = pinnedToken || String(input.prompt_id || `${Date.now()}-${process.pid}`)
+  const current = await readState(input)
+  if (pinnedToken && current && current.token !== token) return
+  if (current?.token === token && current.state !== 'working') return
+  const promptStartedAt = String(
+    input.kiwi_prompt_started_at ||
+    (current?.token === token ? current.promptStartedAt : '') ||
+    new Date().toISOString(),
+  )
+  const parentPid = Number(input.kiwi_parent_pid) || process.ppid
+  if (!current || current.token !== token || current.state !== 'working' || current.promptStartedAt !== promptStartedAt) {
+    await writeState(input, { token, state: 'working', promptStartedAt })
+  }
 
   while (true) {
     if (!processExists(parentPid)) {
@@ -160,16 +170,54 @@ async function heartbeat(input) {
   }
 }
 
-async function transitionActivity(input, state, onlyIfActive = false) {
+async function startActivity(input) {
+  if (!threadEndpoint()) return
+  const token = String(input.prompt_id || `${Date.now()}-${process.pid}`)
+  const promptStartedAt = new Date().toISOString()
+  // Claude documents no per-prompt ID on UserPromptSubmit or Stop. This start
+  // hook is synchronous, so persist our generation before Claude begins the
+  // turn; the synchronous Stop hook can then report exactly that generation
+  // even if the detached heartbeat's first request is still in flight.
+  await writeState(input, { token, state: 'working', promptStartedAt })
+  const heartbeatInput = Buffer.from(JSON.stringify({
+    session_id: input.session_id,
+    kiwi_activity_token: token,
+    kiwi_prompt_started_at: promptStartedAt,
+    kiwi_parent_pid: process.ppid,
+  })).toString('base64url')
+  const child = spawn(process.execPath, [process.argv[1], 'heartbeat', heartbeatInput], {
+    detached: true,
+    env: process.env,
+    stdio: 'ignore',
+  })
+  child.on('error', () => {})
+  child.unref()
+}
+
+async function transitionActivity(input, state) {
   if (!threadEndpoint()) return
   const current = await readState(input)
-  if (onlyIfActive && current?.state !== 'working') return
-  const token = String(current?.token || input.prompt_id || `${Date.now()}-${process.pid}`)
+  const inputToken = input.prompt_id ? String(input.prompt_id) : ''
+  const token = inputToken || String(current?.token || `${Date.now()}-${process.pid}`)
+  const promptStartedAt = String(
+    input.kiwi_prompt_started_at ||
+    (current?.token === token ? current.promptStartedAt : '') ||
+    new Date().toISOString(),
+  )
   // Writing the state first stops the heartbeat process on its next tick. The
-  // token travels with the update so an already in-flight heartbeat cannot
-  // resurrect the working indicator on the server.
-  await writeState(input, { token, state })
-  await sendActivityWithRetry(state, token, activitySession(input), transitionTimeoutMs, transitionAttempts)
+  // token and generation travel with the update so an already in-flight
+  // heartbeat cannot resurrect the working indicator on the server. Prefer an
+  // explicit input token over stale file state for test and forward-compatible
+  // hook protocols.
+  await writeState(input, { token, state, promptStartedAt })
+  await sendActivityWithRetry(
+    state,
+    token,
+    promptStartedAt,
+    activitySession(input),
+    transitionTimeoutMs,
+    transitionAttempts,
+  )
 }
 
 async function endSession(input) {
@@ -308,16 +356,19 @@ async function nameThread(input) {
 
 async function main() {
   const action = process.argv[2]
-  const input = await readInput()
+  const encodedHeartbeatInput = action === 'heartbeat' ? process.argv[3] : ''
+  const input = encodedHeartbeatInput
+    ? JSON.parse(Buffer.from(encodedHeartbeatInput, 'base64url').toString('utf8'))
+    : await readInput()
   switch (action) {
+    case 'start':
+      await startActivity(input)
+      break
     case 'heartbeat':
       await heartbeat(input)
       break
     case 'finished':
       await transitionActivity(input, 'finished')
-      break
-    case 'finished-if-active':
-      await transitionActivity(input, 'finished', true)
       break
     case 'session-end':
       await endSession(input)

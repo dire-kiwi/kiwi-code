@@ -46,7 +46,7 @@ import {
   waitForApplicationRestart,
 } from '../../api'
 import { formatCompactTokens, formatCompactUsd, usageDescription } from '../../lib/formatUsage'
-import { sidebarThreadActivity } from '../../sidebar-thread-activity.mjs'
+import { sidebarProjectActivityCounts, sidebarThreadActivity } from '../../sidebar-thread-activity.mjs'
 import { bookmarkedThreadPathIds, defaultVisibleRootThreadIds } from '../../sidebar-thread-visibility.mjs'
 import type { PiThreadActivity, ProcessWebServer, Profile, Project, Thread, ThreadUsageSnapshot } from '../../types'
 import { Button } from '../atoms/Button'
@@ -285,17 +285,10 @@ export function ProjectSidebar({
   const usageByThread = useMemo(() => new Map(
     usageSnapshots.map((snapshot) => [`${snapshot.projectId}\0${snapshot.threadId}`, snapshot]),
   ), [usageSnapshots])
-  const projectActivityCounts = useMemo(() => {
-    const counts = new Map<string, { working: number; finished: number }>()
-    for (const activity of piActivities) {
-      if (activity.state !== 'working' && activity.state !== 'finished') continue
-      const current = counts.get(activity.projectId) ?? { working: 0, finished: 0 }
-      if (activity.state === 'working') current.working += 1
-      else current.finished += 1
-      counts.set(activity.projectId, current)
-    }
-    return counts
-  }, [piActivities])
+  const projectActivityCounts = useMemo(
+    () => sidebarProjectActivityCounts(projects, piActivities),
+    [piActivities, projects],
+  )
   const bookmarkThreadIdsByProject = useMemo(() => new Map(
     projects.map((project) => [project.id, new Set(bookmarkedThreadPathIds(project.threads))]),
   ), [projects])

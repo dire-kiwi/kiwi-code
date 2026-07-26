@@ -42,10 +42,62 @@ test('threads land in the first section that claims them', () => {
 
   const groups = activityViewGroups(projects, activities)
   assert.deepEqual(entryIds(groups.working), ['p1:agent'])
-  assert.deepEqual(entryIds(groups.needsReview), ['p1:done-agent'])
+  assert.deepEqual(entryIds(groups.needsReview), ['p1:root'])
   assert.deepEqual(entryIds(groups.pinned), ['p1:pinned'])
-  assert.deepEqual(entryIds(groups.recent), ['p1:root', 'p1:plain'])
+  assert.deepEqual(entryIds(groups.recent), ['p1:plain'])
   assert.equal(groups.hiddenRecentCount, 0)
+})
+
+test('finished descendants share one root entry with the newest completion time', () => {
+  const projects = [
+    project('p1', [
+      thread('root', { lastPromptAt: iso(10) }),
+      thread('older-child', { parentThreadId: 'root' }),
+      thread('newer-child', { parentThreadId: 'root' }),
+    ]),
+  ]
+  const activities = [
+    { projectId: 'p1', threadId: 'older-child', state: 'finished', updatedAt: iso(5) },
+    { projectId: 'p1', threadId: 'newer-child', state: 'finished', updatedAt: iso(1) },
+  ]
+
+  const groups = activityViewGroups(projects, activities)
+  assert.deepEqual(entryIds(groups.needsReview), ['p1:root'])
+  assert.equal(groups.needsReview[0].at, base - minute)
+  assert.deepEqual(groups.recent, [])
+})
+
+test('archived child activity cannot keep its active root in needs review', () => {
+  const projects = [
+    project('p1', [
+      thread('root', { lastPromptAt: iso(10) }),
+      thread('archived-child', { parentThreadId: 'root', archivedAt: iso(1) }),
+    ]),
+  ]
+  const activities = [
+    { projectId: 'p1', threadId: 'archived-child', state: 'finished', updatedAt: iso(1) },
+  ]
+
+  const groups = activityViewGroups(projects, activities)
+  assert.deepEqual(groups.needsReview, [])
+  assert.deepEqual(entryIds(groups.recent), ['p1:root'])
+})
+
+test('grandchild activity cannot roll through an archived child to an active root', () => {
+  const projects = [
+    project('p1', [
+      thread('root', { lastPromptAt: iso(10) }),
+      thread('archived-child', { parentThreadId: 'root', archivedAt: iso(1) }),
+      thread('grandchild', { parentThreadId: 'archived-child' }),
+    ]),
+  ]
+  const activities = [
+    { projectId: 'p1', threadId: 'grandchild', state: 'finished', updatedAt: iso(1) },
+  ]
+
+  const groups = activityViewGroups(projects, activities)
+  assert.deepEqual(groups.needsReview, [])
+  assert.deepEqual(entryIds(groups.recent), ['p1:root'])
 })
 
 test('a working thread never duplicates into needs review or pinned', () => {

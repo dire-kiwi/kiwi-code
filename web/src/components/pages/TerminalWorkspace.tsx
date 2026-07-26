@@ -466,7 +466,6 @@ export function TerminalWorkspace({
   return (
     <div
       className="relative flex h-full min-w-0 bg-ghost-black"
-      onFocusCapture={onThreadInteraction}
       onKeyDownCapture={onThreadInteraction}
       onPointerDownCapture={onThreadInteraction}
       onWheelCapture={onThreadInteraction}
