@@ -12,6 +12,9 @@ const strictParseOptions = { onExcessProperty: 'error' } as const
 const initialReconnectDelayMs = 250
 const maximumReconnectDelayMs = 10_000
 const pingIntervalMs = 15_000
+const pongTimeoutMs = 10_000
+const pongTimeoutCloseCode = 4000
+const pongTimeoutCloseReason = 'State connection ping timed out'
 const websocketOpenState = 1
 
 export type SubscriptionState<Snapshot> =
@@ -53,6 +56,12 @@ type ChannelEntry = {
   channelId?: number
   sequence: number
   automaticResnapUsed: boolean
+}
+
+type PendingPing = {
+  readonly generation: number
+  readonly socket: StateSocketLike
+  readonly timestamp: number
 }
 
 export type StateClientOptions = {
@@ -121,6 +130,8 @@ export class StateSocketClient {
   private reconnectAttempt = 0
   private reconnectTimer: ReturnType<typeof window.setTimeout> | undefined
   private pingTimer: ReturnType<typeof window.setInterval> | undefined
+  private pongTimer: ReturnType<typeof window.setTimeout> | undefined
+  private pendingPing: PendingPing | undefined
   private generation = 0
 
   constructor(options: StateClientOptions = {}) {
@@ -152,9 +163,8 @@ export class StateSocketClient {
     this.reconnectAllowed = false
     this.generation += 1
     if (this.reconnectTimer !== undefined) this.clearTimer(this.reconnectTimer)
-    if (this.pingTimer !== undefined) this.clearIntervalTimer(this.pingTimer)
     this.reconnectTimer = undefined
-    this.pingTimer = undefined
+    this.clearLiveness()
     const socket = this.socket
     this.socket = null
     if (socket) {
@@ -323,8 +333,7 @@ export class StateSocketClient {
       if (!this.current(generation, socket)) return
       this.socket = null
       this.ready = false
-      if (this.pingTimer !== undefined) this.clearIntervalTimer(this.pingTimer)
-      this.pingTimer = undefined
+      this.clearLiveness()
       if (event.code === 1002 && event.reason === 'unsupported state protocol') {
         this.reconnectAllowed = false
         this.connection = {
@@ -399,6 +408,7 @@ export class StateSocketClient {
         this.endChannel(message.id, message.reason)
         break
       case 'pong':
+        this.handlePong(message.ts)
         break
     }
   }
@@ -429,10 +439,70 @@ export class StateSocketClient {
     for (const entry of this.entries.values()) {
       if (entry.listeners.size > 0) this.openChannel(entry)
     }
-    if (this.pingTimer !== undefined) this.clearIntervalTimer(this.pingTimer)
+    this.clearLiveness()
     this.pingTimer = this.setIntervalTimer(() => {
-      if (this.ready) this.send({ t: 'ping', ts: Date.now() })
+      this.ping()
     }, pingIntervalMs)
+  }
+
+  private ping() {
+    const socket = this.socket
+    if (!socket || !this.ready || this.pendingPing) return
+    const pending: PendingPing = {
+      generation: this.generation,
+      socket,
+      timestamp: Date.now(),
+    }
+    this.pendingPing = pending
+    this.pongTimer = this.setTimer(() => {
+      if (this.pendingPing !== pending) return
+      this.pendingPing = undefined
+      this.pongTimer = undefined
+      if (!this.ready || !this.current(pending.generation, pending.socket)) return
+      this.reconnectAfterPongTimeout(pending)
+    }, pongTimeoutMs)
+    this.send({ t: 'ping', ts: pending.timestamp })
+  }
+
+  private reconnectAfterPongTimeout(pending: PendingPing) {
+    const socket = pending.socket
+    this.socket = null
+    this.ready = false
+    this.generation += 1
+    this.clearLiveness()
+    socket.onopen = null
+    socket.onmessage = null
+    socket.onerror = null
+    socket.onclose = null
+    socket.close(pongTimeoutCloseCode, pongTimeoutCloseReason)
+    this.connection = {
+      state: 'reconnecting',
+      instanceId: this.connection.instanceId,
+    }
+    this.notifyConnection()
+    this.scheduleReconnect()
+  }
+
+  private handlePong(timestamp: number) {
+    const pending = this.pendingPing
+    if (
+      !pending
+      || pending.timestamp !== timestamp
+      || !this.current(pending.generation, pending.socket)
+    ) return
+    this.clearPongDeadline()
+  }
+
+  private clearPongDeadline() {
+    if (this.pongTimer !== undefined) this.clearTimer(this.pongTimer)
+    this.pongTimer = undefined
+    this.pendingPing = undefined
+  }
+
+  private clearLiveness() {
+    if (this.pingTimer !== undefined) this.clearIntervalTimer(this.pingTimer)
+    this.pingTimer = undefined
+    this.clearPongDeadline()
   }
 
   private openChannel(entry: ChannelEntry) {

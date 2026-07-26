@@ -39,6 +39,8 @@ type threadStatusSnapshot struct {
 // notifyThreadStatusChanged wakes active state channels after a mutation made
 // through Kiwi Code or a tmux control-mode notification. Git changes made
 // outside Kiwi Code are handled by a separate repository reconciliation.
+// Process-session notifications also queue workflow runner reconciliation;
+// any resulting state transition publishes a follow-up invalidation.
 func (s *Server) notifyThreadStatusChanged(projectID, threadID string) {
 	s.notifyStateChanged(stateTopicThreadStatus, projectID, threadID)
 	// The sidebar process projection spans every project and thread.

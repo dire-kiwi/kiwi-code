@@ -71,6 +71,7 @@ type terminalHandler struct {
 	agentExitMarkerMu     sync.Mutex
 	agentExitDirectory    string
 	threadStatusChanged   func(projectID, threadID string)
+	workflowChanged       func(projectID, threadID string)
 	budgetReached         func(projectID, threadID string) (bool, string, error)
 	upgrader              websocket.Upgrader
 }

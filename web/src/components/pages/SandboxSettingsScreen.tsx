@@ -153,11 +153,43 @@ export function SandboxSettingsScreen({
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [saveMessage, setSaveMessage] = useState('')
+  const [externalUpdateNotice, setExternalUpdateNotice] = useState(false)
   const ruleKeyRef = useRef(0)
+  const stateRef = useRef<SandboxConfigState | null>(null)
+  const draftRef = useRef<Draft | null>(null)
+  const baselineRef = useRef('')
+  const sandboxIdentity = SandboxConfigTopic.key(sandboxParams)
+  const sandboxIdentityRef = useRef(sandboxIdentity)
   function nextRuleKey() {
     ruleKeyRef.current += 1
     return ruleKeyRef.current
   }
+
+  function replaceEditorState(nextState: SandboxConfigState) {
+    const nextDraft = draftFromState(nextState, nextRuleKey)
+    const nextBaseline = JSON.stringify(configFromDraft(nextDraft, nextState.scope))
+    stateRef.current = nextState
+    draftRef.current = nextDraft
+    baselineRef.current = nextBaseline
+    setState(nextState)
+    setDraft(nextDraft)
+    setBaseline(nextBaseline)
+    setExternalUpdateNotice(false)
+  }
+
+  useEffect(() => {
+    if (sandboxIdentityRef.current === sandboxIdentity) return
+    sandboxIdentityRef.current = sandboxIdentity
+    stateRef.current = null
+    draftRef.current = null
+    baselineRef.current = ''
+    setState(null)
+    setDraft(null)
+    setBaseline('')
+    setLoadError('')
+    setLoading(true)
+    setExternalUpdateNotice(false)
+  }, [sandboxIdentity])
 
   useEffect(() => {
     if (subscription.state === 'loading') {
@@ -166,21 +198,26 @@ export function SandboxSettingsScreen({
     }
     setLoading(false)
     if (subscription.state === 'error') {
-      setState(null)
-      setDraft(null)
       setLoadError(subscription.error.message)
       return
     }
     setLoadError('')
-    setState(subscription.data as SandboxConfigState)
+    const nextState = subscription.data as SandboxConfigState
+    const currentState = stateRef.current
+    const currentDraft = draftRef.current
+    const currentDirty = currentState !== null
+      && currentDraft !== null
+      && JSON.stringify(configFromDraft(currentDraft, currentState.scope)) !== baselineRef.current
+    if (currentDirty && currentState.scope === nextState.scope) {
+      if (JSON.stringify(currentState) !== JSON.stringify(nextState)) {
+        setExternalUpdateNotice(true)
+      }
+      stateRef.current = nextState
+      setState(nextState)
+      return
+    }
+    replaceEditorState(nextState)
   }, [subscription])
-
-  useEffect(() => {
-    if (!state) return
-    const nextDraft = draftFromState(state, nextRuleKey)
-    setDraft(nextDraft)
-    setBaseline(JSON.stringify(configFromDraft(nextDraft, state.scope)))
-  }, [state])
 
   const inheritedLabel = scope === 'global' ? 'built-in default' : 'global config'
   const config = draft && state ? configFromDraft(draft, state.scope) : null
@@ -191,15 +228,23 @@ export function SandboxSettingsScreen({
   const invalidShell = draft !== null && draft.shell.trim() !== '' && !draft.shell.trim().startsWith('/')
 
   function updateDraft(patch: Partial<Draft>) {
-    setDraft((current) => current ? { ...current, ...patch } : current)
+    setDraft((current) => {
+      const next = current ? { ...current, ...patch } : current
+      draftRef.current = next
+      return next
+    })
     setSaveError('')
     setSaveMessage('')
   }
 
   function updateRule(key: number, patch: Partial<RuleDraft>) {
-    setDraft((current) => current
-      ? { ...current, rules: current.rules.map((rule) => rule.key === key ? { ...rule, ...patch } : rule) }
-      : current)
+    setDraft((current) => {
+      const next = current
+        ? { ...current, rules: current.rules.map((rule) => rule.key === key ? { ...rule, ...patch } : rule) }
+        : current
+      draftRef.current = next
+      return next
+    })
     setSaveError('')
     setSaveMessage('')
   }
@@ -214,7 +259,7 @@ export function SandboxSettingsScreen({
       const next = scope === 'thread' && projectId && threadId
         ? await updateThreadSandboxConfig(projectId, threadId, config)
         : await updateGlobalSandboxConfig(config)
-      setState(next)
+      replaceEditorState(next)
       setSaveMessage(next.exists
         ? 'Sandbox configuration saved. It applies to newly started agent sessions.'
         : 'Sandbox configuration cleared; everything now inherits.')
@@ -230,7 +275,7 @@ export function SandboxSettingsScreen({
     ? 'Global sandbox configuration'
     : [project?.name, thread?.branch || thread?.title].filter(Boolean).join(' · ')
 
-  const body = loading ? (
+  const body = loading && (!state || !draft) ? (
           <LoadingPanel label="Loading sandbox configuration" />
         ) : !state || !draft ? (
           <LoadErrorPanel
@@ -239,6 +284,17 @@ export function SandboxSettingsScreen({
           />
         ) : (
           <form onSubmit={(event) => void handleSubmit(event)} className="space-y-5">
+            {loadError && (
+              <FeedbackMessage role="alert" tone="error">
+                {loadError} The last loaded configuration is still shown; any unsaved draft has been preserved.
+              </FeedbackMessage>
+            )}
+            {externalUpdateNotice && (
+              <InfoCallout>
+                The stored sandbox configuration changed while you were editing. Your unsaved draft was preserved;
+                saving will replace the newer stored configuration.
+              </InfoCallout>
+            )}
             <Surface as="section" variant="elevated-panel" className="overflow-hidden">
               <SectionHeader
                 icon={<FileJson2 size={16} />}

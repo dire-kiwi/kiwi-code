@@ -3,7 +3,11 @@ import { StrictMode, Suspense } from 'react'
 import { act, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { StateSocketClient, type StateSocketLike } from './client'
-import { StateSocketProvider, useSubscription } from './react'
+import {
+  StateSocketProvider,
+  useLastReadySubscriptionData,
+  useSubscription,
+} from './react'
 import type { TopicDefinition } from './topics'
 
 const SharedTopic: TopicDefinition<
@@ -54,6 +58,16 @@ function Viewer({ label }: { label: string }) {
   return (
     <output data-testid={label}>
       {subscription.state === 'ready' ? subscription.data.value : subscription.state}
+    </output>
+  )
+}
+
+function RetainedViewer() {
+  const subscription = useSubscription(SharedTopic, { key: 'retained' })
+  const retained = useLastReadySubscriptionData(subscription)
+  return (
+    <output data-testid="retained">
+      {subscription.state}:{retained?.value ?? 'none'}
     </output>
   )
 }
@@ -161,5 +175,42 @@ describe('state socket React integration', () => {
 
     view.unmount()
     expect(cachedEntryCount(client)).toBe(0)
+  })
+
+  it('retains the last ready payload after a subscription ends', () => {
+    const sockets: FakeWebSocket[] = []
+    const client = new StateSocketClient({
+      url: 'ws://state.test/api/state',
+      socketFactory: () => {
+        const socket = new FakeWebSocket()
+        sockets.push(socket)
+        return socket
+      },
+    })
+    clients.push(client)
+
+    const view = render(
+      <StateSocketProvider client={client}>
+        <RetainedViewer />
+      </StateSocketProvider>,
+    )
+    act(() => {
+      sockets[0].open()
+      sockets[0].receive({
+        t: 'ready',
+        protocol: 1,
+        instanceId: 'retained-instance',
+        serverTime: '2026-07-26T00:00:00Z',
+      })
+      sockets[0].receive({ t: 'snap', id: 1, seq: 1, data: { value: 7 } })
+    })
+    expect(screen.getByTestId('retained').textContent).toBe('ready:7')
+
+    act(() => {
+      sockets[0].receive({ t: 'subend', id: 1, reason: 'Temporary read failure.' })
+    })
+    expect(screen.getByTestId('retained').textContent).toBe('error:7')
+
+    view.unmount()
   })
 })

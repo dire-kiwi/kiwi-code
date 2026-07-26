@@ -48,6 +48,12 @@ type Server struct {
 	childCreationBeforeCommit func(project.Thread)
 	workflowProcessLauncher   workflowProcessLauncher
 	workflowProcessStopper    workflowProcessStopper
+	workflowWatchMu           sync.Mutex
+	workflowWatches           map[threadStatusKey]*workflowProcessWatch
+	workflowWatchesStopped    bool
+	workflowKickMu            sync.Mutex
+	workflowKicks             map[threadStatusKey]*workflowProcessKick
+	workflowKicksStopped      bool
 	assets                    fs.FS
 	static                    http.Handler
 	handler                   http.Handler
@@ -140,6 +146,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	}
 	server.allowChildThreadCreation = childThreadCreationEnabled
 	terminal.threadStatusChanged = server.notifyThreadStatusChanged
+	terminal.workflowChanged = server.queueWorkflowProcessReconcile
 	terminal.budgetReached = server.threadBudgetReached
 	terminal.nativePi.usageReporter = func(key piNativeProcessKey, sessionID string, totals threadUsageTotals) {
 		if err := server.threadUsage.report(key.ProjectID, key.ThreadID, sessionID, totals); err != nil {
@@ -154,6 +161,8 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	if err := server.recoverPendingThreadCreationRollbacks(); err != nil {
 		return nil, fmt.Errorf("recover pending thread creation rollbacks: %w", err)
 	}
+	server.recoverWorkflowProcessWatches()
+	server.stopWorkflowProcessWatchesOnContext(options.CleanupContext)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", server.health)
@@ -293,6 +302,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Close shuts down server-owned browser processes and contexts.
 func (s *Server) Close(ctx context.Context) error {
+	s.stopWorkflowProcessWatches()
 	if s.browser == nil {
 		return nil
 	}
@@ -1031,6 +1041,7 @@ func (s *Server) deleteThreadTree(projectID, threadID string, archivedBefore *ti
 }
 
 func (s *Server) finishDeletedThreadRuntime(projectID, threadID, context string) {
+	s.refreshWorkflowProcessWatch(projectID, threadID)
 	if err := s.terminal.removeCodingAgentExitMarkersForThread(projectID, threadID); err != nil {
 		description := "deleted"
 		if context != "" {

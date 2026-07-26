@@ -406,13 +406,14 @@ type stateSnapshot struct {
 }
 
 type stateClient struct {
-	connection *websocket.Conn
-	cancel     context.CancelFunc
-	topics     map[uint32]string
-	snapshots  chan stateSnapshot
-	errors     chan error
-	pending    map[string]stateSnapshot
-	closeOnce  sync.Once
+	connection       *websocket.Conn
+	cancel           context.CancelFunc
+	stopContextClose func() bool
+	topics           map[uint32]string
+	snapshots        chan stateSnapshot
+	errors           chan error
+	pending          map[string]stateSnapshot
+	closeOnce        sync.Once
 }
 
 func openStateClient(ctx context.Context, base *url.URL) (*stateClient, error) {
@@ -435,7 +436,11 @@ func openStateClient(ctx context.Context, base *url.URL) (*stateClient, error) {
 		}
 		return nil, err
 	}
+	stopContextClose := context.AfterFunc(ctx, func() {
+		_ = connection.Close()
+	})
 	closeWithError := func(err error) (*stateClient, error) {
+		stopContextClose()
 		_ = connection.Close()
 		return nil, err
 	}
@@ -450,6 +455,9 @@ func openStateClient(ctx context.Context, base *url.URL) (*stateClient, error) {
 
 	messageType, payload, err := connection.ReadMessage()
 	if err != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return closeWithError(fmt.Errorf("read state handshake: %w", contextErr))
+		}
 		return closeWithError(fmt.Errorf("read state handshake: %w", err))
 	}
 	if messageType != websocket.TextMessage {
@@ -487,12 +495,13 @@ func openStateClient(ctx context.Context, base *url.URL) (*stateClient, error) {
 
 	readContext, cancel := context.WithCancel(ctx)
 	result := &stateClient{
-		connection: connection,
-		cancel:     cancel,
-		topics:     topics,
-		snapshots:  make(chan stateSnapshot, 128),
-		errors:     make(chan error, 1),
-		pending:    make(map[string]stateSnapshot, len(topics)),
+		connection:       connection,
+		cancel:           cancel,
+		stopContextClose: stopContextClose,
+		topics:           topics,
+		snapshots:        make(chan stateSnapshot, 128),
+		errors:           make(chan error, 1),
+		pending:          make(map[string]stateSnapshot, len(topics)),
 	}
 	go result.read(readContext)
 	return result, nil
@@ -675,6 +684,9 @@ func (c *stateClient) waitFor(ctx context.Context, topic string, predicate func(
 
 func (c *stateClient) close() {
 	c.closeOnce.Do(func() {
+		if c.stopContextClose != nil {
+			c.stopContextClose()
+		}
 		c.cancel()
 		_ = c.connection.WriteControl(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseNormalClosure, "headless check complete"), time.Now().Add(time.Second))

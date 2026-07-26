@@ -1,6 +1,6 @@
 import { Clock3, History, RefreshCw, SquareTerminal } from 'lucide-react'
 import type { SessionClosureEvent, SessionClosureOverview } from '../../types'
-import { useSubscription } from '../../wire/react'
+import { useLastReadySubscriptionData, useSubscription } from '../../wire/react'
 import { SessionClosuresTopic } from '../../wire/topics'
 import { GhostButton } from '../atoms/Button'
 import { StatusBadge } from '../atoms/StatusBadge'
@@ -76,9 +76,7 @@ function ClosureRow({ event }: { event: SessionClosureEvent }) {
 
 export function SessionLogScreen({ onOpenSidebar, onBack }: SessionLogScreenProps) {
   const subscription = useSubscription(SessionClosuresTopic, undefined)
-  const overview = subscription.state === 'ready'
-    ? subscription.data as SessionClosureOverview
-    : null
+  const overview = useLastReadySubscriptionData(subscription) as SessionClosureOverview | null
   const loading = subscription.state === 'loading'
   const error = subscription.state === 'error' ? subscription.error.message : ''
 

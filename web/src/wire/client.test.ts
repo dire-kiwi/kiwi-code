@@ -29,6 +29,8 @@ class FakeSocket implements StateSocketLike {
   closeCode: number | undefined
   closeReason: string | undefined
 
+  constructor(private readonly finishClientClose = true) {}
+
   send(data: string) {
     this.sent.push(data)
   }
@@ -49,7 +51,11 @@ class FakeSocket implements StateSocketLike {
   close(code = 1000, reason = '') {
     this.closeCode = code
     this.closeReason = reason
-    this.finishClose(code, reason)
+    if (this.finishClientClose) {
+      this.finishClose(code, reason)
+    } else {
+      this.readyState = 2
+    }
   }
 
   private finishClose(code: number, reason: string) {
@@ -63,6 +69,12 @@ function sentMessages(socket: FakeSocket) {
   return socket.sent.map((message) => JSON.parse(message) as Record<string, unknown>)
 }
 
+function lastPing(socket: FakeSocket) {
+  const message = sentMessages(socket).filter(({ t }) => t === 'ping').at(-1)
+  if (!message || typeof message.ts !== 'number') throw new Error('Expected a ping message.')
+  return message as { t: 'ping'; ts: number }
+}
+
 function ready(socket: FakeSocket, instanceId = 'instance-a') {
   socket.open()
   socket.receive({
@@ -73,12 +85,12 @@ function ready(socket: FakeSocket, instanceId = 'instance-a') {
   })
 }
 
-function createHarness() {
+function createHarness(finishClientClose = true) {
   const sockets: FakeSocket[] = []
   const client = new StateSocketClient({
     url: 'ws://state.test/api/state',
     socketFactory: () => {
-      const socket = new FakeSocket()
+      const socket = new FakeSocket(finishClientClose)
       sockets.push(socket)
       return socket
     },
@@ -257,6 +269,104 @@ describe('StateSocketClient', () => {
       ['instance-a', undefined],
       ['instance-b', 'instance-a'],
     ])
+  })
+
+  it('keeps the connection alive when the server returns the matching pong', () => {
+    const { client, sockets } = createHarness()
+    clients.push(client)
+    client.start()
+    ready(sockets[0])
+
+    vi.advanceTimersByTime(15_000)
+    const ping = lastPing(sockets[0])
+    vi.advanceTimersByTime(9_000)
+    sockets[0].receive({ t: 'pong', ts: ping.ts })
+    vi.advanceTimersByTime(1_000)
+
+    expect(sockets[0].closeCode).toBeUndefined()
+    expect(client.getConnectionSnapshot().state).toBe('open')
+    expect(vi.getTimerCount()).toBe(1)
+  })
+
+  it('closes and reconnects when the matching pong misses its deadline', () => {
+    const { client, sockets } = createHarness(false)
+    clients.push(client)
+    client.start()
+    ready(sockets[0])
+
+    vi.advanceTimersByTime(15_000)
+    const ping = lastPing(sockets[0])
+    sockets[0].receive({ t: 'pong', ts: ping.ts + 1 })
+    vi.advanceTimersByTime(9_999)
+    expect(sockets[0].closeCode).toBeUndefined()
+
+    vi.advanceTimersByTime(1)
+    expect(sockets[0].closeCode).toBe(4000)
+    expect(sockets[0].closeReason).toBe('State connection ping timed out')
+    expect(client.getConnectionSnapshot().state).toBe('reconnecting')
+
+    vi.advanceTimersByTime(249)
+    expect(sockets).toHaveLength(1)
+    vi.advanceTimersByTime(1)
+    expect(sockets).toHaveLength(2)
+  })
+
+  it('does not let a stale pong deadline close or clear liveness for a newer socket', () => {
+    const capturedPongDeadlines: Array<() => void> = []
+    const setTimer = ((handler: TimerHandler, delay?: number, ...args: unknown[]) => {
+      const callback = () => {
+        if (typeof handler === 'function') handler(...args)
+      }
+      if (delay === 10_000) capturedPongDeadlines.push(callback)
+      return window.setTimeout(callback, delay)
+    }) as typeof window.setTimeout
+    const sockets: FakeSocket[] = []
+    const client = new StateSocketClient({
+      url: 'ws://state.test/api/state',
+      socketFactory: () => {
+        const socket = new FakeSocket()
+        sockets.push(socket)
+        return socket
+      },
+      random: () => 0.5,
+      setTimer,
+    })
+    clients.push(client)
+    client.start()
+    ready(sockets[0])
+
+    vi.advanceTimersByTime(15_000)
+    expect(capturedPongDeadlines).toHaveLength(1)
+    sockets[0].serverClose()
+    vi.advanceTimersByTime(250)
+    ready(sockets[1])
+    vi.advanceTimersByTime(15_000)
+    expect(capturedPongDeadlines).toHaveLength(2)
+    const currentPing = lastPing(sockets[1])
+
+    capturedPongDeadlines[0]()
+    expect(sockets[1].closeCode).toBeUndefined()
+    sockets[1].receive({ t: 'pong', ts: currentPing.ts })
+    vi.advanceTimersByTime(10_000)
+
+    expect(sockets[1].closeCode).toBeUndefined()
+    expect(client.getConnectionSnapshot().state).toBe('open')
+  })
+
+  it('clears ping intervals and pong deadlines when disposed', () => {
+    const { client, sockets } = createHarness()
+    clients.push(client)
+    client.start()
+    ready(sockets[0])
+    vi.advanceTimersByTime(15_000)
+    lastPing(sockets[0])
+    expect(vi.getTimerCount()).toBe(2)
+
+    client.dispose()
+    expect(sockets[0].closeCode).toBe(1000)
+    expect(vi.getTimerCount()).toBe(0)
+    vi.advanceTimersByTime(60_000)
+    expect(sockets).toHaveLength(1)
   })
 
   it('can stop and start again with live subscriptions, as React Strict Mode requires', () => {

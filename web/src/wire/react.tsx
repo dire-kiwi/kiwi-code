@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useState,
   useSyncExternalStore,
   type ReactNode,
 } from 'react'
@@ -68,6 +69,16 @@ export function useSubscription<Tag extends string, Params, Snapshot>(
     enabled ? observer.getSnapshot : getDisabledState,
   )
   return useMemo(() => ({ ...state, retry: observer.retry }), [observer.retry, state])
+}
+
+export function useLastReadySubscriptionData<Snapshot>(
+  subscription: SubscriptionResult<Snapshot>,
+): Snapshot | null {
+  const [lastReady, setLastReady] = useState<Snapshot | null>(null)
+  useEffect(() => {
+    if (subscription.state === 'ready') setLastReady(subscription.data)
+  }, [subscription])
+  return subscription.state === 'ready' ? subscription.data : lastReady
 }
 
 export function useConnectionStatus(): StateConnectionSnapshot {

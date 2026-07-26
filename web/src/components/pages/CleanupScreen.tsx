@@ -13,7 +13,7 @@ import type {
   ThreadCleanupOverview,
   WorktreeCleanupOverview,
 } from '../../types'
-import { useSubscription } from '../../wire/react'
+import { useLastReadySubscriptionData, useSubscription } from '../../wire/react'
 import { CleanupTopic } from '../../wire/topics'
 import { GhostButton } from '../atoms/Button'
 import { StatusBadge } from '../atoms/StatusBadge'
@@ -198,9 +198,7 @@ function WorktreeRow({ item, generatedAt }: { item: WorktreeCleanupOverview; gen
 
 export function CleanupScreen({ onOpenSidebar, onBack }: CleanupScreenProps) {
   const subscription = useSubscription(CleanupTopic, undefined)
-  const overview = subscription.state === 'ready'
-    ? subscription.data as CleanupOverview
-    : null
+  const overview = useLastReadySubscriptionData(subscription) as CleanupOverview | null
   const loading = subscription.state === 'loading'
   const error = subscription.state === 'error' ? subscription.error.message : ''
 
