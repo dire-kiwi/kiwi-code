@@ -60,12 +60,15 @@ export default function (pi: ExtensionAPI) {
 		heartbeat = setInterval(() => void queueActivity("working", activePromptStartedAt), heartbeatIntervalMs);
 	});
 
-	pi.on("agent_settled", () => {
+	pi.on("agent_settled", async () => {
 		if (!working) return;
 		working = false;
 		activePromptStartedAt = undefined;
 		stopHeartbeat();
-		void queueActivity("finished");
+		// Pi waits for settled handlers before publishing agent_settled to RPC
+		// clients. Waiting here keeps the sidebar transition in step with the
+		// native pane instead of leaving a working spinner after Pi is visibly idle.
+		await queueActivity("finished");
 	});
 
 	pi.on("session_shutdown", async () => {

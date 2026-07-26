@@ -352,9 +352,9 @@ for (const event of ["agent_start", "agent_settled", "session_shutdown"]) {
 }
 
 handlers.get("agent_start")();
-handlers.get("agent_settled")();
-for (let index = 0; index < 4; index += 1) {
-	await new Promise((resolve) => setImmediate(resolve));
+await handlers.get("agent_settled")();
+if (activities.map(({ state }) => state).join(",") !== "working,finished") {
+	throw new Error("settled returned before the sidebar transition completed");
 }
 handlers.get("agent_start")();
 await handlers.get("session_shutdown")();

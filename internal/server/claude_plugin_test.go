@@ -559,7 +559,7 @@ func TestClaudePluginHeartbeatReportsPromptStart(t *testing.T) {
 		Session         string `json:"session"`
 		PromptStartedAt string `json:"promptStartedAt"`
 	}
-	updates := make(chan activityUpdate, 1)
+	updates := make(chan activityUpdate, 8)
 	activityServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut || r.URL.Path != "/claude/activity" {
 			w.WriteHeader(http.StatusNotFound)
@@ -579,16 +579,19 @@ func TestClaudePluginHeartbeatReportsPromptStart(t *testing.T) {
 	}))
 	defer activityServer.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	command := exec.CommandContext(ctx, nodePath, filepath.Join(pluginRoot, "scripts", "kiwi-code-hook.mjs"), "heartbeat")
-	command.Stdin = strings.NewReader(`{"session_id":"session-1","prompt_id":"prompt-1"}`)
-	command.Env = append(os.Environ(),
+	input := `{"session_id":"session-1","prompt_id":"prompt-1"}`
+	stateDirectory := t.TempDir()
+	hookEnvironment := append(os.Environ(),
 		"KIWI_CODE_THREAD_ENDPOINT="+activityServer.URL,
 		"KIWI_CODE_PROJECT_ID=project",
 		"KIWI_CODE_THREAD_ID=thread",
-		"KIWI_CODE_CLAUDE_STATE_DIR="+t.TempDir(),
+		"KIWI_CODE_CLAUDE_STATE_DIR="+stateDirectory,
 		"KIWI_CODE_CODING_AGENT="+codingAgentClaude,
 	)
+	ctx, cancel := context.WithCancel(context.Background())
+	command := exec.CommandContext(ctx, nodePath, filepath.Join(pluginRoot, "scripts", "kiwi-code-hook.mjs"), "heartbeat")
+	command.Stdin = strings.NewReader(input)
+	command.Env = hookEnvironment
 	if err := command.Start(); err != nil {
 		cancel()
 		t.Fatal(err)
@@ -613,6 +616,28 @@ func TestClaudePluginHeartbeatReportsPromptStart(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for Claude heartbeat")
+	}
+
+	finished := exec.Command(nodePath, filepath.Join(pluginRoot, "scripts", "kiwi-code-hook.mjs"), "finished")
+	finished.Stdin = strings.NewReader(input)
+	finished.Env = hookEnvironment
+	if output, err := finished.CombinedOutput(); err != nil {
+		t.Fatalf("finish Claude activity: %v: %s", err, output)
+	}
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.State != "finished" {
+				continue
+			}
+			if update.Token != "prompt-1" || update.Session != "session-1" {
+				t.Fatalf("Claude finished identifiers = %#v", update)
+			}
+			return
+		case <-deadline:
+			t.Fatal("Claude finished hook returned without clearing working activity")
+		}
 	}
 }
 
