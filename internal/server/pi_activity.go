@@ -16,15 +16,17 @@ import (
 type piActivityState string
 
 const (
-	piActivityWorking          piActivityState = "working"
-	piActivityFinished         piActivityState = "finished"
-	piActivityIdle             piActivityState = "idle"
+	piActivityWorking  piActivityState = "working"
+	piActivityFinished piActivityState = "finished"
+	piActivityIdle     piActivityState = "idle"
 	// Integrations heartbeat every 5s. Allow several consecutive misses so a
 	// slow request or a busy host cannot prune a genuinely working thread and
 	// make the sidebar indicator flicker mid-turn.
-	piWorkingTimeout                           = 25 * time.Second
-	piActivitySnapshotInterval                 = 5 * time.Second
-	maxPiActivityTokenLength                   = 200
+	piWorkingTimeout           = 25 * time.Second
+	piActivitySnapshotInterval = 5 * time.Second
+	piActivityOrderRetention   = 30 * time.Minute
+	maxPiActivityTokenLength   = 200
+	maxPiActivityRetiredTokens = 64
 )
 
 type piThreadActivity struct {
@@ -50,23 +52,33 @@ type piThreadActivityKey struct {
 	threadID  string
 }
 
+type piActivityPromptOrder struct {
+	active          string
+	activeStartedAt time.Time
+	latestStartedAt time.Time
+	retired         []string
+	updatedAt       time.Time
+}
+
 type piActivityTracker struct {
 	mu         sync.Mutex
 	activities map[piActivityKey]piThreadActivity
-	// settled records the prompt token whose turn has already ended for a key.
-	// Integrations that report activity from several processes (Claude Code
-	// runs its heartbeat and its stop hook independently) can deliver a working
-	// heartbeat that was already in flight when the turn ended. Dropping those
-	// keeps a finished turn from flapping back to working.
-	settled map[piActivityKey]string
-	changes *broadcast.Broker[[]piThreadActivity]
+	// promptOrder keeps terminal updates idempotent and prevents delayed updates
+	// from an older prompt from replacing the state of a newer prompt. A bounded
+	// retired-token history covers requests that remain in flight across turns
+	// without growing for the lifetime of the server.
+	promptOrder map[piActivityKey]*piActivityPromptOrder
+	// Changes are invalidations rather than historical snapshots. Stream
+	// consumers always reread current state, so an authoritative snapshot can
+	// never be followed by an older queued payload.
+	changes *broadcast.Broker[struct{}]
 }
 
 func newPiActivityTracker() *piActivityTracker {
 	return &piActivityTracker{
-		activities: make(map[piActivityKey]piThreadActivity),
-		settled:    make(map[piActivityKey]string),
-		changes:    broadcast.NewBroker[[]piThreadActivity](broadcast.DefaultMaxPending),
+		activities:  make(map[piActivityKey]piThreadActivity),
+		promptOrder: make(map[piActivityKey]*piActivityPromptOrder),
+		changes:     broadcast.NewBroker[struct{}](broadcast.DefaultMaxPending),
 	}
 }
 
@@ -85,27 +97,101 @@ func (t *piActivityTracker) updateAgentTransition(projectID, threadID, agent str
 }
 
 // updateAgentToken applies an activity update. session scopes the update to one
-// agent session and token identifies the prompt it belongs to; both are optional
-// and an empty token opts out of ordering protection. The final return value
-// reports whether the update was applied.
+// agent session and token identifies the prompt it belongs to; both are optional.
+// An empty token uses legacy arrival ordering until the key has received an
+// ordered update. The final return value reports whether the update was applied.
 func (t *piActivityTracker) updateAgentToken(projectID, threadID, agent, session, token string, state piActivityState, now time.Time) (*piThreadActivity, bool, bool) {
+	return t.updateAgentTokenAt(projectID, threadID, agent, session, token, nil, state, now)
+}
+
+// updateAgentTokenAt also accepts the prompt's stable start time. Claude's
+// heartbeat and terminal hooks send the same value, which gives independently
+// running hook processes a comparable generation even when the terminal request
+// reaches the server before the first working request.
+func (t *piActivityTracker) updateAgentTokenAt(
+	projectID, threadID, agent, session, token string,
+	promptStartedAt *time.Time,
+	state piActivityState,
+	now time.Time,
+) (*piThreadActivity, bool, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	key := piActivityKey{projectID: projectID, threadID: threadID, agent: agent, session: session}
+	now = now.UTC()
+	var generation time.Time
+	if promptStartedAt != nil {
+		generation = promptStartedAt.UTC()
+		if generation.After(now) {
+			// A bad client clock must not pin ordering in the future and prevent
+			// subsequent prompts from superseding this one.
+			generation = now
+		}
+	}
+	startedPrompt := false
 	if token != "" {
+		order := t.promptOrder[key]
+		if order == nil {
+			order = &piActivityPromptOrder{}
+			t.promptOrder[key] = order
+		}
 		if state == piActivityWorking {
-			if t.settled[key] == token {
+			if order.isRetired(token) {
 				return nil, false, false
 			}
-			delete(t.settled, key)
+			if order.active != token {
+				if !order.canSupersede(generation, true) {
+					return nil, false, false
+				}
+				order.retire(order.active)
+				order.active = token
+				order.activeStartedAt = generation
+				order.observe(generation)
+				startedPrompt = true
+			} else if order.activeStartedAt.IsZero() && !generation.IsZero() {
+				order.activeStartedAt = generation
+				order.observe(generation)
+			}
 		} else {
-			t.settled[key] = token
+			if order.isRetired(token) {
+				return nil, false, false
+			}
+			if order.active != token {
+				// A terminal hook for another prompt may race ahead of that
+				// prompt's first heartbeat. It may supersede an active prompt
+				// only when it carries a newer, comparable generation. For
+				// legacy token-only clients, a terminal-first update remains
+				// valid when no generated ordering has been established.
+				allowUnordered := order.active == "" && order.latestStartedAt.IsZero()
+				if !(generation.IsZero() && allowUnordered) &&
+					!order.canSupersede(generation, false) {
+					return nil, false, false
+				}
+				order.retire(order.active)
+				order.active = token
+				order.activeStartedAt = generation
+				order.observe(generation)
+			} else if order.activeStartedAt.IsZero() && !generation.IsZero() {
+				order.activeStartedAt = generation
+				order.observe(generation)
+			}
+			if order.active == token {
+				order.active = ""
+				order.activeStartedAt = time.Time{}
+			}
+			order.retire(token)
 		}
-	} else if state != piActivityWorking {
-		delete(t.settled, key)
+		if now.After(order.updatedAt) {
+			order.updatedAt = now
+		}
+	} else if order := t.promptOrder[key]; order != nil && (order.active != "" || len(order.retired) > 0) {
+		// Once an integration has supplied ordered prompt tokens, an unversioned
+		// update for the same key cannot safely supersede that state. Tokenless
+		// integrations continue to work on keys that have never used ordering.
+		return nil, false, false
 	}
 	previous, exists := t.activities[key]
-	startedWorking := state == piActivityWorking && (!exists || previous.State != piActivityWorking)
+	startedWorking := state == piActivityWorking &&
+		(startedPrompt || (token == "" && (!exists || previous.State != piActivityWorking)))
 	if state == piActivityIdle {
 		if exists {
 			delete(t.activities, key)
@@ -133,24 +219,65 @@ func (t *piActivityTracker) list(now time.Time) []piThreadActivity {
 	for key, activity := range t.activities {
 		if activity.State == piActivityWorking && now.Sub(activity.UpdatedAt) > piWorkingTimeout {
 			delete(t.activities, key)
-			delete(t.settled, key)
 			removedStaleActivity = true
 		}
 	}
+	for key, order := range t.promptOrder {
+		if order.updatedAt.IsZero() || now.Sub(order.updatedAt) <= piActivityOrderRetention {
+			continue
+		}
+		delete(t.promptOrder, key)
+	}
 	activities := t.snapshotLocked()
 	if removedStaleActivity {
-		t.changes.Publish(activities)
+		t.changes.Publish(struct{}{})
 	}
 	return activities
 }
 
-func (t *piActivityTracker) subscribe() (<-chan []piThreadActivity, func()) {
+func (t *piActivityTracker) subscribe() (<-chan struct{}, func()) {
 	subscription := t.changes.Subscribe()
 	return subscription.Events(), subscription.Close
 }
 
 func (t *piActivityTracker) notifyLocked() {
-	t.changes.Publish(t.snapshotLocked())
+	t.changes.Publish(struct{}{})
+}
+
+func (o *piActivityPromptOrder) isRetired(token string) bool {
+	if token == "" {
+		return false
+	}
+	for _, retired := range o.retired {
+		if retired == token {
+			return true
+		}
+	}
+	return false
+}
+
+func (o *piActivityPromptOrder) retire(token string) {
+	if token == "" || o.isRetired(token) {
+		return
+	}
+	o.retired = append(o.retired, token)
+	if len(o.retired) > maxPiActivityRetiredTokens {
+		copy(o.retired, o.retired[len(o.retired)-maxPiActivityRetiredTokens:])
+		o.retired = o.retired[:maxPiActivityRetiredTokens]
+	}
+}
+
+func (o *piActivityPromptOrder) canSupersede(startedAt time.Time, allowUnordered bool) bool {
+	if startedAt.IsZero() {
+		return allowUnordered && o.latestStartedAt.IsZero()
+	}
+	return o.latestStartedAt.IsZero() || startedAt.After(o.latestStartedAt)
+}
+
+func (o *piActivityPromptOrder) observe(startedAt time.Time) {
+	if startedAt.After(o.latestStartedAt) {
+		o.latestStartedAt = startedAt
+	}
 }
 
 func (t *piActivityTracker) snapshotLocked() []piThreadActivity {
@@ -190,9 +317,13 @@ func (t *piActivityTracker) acknowledge(projectID, threadID string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	removedActivity := false
+	acknowledgedAt := time.Now().UTC()
 	for key, activity := range t.activities {
 		if key.projectID == projectID && key.threadID == threadID && activity.State == piActivityFinished {
 			delete(t.activities, key)
+			if order := t.promptOrder[key]; order != nil && acknowledgedAt.After(order.updatedAt) {
+				order.updatedAt = acknowledgedAt
+			}
 			removedActivity = true
 		}
 	}
@@ -207,13 +338,13 @@ func (t *piActivityTracker) removeThread(projectID, threadID string) {
 	for key := range t.activities {
 		if key.projectID == projectID && key.threadID == threadID {
 			delete(t.activities, key)
-			delete(t.settled, key)
+			delete(t.promptOrder, key)
 			removedActivity = true
 		}
 	}
-	for key := range t.settled {
+	for key := range t.promptOrder {
 		if key.projectID == projectID && key.threadID == threadID {
-			delete(t.settled, key)
+			delete(t.promptOrder, key)
 		}
 	}
 	if removedActivity {
@@ -231,9 +362,9 @@ func (t *piActivityTracker) removeProject(projectID string) {
 			removedActivity = true
 		}
 	}
-	for key := range t.settled {
+	for key := range t.promptOrder {
 		if key.projectID == projectID {
-			delete(t.settled, key)
+			delete(t.promptOrder, key)
 		}
 	}
 	if removedActivity {
@@ -269,8 +400,8 @@ func (s *Server) streamPiActivityWithInterval(w http.ResponseWriter, r *http.Req
 		select {
 		case <-r.Context().Done():
 			return
-		case activities, open := <-updates:
-			if !open || writePiActivityEvent(w, s.clientPiActivities(activities)) != nil {
+		case _, open := <-updates:
+			if !open || writePiActivityEvent(w, s.clientPiActivities(s.piActivity.list(time.Now()))) != nil {
 				return
 			}
 			flusher.Flush()
@@ -332,10 +463,6 @@ func (s *Server) updateAgentActivity(w http.ResponseWriter, r *http.Request, age
 		writeError(w, http.StatusBadRequest, "Unknown "+label+" activity state.")
 		return
 	}
-	if input.PromptStartedAt != nil && input.State != piActivityWorking {
-		writeError(w, http.StatusBadRequest, "A prompt start can only be reported with working activity.")
-		return
-	}
 	if len(input.Token) > maxPiActivityTokenLength || len(input.Session) > maxPiActivityTokenLength {
 		writeError(w, http.StatusBadRequest, "The "+label+" activity identifiers are too long.")
 		return
@@ -350,10 +477,27 @@ func (s *Server) updateAgentActivity(w http.ResponseWriter, r *http.Request, age
 		activityAgent = requestedAgent
 	}
 	now := time.Now().UTC()
-	activity, startedWorking, applied := s.piActivity.updateAgentToken(projectID, threadID, activityAgent, input.Session, input.Token, input.State, now)
+	promptStartedAt := input.PromptStartedAt
+	if promptStartedAt != nil {
+		normalized := promptStartedAt.UTC()
+		if normalized.After(now) {
+			normalized = now
+		}
+		promptStartedAt = &normalized
+	}
+	activity, startedWorking, applied := s.piActivity.updateAgentTokenAt(
+		projectID,
+		threadID,
+		activityAgent,
+		input.Session,
+		input.Token,
+		promptStartedAt,
+		input.State,
+		now,
+	)
 	if !applied {
-		// A heartbeat that was already in flight when the turn ended. Ignoring it
-		// keeps the finished indicator from flapping back to working.
+		// A delayed update from a settled or older prompt. Ignoring it keeps the
+		// indicator from flapping between prompt states.
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -368,17 +512,17 @@ func (s *Server) updateAgentActivity(w http.ResponseWriter, r *http.Request, age
 		}
 	}
 
-	promptedAt := input.PromptStartedAt
-	if promptedAt == nil && startedWorking {
-		// Compatibility for already-running integrations that predate explicit
-		// prompt timestamps. Repeated working heartbeats do not take this path.
-		promptedAt = &now
+	var promptedAt *time.Time
+	if input.State == piActivityWorking {
+		promptedAt = promptStartedAt
+		if promptedAt == nil && startedWorking {
+			// Compatibility for already-running integrations that predate explicit
+			// prompt timestamps. Repeated working heartbeats do not take this path.
+			promptedAt = &now
+		}
 	}
 	if promptedAt != nil && thread.ParentThreadID == "" {
 		promptTime := promptedAt.UTC()
-		if promptTime.After(now) {
-			promptTime = now
-		}
 		if thread.LastPromptAt == nil || promptTime.After(*thread.LastPromptAt) {
 			if _, err := s.projects.RecordThreadPrompt(projectID, threadID, promptTime); err != nil {
 				writeError(w, http.StatusInternalServerError, "Could not record thread prompt activity.")

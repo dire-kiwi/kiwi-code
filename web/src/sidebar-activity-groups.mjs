@@ -1,3 +1,5 @@
+import { activityDisplayThread } from './sidebar-thread-activity.mjs'
+
 export const recentThreadLimit = 8
 
 function parsedTime(value) {
@@ -30,8 +32,10 @@ function publicEntry({ projectId, threadId, at }) {
  */
 export function activityViewGroups(projects, activities, recentLimit = recentThreadLimit) {
   const threadsByKey = new Map()
+  const threadsByProject = new Map()
   let order = 0
   for (const project of projects) {
+    threadsByProject.set(project.id, project.threads)
     for (const thread of project.threads) {
       threadsByKey.set(entryKey(project.id, thread.id), { projectId: project.id, thread, order: order++ })
     }
@@ -39,20 +43,28 @@ export function activityViewGroups(projects, activities, recentLimit = recentThr
 
   const included = new Set()
   const collectActivityEntries = (state) => {
-    const entries = []
+    const entriesByKey = new Map()
     for (const activity of activities) {
       if (activity.state !== state) continue
-      const key = entryKey(activity.projectId, activity.threadId)
+      const projectThreads = threadsByProject.get(activity.projectId)
+      const displayThread = projectThreads
+        ? activityDisplayThread(projectThreads, activity)
+        : null
+      if (!displayThread) continue
+      const key = entryKey(activity.projectId, displayThread.id)
       const found = threadsByKey.get(key)
       if (!found || found.thread.archivedAt || included.has(key)) continue
-      included.add(key)
-      entries.push({
+      const entry = {
         projectId: found.projectId,
         threadId: found.thread.id,
         at: parsedTime(activity.updatedAt) ?? threadRecency(found.thread),
         order: found.order,
-      })
+      }
+      const current = entriesByKey.get(key)
+      if (!current || entry.at > current.at) entriesByKey.set(key, entry)
     }
+    const entries = [...entriesByKey.values()]
+    for (const entry of entries) included.add(entryKey(entry.projectId, entry.threadId))
     return entries.sort(byNewestFirst)
   }
 

@@ -47,6 +47,15 @@ import {
   workspacePath,
   workspaceToolFromRoute,
 } from './routes'
+import {
+  piActivityKey,
+  piActivityVersion,
+  reconcileFailedPiAcknowledgements,
+  reconcilePiActivities,
+  restoreAcknowledgedPiActivity,
+  samePiActivities,
+  type PiActivityAcknowledgement,
+} from './pi-activity-reconciliation.mjs'
 import { activityDisplayThreadId } from './sidebar-thread-activity.mjs'
 import type {
   CodingAgentStart,
@@ -96,19 +105,6 @@ function newThreadStartFromState(state: unknown): NewThreadStart | null {
     return null
   }
   return candidate as NewThreadStart
-}
-
-function piActivityKey(projectId: string, threadId: string) {
-  return `${projectId}:${threadId}`
-}
-
-function samePiActivities(current: PiThreadActivity[], next: PiThreadActivity[]) {
-  if (current.length !== next.length) return false
-  return current.every((activity) => next.some((candidate) =>
-    candidate.projectId === activity.projectId
-      && candidate.threadId === activity.threadId
-      && candidate.state === activity.state,
-  ))
 }
 
 function visibleProjectSnapshots(items: Project[]) {
@@ -291,29 +287,53 @@ export default function App() {
   const piActivitiesRef = useRef<PiThreadActivity[]>([])
   const projectsRef = useRef<Project[]>(projects)
   projectsRef.current = projects
-  const pendingPiAcknowledgementsRef = useRef(new Set<string>())
+  const piAcknowledgementsRef = useRef(new Map<string, PiActivityAcknowledgement>())
+  const failedPiAcknowledgementsRef = useRef(new Map<string, string>())
   const previousActiveThreadRef = useRef<string | null>(null)
 
   const workspaceProjectId = workspaceMatch?.params.projectId
   const workspaceThreadId = workspaceMatch?.params.threadId
   const activeTool = workspaceToolFromRoute(workspaceMatch?.params.tool)
 
-  const queuePiAcknowledgement = useCallback((projectId: string, threadId: string) => {
-    const key = piActivityKey(projectId, threadId)
-    if (pendingPiAcknowledgementsRef.current.has(key)) return
+  const queuePiAcknowledgement = useCallback((
+    projectId: string,
+    activity: PiThreadActivity,
+    retryFailed: boolean,
+  ) => {
+    const key = piActivityKey(projectId, activity.threadId)
+    const version = piActivityVersion(activity)
+    if (piAcknowledgementsRef.current.has(key)) return
+    if (!retryFailed && failedPiAcknowledgementsRef.current.get(key) === version) return
 
-    pendingPiAcknowledgementsRef.current.add(key)
+    failedPiAcknowledgementsRef.current.delete(key)
+    const acknowledgement: PiActivityAcknowledgement = {
+      activity,
+      index: piActivitiesRef.current.findIndex((item) =>
+        item.projectId === projectId && item.threadId === activity.threadId),
+    }
+    piAcknowledgementsRef.current.set(key, acknowledgement)
     const nextActivities = piActivitiesRef.current.filter((item) =>
-      item.projectId !== projectId || item.threadId !== threadId,
+      item.projectId !== projectId || item.threadId !== activity.threadId,
     )
     piActivitiesRef.current = nextActivities
     setPiActivities(nextActivities)
-    void acknowledgePiThreadActivity(projectId, threadId)
-      .catch(() => {})
-      .finally(() => pendingPiAcknowledgementsRef.current.delete(key))
+    void acknowledgePiThreadActivity(projectId, activity.threadId).catch(() => {
+      if (piAcknowledgementsRef.current.get(key) !== acknowledgement) return
+      piAcknowledgementsRef.current.delete(key)
+      failedPiAcknowledgementsRef.current.set(key, version)
+      const restoredActivities = restoreAcknowledgedPiActivity(piActivitiesRef.current, acknowledgement)
+      if (!samePiActivities(piActivitiesRef.current, restoredActivities)) {
+        piActivitiesRef.current = restoredActivities
+        setPiActivities(restoredActivities)
+      }
+    })
   }, [])
 
-  const acknowledgeThreadActivity = useCallback((projectId: string, threadId: string) => {
+  const acknowledgeThreadActivity = useCallback((
+    projectId: string,
+    threadId: string,
+    retryFailed = false,
+  ) => {
     const project = projectsRef.current.find((item) => item.id === projectId)
     if (!project) return
     const activities = piActivitiesRef.current.filter((activity) =>
@@ -321,16 +341,17 @@ export default function App() {
         && activity.state === 'finished'
         && activityDisplayThreadId(project.threads, activity) === threadId,
     )
-    for (const activity of activities) queuePiAcknowledgement(projectId, activity.threadId)
+    for (const activity of activities) queuePiAcknowledgement(projectId, activity, retryFailed)
   }, [queuePiAcknowledgement])
 
   // A thread that finishes while it is the active thread stays "finished"
-  // until the user actually interacts with it (select, focus, key, pointer),
+  // until the user actually interacts with it (select, key, pointer, wheel),
   // so it remains visible under "Needs review" — no passive acknowledgment.
   const applyPiActivities = useCallback((nextActivities: PiThreadActivity[]) => {
-    const pending = pendingPiAcknowledgementsRef.current
-    const visibleActivities = nextActivities.filter((activity) =>
-      activity.state === 'working' || !pending.has(piActivityKey(activity.projectId, activity.threadId)),
+    reconcileFailedPiAcknowledgements(nextActivities, failedPiAcknowledgementsRef.current)
+    const visibleActivities = reconcilePiActivities(
+      nextActivities,
+      piAcknowledgementsRef.current,
     )
     if (!samePiActivities(piActivitiesRef.current, visibleActivities)) {
       piActivitiesRef.current = visibleActivities
@@ -580,7 +601,9 @@ export default function App() {
   }
 
   function handleThreadSelected(projectId: string, threadId: string) {
-    acknowledgeThreadActivity(projectId, threadId)
+    // Selecting the row is an explicit retry after a previous acknowledgement
+    // failure; passive workspace interaction does not keep flashing that status.
+    acknowledgeThreadActivity(projectId, threadId, true)
     const tool = selectedProject?.id === projectId && selectedThread?.id === threadId && activeTool
       ? activeTool
       : defaultWorkspaceTool

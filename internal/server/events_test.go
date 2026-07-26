@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,88 @@ import (
 type serverSentEvent struct {
 	Name string
 	Data []byte
+}
+
+type blockingGlobalEventWriter struct {
+	header http.Header
+
+	mu                 sync.Mutex
+	profileEvents      int
+	activityPayloads   [][]byte
+	initialFlush       chan struct{}
+	initialFlushOnce   sync.Once
+	profileBlocked     chan struct{}
+	profileBlockedOnce sync.Once
+	releaseProfile     chan struct{}
+	releaseProfileOnce sync.Once
+	activityWritten    chan struct{}
+}
+
+func newBlockingGlobalEventWriter() *blockingGlobalEventWriter {
+	return &blockingGlobalEventWriter{
+		header:          make(http.Header),
+		initialFlush:    make(chan struct{}),
+		profileBlocked:  make(chan struct{}),
+		releaseProfile:  make(chan struct{}),
+		activityWritten: make(chan struct{}, 8),
+	}
+}
+
+func (w *blockingGlobalEventWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *blockingGlobalEventWriter) WriteHeader(int) {}
+
+func (w *blockingGlobalEventWriter) Flush() {
+	w.initialFlushOnce.Do(func() {
+		close(w.initialFlush)
+	})
+}
+
+func (w *blockingGlobalEventWriter) Write(contents []byte) (int, error) {
+	event := string(contents)
+	blockProfile := false
+	if strings.HasPrefix(event, "event: "+profilesEventName+"\n") {
+		w.mu.Lock()
+		w.profileEvents++
+		blockProfile = w.profileEvents == 2
+		w.mu.Unlock()
+	}
+	if blockProfile {
+		w.profileBlockedOnce.Do(func() {
+			close(w.profileBlocked)
+		})
+		<-w.releaseProfile
+	}
+	if strings.HasPrefix(event, "event: "+piActivityEventName+"\n") {
+		for _, line := range strings.Split(event, "\n") {
+			if payload, ok := strings.CutPrefix(line, "data: "); ok {
+				w.mu.Lock()
+				w.activityPayloads = append(w.activityPayloads, []byte(payload))
+				w.mu.Unlock()
+				w.activityWritten <- struct{}{}
+				break
+			}
+		}
+	}
+	return len(contents), nil
+}
+
+func (w *blockingGlobalEventWriter) activities() [][]byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	result := make([][]byte, len(w.activityPayloads))
+	for index, payload := range w.activityPayloads {
+		result[index] = append([]byte{}, payload...)
+	}
+	return result
+}
+
+func (w *blockingGlobalEventWriter) releaseBlockedProfile() {
+	w.releaseProfileOnce.Do(func() {
+		close(w.releaseProfile)
+	})
 }
 
 func TestGlobalEventStreamFansOutNamedStatusesToEveryClient(t *testing.T) {
@@ -112,6 +195,80 @@ func TestGlobalEventStreamFansOutNamedStatusesToEveryClient(t *testing.T) {
 		event := readServerSentEvent(t, reader)
 		if event.Name != projectsEventName || !strings.Contains(string(event.Data), `"id":"`+thread.ID+`"`) || !strings.Contains(string(event.Data), `"bookmarked":true`) {
 			t.Fatalf("client %d bookmark event = %q %s", index, event.Name, event.Data)
+		}
+	}
+}
+
+func TestGlobalEventStreamDoesNotReplayQueuedActivitySnapshots(t *testing.T) {
+	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := item.Threads[0]
+	tracker := newPiActivityTracker()
+	server := &Server{projects: store, piActivity: tracker}
+	writer := newBlockingGlobalEventWriter()
+	ctx, cancel := context.WithCancel(context.Background())
+	request := httptest.NewRequest(http.MethodGet, "/api/events", nil).WithContext(ctx)
+	streamDone := make(chan struct{})
+	go func() {
+		server.streamEvents(writer, request)
+		close(streamDone)
+	}()
+	defer func() {
+		cancel()
+		writer.releaseBlockedProfile()
+		<-streamDone
+	}()
+
+	select {
+	case <-writer.initialFlush:
+	case <-time.After(time.Second):
+		t.Fatal("global event stream did not write its initial snapshots")
+	}
+	select {
+	case <-writer.activityWritten:
+	case <-time.After(time.Second):
+		t.Fatal("global event stream did not write its initial activity snapshot")
+	}
+
+	if _, err := store.AddProfile("Block activity delivery"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-writer.profileBlocked:
+	case <-time.After(time.Second):
+		t.Fatal("global event stream did not block on the profile update")
+	}
+
+	now := time.Now()
+	tracker.update(item.ID, thread.ID, piActivityWorking, now)
+	tracker.update(item.ID, thread.ID, piActivityFinished, now.Add(time.Millisecond))
+	writer.releaseBlockedProfile()
+
+	for index := 0; index < 2; index++ {
+		select {
+		case <-writer.activityWritten:
+		case <-time.After(time.Second):
+			t.Fatalf("global event stream did not deliver queued invalidation %d", index)
+		}
+	}
+
+	payloads := writer.activities()
+	if len(payloads) < 3 {
+		t.Fatalf("activity event count = %d, want at least 3", len(payloads))
+	}
+	for index, payload := range payloads[len(payloads)-2:] {
+		var activities []piThreadActivity
+		if err := json.Unmarshal(payload, &activities); err != nil {
+			t.Fatal(err)
+		}
+		if len(activities) != 1 || activities[0].State != piActivityFinished {
+			t.Fatalf("queued invalidation %d replayed historical activity: %#v", index, activities)
 		}
 	}
 }

@@ -58,6 +58,15 @@ func TestMaterializeClaudePlugin(t *testing.T) {
 	if err := json.Unmarshal(claudePluginHooks, &hooks); err != nil {
 		t.Fatalf("parse plugin hooks: %v", err)
 	}
+	if bytes.Contains(claudePluginHooks, []byte("idle_prompt")) ||
+		bytes.Contains(claudePluginHooks, []byte("finished-if-active")) ||
+		bytes.Contains(claudePluginHookScript, []byte("finished-if-active")) {
+		t.Fatal("Claude plugin retains an asynchronous idle hook that can finish a newer prompt")
+	}
+	if !bytes.Contains(claudePluginHooks, []byte(`kiwi-code-hook.mjs", "start"`)) ||
+		bytes.Contains(claudePluginHooks, []byte(`kiwi-code-hook.mjs", "heartbeat"`)) {
+		t.Fatal("Claude plugin does not establish activity state synchronously before each turn")
+	}
 	var mcpConfig struct {
 		MCPServers map[string]struct {
 			Command string            `json:"command"`
@@ -579,7 +588,8 @@ func TestClaudePluginHeartbeatReportsPromptStart(t *testing.T) {
 	}))
 	defer activityServer.Close()
 
-	input := `{"session_id":"session-1","prompt_id":"prompt-1"}`
+	startInput := `{"session_id":"session-1","hook_event_name":"UserPromptSubmit","prompt":"fix the status"}`
+	stopInput := `{"session_id":"session-1","hook_event_name":"Stop","stop_hook_active":false}`
 	stateDirectory := t.TempDir()
 	hookEnvironment := append(os.Environ(),
 		"KIWI_CODE_THREAD_ENDPOINT="+activityServer.URL,
@@ -588,19 +598,29 @@ func TestClaudePluginHeartbeatReportsPromptStart(t *testing.T) {
 		"KIWI_CODE_CLAUDE_STATE_DIR="+stateDirectory,
 		"KIWI_CODE_CODING_AGENT="+codingAgentClaude,
 	)
-	ctx, cancel := context.WithCancel(context.Background())
-	command := exec.CommandContext(ctx, nodePath, filepath.Join(pluginRoot, "scripts", "kiwi-code-hook.mjs"), "heartbeat")
-	command.Stdin = strings.NewReader(input)
-	command.Env = hookEnvironment
-	if err := command.Start(); err != nil {
-		cancel()
-		t.Fatal(err)
+	start := exec.Command(nodePath, filepath.Join(pluginRoot, "scripts", "kiwi-code-hook.mjs"), "start")
+	start.Stdin = strings.NewReader(startInput)
+	start.Env = hookEnvironment
+	if output, err := start.CombinedOutput(); err != nil {
+		t.Fatalf("start Claude activity: %v: %s", err, output)
 	}
-	defer func() {
-		cancel()
-		_ = command.Wait()
-	}()
+	var persistedStart struct {
+		Token           string `json:"token"`
+		State           string `json:"state"`
+		PromptStartedAt string `json:"promptStartedAt"`
+	}
+	stateContents, err := os.ReadFile(filepath.Join(stateDirectory, "project-thread-session-1.activity.json"))
+	if err != nil {
+		t.Fatalf("read synchronous Claude start state: %v", err)
+	}
+	if err := json.Unmarshal(stateContents, &persistedStart); err != nil {
+		t.Fatalf("parse synchronous Claude start state: %v", err)
+	}
+	if persistedStart.Token == "" || persistedStart.State != "working" || persistedStart.PromptStartedAt == "" {
+		t.Fatalf("synchronous Claude start state = %#v", persistedStart)
+	}
 
+	var working activityUpdate
 	select {
 	case update := <-updates:
 		if update.State != "working" || update.Agent != codingAgentClaude {
@@ -608,18 +628,22 @@ func TestClaudePluginHeartbeatReportsPromptStart(t *testing.T) {
 		}
 		// The token and session let Kiwi Code drop a heartbeat that was already in
 		// flight when the turn ended, so the sidebar indicator cannot flicker.
-		if update.Token != "prompt-1" || update.Session != "session-1" {
+		if update.Token == "" || update.Session != "session-1" {
 			t.Fatalf("Claude heartbeat identifiers = %#v", update)
+		}
+		if update.Token != persistedStart.Token || update.PromptStartedAt != persistedStart.PromptStartedAt {
+			t.Fatalf("Claude heartbeat did not use synchronous start generation: update=%#v start=%#v", update, persistedStart)
 		}
 		if _, err := time.Parse(time.RFC3339Nano, update.PromptStartedAt); err != nil {
 			t.Fatalf("Claude prompt start time = %q: %v", update.PromptStartedAt, err)
 		}
+		working = update
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for Claude heartbeat")
 	}
 
 	finished := exec.Command(nodePath, filepath.Join(pluginRoot, "scripts", "kiwi-code-hook.mjs"), "finished")
-	finished.Stdin = strings.NewReader(input)
+	finished.Stdin = strings.NewReader(stopInput)
 	finished.Env = hookEnvironment
 	if output, err := finished.CombinedOutput(); err != nil {
 		t.Fatalf("finish Claude activity: %v: %s", err, output)
@@ -631,12 +655,266 @@ func TestClaudePluginHeartbeatReportsPromptStart(t *testing.T) {
 			if update.State != "finished" {
 				continue
 			}
-			if update.Token != "prompt-1" || update.Session != "session-1" {
+			if update.Token != working.Token || update.Session != "session-1" {
 				t.Fatalf("Claude finished identifiers = %#v", update)
+			}
+			if update.PromptStartedAt != working.PromptStartedAt {
+				t.Fatalf("Claude finished generation = %q, want heartbeat generation %q", update.PromptStartedAt, working.PromptStartedAt)
 			}
 			return
 		case <-deadline:
 			t.Fatal("Claude finished hook returned without clearing working activity")
+		}
+	}
+}
+
+func TestClaudePluginTerminalPrefersExplicitPromptOverStaleState(t *testing.T) {
+	nodePath, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	pluginRoot, err := materializeClaudePlugin(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type activityUpdate struct {
+		State           string `json:"state"`
+		Token           string `json:"token"`
+		Session         string `json:"session"`
+		PromptStartedAt string `json:"promptStartedAt"`
+	}
+	updates := make(chan activityUpdate, 1)
+	activityServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var update activityUpdate
+		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+			t.Errorf("decode Claude activity: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		updates <- update
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer activityServer.Close()
+
+	stateDirectory := t.TempDir()
+	staleState := `{"token":"prompt-a","state":"working","promptStartedAt":"2026-01-01T00:00:00Z"}`
+	statePath := filepath.Join(stateDirectory, "project-thread-session-1.activity.json")
+	if err := os.WriteFile(statePath, []byte(staleState), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hookEnvironment := append(os.Environ(),
+		"KIWI_CODE_THREAD_ENDPOINT="+activityServer.URL,
+		"KIWI_CODE_PROJECT_ID=project",
+		"KIWI_CODE_THREAD_ID=thread",
+		"KIWI_CODE_CLAUDE_STATE_DIR="+stateDirectory,
+	)
+	finished := exec.Command(nodePath, filepath.Join(pluginRoot, "scripts", "kiwi-code-hook.mjs"), "finished")
+	finished.Stdin = strings.NewReader(`{"session_id":"session-1","prompt_id":"prompt-b"}`)
+	finished.Env = hookEnvironment
+	if output, err := finished.CombinedOutput(); err != nil {
+		t.Fatalf("finish newer Claude prompt: %v: %s", err, output)
+	}
+
+	select {
+	case update := <-updates:
+		if update.State != "finished" || update.Token != "prompt-b" || update.Session != "session-1" {
+			t.Fatalf("newer terminal update used stale prompt state: %#v", update)
+		}
+		if _, err := time.Parse(time.RFC3339Nano, update.PromptStartedAt); err != nil {
+			t.Fatalf("newer terminal generation = %q: %v", update.PromptStartedAt, err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for newer Claude terminal update")
+	}
+}
+
+func TestClaudePluginLegacyDirectHeartbeatStartsAfterFinishedState(t *testing.T) {
+	nodePath, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	pluginRoot, err := materializeClaudePlugin(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type activityUpdate struct {
+		State           string `json:"state"`
+		Token           string `json:"token"`
+		PromptStartedAt string `json:"promptStartedAt"`
+	}
+	updates := make(chan activityUpdate, 1)
+	activityServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var update activityUpdate
+		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+			t.Errorf("decode Claude activity: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		updates <- update
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer activityServer.Close()
+
+	stateDirectory := t.TempDir()
+	statePath := filepath.Join(stateDirectory, "project-thread-session-1.activity.json")
+	priorFinished := `{"token":"prior-prompt","state":"finished","promptStartedAt":"2026-01-01T00:00:00Z"}`
+	if err := os.WriteFile(statePath, []byte(priorFinished), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hookEnvironment := append(os.Environ(),
+		"KIWI_CODE_THREAD_ENDPOINT="+activityServer.URL,
+		"KIWI_CODE_PROJECT_ID=project",
+		"KIWI_CODE_THREAD_ID=thread",
+		"KIWI_CODE_CLAUDE_STATE_DIR="+stateDirectory,
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	command := exec.CommandContext(ctx, nodePath, filepath.Join(pluginRoot, "scripts", "kiwi-code-hook.mjs"), "heartbeat")
+	command.Stdin = strings.NewReader(`{"session_id":"session-1","hook_event_name":"UserPromptSubmit","prompt":"new prompt"}`)
+	command.Env = hookEnvironment
+	if err := command.Start(); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		_ = command.Wait()
+	})
+
+	select {
+	case update := <-updates:
+		if update.State != "working" || update.Token == "" || update.Token == "prior-prompt" || update.PromptStartedAt == "" {
+			t.Fatalf("legacy direct heartbeat did not start a fresh prompt: %#v", update)
+		}
+		contents, err := os.ReadFile(statePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var persisted activityUpdate
+		if err := json.Unmarshal(contents, &persisted); err != nil {
+			t.Fatal(err)
+		}
+		if persisted != update {
+			t.Fatalf("legacy heartbeat state = %#v, want %#v", persisted, update)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("legacy direct heartbeat exited instead of replacing prior finished state")
+	}
+}
+
+func TestClaudePluginDelayedHeartbeatCannotReplaceNewerPromptState(t *testing.T) {
+	nodePath, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	pluginRoot, err := materializeClaudePlugin(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type activityUpdate struct {
+		State           string `json:"state"`
+		Token           string `json:"token"`
+		PromptStartedAt string `json:"promptStartedAt"`
+	}
+	updates := make(chan activityUpdate, 16)
+	activityServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var update activityUpdate
+		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+			t.Errorf("decode Claude activity: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		updates <- update
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer activityServer.Close()
+
+	stateDirectory := t.TempDir()
+	hookEnvironment := append(os.Environ(),
+		"KIWI_CODE_THREAD_ENDPOINT="+activityServer.URL,
+		"KIWI_CODE_PROJECT_ID=project",
+		"KIWI_CODE_THREAD_ID=thread",
+		"KIWI_CODE_CLAUDE_STATE_DIR="+stateDirectory,
+	)
+	scriptPath := filepath.Join(pluginRoot, "scripts", "kiwi-code-hook.mjs")
+	startInput := `{"session_id":"session-1","hook_event_name":"UserPromptSubmit","prompt":"fix status"}`
+	stopInput := `{"session_id":"session-1","hook_event_name":"Stop","stop_hook_active":false}`
+	runHook := func(action, input string) {
+		t.Helper()
+		command := exec.Command(nodePath, scriptPath, action)
+		command.Stdin = strings.NewReader(input)
+		command.Env = hookEnvironment
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("%s Claude hook: %v: %s", action, err, output)
+		}
+	}
+	type persistedActivity struct {
+		Token           string `json:"token"`
+		State           string `json:"state"`
+		PromptStartedAt string `json:"promptStartedAt"`
+	}
+	statePath := filepath.Join(stateDirectory, "project-thread-session-1.activity.json")
+	readActivity := func() persistedActivity {
+		t.Helper()
+		contents, err := os.ReadFile(statePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var activity persistedActivity
+		if err := json.Unmarshal(contents, &activity); err != nil {
+			t.Fatal(err)
+		}
+		return activity
+	}
+
+	runHook("start", startInput)
+	promptA := readActivity()
+	runHook("finished", stopInput)
+	runHook("start", startInput)
+	promptB := readActivity()
+	if promptA.Token == "" || promptB.Token == "" || promptA.Token == promptB.Token {
+		t.Fatalf("prompt generations were not distinct: A=%#v B=%#v", promptA, promptB)
+	}
+
+	delayedHeartbeat, err := json.Marshal(map[string]any{
+		"session_id":             "session-1",
+		"kiwi_activity_token":    promptA.Token,
+		"kiwi_prompt_started_at": promptA.PromptStartedAt,
+		"kiwi_parent_pid":        os.Getpid(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, nodePath, scriptPath, "heartbeat")
+	command.Stdin = bytes.NewReader(delayedHeartbeat)
+	command.Env = hookEnvironment
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("delayed prompt A heartbeat did not exit: %v: %s", err, output)
+	}
+
+	afterDelayedHeartbeat := readActivity()
+	if afterDelayedHeartbeat != promptB {
+		t.Fatalf("delayed prompt A heartbeat replaced prompt B state: got=%#v want=%#v", afterDelayedHeartbeat, promptB)
+	}
+
+	runHook("finished", stopInput)
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.State != "finished" || update.Token != promptB.Token {
+				continue
+			}
+			if update.PromptStartedAt != promptB.PromptStartedAt {
+				t.Fatalf("prompt B terminal generation = %q, want %q", update.PromptStartedAt, promptB.PromptStartedAt)
+			}
+			return
+		case <-deadline:
+			t.Fatal("Stop B did not report prompt B after delayed prompt A heartbeat")
 		}
 	}
 }

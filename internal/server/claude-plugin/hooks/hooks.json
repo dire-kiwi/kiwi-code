@@ -7,9 +7,8 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/kiwi-code-hook.mjs", "heartbeat"],
-            "async": true,
-            "timeout": 86400
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/kiwi-code-hook.mjs", "start"],
+            "timeout": 5
           },
           {
             "type": "command",
@@ -40,20 +39,6 @@
             "type": "command",
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/kiwi-code-hook.mjs", "finished"],
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "idle_prompt",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/kiwi-code-hook.mjs", "finished-if-active"],
-            "async": true,
             "timeout": 10
           }
         ]

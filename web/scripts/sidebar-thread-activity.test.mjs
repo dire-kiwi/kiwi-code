@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  activityDisplayThread,
   activityDisplayThreadId,
+  sidebarProjectActivityCounts,
   sidebarThreadActivity,
 } from '../src/sidebar-thread-activity.mjs'
 
@@ -66,4 +68,78 @@ test('malformed parent links do not propagate completion to an unrelated thread'
   const malformedThreads = [...threads, { id: 'orphan', parentThreadId: 'missing' }]
 
   assert.equal(activityDisplayThreadId(malformedThreads, orphanFinished), 'orphan')
+  assert.equal(activityDisplayThread(malformedThreads, orphanFinished)?.id, 'orphan')
+})
+
+test('cyclic parent links terminate without inventing a display thread', () => {
+  const cyclicThreads = [
+    { id: 'cycle-a', parentThreadId: 'cycle-b' },
+    { id: 'cycle-b', parentThreadId: 'cycle-a' },
+  ]
+  const cycleFinished = activity('cycle-a', 'finished')
+
+  assert.equal(activityDisplayThreadId(cyclicThreads, cycleFinished), 'cycle-a')
+  assert.equal(activityDisplayThread(cyclicThreads, cycleFinished)?.id, 'cycle-a')
+})
+
+test('archived or missing source threads cannot roll activity up to a visible root', () => {
+  const archivedChildThreads = threads.map((thread) =>
+    thread.id === 'child' ? { ...thread, archivedAt: '2026-07-26T00:00:00Z' } : thread)
+  const childFinished = activity('child', 'finished')
+  const missingFinished = activity('missing', 'finished')
+
+  assert.equal(activityDisplayThread(archivedChildThreads, childFinished), null)
+  assert.equal(activityDisplayThread(threads, missingFinished), null)
+  assert.equal(sidebarThreadActivity(archivedChildThreads, [childFinished], projectId, 'root').activity, null)
+  assert.equal(sidebarThreadActivity(threads, [missingFinished], projectId, 'root').activity, null)
+})
+
+test('activity is excluded when its rolled-up display thread is archived', () => {
+  const archivedRootThreads = threads.map((thread) =>
+    thread.id === 'root' ? { ...thread, archivedAt: '2026-07-26T00:00:00Z' } : thread)
+  const childFinished = activity('child', 'finished')
+
+  assert.equal(activityDisplayThread(archivedRootThreads, childFinished), null)
+  assert.equal(sidebarThreadActivity(archivedRootThreads, [childFinished], projectId, 'root').activity, null)
+})
+
+test('activity cannot roll through an archived intermediate ancestor', () => {
+  const archivedIntermediateThreads = threads.map((thread) =>
+    thread.id === 'child' ? { ...thread, archivedAt: '2026-07-26T00:00:00Z' } : thread)
+  const grandchildFinished = activity('grandchild', 'finished')
+
+  assert.equal(activityDisplayThreadId(archivedIntermediateThreads, grandchildFinished), 'root')
+  assert.equal(activityDisplayThread(archivedIntermediateThreads, grandchildFinished), null)
+  assert.equal(
+    sidebarThreadActivity(archivedIntermediateThreads, [grandchildFinished], projectId, 'root').activity,
+    null,
+  )
+  assert.equal(
+    sidebarProjectActivityCounts(
+      [{ id: projectId, threads: archivedIntermediateThreads }],
+      [grandchildFinished],
+    ).has(projectId),
+    false,
+  )
+})
+
+test('project counts exclude archived and missing source or display threads', () => {
+  const archivedChildThreads = threads.map((thread) =>
+    thread.id === 'child' ? { ...thread, archivedAt: '2026-07-26T00:00:00Z' } : thread)
+  const archivedRootThreads = threads.map((thread) =>
+    thread.id === 'root' ? { ...thread, archivedAt: '2026-07-26T00:00:00Z' } : thread)
+  const sourceCounts = sidebarProjectActivityCounts(
+    [{ id: projectId, threads: archivedChildThreads }],
+    [
+      activity('child', 'finished'),
+      activity('missing', 'working'),
+    ],
+  )
+  const displayCounts = sidebarProjectActivityCounts(
+    [{ id: projectId, threads: archivedRootThreads }],
+    [activity('child', 'finished')],
+  )
+
+  assert.equal(sourceCounts.has(projectId), false)
+  assert.equal(displayCounts.has(projectId), false)
 })

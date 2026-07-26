@@ -153,8 +153,8 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			flusher.Flush()
-		case activities, open := <-activityUpdates:
-			if !open || writeNamedEvent(w, piActivityEventName, s.clientPiActivities(activities)) != nil {
+		case _, open := <-activityUpdates:
+			if !open || writeNamedEvent(w, piActivityEventName, s.clientPiActivities(s.piActivity.list(time.Now()))) != nil {
 				return
 			}
 			flusher.Flush()

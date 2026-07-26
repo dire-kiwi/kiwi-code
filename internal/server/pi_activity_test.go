@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -79,6 +80,21 @@ func TestPiActivityAPI(t *testing.T) {
 		t.Fatalf("regular Claude finished activity was not retained: %#v", activities)
 	}
 	updatePiActivityForTest(t, handler, claudeActivityPath, `{"state":"idle","agent":"claude"}`, http.StatusNoContent)
+
+	orderedWorking := `{"state":"working","session":"session-1","token":"prompt-1"}`
+	orderedFinished := `{"state":"finished","session":"session-1","token":"prompt-1"}`
+	updatePiActivityForTest(t, handler, claudeActivityPath, orderedWorking, http.StatusOK)
+	updatePiActivityForTest(t, handler, claudeActivityPath, orderedFinished, http.StatusOK)
+	acknowledgeResponse = httptest.NewRecorder()
+	handler.ServeHTTP(acknowledgeResponse, httptest.NewRequest(http.MethodDelete, activityPath, nil))
+	if acknowledgeResponse.Code != http.StatusNoContent {
+		t.Fatalf("acknowledge ordered finished status = %d", acknowledgeResponse.Code)
+	}
+	updatePiActivityForTest(t, handler, claudeActivityPath, orderedFinished, http.StatusNoContent)
+	if activities = listPiActivityForTest(t, handler); len(activities) != 0 {
+		t.Fatalf("duplicate terminal update resurrected acknowledged status: %#v", activities)
+	}
+
 	updatePiActivityForTest(t, handler, claudeActivityPath, `{"state":"working","agent":"pi"}`, http.StatusBadRequest)
 	updatePiActivityForTest(t, handler, activityPath, `{"state":"working","agent":"claude-gpt"}`, http.StatusBadRequest)
 }
@@ -133,8 +149,15 @@ func TestAgentActivityRecordsPromptRecencyWithoutAdvancingOnHeartbeats(t *testin
 		t.Fatalf("legacy next prompt time = %v, want after %v", legacyNextPrompt.LastPromptAt, promptedAt)
 	}
 
-	invalidFinished := `{"state":"finished","promptStartedAt":"` + promptedAt.Format(time.RFC3339Nano) + `"}`
-	updatePiActivityForTest(t, handler, activityPath, invalidFinished, http.StatusBadRequest)
+	generatedFinished := `{"state":"finished","promptStartedAt":"` + promptedAt.Format(time.RFC3339Nano) + `"}`
+	updatePiActivityForTest(t, handler, activityPath, generatedFinished, http.StatusOK)
+	_, afterGeneratedFinished, err := store.GetThread(item.ID, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterGeneratedFinished.LastPromptAt == nil || !afterGeneratedFinished.LastPromptAt.Equal(*legacyNextPrompt.LastPromptAt) {
+		t.Fatalf("terminal generation advanced prompt time to %v", afterGeneratedFinished.LastPromptAt)
+	}
 }
 
 func TestWorkingActivityReopensACompletedChildThread(t *testing.T) {
@@ -224,9 +247,125 @@ func TestFinishedActivityIgnoresLateHeartbeatForTheSamePrompt(t *testing.T) {
 	if _, _, applied := tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-2", piActivityWorking, now.Add(4*time.Second)); !applied {
 		t.Fatal("the next prompt could not start working")
 	}
+	if _, _, applied := tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityFinished, now.Add(5*time.Second)); applied {
+		t.Fatal("a delayed terminal update from the previous prompt was applied")
+	}
+	if _, _, applied := tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityWorking, now.Add(6*time.Second)); applied {
+		t.Fatal("a delayed heartbeat from the previous prompt was applied")
+	}
 	activities = tracker.list(now.Add(5 * time.Second))
 	if len(activities) != 1 || activities[0].State != piActivityWorking {
-		t.Fatalf("the next prompt did not show as working: %#v", activities)
+		t.Fatalf("the next prompt was replaced by an older update: %#v", activities)
+	}
+
+	tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-2", piActivityFinished, now.Add(7*time.Second))
+	tracker.acknowledge("project", "thread")
+	if _, _, applied := tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-2", piActivityFinished, now.Add(8*time.Second)); applied {
+		t.Fatal("a duplicate terminal update was applied after acknowledgement")
+	}
+	if activities = tracker.list(now.Add(9 * time.Second)); len(activities) != 0 {
+		t.Fatalf("a duplicate terminal update resurrected acknowledged activity: %#v", activities)
+	}
+}
+
+func TestNewPromptSupersedesAnUnsettledPrompt(t *testing.T) {
+	tracker := newPiActivityTracker()
+	now := time.Now()
+	tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityWorking, now)
+	tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-2", piActivityWorking, now.Add(time.Second))
+
+	if _, _, applied := tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityFinished, now.Add(2*time.Second)); applied {
+		t.Fatal("the superseded prompt was allowed to finish the current prompt")
+	}
+	if _, _, applied := tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityWorking, now.Add(3*time.Second)); applied {
+		t.Fatal("the superseded prompt was allowed to resume")
+	}
+	activities := tracker.list(now.Add(4 * time.Second))
+	if len(activities) != 1 || activities[0].State != piActivityWorking {
+		t.Fatalf("superseded prompt changed current activity: %#v", activities)
+	}
+}
+
+func TestNewerTerminalCanArriveBeforeItsFirstWorkingUpdate(t *testing.T) {
+	tracker := newPiActivityTracker()
+	now := time.Now().UTC()
+	promptAStartedAt := now.Add(-4 * time.Second)
+	promptBStartedAt := now.Add(-2 * time.Second)
+
+	if _, _, applied := tracker.updateAgentTokenAt(
+		"project", "thread", codingAgentClaude, "session", "prompt-a",
+		&promptAStartedAt, piActivityWorking, now.Add(-3*time.Second),
+	); !applied {
+		t.Fatal("prompt A did not start")
+	}
+	if _, _, applied := tracker.updateAgentTokenAt(
+		"project", "thread", codingAgentClaude, "session", "prompt-b",
+		&promptBStartedAt, piActivityFinished, now.Add(-time.Second),
+	); !applied {
+		t.Fatal("newer terminal update was rejected before its first working update")
+	}
+
+	activities := tracker.list(now)
+	if len(activities) != 1 || activities[0].State != piActivityFinished {
+		t.Fatalf("terminal-first prompt did not settle activity: %#v", activities)
+	}
+	if _, _, applied := tracker.updateAgentTokenAt(
+		"project", "thread", codingAgentClaude, "session", "prompt-b",
+		&promptBStartedAt, piActivityWorking, now.Add(time.Second),
+	); applied {
+		t.Fatal("late first heartbeat resurrected terminal-first prompt B")
+	}
+	if _, _, applied := tracker.updateAgentTokenAt(
+		"project", "thread", codingAgentClaude, "session", "prompt-a",
+		&promptAStartedAt, piActivityFinished, now.Add(2*time.Second),
+	); applied {
+		t.Fatal("older terminal update replaced prompt B")
+	}
+}
+
+func TestOlderGeneratedTerminalCannotFinishANewerWorkingPrompt(t *testing.T) {
+	tracker := newPiActivityTracker()
+	now := time.Now().UTC()
+	promptAStartedAt := now.Add(-2 * time.Second)
+	promptBStartedAt := now.Add(-time.Second)
+
+	tracker.updateAgentTokenAt(
+		"project", "thread", codingAgentClaude, "session", "prompt-b",
+		&promptBStartedAt, piActivityWorking, now,
+	)
+	if _, _, applied := tracker.updateAgentTokenAt(
+		"project", "thread", codingAgentClaude, "session", "prompt-a",
+		&promptAStartedAt, piActivityFinished, now.Add(time.Second),
+	); applied {
+		t.Fatal("older terminal update finished newer working prompt")
+	}
+	activities := tracker.list(now.Add(2 * time.Second))
+	if len(activities) != 1 || activities[0].State != piActivityWorking {
+		t.Fatalf("older terminal changed newer activity: %#v", activities)
+	}
+}
+
+func TestFuturePromptGenerationIsClampedBeforeOrdering(t *testing.T) {
+	tracker := newPiActivityTracker()
+	now := time.Now().UTC()
+	future := now.Add(24 * time.Hour)
+	if _, _, applied := tracker.updateAgentTokenAt(
+		"project", "thread", codingAgentClaude, "session", "prompt-a",
+		&future, piActivityWorking, now,
+	); !applied {
+		t.Fatal("future-skewed prompt A did not start")
+	}
+
+	promptBStartedAt := now.Add(time.Second)
+	if _, _, applied := tracker.updateAgentTokenAt(
+		"project", "thread", codingAgentClaude, "session", "prompt-b",
+		&promptBStartedAt, piActivityWorking, now.Add(2*time.Second),
+	); !applied {
+		t.Fatal("future client timestamp pinned prompt ordering")
+	}
+	activities := tracker.list(now.Add(3 * time.Second))
+	if len(activities) != 1 || activities[0].State != piActivityWorking {
+		t.Fatalf("newer prompt did not replace future-skewed prompt: %#v", activities)
 	}
 }
 
@@ -343,7 +482,7 @@ func TestPiActivityEventStream(t *testing.T) {
 	}
 }
 
-func TestPiActivitySubscriptionPreservesRapidTransitions(t *testing.T) {
+func TestPiActivitySubscriptionSignalsRapidTransitions(t *testing.T) {
 	tracker := newPiActivityTracker()
 	updates, unsubscribe := tracker.subscribe()
 	defer unsubscribe()
@@ -353,26 +492,15 @@ func TestPiActivitySubscriptionPreservesRapidTransitions(t *testing.T) {
 	tracker.update("project", "thread", piActivityFinished, now.Add(time.Millisecond))
 	tracker.update("project", "thread", piActivityIdle, now.Add(2*time.Millisecond))
 
-	wants := []struct {
-		length int
-		state  piActivityState
-	}{
-		{length: 1, state: piActivityWorking},
-		{length: 1, state: piActivityFinished},
-		{length: 0},
-	}
-	for index, want := range wants {
+	for index := 0; index < 3; index++ {
 		select {
-		case activities := <-updates:
-			if len(activities) != want.length {
-				t.Fatalf("transition %d = %#v, want length %d", index, activities, want.length)
-			}
-			if want.length > 0 && activities[0].State != want.state {
-				t.Fatalf("transition %d state = %s, want %s", index, activities[0].State, want.state)
-			}
+		case <-updates:
 		case <-time.After(time.Second):
-			t.Fatalf("timed out waiting for transition %d", index)
+			t.Fatalf("timed out waiting for transition invalidation %d", index)
 		}
+	}
+	if activities := tracker.list(now.Add(3 * time.Millisecond)); len(activities) != 0 {
+		t.Fatalf("invalidations did not resolve to current idle state: %#v", activities)
 	}
 }
 
@@ -382,12 +510,11 @@ func TestPiActivitySubscriptionPublishesWorkingHeartbeats(t *testing.T) {
 	defer unsubscribe()
 
 	now := time.Now()
-	tracker.update("project", "thread", piActivityWorking, now)
-	tracker.update("project", "thread", piActivityWorking, now.Add(time.Second))
-
 	for index, wantTime := range []time.Time{now, now.Add(time.Second)} {
+		tracker.update("project", "thread", piActivityWorking, wantTime)
 		select {
-		case activities := <-updates:
+		case <-updates:
+			activities := tracker.list(wantTime)
 			if len(activities) != 1 || activities[0].State != piActivityWorking || !activities[0].UpdatedAt.Equal(wantTime.UTC()) {
 				t.Fatalf("heartbeat %d = %#v, want updatedAt %s", index, activities, wantTime.UTC())
 			}
@@ -456,6 +583,63 @@ func TestPiWorkingActivityExpiresWithoutHeartbeat(t *testing.T) {
 	tracker.update("project", "thread", piActivityWorking, now.Add(-piWorkingTimeout-time.Second))
 	if activities := tracker.list(now); len(activities) != 0 {
 		t.Fatalf("stale working activity was not removed: %#v", activities)
+	}
+}
+
+func TestExpiredOrderedActivityCanResumeAndFinish(t *testing.T) {
+	tracker := newPiActivityTracker()
+	now := time.Now().UTC()
+	promptStartedAt := now.Add(-piWorkingTimeout - 2*time.Second)
+	tracker.updateAgentTokenAt(
+		"project", "thread", codingAgentClaude, "session", "prompt-1",
+		&promptStartedAt, piActivityWorking, promptStartedAt,
+	)
+	if activities := tracker.list(now); len(activities) != 0 {
+		t.Fatalf("stale ordered activity was not removed: %#v", activities)
+	}
+	if _, startedWorking, applied := tracker.updateAgentTokenAt(
+		"project", "thread", codingAgentClaude, "session", "prompt-1",
+		&promptStartedAt, piActivityWorking, now.Add(time.Second),
+	); !applied {
+		t.Fatal("heartbeat could not recover after a temporary sleep timeout")
+	} else if startedWorking {
+		t.Fatal("lease recovery was misclassified as a new user prompt")
+	}
+	if activities := tracker.list(now.Add(2 * time.Second)); len(activities) != 1 || activities[0].State != piActivityWorking {
+		t.Fatalf("recovered ordered activity did not resume working: %#v", activities)
+	}
+	if _, _, applied := tracker.updateAgentTokenAt(
+		"project", "thread", codingAgentClaude, "session", "prompt-1",
+		&promptStartedAt, piActivityFinished, now.Add(3*time.Second),
+	); !applied {
+		t.Fatal("terminal update could not settle a recovered activity")
+	}
+	if activities := tracker.list(now.Add(4 * time.Second)); len(activities) != 1 || activities[0].State != piActivityFinished {
+		t.Fatalf("recovered ordered activity did not finish: %#v", activities)
+	}
+}
+
+func TestPromptOrderingStateExpiresAfterBoundedRetention(t *testing.T) {
+	tracker := newPiActivityTracker()
+	now := time.Now().UTC()
+	old := now.Add(-piActivityOrderRetention - time.Second)
+	for index := 0; index < 100; index++ {
+		tracker.updateAgentToken(
+			"project",
+			"thread",
+			codingAgentClaude,
+			fmt.Sprintf("session-%d", index),
+			fmt.Sprintf("prompt-%d", index),
+			piActivityIdle,
+			old,
+		)
+	}
+	if got := len(tracker.promptOrder); got != 100 {
+		t.Fatalf("prompt ordering entries = %d, want 100 before expiry", got)
+	}
+	tracker.list(now)
+	if got := len(tracker.promptOrder); got != 0 {
+		t.Fatalf("expired prompt ordering entries = %d, want 0", got)
 	}
 }
 
