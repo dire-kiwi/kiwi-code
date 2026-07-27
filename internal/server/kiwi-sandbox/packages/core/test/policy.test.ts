@@ -230,6 +230,21 @@ test("simple command detector rejects composition and substitution", () => {
   assert.equal(isSimpleCommand("gh status > /tmp/result"), false);
 });
 
+test("Seatbelt profiles allow metadata globally without allowing contents or writes globally", () => {
+  const profile = createSeatbeltProfile({
+    rule: "defaults",
+    unrestricted: false,
+    read: [],
+    write: [],
+    deniedWrite: [],
+    network: false,
+  });
+  assert.match(profile, /^\(allow file-read-metadata\)$/m);
+  assert.doesNotMatch(profile, /^\(allow file-read-data\)$/m);
+  assert.doesNotMatch(profile, /^\(allow file-read\*\)$/m);
+  assert.doesNotMatch(profile, /^\(allow file-write\*\)$/m);
+});
+
 test("Seatbelt profiles allow the lexical xcode-select runtime path read-only", () => {
   const profile = createSeatbeltProfile({
     rule: "defaults",
