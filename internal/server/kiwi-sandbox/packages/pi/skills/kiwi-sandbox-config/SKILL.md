@@ -107,7 +107,7 @@ Allowed path values include:
 
 Paths are canonicalized through existing ancestors before policy checks to prevent symlink aliases from bypassing an allowlist.
 
-Fixed macOS/toolchain runtime paths are always readable so shells, Node, and command-line executables can start. `/dev/null` and `/dev/tty` are always writable.
+Fixed macOS/toolchain runtime paths are always readable so shells, Node, and command-line executables can start. File metadata inspection is allowed globally so runtimes can traverse lexical and symlinked prefixes such as `/var`, `/etc`, `/opt`, and `/tmp`; read policies still control file and directory contents, and write policies still control modifications. `/dev/null` and `/dev/tty` are always writable.
 
 ## File tool patterns
 

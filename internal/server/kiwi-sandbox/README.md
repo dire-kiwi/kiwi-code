@@ -71,6 +71,7 @@ With no configuration, every Bash command may run under the same deny-by-default
 - Once `files` is present, its `read` and `write` lists constrain access outside the implicit working directory. Write paths are also readable.
 - `$CWD`, `$HOME`, `$TMPDIR`, `~`, absolute paths, and project-relative paths are supported.
 - Runtime paths needed for macOS, Node, and command execution are always readable. `/dev/null` and `/dev/tty` are always writable.
+- File metadata inspection is allowed globally so runtimes can traverse lexical and symlinked path prefixes such as `/var`, `/etc`, `/opt`, and `/tmp`. Read policies still control file and directory contents, and write policies still control modifications.
 - Globs support `*`, `?`, and character classes.
 - Unrestricted command rules are selected only for conservative single shell commands. Composition, redirection, command substitution, and unbalanced quotes fall back to `defaults`, preventing `gh status; cat ~/.ssh/id_ed25519` from inheriting `gh *` access.
 - A requested command working directory must remain inside the project root, another worktree for the same Git repository, or a configured related project after resolving symlinks.
