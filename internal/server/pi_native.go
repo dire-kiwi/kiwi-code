@@ -25,6 +25,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+var piNativeWebSocketSequence atomic.Uint64
+
 const (
 	piNativeSessionDirectoryName    = "pi-native-sessions"
 	piNativeActiveSessionMarkerName = ".active-session"
@@ -196,6 +198,28 @@ func (m *piNativeManager) stopOnContext(ctx context.Context) {
 	})
 }
 
+func piNativeBrowserEventCoalesceKey(payload []byte) string {
+	var event struct {
+		Type       string `json:"type"`
+		ToolCallID string `json:"toolCallId"`
+	}
+	if json.Unmarshal(payload, &event) != nil {
+		return ""
+	}
+	switch event.Type {
+	case "message_update":
+		// Pi includes the full accumulated assistant message in every update.
+		return event.Type
+	case "tool_execution_update":
+		// partialResult is also cumulative. Keep tools distinct in case an
+		// extension reports overlapping executions.
+		if event.ToolCallID != "" {
+			return event.Type + "\x00" + event.ToolCallID
+		}
+	}
+	return ""
+}
+
 func (h *terminalHandler) servePiNative(w http.ResponseWriter, r *http.Request) {
 	if !websocket.IsWebSocketUpgrade(r) {
 		writeError(w, http.StatusBadRequest, "The native Pi endpoint requires a WebSocket connection.")
@@ -219,6 +243,13 @@ func (h *terminalHandler) servePiNative(w http.ResponseWriter, r *http.Request) 
 	}
 	defer connection.Close()
 	connection.SetReadLimit(piNativeMaxClientMessage)
+	connectionID := piNativeWebSocketSequence.Add(1)
+	logSocketEnd := func(category string, socketErr error) {
+		log.Printf(
+			"native Pi websocket ended: connection=%d project=%q thread=%q category=%q error=%v",
+			connectionID, item.ID, thread.ID, category, socketErr,
+		)
+	}
 
 	writer := newWebSocketWriter(connection)
 	write := writer.Write
@@ -229,10 +260,12 @@ func (h *terminalHandler) servePiNative(w http.ResponseWriter, r *http.Request) 
 	closeWithError := func(message string) {
 		_ = writeStatus("pi_native_error", message)
 		_ = write(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, message))
+		logSocketEnd("server-error", errors.New(message))
 	}
 	closeWithFatal := func(message string) {
 		_ = writeStatus("pi_native_fatal", message)
 		_ = write(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, message))
+		logSocketEnd("policy-error", errors.New(message))
 	}
 
 	launchOptions, err := piNativeBrowserLaunchOptions(
@@ -268,9 +301,10 @@ func (h *terminalHandler) servePiNative(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	subscription := process.events.Subscribe()
+	subscription := process.events.SubscribeCoalesced(piNativeBrowserEventCoalesceKey)
 	defer func() { subscription.Close() }()
 	if err := writeStatus("pi_native_ready", "Pi is ready."); err != nil {
+		logSocketEnd("ready-write-failed", err)
 		return
 	}
 	_ = process.refresh()
@@ -281,10 +315,13 @@ func (h *terminalHandler) servePiNative(w http.ResponseWriter, r *http.Request) 
 		select {
 		case payload, open := <-subscription.Events():
 			if !open {
+				_ = writeStatus("pi_native_error", "The native Pi client fell behind; reconnecting to an authoritative snapshot.")
 				_ = write(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "Native Pi client fell behind"))
+				logSocketEnd("slow-subscriber", errors.New("broadcast subscription closed"))
 				return
 			}
 			if err := write(websocket.TextMessage, payload); err != nil {
+				logSocketEnd("event-write-failed", err)
 				return
 			}
 		case payload := <-peer.messages:
@@ -335,7 +372,7 @@ func (h *terminalHandler) servePiNative(w http.ResponseWriter, r *http.Request) 
 				subscription.Close()
 				process = replacement
 				launchOptions = restartOptions
-				subscription = process.events.Subscribe()
+				subscription = process.events.SubscribeCoalesced(piNativeBrowserEventCoalesceKey)
 				if err := writeStatus("pi_native_reloaded", "Pi restarted and extensions reloaded."); err != nil {
 					return
 				}
@@ -368,11 +405,14 @@ func (h *terminalHandler) servePiNative(w http.ResponseWriter, r *http.Request) 
 			message := process.exitMessage()
 			_ = writeStatus("pi_native_exit", message)
 			_ = write(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Pi native process ended"))
+			logSocketEnd("process-ended", errors.New(message))
 			return
-		case <-peer.done:
+		case peerErr := <-peer.done:
+			logSocketEnd("peer-ended", peerErr)
 			return
 		case <-peer.ping.C:
 			if err := peer.WritePing(); err != nil {
+				logSocketEnd("ping-write-failed", err)
 				return
 			}
 		}
@@ -396,6 +436,10 @@ func (h *terminalHandler) startPiNativeProcess(
 		return nil, fmt.Errorf("resolve sub-agent nesting context: %w", err)
 	}
 
+	// Acquire the durable per-thread lease in the established sessionMu ->
+	// mutation order, then release the global lock while Pi starts. This keeps
+	// an unrelated tmux attach from waiting for model/session startup while the
+	// durable lease still serializes this exact thread across backend processes.
 	h.sessionMu.Lock()
 	mutation, err := h.lockTerminalMutationLocked(item.ID, thread.ID)
 	if err != nil {
@@ -407,9 +451,14 @@ func (h *terminalHandler) startPiNativeProcess(
 		h.sessionMu.Unlock()
 		return nil, errors.Join(err, releaseErr)
 	}
+	h.sessionMu.Unlock()
+
 	process, startErr := h.nativePi.getOrStart(item, thread, threadEndpoint, launchOptions)
-	fenceErr := h.finishTerminalThreadMutationLocked(item, thread)
+	// Release the per-thread lease before reacquiring sessionMu so cleanup code
+	// that follows the canonical lock order cannot deadlock with this fence.
 	releaseErr := mutation.Release()
+	h.sessionMu.Lock()
+	fenceErr := h.finishTerminalThreadMutationLocked(item, thread)
 	h.sessionMu.Unlock()
 
 	if combined := errors.Join(startErr, fenceErr, releaseErr); combined != nil {
@@ -450,9 +499,11 @@ func (h *terminalHandler) restartPiNativeProcess(
 		h.sessionMu.Unlock()
 		return nil, errors.Join(err, releaseErr)
 	}
+	h.sessionMu.Unlock()
 	process, restartErr := h.nativePi.restart(expected, item, thread, threadEndpoint, launchOptions)
-	fenceErr := h.finishTerminalThreadMutationLocked(item, thread)
 	releaseErr := mutation.Release()
+	h.sessionMu.Lock()
+	fenceErr := h.finishTerminalThreadMutationLocked(item, thread)
 	h.sessionMu.Unlock()
 
 	if combined := errors.Join(restartErr, fenceErr, releaseErr); combined != nil {

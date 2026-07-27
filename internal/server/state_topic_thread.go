@@ -8,6 +8,8 @@ import (
 	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
+const stateThreadStatusWarmup = 50 * time.Millisecond
+
 func (s *Server) openThreadStatusTopic(ctx context.Context, projectID, threadID string, channel *stateChannel) error {
 	if _, _, err := s.projects.GetThread(projectID, threadID); err != nil {
 		if errors.Is(err, project.ErrNotFound) || errors.Is(err, project.ErrThreadNotFound) {
@@ -58,6 +60,9 @@ func (s *Server) openThreadStatusTopic(ctx context.Context, projectID, threadID 
 			}
 			return stateTopicFailure("Could not load the thread.")
 		}
+		if s.terminal != nil {
+			s.terminal.yieldToInteractiveTerminalSetup(ctx, processProjectionInteractiveYieldLimit)
+		}
 		branches, gitError := readThreadGitStatus(ctx, thread)
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -67,6 +72,16 @@ func (s *Server) openThreadStatusTopic(ctx context.Context, projectID, threadID 
 		return channel.Snapshot(current)
 	}
 
+	// The terminal component starts on the next animation frame. Avoid racing
+	// its first attachment with Git and tmux status subprocesses from this
+	// channel's initial authoritative snapshot.
+	warmup := time.NewTimer(stateThreadStatusWarmup)
+	select {
+	case <-ctx.Done():
+		warmup.Stop()
+		return ctx.Err()
+	case <-warmup.C:
+	}
 	if err := refreshAll(); err != nil {
 		return err
 	}

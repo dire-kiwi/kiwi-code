@@ -43,11 +43,17 @@ type threadStatusSnapshot struct {
 // any resulting state transition publishes a follow-up invalidation.
 func (s *Server) notifyThreadStatusChanged(projectID, threadID string) {
 	s.notifyStateChanged(stateTopicThreadStatus, projectID, threadID)
-	// The sidebar process projection spans every project and thread.
+	// Keep the global sidebar projection cached per thread. The topic still has
+	// one latest-state wakeup, while the durable dirty set prevents a burst from
+	// losing which thread projections need to be refreshed.
+	s.processWebServerCache.markDirty(threadStatusKey{projectID: projectID, threadID: threadID})
 	s.notifyStateChanged(stateTopicProcessWebServers, "", "")
 }
 
 func (s *Server) readThreadStatusSnapshot(ctx context.Context, item project.Project, thread project.Thread) threadStatusSnapshot {
+	if s.terminal != nil {
+		s.terminal.yieldToInteractiveTerminalSetup(ctx, processProjectionInteractiveYieldLimit)
+	}
 	snapshot := threadStatusSnapshot{
 		ContextStatuses: s.contextStatuses.forThread(item.ID, thread.ID),
 		Processes:       []processWindow{},

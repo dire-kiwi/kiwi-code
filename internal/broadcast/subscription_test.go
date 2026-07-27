@@ -65,6 +65,59 @@ func TestLatestSubscriptionCoalescesWithoutDisconnecting(t *testing.T) {
 	}
 }
 
+func TestCoalescedSubscriptionRetainsLifecycleAroundCumulativeUpdates(t *testing.T) {
+	type event struct {
+		kind  string
+		value int
+	}
+	broker := NewBroker[event](4)
+	subscription := broker.SubscribeCoalesced(func(value event) string {
+		if value.kind == "update" {
+			return value.kind
+		}
+		return ""
+	})
+	defer subscription.Close()
+
+	for value := 0; value < 100; value++ {
+		broker.Publish(event{kind: "update", value: value})
+	}
+	broker.Publish(event{kind: "end"})
+	for value := 100; value < 200; value++ {
+		broker.Publish(event{kind: "update", value: value})
+	}
+
+	var received []event
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case value, open := <-subscription.Events():
+			if !open {
+				t.Fatal("coalesced subscription disconnected under cumulative updates")
+			}
+			received = append(received, value)
+			if value.kind == "update" && value.value == 199 {
+				endIndex := -1
+				for index, candidate := range received {
+					if candidate.kind == "end" {
+						endIndex = index
+						break
+					}
+				}
+				if endIndex <= 0 || endIndex >= len(received)-1 {
+					t.Fatalf("coalesced event order = %#v", received)
+				}
+				if len(received) > 5 {
+					t.Fatalf("cumulative updates were not coalesced: %#v", received)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatalf("coalesced events did not settle: %#v", received)
+		}
+	}
+}
+
 func TestSlowSubscriberDisconnectsWithoutBlockingOthers(t *testing.T) {
 	broker := NewBroker[int](4)
 	slow := broker.Subscribe()
