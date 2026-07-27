@@ -16,7 +16,7 @@ export function configuredCodingAgentId(agent: CodingAgentSetting): ConfiguredCl
 }
 
 export function codingAgentSelectionForSetting(agent: CodingAgentSetting): CodingAgentSelection {
-  if (agent.kind === 'pi' || agent.kind === 'pi-native') return agent.kind
+  if (agent.kind === 'pi' || agent.kind === 'pi-native' || agent.kind === 'codex') return agent.kind
   return configuredCodingAgentId(agent)
 }
 
@@ -27,6 +27,7 @@ export function defaultCodingAgentSelection(agents: CodingAgentSetting[]): Codin
 
 export function isCodingAgent(value: unknown): value is CodingAgent {
   return value === 'pi'
+    || value === 'codex'
     || value === 'claude'
     || value === 'claude-gpt'
     || (typeof value === 'string' && configuredClaudeAgentPattern.test(value))
@@ -56,6 +57,14 @@ export const piThinkingLevelIds = [
   'high',
   'xhigh',
   'max',
+] as const
+
+export const codexThinkingLevelIds = [
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
 ] as const
 
 export const claudeThinkingLevelIds = [
@@ -103,5 +112,11 @@ export const fallbackCodingAgentConfigs: CodingAgentConfig[] = [
     label: 'Pi',
     models: [{ id: '', label: 'Use Pi default' }],
     thinkingLevels: thinkingLevels('Use Pi default'),
+  },
+  {
+    id: 'codex',
+    label: 'Codex CLI',
+    models: [{ id: '', label: 'Use Codex default' }],
+    thinkingLevels: thinkingLevels('Use Codex default', codexThinkingLevelIds),
   },
 ]

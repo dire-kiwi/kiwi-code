@@ -88,6 +88,7 @@ const (
 	terminalAgentPollInterval         = time.Second
 	terminalViewCreationGrace         = 2 * time.Second
 	codingAgentPi                     = "pi"
+	codingAgentCodex                  = "codex"
 	codingAgentClaude                 = "claude"
 	codingAgentClaudeGPT              = "claude-gpt"
 	codingAgentClaudeProfilePrefix    = "claude-profile-"
@@ -1836,7 +1837,7 @@ func (h *terminalHandler) prepareExistingCodingAgentPane(projectID, threadID, se
 
 // prepareCodingAgentWindow is only for the fixed Pi window. It adopts the
 // historical first unmarked pane as Pi, leaves every other unmarked pane
-// untouched, and prepares only panes explicitly identified as Pi or Claude.
+// untouched, and prepares only panes explicitly identified as coding agents.
 func (h *terminalHandler) prepareCodingAgentWindow(projectID, threadID, sessionName, windowID, requiredAgent string) ([]tmuxAgentPane, map[string]bool, error) {
 	panes, err := h.tmuxAgentPanes(windowID)
 	if err != nil {
@@ -1865,7 +1866,7 @@ func (h *terminalHandler) prepareCodingAgentWindow(projectID, threadID, sessionN
 	alivePanes := make([]tmuxAgentPane, 0, len(panes))
 	endedAgents := make(map[string]bool)
 	for _, pane := range panes {
-		if pane.Agent != codingAgentPi && !isClaudeCodingAgent(pane.Agent) {
+		if !isTerminalCodingAgent(pane.Agent) {
 			alivePanes = append(alivePanes, pane)
 			continue
 		}
@@ -2553,7 +2554,7 @@ func (h *terminalHandler) tmuxTargetServerPID(target string) (string, bool, erro
 }
 
 func (h *terminalHandler) removeCodingAgentExitMarkersForThread(projectID, threadID string) error {
-	agents := []string{codingAgentPi, codingAgentClaude, codingAgentClaudeGPT}
+	agents := []string{codingAgentPi, codingAgentCodex, codingAgentClaude, codingAgentClaudeGPT}
 	if h.projects != nil {
 		for _, configured := range h.projects.GetSettings().CodingAgents {
 			if configured.Kind == project.CodingAgentKindClaude || configured.Kind == project.CodingAgentKindClaudeGPT {
@@ -2996,13 +2997,16 @@ func (h *terminalHandler) commandForCodingAgentPaneWithOptions(
 		args = append(args, "--model", launchOptions.Model)
 	}
 	if launchOptions.ThinkingLevel != "" {
-		thinkingFlag := "--thinking"
-		if isClaudeCodingAgent(agent) {
-			thinkingFlag = "--effort"
+		switch {
+		case agent == codingAgentCodex:
+			args = append(args, "--config", `model_reasoning_effort="`+launchOptions.ThinkingLevel+`"`)
+		case isClaudeCodingAgent(agent):
+			args = append(args, "--effort", launchOptions.ThinkingLevel)
+		default:
+			args = append(args, "--thinking", launchOptions.ThinkingLevel)
 		}
-		args = append(args, thinkingFlag, launchOptions.ThinkingLevel)
 	}
-	if (agent == codingAgentPi || isClaudeCodingAgent(agent)) && launchOptions.InitialPrompt != "" {
+	if isTerminalCodingAgent(agent) && launchOptions.InitialPrompt != "" {
 		// Terminal agents treat a positional message as the first interactive
 		// turn. Passing it at launch avoids racing a TUI that is not ready to
 		// receive synthetic paste and Enter input yet.
@@ -3049,6 +3053,9 @@ func (h *terminalHandler) commandForTmuxTarget(
 			extensionArgs = append(extensionArgs, "--skill", skillPath)
 		}
 		args = append(extensionArgs, args...)
+	}
+	if tool == codingAgentCodex && notice == "" {
+		args = append([]string{"--dangerously-bypass-approvals-and-sandbox"}, args...)
 	}
 	if isClaudeCodingAgent(tool) && notice == "" {
 		if h.claudePluginErr != nil {
@@ -3116,7 +3123,7 @@ func (h *terminalHandler) commandForTmuxTarget(
 		"KIWI_CODE_TMUX_SESSION=" + sessionName,
 		"KIWI_CODE_TMUX_WINDOW=" + windowName,
 	}
-	if (tool == "pi" || isClaudeCodingAgent(tool)) && threadEndpoint != "" {
+	if isTerminalCodingAgent(tool) && threadEndpoint != "" {
 		environment = append(environment, kiwiCodeThreadEnvironment(threadEndpoint, item.ID, thread.ID)...)
 	}
 	// Kiwi Code child and workflow execution is deliberately Pi Native. Do not
@@ -4252,6 +4259,8 @@ func normalizeCodingAgent(agent string) (string, error) {
 	switch agent {
 	case "", codingAgentPi:
 		return codingAgentPi, nil
+	case codingAgentCodex:
+		return codingAgentCodex, nil
 	case codingAgentClaude:
 		return codingAgentClaude, nil
 	case codingAgentClaudeGPT:
@@ -4315,6 +4324,10 @@ func isClaudeCodingAgent(agent string) bool {
 	return agent == codingAgentClaude || isClaudeGPTCodingAgent(agent) || validClaudeCodeProfileAgent(agent)
 }
 
+func isTerminalCodingAgent(agent string) bool {
+	return agent == codingAgentPi || agent == codingAgentCodex || isClaudeCodingAgent(agent)
+}
+
 func (h *terminalHandler) claudeCodeProfile(agent string) (project.CodingAgentSetting, bool) {
 	if h == nil || h.projects == nil || !validConfiguredClaudeAgent(agent) {
 		return project.CodingAgentSetting{}, false
@@ -4342,6 +4355,15 @@ func commandFor(tool string) (string, []string, string, error) {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
+	}
+
+	if tool == codingAgentCodex {
+		path, err := exec.LookPath(codingAgentCodex)
+		if err == nil {
+			return path, nil, "", nil
+		}
+		notice := "\r\n\x1b[38;5;214mCodex CLI is not installed or not on PATH. Opened a shell instead.\x1b[0m\r\n\r\n"
+		return shell, []string{"-l"}, notice, nil
 	}
 
 	if isClaudeCodingAgent(tool) {

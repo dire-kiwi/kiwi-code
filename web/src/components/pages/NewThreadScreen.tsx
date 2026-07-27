@@ -451,6 +451,7 @@ export function NewThreadScreen({
   })) ?? [
     { value: 'pi' as CodingAgentSelection, label: 'Pi' },
     { value: 'pi-native' as CodingAgentSelection, label: 'Pi Native' },
+    { value: 'codex' as CodingAgentSelection, label: 'Codex CLI' },
   ]
   const selectedAgentId = codingAgentIdForSelection(codingAgent)
   const selectedAgent = codingAgents.find((agent) => agent.id === selectedAgentId)
@@ -463,6 +464,7 @@ export function NewThreadScreen({
   const startsAgent = Boolean(initialPrompt.trim() || initialPromptImages.length > 0)
   const selectedAgentModelsUnavailable = isClaudeGPTCodingAgent(selectedAgentId)
     && selectedAgent.models.length === 0
+  const agentNamesThread = selectedAgentId !== 'codex'
   const submitDisabled = submitting
     || selectedAgentModelsUnavailable
     || (location === 'worktree' && (branchesLoading || Boolean(branchLoadError) || !baseBranch))
@@ -762,7 +764,10 @@ export function NewThreadScreen({
           </div>
 
           <p id="thread-initial-prompt-help" className="mt-2 px-0.5 text-[9px] leading-4 text-ghost-faint">
-            {selectedAgentLabel} uses the first prompt to name the thread{location === 'worktree' ? ' and its branch' : ''}. Leave it blank to open {selectedAgentLabel} without a task.
+            {agentNamesThread
+              ? `${selectedAgentLabel} uses the first prompt to name the thread${location === 'worktree' ? ' and its branch' : ''}. `
+              : ''}
+            Leave it blank to open {selectedAgentLabel} without a task.
           </p>
 
           {error && (

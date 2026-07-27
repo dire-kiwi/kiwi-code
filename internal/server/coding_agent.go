@@ -84,6 +84,14 @@ func codingAgentThinkingLevels(defaultLabel string, includeOffAndMinimal bool) [
 }
 
 var piThinkingLevels = codingAgentThinkingLevels("Use Pi default", true)
+var codexThinkingLevels = []codingAgentChoice{
+	{ID: "", Label: "Use Codex default"},
+	{ID: "minimal", Label: "Minimal"},
+	{ID: "low", Label: "Low"},
+	{ID: "medium", Label: "Medium"},
+	{ID: "high", Label: "High"},
+	{ID: "xhigh", Label: "Extra high"},
+}
 
 // Claude's ultracode effort is passed through to Claude Code itself. It is
 // independent from the Pi-only Kiwi Code workflow integration.
@@ -184,12 +192,20 @@ func (h *terminalHandler) codingAgentConfigs(parent context.Context, projectID s
 		claudeGPTModels = []codingAgentChoice{}
 	}
 
-	configs := []codingAgentConfig{{
-		ID:             codingAgentPi,
-		Label:          "Pi",
-		Models:         piModels,
-		ThinkingLevels: piThinkingLevels,
-	}}
+	configs := []codingAgentConfig{
+		{
+			ID:             codingAgentPi,
+			Label:          "Pi",
+			Models:         piModels,
+			ThinkingLevels: piThinkingLevels,
+		},
+		{
+			ID:             codingAgentCodex,
+			Label:          "Codex CLI",
+			Models:         []codingAgentChoice{{ID: "", Label: "Use Codex default"}},
+			ThinkingLevels: codexThinkingLevels,
+		},
+	}
 	if h != nil && h.projects != nil {
 		for _, configured := range configuredAgents {
 			models := claudeModels
@@ -516,6 +532,9 @@ func normalizeCodingAgentLaunchOptions(agent, model, thinkingLevel string) (codi
 	}
 	thinkingLevel = strings.TrimSpace(thinkingLevel)
 	levels := piThinkingLevels
+	if agent == codingAgentCodex {
+		levels = codexThinkingLevels
+	}
 	if isClaudeCodingAgent(agent) {
 		levels = claudeThinkingLevels
 	}

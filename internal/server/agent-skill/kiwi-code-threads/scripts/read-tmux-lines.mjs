@@ -11,7 +11,7 @@ import {
   usage,
 } from "./common.mjs";
 
-const supportedTargets = new Set(["pi", "claude", "claude-gpt", "terminal", "shell", "nvim", "lazygit"]);
+const supportedTargets = new Set(["pi", "codex", "claude", "claude-gpt", "terminal", "shell", "nvim", "lazygit"]);
 
 run(async () => {
   const args = process.argv.slice(2);
@@ -23,7 +23,7 @@ run(async () => {
   const [target, rawLines = "200"] = args;
   const lines = Number(rawLines);
   if (!target || args.length > 2 || !Number.isInteger(lines) || lines < 1 || lines > 5000) {
-    usage("Usage: read-tmux-lines.mjs <pi|claude|claude-gpt|terminal|nvim|lazygit|process:ID> [lines: 1-5000] [--thread <thread-id>] [--project <project-id>] [--window <shell-index>]");
+    usage("Usage: read-tmux-lines.mjs <pi|codex|claude|claude-gpt|terminal|nvim|lazygit|process:ID> [lines: 1-5000] [--thread <thread-id>] [--project <project-id>] [--window <shell-index>]");
     return;
   }
 
@@ -41,7 +41,7 @@ run(async () => {
       usage(`Unknown tmux target: ${target}`);
       return;
     }
-    if (target === "pi" || target === "claude" || target === "claude-gpt") {
+    if (target === "pi" || target === "codex" || target === "claude" || target === "claude-gpt") {
       query.set("tool", "pi");
       query.set("agent", target);
     } else {

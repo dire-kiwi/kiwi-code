@@ -65,7 +65,7 @@ node "$HOME/.agents/skills/kiwi-code-threads/scripts/create-thread.mjs" "Fix cac
   --prompt "Find and fix the cache misses, then run the relevant tests."
 ```
 
-`--agent` accepts `pi-native`, `pi`, `claude-native`, `claude`, or `claude-gpt`. The `pi` and `claude` values start terminal presentations; `claude-gpt` is terminal-only. Model IDs and thinking levels must be supported by the selected agent. `--model`, `--thinking`, and `--prompt` require `--agent`. Omitting `--prompt` starts the selected agent without sending a task.
+`--agent` accepts `pi-native`, `pi`, `codex`, `claude-native`, `claude`, or `claude-gpt`. The `pi` and `claude` values start terminal presentations; `codex` and `claude-gpt` are terminal-only. Model IDs and thinking levels must be supported by the selected agent. `--model`, `--thinking`, and `--prompt` require `--agent`. Omitting `--prompt` starts the selected agent without sending a task.
 
 Add `--project <project-id>` to create the thread in another project. The title is optional; without one, Kiwi Code uses `New thread` and its first coding-agent prompt can name it automatically. If agent startup fails, the helper reports the ID of the thread that was still created.
 
@@ -104,13 +104,14 @@ node "$HOME/.agents/skills/kiwi-code-threads/scripts/read-tmux-lines.mjs" pi 200
 Read another thread's Claude Code pane, its CLIProxyAPI-backed GPT pane, or one of its process shells:
 
 ```bash
+node "$HOME/.agents/skills/kiwi-code-threads/scripts/read-tmux-lines.mjs" codex 300 --thread <thread-id>
 node "$HOME/.agents/skills/kiwi-code-threads/scripts/read-tmux-lines.mjs" claude 300 --thread <thread-id>
 node "$HOME/.agents/skills/kiwi-code-threads/scripts/read-tmux-lines.mjs" claude-gpt 300 --thread <thread-id>
 node "$HOME/.agents/skills/kiwi-code-threads/scripts/list-processes.mjs" --thread <thread-id>
 node "$HOME/.agents/skills/kiwi-code-threads/scripts/read-tmux-lines.mjs" process:<process-id> 300 --thread <thread-id>
 ```
 
-Supported targets are `pi`, `claude`, `claude-gpt`, `terminal` (or `shell`), `nvim`, `lazygit`, and `process:<process-id>`. Use `--window <index>` with `terminal` or `shell` to select a shell window; otherwise the active shell window is captured. Add `--project <project-id>` when the thread belongs to another project. Line counts default to 200 and must be between 1 and 5000.
+Supported targets are `pi`, `codex`, `claude`, `claude-gpt`, `terminal` (or `shell`), `nvim`, `lazygit`, and `process:<process-id>`. Use `--window <index>` with `terminal` or `shell` to select a shell window; otherwise the active shell window is captured. Add `--project <project-id>` when the thread belongs to another project. Line counts default to 200 and must be between 1 and 5000.
 
 ANSI control sequences may be present because the output comes from tmux's pane history. A not-found response usually means that workspace has not been opened, the selected agent is not running, or the process ID is stale.
 

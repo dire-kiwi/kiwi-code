@@ -35,13 +35,14 @@ function newCodingAgentId() {
 }
 
 function isBuiltInAgent(agent: CodingAgentSetting) {
-  return agent.kind === 'pi' || agent.kind === 'pi-native'
+  return agent.kind === 'pi' || agent.kind === 'pi-native' || agent.kind === 'codex'
 }
 
 function agentTypeLabel(agent: CodingAgentSetting) {
   switch (agent.kind) {
     case 'pi': return 'Pi (terminal)'
     case 'pi-native': return 'Pi Native'
+    case 'codex': return 'Codex CLI (terminal)'
     case 'claude-gpt': return 'Claude Code with GPT'
     default: return 'Claude Code'
   }
@@ -55,7 +56,9 @@ export function ClaudeProfilesSection({ settings, onSettingsUpdated }: ClaudePro
 
   const normalizedAgents = codingAgents.map((agent) => ({
     ...agent,
-    name: isBuiltInAgent(agent) ? (agent.kind === 'pi' ? 'Pi' : 'Pi Native') : agent.name.trim(),
+    name: isBuiltInAgent(agent)
+      ? agent.kind === 'pi' ? 'Pi' : agent.kind === 'pi-native' ? 'Pi Native' : 'Codex CLI'
+      : agent.name.trim(),
     configDirectory: agent.kind === 'claude' ? (agent.configDirectory ?? '').trim() : undefined,
   }))
   const customAgents = normalizedAgents.filter((agent) => !isBuiltInAgent(agent))
@@ -71,6 +74,7 @@ export function ClaudeProfilesSection({ settings, onSettingsUpdated }: ClaudePro
     && new Set(claudeDirectories).size === claudeDirectories.length
     && normalizedAgents.filter((agent) => agent.kind === 'pi').length === 1
     && normalizedAgents.filter((agent) => agent.kind === 'pi-native').length === 1
+    && normalizedAgents.filter((agent) => agent.kind === 'codex').length === 1
     && normalizedAgents.filter((agent) => agent.isDefault).length === 1
   const agentsDirty = JSON.stringify(normalizedAgents) !== JSON.stringify(settings.codingAgents)
 
@@ -297,7 +301,7 @@ export function ClaudeProfilesSection({ settings, onSettingsUpdated }: ClaudePro
         </GhostButton>
 
         <InfoCallout>
-          Pi and Pi Native are always available and can be reordered or selected as the default.
+          Pi, Pi Native, and Codex CLI are always available and can be reordered or selected as the default.
           Standard Claude Code instances use their selected <span className="font-mono text-ghost-blue">CLAUDE_CONFIG_DIR</span>;
           GPT instances use Kiwi Code&apos;s managed CLIProxyAPI profile. Missing standard directories are created on save.
         </InfoCallout>
