@@ -242,6 +242,16 @@ const tools = [
   },
 ];
 
+// Browser work belongs in the bundled context: fork skill so it runs in its own
+// agent context. Remind the caller on every tool, because a client that defers
+// tool schemas may surface a browser tool without ever showing the skill.
+const SKILL_REMINDER =
+  "Requires the kiwi-code-in-app-browser skill: invoke that skill first and call this tool from inside it, not from the main conversation.";
+
+for (const tool of tools) {
+  tool.description = `${tool.description} ${SKILL_REMINDER}`;
+}
+
 const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
 
 function isRecord(value) {
@@ -743,7 +753,7 @@ async function handleRequest(message) {
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
         instructions:
-          "Controls the in-app browser owned by the current Kiwi Code thread. Use focused browser_* tools and inspect the page with browser_snapshot before interacting with refs.",
+          "Controls the in-app browser owned by the current Kiwi Code thread. Do not call these tools directly from the main conversation: invoke the kiwi-code-in-app-browser context: fork skill first and drive the browser from there. Inside that skill, use focused browser_* tools and inspect the page with browser_snapshot before interacting with refs.",
       });
       return;
     }
