@@ -218,7 +218,14 @@ export function TerminalWorkspace({
   const [branchOverlayOpen, setBranchOverlayOpen] = useState(false)
   const [runningEnvironmentAction, setRunningEnvironmentAction] = useState<string | null>(null)
   const [environmentActionError, setEnvironmentActionError] = useState('')
+  const [environmentSetupStatus, setEnvironmentSetupStatus] = useState(
+    thread.environmentSetupStatus ?? 'succeeded',
+  )
   const toolTabsRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    setEnvironmentSetupStatus(thread.environmentSetupStatus ?? 'succeeded')
+  }, [thread.environmentSetupStatus])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -702,6 +709,41 @@ export function TerminalWorkspace({
               }
               const processId = tool === 'process' ? selectedProcessId ?? undefined : undefined
               if (tool === 'process' && !processId) return null
+              if (tool === 'pi' && environmentSetupStatus !== 'succeeded') {
+                return (
+                  <TerminalSession
+                    key="pi:environment-setup"
+                    projectId={project.id}
+                    threadId={thread.id}
+                    threadTitle={thread.title}
+                    tool="pi"
+                    codingAgent={codingAgent}
+                    terminalLabel="environment setup"
+                    environmentSetup
+                    onEnvironmentSetupFinished={setEnvironmentSetupStatus}
+                    active={activeTool === 'pi'}
+                    onStatusChange={(status) => {
+                      if (codingAgent === 'claude') {
+                        setClaudePresentationStatuses((current) => (
+                          current[claudePresentation] === status
+                            ? current
+                            : { ...current, [claudePresentation]: status }
+                        ))
+                        return
+                      }
+                      if (codingAgent === 'pi') {
+                        setPiPresentationStatuses((current) => (
+                          current[piPresentation] === status
+                            ? current
+                            : { ...current, [piPresentation]: status }
+                        ))
+                        return
+                      }
+                      setStatuses((current) => current.pi === status ? current : { ...current, pi: status })
+                    }}
+                  />
+                )
+              }
               if (tool === 'pi' && codingAgent === 'claude') {
                 const initialPromptTargetsNative = initialClaudePresentationRef.current === 'native'
                 return (

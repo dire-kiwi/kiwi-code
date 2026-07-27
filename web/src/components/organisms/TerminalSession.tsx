@@ -33,6 +33,8 @@ type TerminalSessionProps = {
   tmuxSession?: string
   tmuxWindow?: string
   terminalLabel?: string
+  environmentSetup?: boolean
+  onEnvironmentSetupFinished?: (status: 'succeeded' | 'failed') => void
   active: boolean
   onStatusChange: (status: ConnectionStatus) => void
 }
@@ -44,6 +46,8 @@ type ImagePasteNotice = {
 
 const OSC_CLIPBOARD = 52
 const CODING_AGENT_ENDED_CLOSE_REASON = 'Coding agent ended'
+const ENVIRONMENT_SETUP_COMPLETED_CLOSE_REASON = 'Environment setup completed'
+const ENVIRONMENT_SETUP_FAILED_CLOSE_REASON = 'Environment setup failed'
 const RECONNECT_STABLE_AFTER_MS = 5_000
 
 function decodeOscClipboard(data: string): string | null {
@@ -114,6 +118,8 @@ export function TerminalSession({
   tmuxSession,
   tmuxWindow,
   terminalLabel,
+  environmentSetup = false,
+  onEnvironmentSetupFinished,
   active,
   onStatusChange,
 }: TerminalSessionProps) {
@@ -130,6 +136,7 @@ export function TerminalSession({
   const initialPromptRef = useRef(initialPrompt ?? '')
   const initialPromptSentRef = useRef(false)
   const onInitialPromptSentRef = useRef(onInitialPromptSent)
+  const onEnvironmentSetupFinishedRef = useRef(onEnvironmentSetupFinished)
   const reconnectAttemptsRef = useRef(0)
   const [connectionAttempt, setConnectionAttempt] = useState({ generation: 0, restartCodingAgent: false })
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
@@ -152,6 +159,7 @@ export function TerminalSession({
     initialPromptRef.current = initialPrompt
   }
   onInitialPromptSentRef.current = onInitialPromptSent
+  onEnvironmentSetupFinishedRef.current = onEnvironmentSetupFinished
 
   useEffect(() => {
     const host = hostRef.current
@@ -235,6 +243,7 @@ export function TerminalSession({
         if (processId) params.set('processId', processId)
         if (tool === 'pi') {
           params.set('agent', codingAgent)
+          if (environmentSetup) params.set('environmentSetup', '1')
           if (initialModelRef.current) params.set('model', initialModelRef.current)
           if (initialThinkingLevelRef.current) params.set('thinking', initialThinkingLevelRef.current)
           if (initialPromptRef.current.trim()) {
@@ -474,9 +483,17 @@ export function TerminalSession({
         const codingAgentExited = tool === 'pi'
           && event.code === 1000
           && event.reason === CODING_AGENT_ENDED_CLOSE_REASON
-        const shouldReconnect = tool === 'pi'
-          ? !codingAgentExited
-          : tool === 'nvim' || tool === 'lazygit' || event.code !== 1000
+        const environmentSetupCompleted = environmentSetup
+          && event.code === 1000
+          && event.reason === ENVIRONMENT_SETUP_COMPLETED_CLOSE_REASON
+        const environmentSetupFailed = environmentSetup
+          && event.code === 1000
+          && event.reason === ENVIRONMENT_SETUP_FAILED_CLOSE_REASON
+        const shouldReconnect = environmentSetup
+          ? !environmentSetupCompleted && !environmentSetupFailed && event.code !== 1000
+          : tool === 'pi'
+            ? !codingAgentExited
+            : tool === 'nvim' || tool === 'lazygit' || event.code !== 1000
 
         console.info('Terminal WebSocket closed.', {
           projectId,
@@ -489,7 +506,11 @@ export function TerminalSession({
           reconnecting: !disposed && shouldReconnect,
         })
 
-        updateStatus(codingAgentExited ? 'closed' : shouldReconnect ? 'connecting' : socketErrored ? 'error' : 'closed')
+        updateStatus(environmentSetupFailed || socketErrored
+          ? 'error'
+          : codingAgentExited ? 'closed' : shouldReconnect ? 'connecting' : 'closed')
+        if (environmentSetupCompleted) onEnvironmentSetupFinishedRef.current?.('succeeded')
+        if (environmentSetupFailed) onEnvironmentSetupFinishedRef.current?.('failed')
         if (disposed || !shouldReconnect) return
 
         const delay = Math.min(250 * 2 ** reconnectAttemptsRef.current, 2_000)
@@ -608,7 +629,7 @@ export function TerminalSession({
       cancelAnimationFrame(startFrame)
       disposeTerminal()
     }
-  }, [codingAgent, connectionAttempt, processId, projectId, sessionLabel, threadId, tmuxSession, tmuxWindow, tool])
+  }, [codingAgent, connectionAttempt, environmentSetup, processId, projectId, sessionLabel, threadId, tmuxSession, tmuxWindow, tool])
 
   useEffect(() => {
     const terminal = terminalRef.current
@@ -672,7 +693,7 @@ export function TerminalSession({
         </div>
       )}
 
-      {(status === 'error' || status === 'closed') && (
+      {(status === 'error' || status === 'closed') && !environmentSetup && (
         <div className="absolute inset-0 z-20 grid place-items-center bg-ghost-black/85 backdrop-blur-[2px]">
           <Surface variant="raised-panel" className="px-7 py-6 text-center">
             <span

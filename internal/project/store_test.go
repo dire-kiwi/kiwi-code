@@ -2429,6 +2429,57 @@ func TestStoreRunsProjectEnvironmentSetupAndCleanup(t *testing.T) {
 	}
 }
 
+func TestStoreDefersProjectEnvironmentSetupForTheCodingTab(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses POSIX shell commands")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+
+	repositoryPath := createGitRepository(t)
+	store, err := NewStore(filepath.Join(t.TempDir(), "data", "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", repositoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupMarker := filepath.Join(t.TempDir(), "setup.txt")
+	environment := defaultLocalEnvironment()
+	environment.SetupScripts.Default = `printf ready > "$SETUP_MARKER"`
+	environment.Variables = []EnvironmentVariable{{Name: "SETUP_MARKER", Value: setupMarker}}
+	item, err = store.UpdateProject(item.ID, ProjectUpdate{Environment: &environment})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	thread, err := store.AddThreadWithOptions(item.ID, "Deferred setup", AddThreadOptions{
+		Worktree:              true,
+		DeferEnvironmentSetup: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thread.EnvironmentSetupStatus != EnvironmentSetupPending {
+		t.Fatalf("environment setup status = %q, want pending", thread.EnvironmentSetupStatus)
+	}
+	if _, err := os.Stat(setupMarker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deferred setup ran before the coding tab opened: %v", err)
+	}
+	if _, err := store.SetThreadEnvironmentSetupStatus(item.ID, thread.ID, EnvironmentSetupRunning); err != nil {
+		t.Fatal(err)
+	}
+	completed, err := store.SetThreadEnvironmentSetupStatus(item.ID, thread.ID, EnvironmentSetupSucceeded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.EnvironmentSetupStatus != EnvironmentSetupSucceeded || EnvironmentSetupBlocksAgent(completed) {
+		t.Fatalf("completed environment setup = %#v", completed)
+	}
+}
+
 func TestStoreCreatesGitWorktreeFromSelectedBaseBranch(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")

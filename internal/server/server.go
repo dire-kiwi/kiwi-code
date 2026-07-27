@@ -661,9 +661,10 @@ func (s *Server) addThread(w http.ResponseWriter, r *http.Request) {
 
 	projectID := r.PathValue("id")
 	thread, err := s.projects.AddThreadWithOptions(projectID, input.Title, project.AddThreadOptions{
-		Worktree:    input.Worktree,
-		BaseBranch:  input.BaseBranch,
-		NestedDepth: input.NestedDepth,
+		Worktree:              input.Worktree,
+		DeferEnvironmentSetup: true,
+		BaseBranch:            input.BaseBranch,
+		NestedDepth:           input.NestedDepth,
 	})
 	if err != nil && thread.ID != "" {
 		rollbackErr := s.projects.RollbackThreadCreation(projectID, thread.ID)

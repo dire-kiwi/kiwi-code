@@ -186,8 +186,9 @@ type codingAgentPaneIncarnation struct {
 }
 
 var (
-	errCodingAgentEnded = errors.New("coding agent ended")
-	errTerminalStopping = errors.New("terminal sessions are stopping")
+	errCodingAgentEnded        = errors.New("coding agent ended")
+	errEnvironmentSetupPending = errors.New("environment setup has not completed")
+	errTerminalStopping        = errors.New("terminal sessions are stopping")
 )
 
 func newTerminalHandler(projects *project.Store) *terminalHandler {
@@ -302,6 +303,10 @@ func (h *terminalHandler) startCodingAgent(w http.ResponseWriter, r *http.Reques
 	}
 	if thread.ParentThreadID != "" {
 		writeError(w, http.StatusForbidden, "Subagent coding agents are managed by their parent thread.")
+		return
+	}
+	if project.EnvironmentSetupBlocksAgent(thread) {
+		writeError(w, http.StatusConflict, "Wait for the environment setup to finish before starting a coding agent.")
 		return
 	}
 
@@ -427,6 +432,131 @@ func (h *terminalHandler) startCodingAgent(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
+const (
+	environmentSetupCompletedCloseReason = "Environment setup completed"
+	environmentSetupFailedCloseReason    = "Environment setup failed"
+)
+
+func (h *terminalHandler) serveEnvironmentSetupTerminal(w http.ResponseWriter, r *http.Request, item project.Project, thread project.Thread) {
+	if !websocket.IsWebSocketUpgrade(r) {
+		writeError(w, http.StatusBadRequest, "The environment setup terminal requires a WebSocket connection.")
+		return
+	}
+	connection, err := h.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer connection.Close()
+	connection.SetReadLimit(1 << 20)
+	writer := newWebSocketWriter(connection)
+	closeWithError := func(message string) {
+		_ = writer.Close(websocket.CloseInternalServerErr, message)
+	}
+	if !project.EnvironmentSetupBlocksAgent(thread) {
+		_ = writer.Close(websocket.CloseNormalClosure, environmentSetupCompletedCloseReason)
+		return
+	}
+	if _, _, required := project.ResolveEnvironmentSetup(item, thread); !required {
+		if _, updateErr := h.projects.SetThreadEnvironmentSetupStatus(item.ID, thread.ID, project.EnvironmentSetupSucceeded); updateErr != nil {
+			closeWithError("Could not save the environment setup state")
+			return
+		}
+		h.notifyThreadStatusChanged(item.ID, thread.ID)
+		_ = writer.Close(websocket.CloseNormalClosure, environmentSetupCompletedCloseReason)
+		return
+	}
+
+	sessionName, target, paneID, created, err := h.ensureEnvironmentSetupSession(item, thread)
+	if err != nil {
+		closeWithError("Could not start the environment setup")
+		return
+	}
+	if created || thread.EnvironmentSetupStatus == project.EnvironmentSetupPending {
+		updated, updateErr := h.projects.SetThreadEnvironmentSetupStatus(item.ID, thread.ID, project.EnvironmentSetupRunning)
+		if updateErr != nil {
+			closeWithError("Could not save the environment setup state")
+			return
+		}
+		thread = updated
+		h.notifyThreadStatusChanged(item.ID, thread.ID)
+	}
+	if created {
+		h.wakeThreadTmuxWatchers(item.ID, thread.ID)
+	}
+
+	viewSessionName, err := h.createTmuxViewSession(item, thread, sessionName, target)
+	if err != nil {
+		closeWithError("Could not create the environment setup terminal view")
+		return
+	}
+	defer h.closeTmuxViewSession(viewSessionName)
+	cols := boundedDimension(r.URL.Query().Get("cols"), 80)
+	rows := boundedDimension(r.URL.Query().Get("rows"), 24)
+	cmd := h.tmuxCommand(
+		"set-option", "-q", "-s", "set-clipboard", "external",
+		";",
+		"attach-session", "-c", thread.Cwd,
+		"-t", exactTmuxSessionTarget(viewSessionName),
+	)
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})
+	if err != nil {
+		closeWithError("Could not attach to the environment setup terminal")
+		return
+	}
+	defer func() {
+		_ = ptmx.Close()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+	}()
+	protocol := 1
+	if r.URL.Query().Get("protocol") == strconv.Itoa(terminalProtocolV2) {
+		protocol = terminalProtocolV2
+	}
+	if protocol >= terminalProtocolV2 {
+		if err := writer.Write(websocket.TextMessage, []byte(`{"type":"terminal_ready","protocol":2}`)); err != nil {
+			return
+		}
+	}
+	bridge := startPTYWebSocketBridge(connection, writer, ptmx, protocol, func() {})
+	defer bridge.Stop()
+	defer func() { _ = h.markTmuxSessionUsed(sessionName, time.Now()) }()
+
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			state, stateErr := h.tmuxPaneExitState(paneID)
+			if stateErr != nil {
+				closeWithError("Could not inspect the environment setup")
+				return
+			}
+			if !state.Found || !state.Dead {
+				continue
+			}
+			status := project.EnvironmentSetupFailed
+			closeReason := environmentSetupFailedCloseReason
+			if state.Status == "0" && state.Signal == "" {
+				status = project.EnvironmentSetupSucceeded
+				closeReason = environmentSetupCompletedCloseReason
+			}
+			if _, updateErr := h.projects.SetThreadEnvironmentSetupStatus(item.ID, thread.ID, status); updateErr != nil {
+				closeWithError("Could not save the environment setup result")
+				return
+			}
+			h.notifyThreadStatusChanged(item.ID, thread.ID)
+			_ = writer.Close(websocket.CloseNormalClosure, closeReason)
+			return
+		case <-bridge.terminalDone:
+			return
+		case <-bridge.peer.done:
+			return
+		}
+	}
+}
+
 func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 	if !websocket.IsWebSocketUpgrade(r) {
 		writeError(w, http.StatusBadRequest, "The terminal endpoint requires a WebSocket connection.")
@@ -445,6 +575,14 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 	tool, err := normalizeTerminalTool(r.URL.Query().Get("tool"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if tool == "pi" && r.URL.Query().Get("environmentSetup") == "1" {
+		h.serveEnvironmentSetupTerminal(w, r, item, thread)
+		return
+	}
+	if tool == "pi" && project.EnvironmentSetupBlocksAgent(thread) {
+		writeError(w, http.StatusConflict, "Wait for the environment setup to finish before starting a coding agent.")
 		return
 	}
 	if tool == "pi" && thread.ParentThreadID != "" {
@@ -845,6 +983,107 @@ func (h *terminalHandler) tmuxThread(w http.ResponseWriter, r *http.Request) (pr
 		return project.Project{}, project.Thread{}, false
 	}
 	return item, thread, true
+}
+
+func (h *terminalHandler) ensureEnvironmentSetupSession(item project.Project, thread project.Thread) (sessionName string, target tmuxWindowTarget, paneID string, created bool, err error) {
+	command, args, required := h.environmentSetupLaunchCommand(item, thread)
+	if !required {
+		return "", tmuxWindowTarget{}, "", false, errors.New("environment setup is not configured")
+	}
+	sessionName = tmuxSessionName(item.ID, thread.ID, "pi")
+
+	h.sessionMu.Lock()
+	mutation, mutationErr := h.lockTerminalMutationLocked(item.ID, thread.ID)
+	if mutationErr != nil {
+		h.sessionMu.Unlock()
+		return "", tmuxWindowTarget{}, "", false, mutationErr
+	}
+	if activeErr := h.ensureTerminalThreadActiveLocked(item.ID, thread.ID); activeErr != nil {
+		releaseErr := mutation.Release()
+		h.sessionMu.Unlock()
+		return "", tmuxWindowTarget{}, "", false, errors.Join(activeErr, releaseErr)
+	}
+	h.sessionMu.Unlock()
+	defer func() {
+		releaseErr := mutation.Release()
+		h.sessionMu.Lock()
+		fenceErr := h.finishTerminalThreadMutationLocked(item, thread)
+		h.sessionMu.Unlock()
+		err = errors.Join(err, releaseErr, fenceErr)
+	}()
+
+	if err := h.reconcileThreadTmuxStateUnderLease(item, thread); err != nil {
+		return "", tmuxWindowTarget{}, "", false, err
+	}
+	exists, err := h.tmuxSessionExists(sessionName)
+	if err != nil {
+		return "", tmuxWindowTarget{}, "", false, err
+	}
+	if !exists {
+		target, err = h.createTmuxSession(sessionName, thread.Cwd, "pi", command, args)
+		if err != nil {
+			return "", tmuxWindowTarget{}, "", false, err
+		}
+		created = true
+		if err = h.configureSharedToolWindow(sessionName, target, "pi"); err != nil {
+			_ = h.killTmuxSessionIncarnation(sessionName, target.ServerPID)
+			return "", tmuxWindowTarget{}, "", false, err
+		}
+	} else {
+		var found bool
+		target, found, err = h.tmuxToolWindow(sessionName, "pi")
+		if err != nil {
+			return "", tmuxWindowTarget{}, "", false, err
+		}
+		if !found {
+			target, err = h.createTmuxWindow(thread.Cwd, sessionName, "pi", command, args, false)
+			if err != nil {
+				return "", tmuxWindowTarget{}, "", false, err
+			}
+			created = true
+			if err = h.configureSharedToolWindow(sessionName, target, "pi"); err != nil {
+				_ = h.killTmuxWindowIncarnation(target.ID, target.ServerPID)
+				return "", tmuxWindowTarget{}, "", false, err
+			}
+		}
+	}
+
+	panes, err := h.tmuxAgentPanes(target.ID)
+	if err != nil {
+		return "", tmuxWindowTarget{}, "", false, err
+	}
+	for _, pane := range panes {
+		if pane.Agent == environmentSetupAgent {
+			return sessionName, target, pane.ID, created, nil
+		}
+	}
+	if thread.EnvironmentSetupStatus == project.EnvironmentSetupFailed {
+		return "", tmuxWindowTarget{}, "", false, errors.New("failed environment setup pane is unavailable")
+	}
+	if created {
+		paneID = panes[0].ID
+	} else {
+		output, splitErr := h.tmuxCommand(
+			"split-window", "-d", "-P", "-F", "#{pane_id}\t#{pid}",
+			"-t", target.ID, "-c", thread.Cwd, shellCommand(command, args),
+		).CombinedOutput()
+		if splitErr != nil {
+			return "", tmuxWindowTarget{}, "", false, tmuxCommandError("create environment setup pane", output, splitErr)
+		}
+		incarnation, parseErr := parseTmuxPaneIncarnation(output)
+		if parseErr != nil {
+			return "", tmuxWindowTarget{}, "", false, parseErr
+		}
+		paneID = incarnation.PaneID
+		created = true
+	}
+	if err := h.setTmuxPaneOption(paneID, "@kiwi-code-agent", environmentSetupAgent); err != nil {
+		return "", tmuxWindowTarget{}, "", false, err
+	}
+	if err := h.setTmuxPaneOption(paneID, "remain-on-exit", "on"); err != nil {
+		return "", tmuxWindowTarget{}, "", false, err
+	}
+	return sessionName, target, paneID, created, nil
 }
 
 func (h *terminalHandler) ensureTmuxSession(item project.Project, thread project.Thread, tool string) (sessionName, notice string, created bool, err error) {
@@ -1761,6 +2000,53 @@ const codingAgentLaunchScript = `set -eu
 "$1" set-option -p -t "$TMUX_PANE" remain-on-exit on
 shift 2
 exec "$@"`
+
+const environmentSetupAgent = "environment-setup"
+
+const environmentSetupLaunchScript = `set -u
+tmux_path=$1
+environment_name=$2
+shift 2
+"$tmux_path" set-option -p -t "$TMUX_PANE" @kiwi-code-agent environment-setup
+"$tmux_path" set-option -p -t "$TMUX_PANE" remain-on-exit on
+printf '\033[1;36mSetting up %s...\033[0m\n\n' "$environment_name"
+"$@"
+status=$?
+if [ "$status" -eq 0 ]; then
+  printf '\n\033[1;32mEnvironment setup completed. Starting the coding agent...\033[0m\n'
+else
+  printf '\n\033[1;31mEnvironment setup failed (exit %s). The coding agent was not started.\033[0m\n' "$status"
+fi
+exit "$status"`
+
+func (h *terminalHandler) environmentSetupLaunchCommand(item project.Project, thread project.Thread) (string, []string, bool) {
+	script, variables, required := project.ResolveEnvironmentSetup(item, thread)
+	if !required {
+		return "", nil, false
+	}
+	envPath := h.envPath
+	if envPath == "" {
+		envPath = "env"
+	}
+	setupCommand := "/bin/sh"
+	setupArguments := []string{"-lc", script}
+	environment := make([]string, 0, len(variables)+1+len(setupArguments))
+	for _, variable := range variables {
+		environment = append(environment, variable.Name+"="+variable.Value)
+	}
+	environment = append(environment, setupCommand)
+	environment = append(environment, setupArguments...)
+	arguments := []string{
+		"-c",
+		environmentSetupLaunchScript,
+		"kiwi-code-environment-setup",
+		h.tmuxPath,
+		item.Environment.Name,
+		envPath,
+	}
+	arguments = append(arguments, environment...)
+	return "/bin/sh", arguments, true
+}
 
 func (h *terminalHandler) codingAgentLaunchCommand(agent, command string, args []string) (string, []string) {
 	launchArgs := make([]string, 0, len(args)+6)

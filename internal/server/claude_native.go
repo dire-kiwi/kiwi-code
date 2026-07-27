@@ -328,6 +328,9 @@ func (h *terminalHandler) startClaudeNativeProcess(
 	if thread.RollbackPending && !launchOptions.AllowPendingCreation {
 		return nil, project.ErrThreadRollbackPending
 	}
+	if project.EnvironmentSetupBlocksAgent(thread) {
+		return nil, errEnvironmentSetupPending
+	}
 	if h.nativeClaude == nil {
 		return nil, errors.New("native Claude is unavailable")
 	}

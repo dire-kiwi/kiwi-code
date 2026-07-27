@@ -428,6 +428,9 @@ func (h *terminalHandler) startPiNativeProcess(
 	if thread.RollbackPending && !launchOptions.AllowPendingCreation {
 		return nil, project.ErrThreadRollbackPending
 	}
+	if project.EnvironmentSetupBlocksAgent(thread) {
+		return nil, errEnvironmentSetupPending
+	}
 	if h.nativePi == nil {
 		return nil, errors.New("native Pi is unavailable")
 	}
