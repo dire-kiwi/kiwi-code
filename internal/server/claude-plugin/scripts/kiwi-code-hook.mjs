@@ -30,10 +30,25 @@ function threadEndpoint() {
   return (process.env.KIWI_CODE_THREAD_ENDPOINT || '').replace(/\/+$/, '')
 }
 
+function codingAgent() {
+  return process.env.KIWI_CODE_CODING_AGENT === 'codex'
+    ? 'codex'
+    : (process.env.KIWI_CODE_CODING_AGENT || 'claude')
+}
+
+function activityEndpoint() {
+  return codingAgent() === 'codex' ? 'codex' : 'claude'
+}
+
 function stateDirectory() {
-  if (process.env.KIWI_CODE_CLAUDE_STATE_DIR) return process.env.KIWI_CODE_CLAUDE_STATE_DIR
+  if (codingAgent() === 'codex' && process.env.KIWI_CODE_CODEX_STATE_DIR) {
+    return process.env.KIWI_CODE_CODEX_STATE_DIR
+  }
+  if (codingAgent() !== 'codex' && process.env.KIWI_CODE_CLAUDE_STATE_DIR) {
+    return process.env.KIWI_CODE_CLAUDE_STATE_DIR
+  }
   const uid = typeof process.getuid === 'function' ? process.getuid() : 'user'
-  return path.join(os.tmpdir(), `kiwi-code-claude-${uid}`)
+  return path.join(os.tmpdir(), `kiwi-code-${codingAgent()}-${uid}`)
 }
 
 function sessionKey(input) {
@@ -91,12 +106,12 @@ async function request(url, init = {}, timeoutMs = requestTimeoutMs) {
 async function sendActivity(state, token, timeoutMs = requestTimeoutMs, promptStartedAt = '', session = '') {
   const endpoint = threadEndpoint()
   if (!endpoint) return
-  await request(`${endpoint}/claude/activity`, {
+  await request(`${endpoint}/${activityEndpoint()}/activity`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       state,
-      agent: process.env.KIWI_CODE_CODING_AGENT || 'claude',
+      agent: codingAgent(),
       // The heartbeat and the stop hook are separate processes, so their updates
       // can arrive out of order. The token lets Kiwi Code discard a working
       // heartbeat that belongs to a turn it already saw finish.
@@ -174,9 +189,9 @@ async function startActivity(input) {
   if (!threadEndpoint()) return
   const token = String(input.prompt_id || `${Date.now()}-${process.pid}`)
   const promptStartedAt = new Date().toISOString()
-  // Claude documents no per-prompt ID on UserPromptSubmit or Stop. This start
-  // hook is synchronous, so persist our generation before Claude begins the
-  // turn; the synchronous Stop hook can then report exactly that generation
+  // The managed lifecycle hooks do not provide a reliable per-prompt ID.
+  // This start hook is synchronous, so persist our generation before the agent
+  // begins the turn; the synchronous stop hook can then report that generation
   // even if the detached heartbeat's first request is still in flight.
   await writeState(input, { token, state: 'working', promptStartedAt })
   const heartbeatInput = Buffer.from(JSON.stringify({
@@ -258,6 +273,7 @@ async function generateTitle(prompt) {
   delete environment.CLAUDECODE
   delete environment.CLAUDE_CODE_CHILD_SESSION
   delete environment.CLAUDE_CODE_SESSION_ID
+  delete environment.CODEX_THREAD_ID
 
   // Match Pi's thread-title extension while keeping this one-shot process
   // isolated from project context and globally installed resources.
@@ -315,6 +331,9 @@ async function generateTitle(prompt) {
 }
 
 function emitSessionTitle(title) {
+  // Claude accepts a sessionTitle extension on UserPromptSubmit. Codex does not;
+  // its own session naming remains independent from Kiwi Code's thread title.
+  if (codingAgent() === 'codex') return
   process.stdout.write(JSON.stringify({
     suppressOutput: true,
     hookSpecificOutput: {
@@ -380,7 +399,7 @@ async function main() {
 }
 
 await main().catch((error) => {
-  // Kiwi Code integration must never block or fail the user's Claude turn.
+  // Kiwi Code integration must never block or fail the user's coding-agent turn.
   if (process.argv[2] !== 'title') return
   const message = error instanceof Error ? error.message : String(error)
   process.stdout.write(JSON.stringify({

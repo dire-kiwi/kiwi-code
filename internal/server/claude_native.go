@@ -480,7 +480,7 @@ func (m *claudeNativeManager) startProcess(
 	}
 	// Kiwi Sandbox is intentionally not loaded into Claude for now. Preserve
 	// its related-project ergonomics through Claude's native --add-dir flag.
-	relatedDirectories, err := claudeRelatedProjectDirectories(thread)
+	relatedDirectories, err := codingAgentRelatedProjectDirectories(thread)
 	if err != nil {
 		return nil, err
 	}

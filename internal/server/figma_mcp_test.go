@@ -92,7 +92,7 @@ func TestClaudeNativeArgumentsPassFigmaMCPConfig(t *testing.T) {
 
 func TestTmuxCodingAgentLaunchWiresFigmaMCPPerAgent(t *testing.T) {
 	directory := t.TempDir()
-	for _, name := range []string{codingAgentPi, codingAgentClaude} {
+	for _, name := range []string{codingAgentPi, codingAgentCodex, codingAgentClaude} {
 		if err := os.WriteFile(filepath.Join(directory, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -102,9 +102,19 @@ func TestTmuxCodingAgentLaunchWiresFigmaMCPPerAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	codexDataDirectory := t.TempDir()
+	codexPlugin, err := materializeCodexPlugin(codexDataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler := &terminalHandler{
 		projects:             store,
 		envPath:              "/usr/bin/env",
+		agentToken:           "figma-test-capability",
+		agentTokenPath:       filepath.Join(codexDataDirectory, agentTokenFileName),
+		codexPlugin:          codexPlugin,
+		codexConfigPath:      filepath.Join(t.TempDir(), "codex"),
+		codexProfileName:     managedCodexProfileName(codexDataDirectory),
 		claudePluginPath:     "/plugin/kiwi-code",
 		piExtensionPaths:     []string{"/extensions/activity.ts"},
 		piFigmaExtensionPath: "/extensions/figma.ts",
@@ -143,6 +153,19 @@ func TestTmuxCodingAgentLaunchWiresFigmaMCPPerAgent(t *testing.T) {
 	}
 	if !slices.Contains(piEnabled, figmaMCPEnvironmentName+"="+project.DefaultFigmaMCPURL) {
 		t.Fatalf("enabled Pi launch did not export the Figma endpoint: %#v", piEnabled)
+	}
+
+	codexDisabled := launch(disabled, codingAgentCodex)
+	if slices.ContainsFunc(codexDisabled, func(argument string) bool {
+		return strings.Contains(argument, "mcp_servers.kiwi-code-figma.url")
+	}) {
+		t.Fatalf("disabled Codex launch referenced Figma: %#v", codexDisabled)
+	}
+	codexEnabled := launch(enabled, codingAgentCodex)
+	if !slices.ContainsFunc(codexEnabled, func(argument string) bool {
+		return strings.Contains(argument, "mcp_servers.kiwi-code-figma.url") && strings.Contains(argument, project.DefaultFigmaMCPURL)
+	}) {
+		t.Fatalf("enabled Codex launch did not pass the Figma MCP config: %#v", codexEnabled)
 	}
 
 	claudeDisabled := launch(disabled, codingAgentClaude)

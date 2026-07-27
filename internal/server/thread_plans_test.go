@@ -148,12 +148,12 @@ func TestThreadPlanUploadRequiresForkedChildAndValidMarkdown(t *testing.T) {
 	parentRequest.Header.Set(agentTokenHeader, application.terminal.agentToken)
 	parentResponse := httptest.NewRecorder()
 	handler.ServeHTTP(parentResponse, parentRequest)
-	if parentResponse.Code != http.StatusConflict || !strings.Contains(parentResponse.Body.String(), "context: fork") {
+	if parentResponse.Code != http.StatusConflict || !strings.Contains(parentResponse.Body.String(), "managed planner") {
 		t.Fatalf("parent upload status = %d, body = %s", parentResponse.Code, parentResponse.Body.String())
 	}
 
 	claudeUnauthorizedRequest := httptest.NewRequest(http.MethodPost, parentPath, strings.NewReader(`{"title":"Claude plan","content":"# Plan"}`))
-	claudeUnauthorizedRequest.Header.Set(claudePlanContextHeader, claudePlanContextFork)
+	claudeUnauthorizedRequest.Header.Set(threadPlanContextHeader, claudePlanContextFork)
 	claudeUnauthorizedResponse := httptest.NewRecorder()
 	handler.ServeHTTP(claudeUnauthorizedResponse, claudeUnauthorizedRequest)
 	if claudeUnauthorizedResponse.Code != http.StatusForbidden {
@@ -162,7 +162,7 @@ func TestThreadPlanUploadRequiresForkedChildAndValidMarkdown(t *testing.T) {
 
 	claudeRequest := httptest.NewRequest(http.MethodPost, parentPath, strings.NewReader(`{"title":"Claude plan","content":"# Plan"}`))
 	claudeRequest.Header.Set(agentTokenHeader, application.terminal.agentToken)
-	claudeRequest.Header.Set(claudePlanContextHeader, claudePlanContextFork)
+	claudeRequest.Header.Set(threadPlanContextHeader, claudePlanContextFork)
 	claudeResponse := httptest.NewRecorder()
 	handler.ServeHTTP(claudeResponse, claudeRequest)
 	if claudeResponse.Code != http.StatusCreated {
@@ -176,6 +176,22 @@ func TestThreadPlanUploadRequiresForkedChildAndValidMarkdown(t *testing.T) {
 		t.Fatalf("Claude context fork plan = %#v", claudePlan)
 	}
 
+	codexRequest := httptest.NewRequest(http.MethodPost, parentPath, strings.NewReader(`{"title":"Codex plan","content":"# Plan"}`))
+	codexRequest.Header.Set(agentTokenHeader, application.terminal.agentToken)
+	codexRequest.Header.Set(threadPlanContextHeader, codexPlanContext)
+	codexResponse := httptest.NewRecorder()
+	handler.ServeHTTP(codexResponse, codexRequest)
+	if codexResponse.Code != http.StatusCreated {
+		t.Fatalf("Codex planner upload status = %d, body = %s", codexResponse.Code, codexResponse.Body.String())
+	}
+	var codexPlan threadPlanSnapshot
+	if err := json.NewDecoder(codexResponse.Body).Decode(&codexPlan); err != nil {
+		t.Fatal(err)
+	}
+	if codexPlan.ThreadID != parent.ID || codexPlan.SourceThreadID != parent.ID || codexPlan.Title != "Codex plan" {
+		t.Fatalf("Codex planner plan = %#v", codexPlan)
+	}
+
 	workflowChild, err := store.AddThreadWithOptions(item.ID, "Workflow child", project.AddThreadOptions{
 		ParentThreadID:  parent.ID,
 		WorkflowRunID:   "run-1",
@@ -187,10 +203,10 @@ func TestThreadPlanUploadRequiresForkedChildAndValidMarkdown(t *testing.T) {
 	workflowPath := "/api/projects/" + item.ID + "/threads/" + workflowChild.ID + "/plans"
 	workflowRequest := httptest.NewRequest(http.MethodPost, workflowPath, strings.NewReader(`{"title":"Workflow","content":"# Plan"}`))
 	workflowRequest.Header.Set(agentTokenHeader, application.terminal.agentToken)
-	workflowRequest.Header.Set(claudePlanContextHeader, claudePlanContextFork)
+	workflowRequest.Header.Set(threadPlanContextHeader, claudePlanContextFork)
 	workflowResponse := httptest.NewRecorder()
 	handler.ServeHTTP(workflowResponse, workflowRequest)
-	if workflowResponse.Code != http.StatusConflict || !strings.Contains(workflowResponse.Body.String(), "context: fork") {
+	if workflowResponse.Code != http.StatusConflict || !strings.Contains(workflowResponse.Body.String(), "managed planner") {
 		t.Fatalf("workflow upload status = %d, body = %s", workflowResponse.Code, workflowResponse.Body.String())
 	}
 

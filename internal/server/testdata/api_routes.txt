@@ -82,6 +82,7 @@ POST /api/settings/agent-skills
 PUT /api/projects/order
 PUT /api/projects/{id}/threads/order
 PUT /api/projects/{id}/threads/{threadId}/claude/activity
+PUT /api/projects/{id}/threads/{threadId}/codex/activity
 PUT /api/projects/{id}/threads/{threadId}/context/status
 PUT /api/projects/{id}/threads/{threadId}/limits
 PUT /api/projects/{id}/threads/{threadId}/pi/activity

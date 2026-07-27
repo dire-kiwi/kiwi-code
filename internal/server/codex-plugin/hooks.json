@@ -1,0 +1,43 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/kiwi-code-hook.mjs\" start",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/kiwi-code-hook.mjs\" title",
+            "timeout": 30,
+            "statusMessage": "Naming Kiwi Code thread…"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/kiwi-code-hook.mjs\" finished",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/kiwi-code-hook.mjs\" session-end",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
