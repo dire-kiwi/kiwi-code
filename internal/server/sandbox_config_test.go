@@ -80,12 +80,13 @@ func TestGlobalSandboxConfigAPIRoundTrip(t *testing.T) {
 	if state.Path != filepath.Join(home, ".config", "kiwi-sandbox", "sandbox.json") {
 		t.Fatalf("unexpected config path: %q", state.Path)
 	}
-	if state.Effective.Network || state.Effective.Shell != "/bin/zsh" {
+	if state.Effective.Network || state.Effective.PTY || state.Effective.Shell != "/bin/zsh" {
 		t.Fatalf("unexpected effective defaults: %#v", state.Effective)
 	}
 
 	body := []byte(`{
 		"network": false,
+		"pty": true,
 		"shell": "/bin/bash",
 		"defaults": {"read": ["$CWD", " /extra "], "write": ["$CWD", ""]},
 		"commands": [{"patterns": ["npm *", "pnpm *"], "network": true}]
@@ -103,6 +104,9 @@ func TestGlobalSandboxConfigAPIRoundTrip(t *testing.T) {
 	}
 	if state.Config.Network == nil || *state.Config.Network || state.Effective.Network {
 		t.Fatalf("network was not persisted: %#v", state)
+	}
+	if state.Config.PTY == nil || !*state.Config.PTY || !state.Effective.PTY {
+		t.Fatalf("PTY access was not persisted: %#v", state)
 	}
 	if state.Config.Defaults == nil ||
 		len(state.Config.Defaults.Read) != 2 || state.Config.Defaults.Read[1] != "/extra" ||
@@ -177,6 +181,7 @@ func TestGlobalSandboxConfigAPIRejectsInvalidInput(t *testing.T) {
 		"empty pattern":  `{"commands": [{"patterns": ["  "]}]}`,
 		"unknown field":  `{"defaultz": {}}`,
 		"malformed":      `{"network": "yes"}`,
+		"malformed PTY":  `{"pty": "yes"}`,
 	} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/sandbox/config",
@@ -227,7 +232,7 @@ func TestThreadSandboxConfigAPIOverlaysGlobalConfig(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(globalPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(globalPath, []byte(`{"network": false, "shell": "/bin/bash"}`), 0o600); err != nil {
+	if err := os.WriteFile(globalPath, []byte(`{"network": false, "pty": false, "shell": "/bin/bash"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -261,11 +266,11 @@ func TestThreadSandboxConfigAPIOverlaysGlobalConfig(t *testing.T) {
 	if state.Path != filepath.Join(thread.Cwd, ".config", "kiwi-sandbox.json") {
 		t.Fatalf("unexpected thread config path: %q", state.Path)
 	}
-	if state.Effective.Network || state.Effective.Shell != "/bin/bash" {
+	if state.Effective.Network || state.Effective.PTY || state.Effective.Shell != "/bin/bash" {
 		t.Fatalf("global config not reflected in effective policy: %#v", state.Effective)
 	}
 
-	body := []byte(`{"network": true, "relatedProjects": ["../shared-library"]}`)
+	body := []byte(`{"network": true, "pty": true, "relatedProjects": ["../shared-library"]}`)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, url, bytes.NewReader(body)))
 	if response.Code != http.StatusOK {
@@ -274,8 +279,11 @@ func TestThreadSandboxConfigAPIOverlaysGlobalConfig(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&state); err != nil {
 		t.Fatal(err)
 	}
-	if !state.Exists || !state.Effective.Network || state.Effective.Shell != "/bin/bash" {
+	if !state.Exists || !state.Effective.Network || !state.Effective.PTY || state.Effective.Shell != "/bin/bash" {
 		t.Fatalf("thread overlay not applied: %#v", state)
+	}
+	if state.Config.PTY == nil || !*state.Config.PTY {
+		t.Fatalf("thread PTY override not persisted: %#v", state.Config)
 	}
 	if len(state.Effective.RelatedProjects) != 1 || state.Effective.RelatedProjects[0] != "../shared-library" {
 		t.Fatalf("related projects not persisted: %#v", state.Effective.RelatedProjects)

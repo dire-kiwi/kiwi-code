@@ -24,6 +24,7 @@ const baseState: SandboxConfigState = {
     defaults: { read: ['$CWD'], write: ['$CWD', '$TMPDIR'] },
     commands: [],
     network: false,
+    pty: false,
     shell: '/bin/zsh',
     relatedProjects: [],
   },
@@ -31,6 +32,7 @@ const baseState: SandboxConfigState = {
     defaults: { read: ['$CWD'], write: ['$CWD', '$TMPDIR'] },
     commands: [],
     network: false,
+    pty: false,
     shell: '/bin/zsh',
     relatedProjects: [],
   },
@@ -81,5 +83,17 @@ describe('SandboxSettingsScreen', () => {
     })
 
     view.unmount()
+  })
+
+  it('requires an explicit pseudo-terminal override', async () => {
+    subscription.current = { state: 'ready', data: baseState, retry }
+    render(<SandboxSettingsScreen scope="global" embedded />)
+
+    const pty = await screen.findByLabelText('Pseudo-terminal access')
+    expect(pty.textContent).toContain('Inherit (disabled)')
+    fireEvent.click(pty)
+    fireEvent.click(await screen.findByRole('option', { name: 'Enabled' }))
+    expect(pty.textContent).toContain('Enabled')
+    expect((screen.getByRole('button', { name: 'Save sandbox config' }) as HTMLButtonElement).disabled).toBe(false)
   })
 })

@@ -58,6 +58,7 @@ export const SandboxConfigSchema = Schema.mutable(Schema.Struct({
   defaults: Schema.optional(SandboxFileAccessSchema),
   commands: Schema.optional(MutableArray(SandboxCommandRuleSchema)),
   network: Schema.optional(Schema.Boolean),
+  pty: Schema.optional(Schema.Boolean),
   shell: Schema.optional(Schema.String),
   relatedProjects: Schema.optional(StringArray),
 }))
@@ -67,6 +68,7 @@ export const EffectiveSandboxConfigSchema = Schema.Struct({
   defaults: SandboxFileAccessSchema,
   commands: MutableArray(SandboxCommandRuleSchema),
   network: Schema.Boolean,
+  pty: Schema.Boolean,
   shell: Schema.String,
   relatedProjects: StringArray,
 })

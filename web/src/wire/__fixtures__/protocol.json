@@ -259,6 +259,7 @@
         },
         "commands": [],
         "network": false,
+        "pty": false,
         "shell": "/bin/zsh",
         "relatedProjects": []
       },
@@ -282,6 +283,7 @@
         },
         "commands": [],
         "network": false,
+        "pty": false,
         "shell": "/bin/zsh",
         "relatedProjects": []
       }

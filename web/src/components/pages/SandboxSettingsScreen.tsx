@@ -49,6 +49,7 @@ type SandboxSettingsScreenProps = {
 }
 
 type NetworkChoice = 'inherit' | 'allowed' | 'blocked'
+type PtyChoice = 'inherit' | 'enabled' | 'disabled'
 
 type RuleDraft = {
   key: number
@@ -66,6 +67,7 @@ type Draft = {
   commandsEnabled: boolean
   rules: RuleDraft[]
   network: NetworkChoice
+  pty: PtyChoice
   shell: string
   relatedProjects: string
 }
@@ -76,6 +78,10 @@ function splitLines(value: string): string[] {
 
 function networkChoice(value: boolean | undefined): NetworkChoice {
   return value === undefined ? 'inherit' : value ? 'allowed' : 'blocked'
+}
+
+function ptyChoice(value: boolean | undefined): PtyChoice {
+  return value === undefined ? 'inherit' : value ? 'enabled' : 'disabled'
 }
 
 function ruleDraft(rule: SandboxCommandRule, key: number): RuleDraft {
@@ -98,6 +104,7 @@ function draftFromState(state: SandboxConfigState, nextKey: () => number): Draft
     commandsEnabled: config.commands !== undefined,
     rules: (config.commands ?? []).map((rule) => ruleDraft(rule, nextKey())),
     network: networkChoice(config.network),
+    pty: ptyChoice(config.pty),
     shell: config.shell ?? '',
     relatedProjects: (config.relatedProjects ?? []).join('\n'),
   }
@@ -121,6 +128,7 @@ function configFromDraft(draft: Draft, scope: 'global' | 'thread'): SandboxConfi
     }))
   }
   if (draft.network !== 'inherit') config.network = draft.network === 'allowed'
+  if (draft.pty !== 'inherit') config.pty = draft.pty === 'enabled'
   if (draft.shell.trim()) config.shell = draft.shell.trim()
   if (scope === 'thread') {
     const relatedProjects = splitLines(draft.relatedProjects)
@@ -337,8 +345,8 @@ export function SandboxSettingsScreen({
             <Surface as="section" variant="elevated-panel" className="overflow-hidden">
               <SectionHeader
                 icon={<Globe size={16} />}
-                title="Network and shell"
-                description="Whether sandboxed commands may reach the network, and which shell runs them."
+                title="Runtime capabilities"
+                description="Network, pseudo-terminal, and shell settings for sandboxed commands."
                 tone="blue"
               />
               <div className="space-y-4 p-4 sm:p-5">
@@ -369,6 +377,35 @@ export function SandboxSettingsScreen({
                   </div>
                   <p className="mt-2 text-[9px] leading-4 text-ghost-faint">
                     Individual command rules below can still allow or block the network per command.
+                  </p>
+                </div>
+                <div>
+                  <label
+                    htmlFor="sandbox-pty-select"
+                    className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-ghost-dim"
+                  >
+                    Pseudo-terminal access
+                  </label>
+                  <div className="mt-2.5 max-w-72">
+                    <Select
+                      id="sandbox-pty-select"
+                      variant="code"
+                      value={draft.pty}
+                      options={[
+                        {
+                          value: 'inherit',
+                          label: `Inherit (${state.inherited.pty ? 'enabled' : 'disabled'})`,
+                        },
+                        { value: 'enabled', label: 'Enabled' },
+                        { value: 'disabled', label: 'Disabled' },
+                      ]}
+                      onChange={(value) => updateDraft({ pty: value as PtyChoice })}
+                      disabled={saving}
+                      leadingIcon={<SquareTerminal size={12} />}
+                    />
+                  </div>
+                  <p className="mt-2 text-[9px] leading-4 text-ghost-faint">
+                    Disabled by default. Enable explicitly for openpty(), forkpty(), or terminal integration tests.
                   </p>
                 </div>
                 <div>

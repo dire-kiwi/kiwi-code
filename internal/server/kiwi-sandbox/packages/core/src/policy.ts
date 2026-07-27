@@ -15,6 +15,7 @@ export type PolicyDecision = {
   write: string[];
   deniedWrite: string[];
   network: boolean;
+  pty: boolean;
 };
 
 export async function resolveDecision(
@@ -29,6 +30,7 @@ export async function resolveDecision(
   let rule = "defaults";
   let unrestricted = false;
   let network = config.network;
+  const pty = config.pty;
   let includeRelatedProjects = true;
 
   if (isSimpleCommand(command)) {
@@ -45,7 +47,7 @@ export async function resolveDecision(
     }
   }
 
-  if (unrestricted) return { rule, unrestricted, read: [], write: [], deniedWrite: [], network };
+  if (unrestricted) return { rule, unrestricted, read: [], write: [], deniedWrite: [], network, pty };
   const relatedProjects = includeRelatedProjects
     ? await resolvePaths(config.relatedProjects, projectRoot)
     : [];
@@ -62,6 +64,7 @@ export async function resolveDecision(
     write: uniqueSorted([...write, ...relatedProjects, ...worktrees]),
     deniedWrite: [],
     network,
+    pty,
   };
 }
 

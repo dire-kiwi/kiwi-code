@@ -29,6 +29,7 @@ Configuration is JSON without comments:
     "write": ["$CWD", "$TMPDIR"]
   },
   "network": false,
+  "pty": false,
   "shell": "/bin/zsh",
   "relatedProjects": ["../shared-library", "~/projects/related-service"],
   "commands": [
@@ -74,6 +75,7 @@ Configuration is JSON without comments:
 - `defaults.read`: additional directories or files readable when no command rule matches.
 - `defaults.write`: additional directories or files writable when no command rule matches. Write paths are automatically readable.
 - `network`: whether sandboxed processes may use the network.
+- `pty`: whether sandboxed processes may allocate pseudo-terminals. It defaults to `false`; set it to `true` explicitly, preferably in a trusted project config, for `openpty()`, `forkpty()`, or terminal emulation.
 - `shell`: absolute shell path used by command execution.
 - `relatedProjects`: project-config-only paths injected into Pi and Claude's system context and added to the default read/write policy. Relative paths resolve from the project root. Ordinary read/write roots are not injected into context.
 - `commands`: ordered command rules. The first matching rule replaces `defaults`, including automatic related-project access, for that operation, but cannot remove implicit working-directory or Git-worktree access.
@@ -98,7 +100,7 @@ Allowed path values include:
 
 Paths are canonicalized through existing ancestors before policy checks to prevent symlink aliases from bypassing an allowlist.
 
-Fixed macOS/toolchain runtime paths are always readable so shells, Node, and command-line executables can start. File metadata inspection is allowed globally so runtimes can traverse lexical and symlinked prefixes such as `/var`, `/etc`, `/opt`, and `/tmp`; read policies still control file and directory contents, and write policies still control modifications. `/dev/null` and `/dev/tty` are always writable.
+Fixed macOS/toolchain runtime paths are always readable so shells, Node, and command-line executables can start. File metadata inspection is allowed globally so runtimes can traverse lexical and symlinked prefixes such as `/var`, `/etc`, `/opt`, and `/tmp`; read policies still control file and directory contents, and write policies still control modifications. `/dev/null` and `/dev/tty` are always writable. When `pty` is `true`, `/dev/ptmx` and dynamically allocated three-digit `/dev/ttysNNN` PTY slave devices receive the additional access needed for terminal allocation; other device access remains blocked unless explicitly configured.
 
 ## File tool patterns
 
