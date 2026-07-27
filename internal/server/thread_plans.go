@@ -30,8 +30,9 @@ const (
 	maxThreadPlanRequestBytes    = 2 << 20
 	maxThreadPlanTitleCharacters = 120
 	maxRetainedThreadPlans       = 25
-	claudePlanContextHeader      = "X-Kiwi-Code-Plan-Context"
+	threadPlanContextHeader      = "X-Kiwi-Code-Plan-Context"
 	claudePlanContextFork        = "claude-context-fork"
+	codexPlanContext             = "codex-planner"
 )
 
 var errThreadPlanNotFound = errors.New("thread plan not found")
@@ -376,13 +377,15 @@ func (s *Server) uploadThreadPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	piForkChild := source.ParentThreadID != "" && source.WorkflowRunID == "" && source.WorkflowAgentID == ""
-	// Claude Code's native context: fork agents remain inside the current Kiwi
-	// thread rather than receiving a separately addressable Kiwi child thread.
-	// The bundled plan MCP marks those authenticated uploads so they can publish
-	// to that current thread without weakening the existing Pi child check.
-	claudeForkChild := source.ParentThreadID == "" && r.Header.Get(claudePlanContextHeader) == claudePlanContextFork
-	if !piForkChild && !claudeForkChild {
-		writeError(w, http.StatusConflict, "Only a context: fork skill child can publish a plan to its parent thread.")
+	// Native planner agents remain inside the current Kiwi thread rather than
+	// receiving a separately addressable Kiwi child thread. Bundled plan MCP
+	// servers mark authenticated uploads so they can publish to the current
+	// thread without weakening the existing Pi child check.
+	planContext := r.Header.Get(threadPlanContextHeader)
+	nativePlanner := source.ParentThreadID == "" &&
+		(planContext == claudePlanContextFork || planContext == codexPlanContext)
+	if !piForkChild && !nativePlanner {
+		writeError(w, http.StatusConflict, "Only a managed planner can publish a retained plan.")
 		return
 	}
 	if source.ClosedAt != nil || source.ArchivedAt != nil {

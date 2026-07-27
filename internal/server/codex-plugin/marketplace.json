@@ -1,0 +1,20 @@
+{
+  "name": "kiwi-code-managed",
+  "interface": {
+    "displayName": "Kiwi Code Managed"
+  },
+  "plugins": [
+    {
+      "name": "kiwi-code",
+      "source": {
+        "source": "local",
+        "path": "./plugins/kiwi-code"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

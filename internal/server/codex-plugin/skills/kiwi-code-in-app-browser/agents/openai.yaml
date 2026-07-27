@@ -1,0 +1,6 @@
+interface:
+  display_name: "Kiwi Code Browser"
+  short_description: "Control the browser shared by this Kiwi Code thread"
+  default_prompt: "Open the relevant page in the Kiwi Code browser and verify it."
+policy:
+  allow_implicit_invocation: true

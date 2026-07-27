@@ -7,8 +7,8 @@ const SERVER_NAME = "kiwi-code-plans";
 const SERVER_VERSION = "1.0.0";
 const MAX_PLAN_BYTES = 256 * 1024;
 const MAX_TITLE_CHARACTERS = 120;
-const CLAUDE_PLAN_CONTEXT_HEADER = "X-Kiwi-Code-Plan-Context";
-const CLAUDE_PLAN_CONTEXT = "claude-context-fork";
+const PLAN_CONTEXT_HEADER = "X-Kiwi-Code-Plan-Context";
+const PLAN_CONTEXT = "claude-context-fork";
 
 const tools = [
   {
@@ -230,7 +230,7 @@ async function callTool(params, signal) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        [CLAUDE_PLAN_CONTEXT_HEADER]: CLAUDE_PLAN_CONTEXT,
+        [PLAN_CONTEXT_HEADER]: PLAN_CONTEXT,
       },
       body: JSON.stringify({ title: args.title, content: args.content }),
     }, signal);

@@ -92,7 +92,15 @@ func TestPiActivityAPI(t *testing.T) {
 		t.Fatalf("duplicate terminal update resurrected acknowledged status: %#v", activities)
 	}
 
+	codexActivityPath := "/api/projects/" + item.ID + "/threads/" + thread.ID + "/codex/activity"
+	updatePiActivityForTest(t, handler, codexActivityPath, `{"state":"working","agent":"codex"}`, http.StatusOK)
+	if activities = listPiActivityForTest(t, handler); len(activities) != 1 || activities[0].State != piActivityWorking {
+		t.Fatalf("Codex working activity was not retained: %#v", activities)
+	}
+	updatePiActivityForTest(t, handler, codexActivityPath, `{"state":"idle","agent":"codex"}`, http.StatusNoContent)
+
 	updatePiActivityForTest(t, handler, claudeActivityPath, `{"state":"working","agent":"pi"}`, http.StatusBadRequest)
+	updatePiActivityForTest(t, handler, codexActivityPath, `{"state":"working","agent":"claude"}`, http.StatusBadRequest)
 	updatePiActivityForTest(t, handler, activityPath, `{"state":"working","agent":"claude-gpt"}`, http.StatusBadRequest)
 }
 

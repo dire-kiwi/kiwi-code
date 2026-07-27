@@ -38,9 +38,18 @@ type terminalHandler struct {
 	piModelCache          map[string]piModelCapabilityCacheEntry
 	piModelInflight       map[string]*piModelCapabilityInflight
 	agentToken            string
+	agentTokenPath        string
 	agentTokenErr         error
 	nativePi              *piNativeManager
 	nativeClaude          *claudeNativeManager
+	codexPlugin           codexPluginInstallation
+	codexPluginErr        error
+	codexConfigPath       string
+	codexConfigErr        error
+	codexProfileName      string
+	codexPluginMu         sync.Mutex
+	codexPluginPrepared   bool
+	codexPluginPrepareErr error
 	claudePluginPath      string
 	claudePluginErr       error
 	claudeConfigPath      string
@@ -227,6 +236,8 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 	// so it only loads for projects that enabled Figma MCP support.
 	figmaExtensionPath, figmaExtensionErr := materializePiFigmaMCPExtension(projects.DataDirectory())
 	agentToken, agentTokenErr := loadOrCreateAgentToken(projects.DataDirectory())
+	codexPlugin, codexPluginErr := materializeCodexPlugin(projects.DataDirectory())
+	codexConfigPath, codexConfigErr := defaultCodexConfigDirectory()
 	claudePluginPath, claudePluginErr := materializeClaudePlugin(projects.DataDirectory())
 	claudeConfigPath, claudeConfigErr := defaultClaudeConfigDirectory()
 	claudePluginRootPath, claudePluginRootErr := defaultClaudePluginDirectory(claudeConfigPath)
@@ -242,6 +253,7 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 		piFigmaExtensionPath: figmaExtensionPath,
 		piFigmaExtensionErr:  figmaExtensionErr,
 		agentToken:           agentToken,
+		agentTokenPath:       filepath.Join(projects.DataDirectory(), agentTokenFileName),
 		agentTokenErr:        agentTokenErr,
 		nativePi: newPiNativeManager(
 			projects.DataDirectory(),
@@ -256,6 +268,11 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 			claudePluginPath,
 			claudePluginErr,
 		),
+		codexPlugin:          codexPlugin,
+		codexPluginErr:       codexPluginErr,
+		codexConfigPath:      codexConfigPath,
+		codexConfigErr:       codexConfigErr,
+		codexProfileName:     managedCodexProfileName(projects.DataDirectory()),
 		claudePluginPath:     claudePluginPath,
 		claudePluginErr:      claudePluginErr,
 		claudeConfigPath:     claudeConfigPath,
@@ -3015,6 +3032,28 @@ func (h *terminalHandler) commandForCodingAgentPaneWithOptions(
 	return command, args, notice, nil
 }
 
+func (h *terminalHandler) prepareManagedCodexPlugin() error {
+	h.codexPluginMu.Lock()
+	defer h.codexPluginMu.Unlock()
+	if h.codexPluginPrepared {
+		return h.codexPluginPrepareErr
+	}
+	h.codexPluginPrepared = true
+	switch {
+	case h.codexPluginErr != nil:
+		h.codexPluginPrepareErr = h.codexPluginErr
+	case h.codexConfigErr != nil:
+		h.codexPluginPrepareErr = h.codexConfigErr
+	default:
+		h.codexPluginPrepareErr = prepareCodexPluginProfile(
+			h.codexConfigPath,
+			h.codexProfileName,
+			h.codexPlugin,
+		)
+	}
+	return h.codexPluginPrepareErr
+}
+
 func (h *terminalHandler) commandForTmuxTarget(
 	item project.Project,
 	thread project.Thread,
@@ -3055,7 +3094,34 @@ func (h *terminalHandler) commandForTmuxTarget(
 		args = append(extensionArgs, args...)
 	}
 	if tool == codingAgentCodex && notice == "" {
-		args = append([]string{"--dangerously-bypass-approvals-and-sandbox"}, args...)
+		if h.agentTokenErr != nil {
+			return "", nil, "", h.agentTokenErr
+		}
+		if h.agentToken == "" || h.agentTokenPath == "" {
+			return "", nil, "", errors.New("Codex plugin capability is unavailable")
+		}
+		if err := h.prepareManagedCodexPlugin(); err != nil {
+			return "", nil, "", err
+		}
+		pluginArguments := []string{
+			"--profile", h.codexProfileName,
+			"--dangerously-bypass-approvals-and-sandbox",
+			"--dangerously-bypass-hook-trust",
+		}
+		relatedDirectories, err := codingAgentRelatedProjectDirectories(thread)
+		if err != nil {
+			return "", nil, "", err
+		}
+		for _, directory := range relatedDirectories {
+			pluginArguments = append(pluginArguments, "--add-dir", directory)
+		}
+		if figmaMCPURL != "" {
+			pluginArguments = append(
+				pluginArguments,
+				"--config", "mcp_servers.kiwi-code-figma.url="+strconv.Quote(figmaMCPURL),
+			)
+		}
+		args = append(pluginArguments, args...)
 	}
 	if isClaudeCodingAgent(tool) && notice == "" {
 		if h.claudePluginErr != nil {
@@ -3090,7 +3156,7 @@ func (h *terminalHandler) commandForTmuxTarget(
 		// Kiwi Sandbox is intentionally not loaded into Claude for now. Preserve
 		// its related-project ergonomics through Claude's native --add-dir flag.
 		pluginArguments := []string{"--plugin-dir", h.claudePluginPath}
-		relatedDirectories, err := claudeRelatedProjectDirectories(thread)
+		relatedDirectories, err := codingAgentRelatedProjectDirectories(thread)
 		if err != nil {
 			return "", nil, "", err
 		}
@@ -3127,9 +3193,8 @@ func (h *terminalHandler) commandForTmuxTarget(
 		environment = append(environment, kiwiCodeThreadEnvironment(threadEndpoint, item.ID, thread.ID)...)
 	}
 	// Kiwi Code child and workflow execution is deliberately Pi Native. Do not
-	// pass the broad managed-agent capability or relationship metadata to other
-	// coding harnesses. Claude's browser MCP reads its capability from the
-	// protected data directory.
+	// pass relationship metadata to other coding harnesses. Their managed browser
+	// and plan MCP servers receive only the capability-file location they need.
 	if tool == codingAgentPi && figmaMCPURL != "" && notice == "" {
 		environment = append(environment, figmaMCPEnvironmentName+"="+figmaMCPURL)
 	}
@@ -3140,6 +3205,18 @@ func (h *terminalHandler) commandForTmuxTarget(
 		if thread.ParentThreadID != "" {
 			environment = append(environment, "KIWI_CODE_PARENT_THREAD_ID="+thread.ParentThreadID)
 		}
+	}
+	if tool == codingAgentCodex && notice == "" {
+		piPath := codingAgentPi
+		if resolvedPiPath, err := exec.LookPath(codingAgentPi); err == nil {
+			piPath = resolvedPiPath
+		}
+		environment = append(environment,
+			"CODEX_HOME="+h.codexConfigPath,
+			"KIWI_CODE_AGENT_TOKEN_FILE="+h.agentTokenPath,
+			"KIWI_CODE_CODING_AGENT="+codingAgentCodex,
+			"KIWI_CODE_PI_PATH="+piPath,
+		)
 	}
 	if isClaudeCodingAgent(tool) && notice == "" {
 		if profileAgent && !gptAgent {

@@ -96,11 +96,11 @@ func threadSandboxConfigPath(thread project.Thread) string {
 	return filepath.Join(threadSandboxRoot(thread), ".config", "kiwi-sandbox.json")
 }
 
-// claudeRelatedProjectDirectories translates the project-only relatedProjects
-// setting into the absolute paths accepted by Claude Code's --add-dir flag.
-// Keep this expansion aligned with Kiwi Sandbox so switching enforcement back
-// on later does not change which related directories Claude can access.
-func claudeRelatedProjectDirectories(thread project.Thread) ([]string, error) {
+// codingAgentRelatedProjectDirectories translates the project-only relatedProjects
+// setting into the absolute paths accepted by Claude Code and Codex --add-dir
+// flags. Keep this expansion aligned with Kiwi Sandbox so switching enforcement
+// back on later does not change which related directories agents can access.
+func codingAgentRelatedProjectDirectories(thread project.Thread) ([]string, error) {
 	config, _, err := readSandboxConfigFile(threadSandboxConfigPath(thread), true)
 	if err != nil {
 		return nil, fmt.Errorf("load related projects: %w", err)
