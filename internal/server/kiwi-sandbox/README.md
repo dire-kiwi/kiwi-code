@@ -30,6 +30,7 @@ The project file overrides top-level fields from the global file. Pi only reads 
     "write": ["$CWD", "$TMPDIR"]
   },
   "network": false,
+  "pty": false,
   "shell": "/bin/zsh",
   "relatedProjects": ["../shared-library", "~/projects/related-service"],
   "commands": [
@@ -68,10 +69,12 @@ With no configuration, every Bash command may run under the same deny-by-default
 - An object rule's `pattern` may be one string or a list such as `["gh", "gh *"]`; every listed pattern shares that rule's `files` and `network` policy.
 - A matching object rule with no `files` field also grants unrestricted filesystem reads and writes.
 - An optional command-level `network` boolean overrides the top-level network policy for that matching simple command.
+- Top-level `pty` defaults to `false`. Set it to `true` explicitly—preferably in a trusted project config—when commands need `openpty()`, `forkpty()`, or terminal emulation.
 - Once `files` is present, its `read` and `write` lists constrain access outside the implicit working directory. Write paths are also readable.
 - `$CWD`, `$HOME`, `$TMPDIR`, `~`, absolute paths, and project-relative paths are supported.
 - Runtime paths needed for macOS, Node, and command execution are always readable. `/dev/null` and `/dev/tty` are always writable.
 - File metadata inspection is allowed globally so runtimes can traverse lexical and symlinked path prefixes such as `/var`, `/etc`, `/opt`, and `/tmp`. Read policies still control file and directory contents, and write policies still control modifications.
+- When `pty` is enabled, PTY allocation receives the `pseudo-tty` operation plus read/write/ioctl access to `/dev/ptmx` and dynamically allocated three-digit `/dev/ttysNNN` slave devices. Other device access remains blocked unless explicitly configured.
 - Globs support `*`, `?`, and character classes.
 - Unrestricted command rules are selected only for conservative single shell commands. Composition, redirection, command substitution, and unbalanced quotes fall back to `defaults`, preventing `gh status; cat ~/.ssh/id_ed25519` from inheriting `gh *` access.
 - A requested command working directory must remain inside the project root, another worktree for the same Git repository, or a configured related project after resolving symlinks.

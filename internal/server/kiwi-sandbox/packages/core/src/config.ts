@@ -19,6 +19,7 @@ export type SandboxConfig = {
   defaults: FileAccess;
   commands: CommandRule[];
   network: boolean;
+  pty: boolean;
   shell: string;
   relatedProjects: string[];
 };
@@ -39,6 +40,7 @@ export function defaultConfig(): SandboxConfig {
     },
     commands: [],
     network: false,
+    pty: false,
     shell: "/bin/zsh",
     relatedProjects: [],
   };
@@ -57,7 +59,7 @@ export async function loadConfig(paths: string[]): Promise<SandboxConfig> {
     try {
       const value = JSON.parse(await readFile(expandHome(path), "utf8")) as unknown;
       if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("configuration must be an object");
-      assertKnownKeys(value, ["defaults", "commands", "network", "shell", "relatedProjects"], path);
+      assertKnownKeys(value, ["defaults", "commands", "network", "pty", "shell", "relatedProjects"], path);
       parsed = value as Partial<SandboxConfig>;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
@@ -68,6 +70,10 @@ export async function loadConfig(paths: string[]): Promise<SandboxConfig> {
     if (Object.hasOwn(parsed, "network")) {
       if (typeof parsed.network !== "boolean") throw new Error(`${path}: network must be boolean`);
       config.network = parsed.network;
+    }
+    if (Object.hasOwn(parsed, "pty")) {
+      if (typeof parsed.pty !== "boolean") throw new Error(`${path}: pty must be boolean`);
+      config.pty = parsed.pty;
     }
     if (Object.hasOwn(parsed, "shell")) {
       if (typeof parsed.shell !== "string" || !isAbsolute(parsed.shell)) {
