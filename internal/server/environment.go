@@ -25,7 +25,14 @@ func (s *Server) runEnvironmentAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	window, err := s.terminal.newEnvironmentActionProcess(item, thread, action.Name, command, variables)
+	window, err := s.terminal.newEnvironmentActionProcess(
+		item,
+		thread,
+		action.Name,
+		command,
+		variables,
+		threadEndpointURL(r, item.ID, thread.ID),
+	)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
