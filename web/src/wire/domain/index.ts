@@ -94,6 +94,7 @@ export const ThreadSchema = Schema.Struct({
   title: Schema.String,
   cwd: Schema.String,
   createdAt: Schema.String,
+  environmentSetupStatus: Schema.optional(Schema.Literal('pending', 'running', 'succeeded', 'failed')),
   lastPromptAt: Schema.optional(Schema.String),
   parentThreadId: Schema.optional(Schema.String),
   agentModel: Schema.optional(Schema.String),

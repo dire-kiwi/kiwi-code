@@ -13,6 +13,11 @@ import (
 )
 
 const (
+	EnvironmentSetupPending   = "pending"
+	EnvironmentSetupRunning   = "running"
+	EnvironmentSetupSucceeded = "succeeded"
+	EnvironmentSetupFailed    = "failed"
+
 	defaultEnvironmentName           = "Local"
 	maxEnvironmentNameRunes          = 80
 	maxEnvironmentScriptBytes        = 128 << 10
@@ -229,6 +234,24 @@ func platformScript(scripts PlatformScripts) string {
 		return specific
 	}
 	return scripts.Default
+}
+
+func EnvironmentSetupRequired(item Project) bool {
+	return strings.TrimSpace(platformScript(item.Environment.SetupScripts)) != ""
+}
+
+func ResolveEnvironmentSetup(item Project, thread Thread) (string, []EnvironmentVariable, bool) {
+	script := platformScript(item.Environment.SetupScripts)
+	if strings.TrimSpace(script) == "" {
+		return "", nil, false
+	}
+	return script, environmentVariables(item, thread), true
+}
+
+func EnvironmentSetupBlocksAgent(thread Thread) bool {
+	return thread.EnvironmentSetupStatus == EnvironmentSetupPending ||
+		thread.EnvironmentSetupStatus == EnvironmentSetupRunning ||
+		thread.EnvironmentSetupStatus == EnvironmentSetupFailed
 }
 
 func runEnvironmentSetup(item Project, thread Thread) error {

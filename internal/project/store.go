@@ -56,29 +56,30 @@ type Profile struct {
 }
 
 type Thread struct {
-	ID                   string     `json:"id"`
-	Title                string     `json:"title"`
-	Cwd                  string     `json:"cwd"`
-	CreatedAt            time.Time  `json:"createdAt"`
-	LastPromptAt         *time.Time `json:"lastPromptAt,omitempty"`
-	ParentThreadID       string     `json:"parentThreadId,omitempty"`
-	AgentModel           string     `json:"agentModel,omitempty"`
-	AgentThinkingLevel   string     `json:"agentThinkingLevel,omitempty"`
-	WorkflowRunID        string     `json:"workflowRunId,omitempty"`
-	WorkflowAgentID      string     `json:"workflowAgentId,omitempty"`
-	SkillForkRequestID   string     `json:"skillForkRequestId,omitempty"`
-	NestedDepth          *int       `json:"nestedDepth,omitempty"`
-	Worktree             bool       `json:"worktree,omitempty"`
-	Branch               string     `json:"branch,omitempty"`
-	WorktreePath         string     `json:"worktreePath,omitempty"`
-	RollbackPending      bool       `json:"rollbackPending,omitempty"`
-	RollbackCleanupReady bool       `json:"rollbackCleanupReady,omitempty"`
-	AutoNamed            bool       `json:"autoNamed,omitempty"`
-	ClosedAt             *time.Time `json:"closedAt,omitempty"`
-	ArchivedAt           *time.Time `json:"archivedAt,omitempty"`
-	Bookmarked           bool       `json:"bookmarked,omitempty"`
-	TokenLimit           *int64     `json:"tokenLimit,omitempty"`
-	CostLimitUSD         *float64   `json:"costLimitUsd,omitempty"`
+	ID                     string     `json:"id"`
+	Title                  string     `json:"title"`
+	Cwd                    string     `json:"cwd"`
+	CreatedAt              time.Time  `json:"createdAt"`
+	EnvironmentSetupStatus string     `json:"environmentSetupStatus,omitempty"`
+	LastPromptAt           *time.Time `json:"lastPromptAt,omitempty"`
+	ParentThreadID         string     `json:"parentThreadId,omitempty"`
+	AgentModel             string     `json:"agentModel,omitempty"`
+	AgentThinkingLevel     string     `json:"agentThinkingLevel,omitempty"`
+	WorkflowRunID          string     `json:"workflowRunId,omitempty"`
+	WorkflowAgentID        string     `json:"workflowAgentId,omitempty"`
+	SkillForkRequestID     string     `json:"skillForkRequestId,omitempty"`
+	NestedDepth            *int       `json:"nestedDepth,omitempty"`
+	Worktree               bool       `json:"worktree,omitempty"`
+	Branch                 string     `json:"branch,omitempty"`
+	WorktreePath           string     `json:"worktreePath,omitempty"`
+	RollbackPending        bool       `json:"rollbackPending,omitempty"`
+	RollbackCleanupReady   bool       `json:"rollbackCleanupReady,omitempty"`
+	AutoNamed              bool       `json:"autoNamed,omitempty"`
+	ClosedAt               *time.Time `json:"closedAt,omitempty"`
+	ArchivedAt             *time.Time `json:"archivedAt,omitempty"`
+	Bookmarked             bool       `json:"bookmarked,omitempty"`
+	TokenLimit             *int64     `json:"tokenLimit,omitempty"`
+	CostLimitUSD           *float64   `json:"costLimitUsd,omitempty"`
 }
 
 type Project struct {
@@ -244,17 +245,18 @@ type ProjectUpdate struct {
 }
 
 type AddThreadOptions struct {
-	Worktree           bool
-	BaseBranch         string
-	BaseRevision       string
-	ParentThreadID     string
-	AgentModel         string
-	AgentThinkingLevel string
-	WorkflowRunID      string
-	WorkflowAgentID    string
-	SkillForkRequestID string
-	NestedDepth        *int
-	CreationPending    bool
+	Worktree              bool
+	DeferEnvironmentSetup bool
+	BaseBranch            string
+	BaseRevision          string
+	ParentThreadID        string
+	AgentModel            string
+	AgentThinkingLevel    string
+	WorkflowRunID         string
+	WorkflowAgentID       string
+	SkillForkRequestID    string
+	NestedDepth           *int
+	CreationPending       bool
 }
 
 func validWorkflowIdentity(value string) bool {
@@ -713,6 +715,14 @@ func readProjectsFile(path string) ([]Project, error) {
 		for _, thread := range item.Threads {
 			if thread.ID == "" {
 				return nil, fmt.Errorf("decode projects: thread ID is required in project %q", item.ID)
+			}
+			if thread.EnvironmentSetupStatus != "" && thread.EnvironmentSetupStatus != EnvironmentSetupPending &&
+				thread.EnvironmentSetupStatus != EnvironmentSetupRunning && thread.EnvironmentSetupStatus != EnvironmentSetupSucceeded &&
+				thread.EnvironmentSetupStatus != EnvironmentSetupFailed {
+				return nil, fmt.Errorf("decode projects: thread %q has an invalid environment setup status", thread.ID)
+			}
+			if thread.EnvironmentSetupStatus != "" && !thread.Worktree {
+				return nil, fmt.Errorf("decode projects: thread %q has environment setup state without a worktree", thread.ID)
 			}
 			if thread.NestedDepth != nil {
 				if err := validateSubAgentNestingDepth(*thread.NestedDepth); err != nil {
@@ -2000,7 +2010,7 @@ func (s *Store) AddThreadWithOptions(projectID, title string, options AddThreadO
 				RollbackPending:    options.CreationPending,
 			}
 			if options.Worktree {
-				thread, err = s.createWorktreeThread(s.projects[index], thread, options.BaseBranch, options.BaseRevision)
+				thread, err = s.createWorktreeThread(s.projects[index], thread, options.BaseBranch, options.BaseRevision, options.DeferEnvironmentSetup)
 				if err != nil {
 					return Thread{}, err
 				}
@@ -2045,6 +2055,46 @@ func (s *Store) AddThreadWithOptions(projectID, title string, options AddThreadO
 				s.notifyChangesLocked()
 			}
 			return cloneThread(thread), nil
+		}
+		return Thread{}, ErrNotFound
+	})
+}
+
+func (s *Store) SetThreadEnvironmentSetupStatus(projectID, threadID, status string) (Thread, error) {
+	if status != EnvironmentSetupRunning && status != EnvironmentSetupSucceeded && status != EnvironmentSetupFailed {
+		return Thread{}, errors.New("invalid environment setup status")
+	}
+
+	return withProjectMutationResult(s, func() (Thread, error) {
+		for projectIndex := range s.projects {
+			if s.projects[projectIndex].ID != projectID {
+				continue
+			}
+			for threadIndex := range s.projects[projectIndex].Threads {
+				thread := &s.projects[projectIndex].Threads[threadIndex]
+				if thread.ID != threadID {
+					continue
+				}
+				current := thread.EnvironmentSetupStatus
+				if current == "" {
+					return Thread{}, errors.New("the thread has no deferred environment setup")
+				}
+				if current == EnvironmentSetupSucceeded || current == EnvironmentSetupFailed || current == status {
+					return cloneThread(*thread), nil
+				}
+				thread.EnvironmentSetupStatus = status
+				if saveErr := s.saveLocked(); saveErr != nil {
+					if projectSaveWasPublished(saveErr) {
+						s.notifyChangesLocked()
+						return cloneThread(*thread), saveErr
+					}
+					thread.EnvironmentSetupStatus = current
+					return Thread{}, saveErr
+				}
+				s.notifyChangesLocked()
+				return cloneThread(*thread), nil
+			}
+			return Thread{}, ErrThreadNotFound
 		}
 		return Thread{}, ErrNotFound
 	})
@@ -2320,7 +2370,7 @@ func effectiveThreadNestingLimit(threads []Thread, threadID string, projectLimit
 	return depth, effectiveLimit, nil
 }
 
-func (s *Store) createWorktreeThread(item Project, thread Thread, baseBranch, baseRevision string) (Thread, error) {
+func (s *Store) createWorktreeThread(item Project, thread Thread, baseBranch, baseRevision string, deferEnvironmentSetup bool) (Thread, error) {
 	prefixOutput, err := gitOutput(item.Path, "rev-parse", "--show-prefix")
 	if err != nil || !isGitRepository(item.Path) {
 		return Thread{}, errors.New("Git worktrees are only available for Git repositories")
@@ -2380,7 +2430,9 @@ func (s *Store) createWorktreeThread(item Project, thread Thread, baseBranch, ba
 	if err := os.MkdirAll(thread.Cwd, 0o700); err != nil {
 		return cleanupFailedCreation(fmt.Errorf("create worktree working directory: %w", err))
 	}
-	if err := runEnvironmentSetup(item, thread); err != nil {
+	if deferEnvironmentSetup && EnvironmentSetupRequired(item) {
+		thread.EnvironmentSetupStatus = EnvironmentSetupPending
+	} else if err := runEnvironmentSetup(item, thread); err != nil {
 		return cleanupFailedCreation(err)
 	}
 	if s.worktreeSetup != nil {

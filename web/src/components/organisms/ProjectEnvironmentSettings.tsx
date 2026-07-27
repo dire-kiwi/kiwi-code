@@ -291,7 +291,7 @@ export function ProjectEnvironmentSettings({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 className="text-xs font-semibold text-ghost-bright-white">Setup script</h3>
-              <p className="mt-1 text-[10px] leading-4 text-ghost-dim">Runs at the project root when a managed worktree is created.</p>
+              <p className="mt-1 text-[10px] leading-4 text-ghost-dim">Runs in the coding tab at the managed worktree root before its agent starts.</p>
             </div>
             <GhostButton type="button" size="sm" className="flex items-center gap-2" onClick={() => setVariablesOpen(true)}>
               <Braces size={13} />
