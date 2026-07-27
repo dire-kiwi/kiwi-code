@@ -93,6 +93,7 @@ const statusCopy: Record<ConnectionStatus, string> = {
 const fallbackWorkspaceCodingAgents: Array<{ id: CodingAgentSelection; label: string }> = [
   { id: 'pi', label: 'Pi' },
   { id: 'pi-native', label: 'Pi Native' },
+  { id: 'codex', label: 'Codex CLI' },
 ]
 
 function codingAgentStorageKey(projectId: string, threadId: string) {
@@ -159,7 +160,7 @@ export function TerminalWorkspace({
       return fallbackWorkspaceCodingAgents
     }
     return [
-      { id: initialCodingAgent, label: 'Claude Code' },
+      { id: initialCodingAgent, label: initialCodingAgent === 'codex' ? 'Codex CLI' : 'Claude Code' },
       ...fallbackWorkspaceCodingAgents,
     ]
   })

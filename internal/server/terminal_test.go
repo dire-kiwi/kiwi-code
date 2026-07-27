@@ -386,6 +386,7 @@ func TestNormalizeCodingAgent(t *testing.T) {
 	for input, want := range map[string]string{
 		"":                        codingAgentPi,
 		"pi":                      codingAgentPi,
+		"codex":                   codingAgentCodex,
 		"claude":                  codingAgentClaude,
 		"claude-gpt":              codingAgentClaudeGPT,
 		"claude-profile-work":     claudeCodeProfileAgentID("work"),

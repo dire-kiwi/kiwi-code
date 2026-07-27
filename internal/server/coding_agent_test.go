@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -576,19 +577,22 @@ done
 	if err := json.NewDecoder(response.Body).Decode(&configs); err != nil {
 		t.Fatal(err)
 	}
-	if len(configs) != 3 || configs[0].ID != codingAgentPi || configs[1].ID != claudeCodeProfileAgentID("work") || configs[2].ID != claudeCodeGPTProfileAgentID("gpt") {
+	if len(configs) != 4 || configs[0].ID != codingAgentPi || configs[1].ID != codingAgentCodex || configs[2].ID != claudeCodeProfileAgentID("work") || configs[3].ID != claudeCodeGPTProfileAgentID("gpt") {
 		t.Fatalf("coding agent configs = %#v", configs)
 	}
 	if len(configs[0].Models) != 3 || configs[0].Models[1].ID != "custom/model-a" || configs[0].Models[2].ID != "custom/model-b" {
 		t.Fatalf("Pi models = %#v", configs[0].Models)
 	}
-	if codingAgentChoiceExists(configs[1].ThinkingLevels, "minimal") {
-		t.Fatalf("Claude thinking levels include Pi-only minimal: %#v", configs[1].ThinkingLevels)
+	if !codingAgentChoiceExists(configs[1].ThinkingLevels, "minimal") || codingAgentChoiceExists(configs[1].ThinkingLevels, "max") {
+		t.Fatalf("Codex thinking levels = %#v", configs[1].ThinkingLevels)
 	}
-	if !codingAgentChoiceExists(configs[1].ThinkingLevels, "ultracode") || !codingAgentChoiceExists(configs[2].ThinkingLevels, "ultracode") {
-		t.Fatalf("Claude thinking levels do not expose built-in ultracode: %#v / %#v", configs[1].ThinkingLevels, configs[2].ThinkingLevels)
+	if codingAgentChoiceExists(configs[2].ThinkingLevels, "minimal") {
+		t.Fatalf("Claude thinking levels include Codex minimal: %#v", configs[2].ThinkingLevels)
 	}
-	for _, config := range configs[1:] {
+	if !codingAgentChoiceExists(configs[2].ThinkingLevels, "ultracode") || !codingAgentChoiceExists(configs[3].ThinkingLevels, "ultracode") {
+		t.Fatalf("Claude thinking levels do not expose built-in ultracode: %#v / %#v", configs[2].ThinkingLevels, configs[3].ThinkingLevels)
+	}
+	for _, config := range configs[2:] {
 		for _, level := range config.ThinkingLevels {
 			if level.ID == "ultracode" && level.Label != "Ultracode (Claude built-in)" {
 				t.Fatalf("%s ultracode label = %q", config.ID, level.Label)
@@ -596,20 +600,20 @@ done
 		}
 	}
 	for _, model := range []string{"sonnet", "opus", "haiku", "fable"} {
-		if !codingAgentChoiceExists(configs[1].Models, model) {
-			t.Fatalf("Claude models = %#v, missing %q", configs[1].Models, model)
+		if !codingAgentChoiceExists(configs[2].Models, model) {
+			t.Fatalf("Claude models = %#v, missing %q", configs[2].Models, model)
 		}
 	}
-	if !reflect.DeepEqual(configs[2].Models, []codingAgentChoice{
+	if !reflect.DeepEqual(configs[3].Models, []codingAgentChoice{
 		{ID: "gpt-5.4", Label: "gpt-5.4"},
 		{ID: "gpt-5.3-codex", Label: "gpt-5.3-codex"},
 	}) {
-		t.Fatalf("Claude GPT models = %#v", configs[2].Models)
+		t.Fatalf("Claude GPT models = %#v", configs[3].Models)
 	}
-	if codingAgentChoiceExists(configs[2].Models, "opus") {
-		t.Fatalf("Claude GPT models unexpectedly contain Claude aliases: %#v", configs[2].Models)
+	if codingAgentChoiceExists(configs[3].Models, "opus") {
+		t.Fatalf("Claude GPT models unexpectedly contain Claude aliases: %#v", configs[3].Models)
 	}
-	if configs[1].Label != "Claude Work" || configs[2].Label != "Claude GPT" {
+	if configs[1].Label != "Codex CLI" || configs[2].Label != "Claude Work" || configs[3].Label != "Claude GPT" {
 		t.Fatalf("configured coding agent labels = %#v", configs)
 	}
 }
@@ -640,6 +644,11 @@ func TestNormalizeCodingAgentLaunchOptions(t *testing.T) {
 			name: "Pi selection", agent: codingAgentPi, model: "openai-codex/gpt-5.6-sol", thinking: "max",
 			want: codingAgentLaunchOptions{Model: "openai-codex/gpt-5.6-sol", ThinkingLevel: "max"},
 		},
+		{
+			name: "Codex selection", agent: codingAgentCodex, model: "gpt-5-codex", thinking: "xhigh",
+			want: codingAgentLaunchOptions{Model: "gpt-5-codex", ThinkingLevel: "xhigh"},
+		},
+		{name: "Codex rejects unsupported maximum", agent: codingAgentCodex, thinking: "max", wantErr: true},
 		{
 			name: "Claude selection", agent: codingAgentClaude, model: "sonnet", thinking: "xhigh",
 			want: codingAgentLaunchOptions{Model: "sonnet", ThinkingLevel: "xhigh"},
@@ -848,7 +857,7 @@ func TestConfiguredClaudeCodeProfileUsesTheDefaultClaudeLaunchConfiguration(t *t
 
 func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) {
 	directory := t.TempDir()
-	for _, name := range []string{codingAgentPi, codingAgentClaude} {
+	for _, name := range []string{codingAgentPi, codingAgentCodex, codingAgentClaude} {
 		if err := os.WriteFile(filepath.Join(directory, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -887,6 +896,14 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 			},
 			wantCommand: filepath.Join(directory, codingAgentPi),
 			wantTail:    []string{"--model", "openai-codex/gpt-5.6-sol", "--thinking", "max", "Inspect the repository"},
+		},
+		{
+			agent: codingAgentCodex,
+			options: codingAgentLaunchOptions{
+				Model: "gpt-5-codex", ThinkingLevel: "xhigh", InitialPrompt: "Inspect with Codex",
+			},
+			wantCommand: filepath.Join(directory, codingAgentCodex),
+			wantTail:    []string{"--model", "gpt-5-codex", "--config", `model_reasoning_effort="xhigh"`, "Inspect with Codex"},
 		},
 		{
 			agent: codingAgentClaude,
@@ -933,6 +950,9 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 			}
 			if len(args) < len(test.wantTail) || !reflect.DeepEqual(args[len(args)-len(test.wantTail):], test.wantTail) {
 				t.Fatalf("args tail = %#v, want %#v", args, test.wantTail)
+			}
+			if test.agent == codingAgentCodex && !slices.Contains(args, "--dangerously-bypass-approvals-and-sandbox") {
+				t.Fatalf("Codex args = %#v, missing unrestricted execution flag", args)
 			}
 			if validClaudeCodeProfileAgent(test.agent) {
 				for _, expected := range []string{

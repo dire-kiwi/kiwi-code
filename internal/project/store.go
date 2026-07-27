@@ -161,6 +161,7 @@ func DefaultTheme() Theme {
 const (
 	CodingAgentKindPi        = "pi"
 	CodingAgentKindPiNative  = "pi-native"
+	CodingAgentKindCodex     = "codex"
 	CodingAgentKindClaude    = "claude"
 	CodingAgentKindClaudeGPT = "claude-gpt"
 )
@@ -177,6 +178,7 @@ func defaultCodingAgentSettings() []CodingAgentSetting {
 	return []CodingAgentSetting{
 		{ID: CodingAgentKindPi, Name: "Pi", Kind: CodingAgentKindPi},
 		{ID: CodingAgentKindPiNative, Name: "Pi Native", Kind: CodingAgentKindPiNative, IsDefault: true},
+		{ID: CodingAgentKindCodex, Name: "Codex CLI", Kind: CodingAgentKindCodex},
 	}
 }
 
@@ -1350,6 +1352,7 @@ func normalizeCodingAgents(agents []CodingAgentSetting) ([]CodingAgentSetting, e
 	seenDirectories := make(map[string]struct{}, len(agents))
 	seenPi := false
 	seenPiNative := false
+	seenCodex := false
 	customAgentCount := 0
 	defaultCount := 0
 
@@ -1371,6 +1374,14 @@ func normalizeCodingAgents(agents []CodingAgentSetting) ([]CodingAgentSetting, e
 			seenPiNative = true
 			agent.ID = CodingAgentKindPiNative
 			agent.Name = "Pi Native"
+			agent.ConfigDirectory = ""
+		case CodingAgentKindCodex:
+			if seenCodex {
+				return nil, errors.New("Codex CLI may appear only once in coding agents")
+			}
+			seenCodex = true
+			agent.ID = CodingAgentKindCodex
+			agent.Name = "Codex CLI"
 			agent.ConfigDirectory = ""
 		case CodingAgentKindClaude, CodingAgentKindClaudeGPT:
 			customAgentCount++
@@ -1429,7 +1440,7 @@ func normalizeCodingAgents(agents []CodingAgentSetting) ([]CodingAgentSetting, e
 			seenIDs[agent.ID] = struct{}{}
 			seenNames[foldedName] = struct{}{}
 		default:
-			return nil, errors.New("coding agent kind must be pi, pi-native, claude, or claude-gpt")
+			return nil, errors.New("coding agent kind must be pi, pi-native, codex, claude, or claude-gpt")
 		}
 
 		if agent.IsDefault {
@@ -1443,6 +1454,9 @@ func normalizeCodingAgents(agents []CodingAgentSetting) ([]CodingAgentSetting, e
 	}
 	if !seenPiNative {
 		normalized = append(normalized, CodingAgentSetting{ID: CodingAgentKindPiNative, Name: "Pi Native", Kind: CodingAgentKindPiNative})
+	}
+	if !seenCodex {
+		normalized = append(normalized, CodingAgentSetting{ID: CodingAgentKindCodex, Name: "Codex CLI", Kind: CodingAgentKindCodex})
 	}
 	if defaultCount > 1 {
 		return nil, errors.New("exactly one coding agent may be the default")

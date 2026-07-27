@@ -1998,9 +1998,10 @@ func TestStorePersistsCodingAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if agents := store.GetSettings().CodingAgents; len(agents) != 2 ||
+	if agents := store.GetSettings().CodingAgents; len(agents) != 3 ||
 		agents[0].Kind != CodingAgentKindPi || agents[0].IsDefault ||
-		agents[1].Kind != CodingAgentKindPiNative || !agents[1].IsDefault {
+		agents[1].Kind != CodingAgentKindPiNative || !agents[1].IsDefault ||
+		agents[2].Kind != CodingAgentKindCodex {
 		t.Fatalf("default coding agents = %#v", agents)
 	}
 
@@ -2018,6 +2019,7 @@ func TestStorePersistsCodingAgents(t *testing.T) {
 		{ID: "work-account", Name: "Work", Kind: CodingAgentKindClaude, ConfigDirectory: wantDirectory},
 		{ID: "gpt", Name: "GPT", Kind: CodingAgentKindClaudeGPT},
 		{ID: CodingAgentKindPiNative, Name: "Pi Native", Kind: CodingAgentKindPiNative, IsDefault: true},
+		{ID: CodingAgentKindCodex, Name: "Codex CLI", Kind: CodingAgentKindCodex},
 	}
 	if len(settings.CodingAgents) != len(want) {
 		t.Fatalf("coding agents = %#v, want %#v", settings.CodingAgents, want)
@@ -2056,8 +2058,9 @@ func TestStorePersistsCodingAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(settings.CodingAgents) != 2 || settings.CodingAgents[0].Kind != CodingAgentKindPi ||
-		settings.CodingAgents[1].Kind != CodingAgentKindPiNative || !settings.CodingAgents[1].IsDefault {
+	if len(settings.CodingAgents) != 3 || settings.CodingAgents[0].Kind != CodingAgentKindPi ||
+		settings.CodingAgents[1].Kind != CodingAgentKindPiNative || !settings.CodingAgents[1].IsDefault ||
+		settings.CodingAgents[2].Kind != CodingAgentKindCodex {
 		t.Fatalf("reset coding agents = %#v", settings.CodingAgents)
 	}
 }
@@ -2077,9 +2080,10 @@ func TestStoreMigratesLegacyClaudeCodeProfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	agents := store.GetSettings().CodingAgents
-	if len(agents) != 3 || agents[0].Kind != CodingAgentKindPi ||
+	if len(agents) != 4 || agents[0].Kind != CodingAgentKindPi ||
 		agents[1].Kind != CodingAgentKindClaude || agents[1].ID != "work" ||
-		agents[2].Kind != CodingAgentKindPiNative || !agents[2].IsDefault {
+		agents[2].Kind != CodingAgentKindPiNative || !agents[2].IsDefault ||
+		agents[3].Kind != CodingAgentKindCodex {
 		t.Fatalf("migrated coding agents = %#v", agents)
 	}
 }
@@ -2106,6 +2110,7 @@ func TestStoreRejectsInvalidCodingAgents(t *testing.T) {
 		{name: "duplicate names", agents: []CodingAgentSetting{valid("one", "Work", "one"), valid("two", "work", "two")}},
 		{name: "duplicate directories", agents: []CodingAgentSetting{valid("one", "Work", "same"), valid("two", "Personal", "same")}},
 		{name: "duplicate Pi", agents: []CodingAgentSetting{{Kind: CodingAgentKindPi}, {Kind: CodingAgentKindPi}}},
+		{name: "duplicate Codex", agents: []CodingAgentSetting{{Kind: CodingAgentKindCodex}, {Kind: CodingAgentKindCodex}}},
 		{name: "multiple defaults", agents: []CodingAgentSetting{
 			{ID: "one", Name: "Work", Kind: CodingAgentKindClaudeGPT, IsDefault: true},
 			{ID: "two", Name: "Personal", Kind: CodingAgentKindClaudeGPT, IsDefault: true},

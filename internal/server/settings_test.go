@@ -44,8 +44,9 @@ func TestSettingsAPIUpdatesWorktreeBaseLocation(t *testing.T) {
 	if settings.DisableWorkflows || !settings.WorkflowKeywordTrigger || settings.WorkflowSizeGuideline != project.DefaultWorkflowSizeGuideline {
 		t.Fatalf("unexpected default workflow settings: %#v", settings)
 	}
-	if len(settings.CodingAgents) != 2 || settings.CodingAgents[0].Kind != project.CodingAgentKindPi ||
-		settings.CodingAgents[1].Kind != project.CodingAgentKindPiNative || !settings.CodingAgents[1].IsDefault {
+	if len(settings.CodingAgents) != 3 || settings.CodingAgents[0].Kind != project.CodingAgentKindPi ||
+		settings.CodingAgents[1].Kind != project.CodingAgentKindPiNative || !settings.CodingAgents[1].IsDefault ||
+		settings.CodingAgents[2].Kind != project.CodingAgentKindCodex {
 		t.Fatalf("unexpected default coding agents: %#v", settings.CodingAgents)
 	}
 	if !settings.UsingDefaultTheme || settings.Theme != project.DefaultTheme() || settings.DefaultTheme != project.DefaultTheme() {
@@ -180,10 +181,11 @@ func TestSettingsAPIUpdatesCodingAgents(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&settings); err != nil {
 		t.Fatal(err)
 	}
-	if len(settings.CodingAgents) != 4 || settings.CodingAgents[0].Kind != project.CodingAgentKindPiNative ||
+	if len(settings.CodingAgents) != 5 || settings.CodingAgents[0].Kind != project.CodingAgentKindPiNative ||
 		settings.CodingAgents[1].Name != "Work" || settings.CodingAgents[1].ConfigDirectory != workDirectory || !settings.CodingAgents[1].IsDefault ||
 		settings.CodingAgents[2].Kind != project.CodingAgentKindClaudeGPT ||
-		settings.CodingAgents[3].Kind != project.CodingAgentKindPi {
+		settings.CodingAgents[3].Kind != project.CodingAgentKindPi ||
+		settings.CodingAgents[4].Kind != project.CodingAgentKindCodex {
 		t.Fatalf("coding agents = %#v", settings.CodingAgents)
 	}
 	if info, err := os.Stat(workDirectory); err != nil || !info.IsDir() {
