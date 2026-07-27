@@ -74,7 +74,13 @@ func (h *terminalHandler) createProcess(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	window, err := h.newProcessWindow(item, thread, input.Name, input.Command)
+	window, err := h.newProcessWindowForRequest(
+		item,
+		thread,
+		input.Name,
+		input.Command,
+		threadEndpointURL(r, item.ID, thread.ID),
+	)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -274,7 +280,17 @@ func (h *terminalHandler) processForRequest(item project.Project, thread project
 }
 
 func (h *terminalHandler) newProcessWindow(item project.Project, thread project.Thread, rawName, rawCommand string) (result processWindow, err error) {
-	return h.newProcessWindowWithEnvironment(item, thread, rawName, rawCommand, nil, false)
+	return h.newProcessWindowWithEnvironment(item, thread, rawName, rawCommand, nil, false, "")
+}
+
+func (h *terminalHandler) newProcessWindowForRequest(
+	item project.Project,
+	thread project.Thread,
+	rawName string,
+	rawCommand string,
+	threadEndpoint string,
+) (result processWindow, err error) {
+	return h.newProcessWindowWithEnvironment(item, thread, rawName, rawCommand, nil, false, threadEndpoint)
 }
 
 func (h *terminalHandler) newEnvironmentActionProcess(
@@ -283,8 +299,9 @@ func (h *terminalHandler) newEnvironmentActionProcess(
 	rawName string,
 	rawCommand string,
 	variables []project.EnvironmentVariable,
+	threadEndpoint string,
 ) (processWindow, error) {
-	return h.newProcessWindowWithEnvironment(item, thread, rawName, rawCommand, variables, true)
+	return h.newProcessWindowWithEnvironment(item, thread, rawName, rawCommand, variables, true, threadEndpoint)
 }
 
 func (h *terminalHandler) newProcessWindowWithEnvironment(
@@ -294,6 +311,7 @@ func (h *terminalHandler) newProcessWindowWithEnvironment(
 	rawCommand string,
 	variables []project.EnvironmentVariable,
 	uniqueName bool,
+	threadEndpoint string,
 ) (result processWindow, err error) {
 	name, err := normalizeProcessName(rawName)
 	if err != nil {
@@ -401,7 +419,11 @@ func (h *terminalHandler) newProcessWindowWithEnvironment(
 		cleanup()
 		return processWindow{}, err
 	}
-	if err := h.sendTmuxInput(target, h.processCommandWithWebServerCleanup(commandText), true); err != nil {
+	callbackURL := ""
+	if threadEndpoint != "" {
+		callbackURL = strings.TrimRight(threadEndpoint, "/") + "/processes/" + url.PathEscape(processID)
+	}
+	if err := h.sendTmuxInput(target, h.processCommandWithWebServerCleanup(commandText, callbackURL), true); err != nil {
 		cleanup()
 		return processWindow{}, err
 	}
@@ -418,13 +440,22 @@ func (h *terminalHandler) newProcessWindowWithEnvironment(
 	return window, nil
 }
 
-func (h *terminalHandler) processCommandWithWebServerCleanup(commandText string) string {
+func (h *terminalHandler) processCommandWithWebServerCleanup(commandText, callbackURL string) string {
 	// The login shell intentionally remains available for final logs and follow-up
-	// input. Clear published links as soon as its foreground command returns.
-	return commandText + "\n" +
+	// input. Clear published links as soon as its foreground command returns,
+	// then best-effort notify the backend so the global sidebar can refresh
+	// without a persistent tmux control client for this process.
+	command := commandText + "\n" +
 		"__kiwi_code_status=$?\n" +
-		shellQuote(h.tmuxPath) + " set-option -w -t \"$TMUX_PANE\" " + tmuxProcessWebServersOption + " '[]'\n" +
-		"(exit \"$__kiwi_code_status\")"
+		shellQuote(h.tmuxPath) + " set-option -w -t \"$TMUX_PANE\" " + tmuxProcessWebServersOption + " '[]'\n"
+	if h.curlPath != "" && callbackURL != "" {
+		command += shellQuote(h.curlPath) +
+			" --connect-timeout 0.2 --max-time 1 -fsS" +
+			" -X PATCH -H 'Content-Type: application/json'" +
+			" --data '{\"webServers\":[]}' " + shellQuote(callbackURL) +
+			" >/dev/null 2>&1 || :\n"
+	}
+	return command + "(exit \"$__kiwi_code_status\")"
 }
 
 func normalizeProcessWebServers(values []string) ([]string, error) {

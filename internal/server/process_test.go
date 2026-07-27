@@ -63,6 +63,39 @@ func TestNormalizeProcessWebServers(t *testing.T) {
 	}
 }
 
+func TestProcessCommandClearsPublishedServersAndNotifiesBackend(t *testing.T) {
+	handler := &terminalHandler{
+		tmuxPath: "/opt/test/tmux",
+		curlPath: "/opt/test/curl",
+	}
+	command := handler.processCommandWithWebServerCleanup(
+		"run-server --port 5173",
+		"http://127.0.0.1:4001/api/projects/project/threads/thread/processes/process-id",
+	)
+	for _, expected := range []string{
+		"run-server --port 5173\n",
+		"__kiwi_code_status=$?\n",
+		"'/opt/test/tmux' set-option -w -t \"$TMUX_PANE\" @kiwi-code-web-servers '[]'\n",
+		"'/opt/test/curl' --connect-timeout 0.2 --max-time 1 -fsS -X PATCH",
+		"--data '{\"webServers\":[]}'",
+		"'http://127.0.0.1:4001/api/projects/project/threads/thread/processes/process-id'",
+		">/dev/null 2>&1 || :\n",
+		"(exit \"$__kiwi_code_status\")",
+	} {
+		if !strings.Contains(command, expected) {
+			t.Fatalf("process command missing %q:\n%s", expected, command)
+		}
+	}
+	if strings.Index(command, "@kiwi-code-web-servers") > strings.Index(command, "/opt/test/curl") {
+		t.Fatalf("process callback ran before tmux metadata cleanup:\n%s", command)
+	}
+
+	withoutCallback := handler.processCommandWithWebServerCleanup("true", "")
+	if strings.Contains(withoutCallback, "/opt/test/curl") {
+		t.Fatalf("process command without an endpoint included a callback:\n%s", withoutCallback)
+	}
+}
+
 func TestTmuxProcessIncarnationConditionRequiresCapturedIdentity(t *testing.T) {
 	target := tmuxWindowTarget{ID: "@12", ServerPID: "456", ProcessID: "abc123"}
 	condition, err := tmuxProcessIncarnationCondition(target)

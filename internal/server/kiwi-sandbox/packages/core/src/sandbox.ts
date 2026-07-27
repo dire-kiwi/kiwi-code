@@ -304,7 +304,7 @@ function signalExitCode(signal: NodeJS.Signals | null): number {
 }
 
 function disabledPolicy(): PolicyDecision {
-  return { rule: "disabled", unrestricted: true, read: [], write: [], deniedWrite: [], network: true };
+  return { rule: "disabled", unrestricted: true, read: [], write: [], deniedWrite: [], network: true, pty: true };
 }
 
 async function executeFileRequest(request: FileWorkerRequest): Promise<unknown> {

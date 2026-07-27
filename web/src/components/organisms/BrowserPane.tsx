@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -26,17 +25,21 @@ import {
   X,
 } from 'lucide-react'
 import {
-  browserRecordingDownloadUrl,
   browserRecordingPlaybackUrl,
   browserStreamUrl,
   getBrowserFrame,
   performBrowserAction,
 } from '../../api'
 import { isDefaultBackendActive } from '../../backends'
+import {
+  downloadBrowserRecording,
+  formatRecordingBytes,
+  formatRecordingDuration,
+} from '../../lib/browserRecording'
+import { useDesktopSurfaceBounds } from '../../lib/useDesktopSurfaceBounds'
 import type {
   BrowserActionOperation,
   BrowserActionParams,
-  BrowserViewBounds,
   ConnectionStatus,
 } from '../../types'
 import type {
@@ -121,40 +124,12 @@ function connectionStatusFor(
   return 'closed'
 }
 
-function browserBounds(rect: DOMRect): BrowserViewBounds | null {
-  const width = Math.round(rect.width)
-  const height = Math.round(rect.height)
-  if (width < 1 || height < 1) return null
-  return {
-    x: Math.max(0, Math.round(rect.left)),
-    y: Math.max(0, Math.round(rect.top)),
-    width,
-    height,
-  }
-}
-
 function errorMessage(reason: unknown, fallback: string) {
   return reason instanceof Error && reason.message ? reason.message : fallback
 }
 
-function promiseResult(result: void | Promise<unknown>, onError: (reason: unknown) => void) {
-  if (result && typeof result.then === 'function') void result.catch(onError)
-}
-
 function inputModifiers(event: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) {
   return (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0)
-}
-
-function formatRecordingDuration(milliseconds = 0) {
-  const seconds = Math.max(0, Math.floor(milliseconds / 1_000))
-  const minutes = Math.floor(seconds / 60)
-  return `${minutes}:${String(seconds % 60).padStart(2, '0')}`
-}
-
-function formatRecordingBytes(bytes?: number) {
-  if (!bytes || bytes < 1) return ''
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function validRecordingTitle(value: string) {
@@ -504,81 +479,28 @@ export function BrowserPane({
     frameURLRef.current = ''
   }, [])
 
-  useLayoutEffect(() => {
-    if (!desktopBridge || !usesNativeView) return
-    const identity = { projectId, threadId }
-    let disposed = false
-    let failed = false
-    let shown = false
-    let animationFrame = 0
-
-    function hideView() {
-      shown = false
-      try {
-        promiseResult(desktopBridge!.hide(identity), () => {})
-      } catch {
-        // Hiding is best effort during teardown and overlay transitions.
-      }
-    }
-
-    function reportFailure(reason: unknown) {
-      if (disposed || failed) return
-      failed = true
-      hideView()
-      setNativeViewError(errorMessage(reason, 'The desktop browser view could not be displayed.'))
-    }
-
-    function syncBounds() {
-      animationFrame = 0
-      if (disposed || failed) return
-      const element = guestRef.current
-      const bounds = element ? browserBounds(element.getBoundingClientRect()) : null
-      if (!bounds) {
-        if (shown) hideView()
-        return
-      }
-
-      try {
-        if (!shown) {
-          shown = true
-          promiseResult(desktopBridge!.show({ ...identity, bounds }), reportFailure)
-        } else {
-          promiseResult(desktopBridge!.setBounds({ ...identity, bounds }), reportFailure)
-        }
-      } catch (reason) {
-        reportFailure(reason)
-      }
-    }
-
-    function scheduleBoundsSync() {
-      if (animationFrame) window.cancelAnimationFrame(animationFrame)
-      animationFrame = window.requestAnimationFrame(syncBounds)
-    }
-
-    if (!active || suppressed || playbackOpen || providerUnavailable || status?.running !== true) {
-      hideView()
-      return () => {
-        disposed = true
-        hideView()
-      }
-    }
-
-    setNativeViewError('')
-    const observer = new ResizeObserver(scheduleBoundsSync)
-    if (guestRef.current) observer.observe(guestRef.current)
-    window.addEventListener('resize', scheduleBoundsSync)
-    window.addEventListener('scroll', scheduleBoundsSync, true)
-    syncBounds()
-
-    return () => {
-      disposed = true
-      if (animationFrame) window.cancelAnimationFrame(animationFrame)
-      observer.disconnect()
-      window.removeEventListener('resize', scheduleBoundsSync)
-      window.removeEventListener('scroll', scheduleBoundsSync, true)
-      hideView()
-    }
-  }, [active, desktopBridge, nativeRetryKey, playbackOpen, projectId, providerUnavailable, status?.running, suppressed, threadId, usesNativeView])
+  useDesktopSurfaceBounds<unknown>({
+    surfaceRef: guestRef,
+    owner: usesNativeView ? desktopBridge : undefined,
+    identityKey: `${projectId}\0${threadId}\0${nativeRetryKey}`,
+    enabled: Boolean(
+      desktopBridge
+      && usesNativeView
+      && active
+      && !suppressed
+      && !playbackOpen
+      && !providerUnavailable
+      && status?.running === true
+    ),
+    stopOnError: true,
+    show: (bounds) => desktopBridge!.show({ projectId, threadId, bounds }),
+    setBounds: (bounds) => desktopBridge!.setBounds({ projectId, threadId, bounds }),
+    hide: () => desktopBridge!.hide({ projectId, threadId }),
+    onBeforeShow: () => setNativeViewError(''),
+    onError: (reason) => setNativeViewError(
+      errorMessage(reason, 'The desktop browser view could not be displayed.'),
+    ),
+  })
 
   const runAction = useCallback(async (
     operation: BrowserActionOperation,
@@ -643,11 +565,7 @@ export function BrowserPane({
   }
 
   function downloadRecording(recording: BrowserRecording) {
-    const link = document.createElement('a')
-    link.href = browserRecordingDownloadUrl(projectId, threadId, recording.id)
-    link.download = `${recording.title}.webm`
-    link.rel = 'noopener'
-    link.click()
+    downloadBrowserRecording(projectId, threadId, recording)
   }
 
   function playRecording(recording: BrowserRecording) {

@@ -35,6 +35,7 @@ type sandboxConfig struct {
 	Defaults        *sandboxFileAccess    `json:"defaults,omitempty"`
 	Commands        *[]sandboxCommandRule `json:"commands,omitempty"`
 	Network         *bool                 `json:"network,omitempty"`
+	PTY             *bool                 `json:"pty,omitempty"`
 	Shell           *string               `json:"shell,omitempty"`
 	RelatedProjects *[]string             `json:"relatedProjects,omitempty"`
 }
@@ -43,6 +44,7 @@ type effectiveSandboxConfig struct {
 	Defaults        sandboxFileAccess    `json:"defaults"`
 	Commands        []sandboxCommandRule `json:"commands"`
 	Network         bool                 `json:"network"`
+	PTY             bool                 `json:"pty"`
 	Shell           string               `json:"shell"`
 	RelatedProjects []string             `json:"relatedProjects"`
 }
@@ -72,6 +74,7 @@ func defaultEffectiveSandboxConfig() effectiveSandboxConfig {
 		},
 		Commands:        []sandboxCommandRule{},
 		Network:         false,
+		PTY:             false,
 		Shell:           "/bin/zsh",
 		RelatedProjects: []string{},
 	}
@@ -151,6 +154,9 @@ func applySandboxConfig(base effectiveSandboxConfig, overlay sandboxConfig) effe
 	if overlay.Network != nil {
 		base.Network = *overlay.Network
 	}
+	if overlay.PTY != nil {
+		base.PTY = *overlay.PTY
+	}
 	if overlay.Shell != nil {
 		base.Shell = *overlay.Shell
 	}
@@ -162,7 +168,7 @@ func applySandboxConfig(base effectiveSandboxConfig, overlay sandboxConfig) effe
 
 func sandboxConfigIsEmpty(config sandboxConfig) bool {
 	return config.Defaults == nil && config.Commands == nil && config.Network == nil &&
-		config.Shell == nil && config.RelatedProjects == nil
+		config.PTY == nil && config.Shell == nil && config.RelatedProjects == nil
 }
 
 // readSandboxConfigFile loads a sparse config from disk. A missing file is not
@@ -186,7 +192,7 @@ func parseSandboxConfig(data []byte, allowRelatedProjects bool) (sandboxConfig, 
 	if err := json.Unmarshal(data, &raw); err != nil || raw == nil {
 		return sandboxConfig{}, errors.New("configuration must be a JSON object")
 	}
-	if err := assertKnownSandboxKeys(raw, "defaults", "commands", "network", "shell", "relatedProjects"); err != nil {
+	if err := assertKnownSandboxKeys(raw, "defaults", "commands", "network", "pty", "shell", "relatedProjects"); err != nil {
 		return sandboxConfig{}, err
 	}
 
@@ -211,6 +217,13 @@ func parseSandboxConfig(data []byte, allowRelatedProjects bool) (sandboxConfig, 
 			return sandboxConfig{}, errors.New("network must be boolean")
 		}
 		config.Network = &network
+	}
+	if value, ok := raw["pty"]; ok {
+		var pty bool
+		if err := json.Unmarshal(value, &pty); err != nil {
+			return sandboxConfig{}, errors.New("pty must be boolean")
+		}
+		config.PTY = &pty
 	}
 	if value, ok := raw["shell"]; ok {
 		var shell string
@@ -398,6 +411,7 @@ type diskSandboxConfig struct {
 	Defaults        *sandboxFileAccess        `json:"defaults,omitempty"`
 	Commands        *[]diskSandboxCommandRule `json:"commands,omitempty"`
 	Network         *bool                     `json:"network,omitempty"`
+	PTY             *bool                     `json:"pty,omitempty"`
 	Shell           *string                   `json:"shell,omitempty"`
 	RelatedProjects *[]string                 `json:"relatedProjects,omitempty"`
 }
@@ -412,6 +426,7 @@ func writeSandboxConfigFile(path string, config sandboxConfig) error {
 	disk := diskSandboxConfig{
 		Defaults:        config.Defaults,
 		Network:         config.Network,
+		PTY:             config.PTY,
 		Shell:           config.Shell,
 		RelatedProjects: config.RelatedProjects,
 	}

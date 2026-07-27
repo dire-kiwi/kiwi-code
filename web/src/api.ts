@@ -32,6 +32,24 @@ type ApplicationRestart = {
   instanceId: string
 }
 
+export async function decodeApiError(response: Response, fallback: string): Promise<string> {
+  let text = ''
+  try {
+    text = (await response.text()).trim()
+  } catch {
+    return fallback
+  }
+  if (!text) return fallback
+  try {
+    const body = JSON.parse(text) as ErrorResponse
+    return typeof body?.error === 'string' && body.error.trim()
+      ? body.error.trim()
+      : fallback
+  } catch {
+    return text
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(apiUrl(path), {
     ...init,
@@ -42,18 +60,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   })
 
   if (!response.ok) {
-    let message = `Request failed (${response.status})`
-    try {
-      const body = (await response.json()) as ErrorResponse
-      if (body.error) message = body.error
-    } catch {
-      // The fallback message already contains the useful HTTP status.
-    }
-    throw new Error(message)
+    throw new Error(await decodeApiError(response, `Request failed (${response.status})`))
   }
 
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
+}
+
+function jsonRequest<T>(
+  path: string,
+  method: 'POST' | 'PUT' | 'PATCH',
+  body: unknown,
+  init?: Omit<RequestInit, 'body' | 'method'>,
+) {
+  return request<T>(path, {
+    ...init,
+    method,
+    body: JSON.stringify(body),
+  })
 }
 
 export function getApplicationHealth(signal?: AbortSignal) {
@@ -84,26 +108,22 @@ export function updateSettings(input: string | Partial<Pick<
   'worktreeBasePath' | 'archivedThreadRetentionDays' | 'orphanedWorktreeRetentionDays' | 'subAgentNestingDepth'
   | 'disableWorkflows' | 'workflowKeywordTriggerEnabled' | 'workflowSizeGuideline' | 'codingAgents' | 'theme'
 >>) {
-  return request<AppSettings>('/api/settings', {
-    method: 'PUT',
-    body: JSON.stringify(typeof input === 'string' ? { worktreeBasePath: input } : input),
-  })
+  return jsonRequest<AppSettings>(
+    '/api/settings',
+    'PUT',
+    typeof input === 'string' ? { worktreeBasePath: input } : input,
+  )
 }
 
 export function updateGlobalSandboxConfig(config: SandboxConfig) {
-  return request<SandboxConfigState>('/api/sandbox/config', {
-    method: 'PUT',
-    body: JSON.stringify(config),
-  })
+  return jsonRequest<SandboxConfigState>('/api/sandbox/config', 'PUT', config)
 }
 
 export function updateThreadSandboxConfig(projectId: string, threadId: string, config: SandboxConfig) {
-  return request<SandboxConfigState>(
+  return jsonRequest<SandboxConfigState>(
     `/api/projects/${projectId}/threads/${threadId}/sandbox/config`,
-    {
-      method: 'PUT',
-      body: JSON.stringify(config),
-    },
+    'PUT',
+    config,
   )
 }
 
@@ -116,17 +136,11 @@ export function installAgentSkill() {
 }
 
 export function createProfile(name: string) {
-  return request<Profile>('/api/profiles', {
-    method: 'POST',
-    body: JSON.stringify({ name }),
-  })
+  return jsonRequest<Profile>('/api/profiles', 'POST', { name })
 }
 
 export function createProject(input: { name: string; path: string; profileId: string }) {
-  return request<Project>('/api/projects', {
-    method: 'POST',
-    body: JSON.stringify(input),
-  })
+  return jsonRequest<Project>('/api/projects', 'POST', input)
 }
 
 export function updateProject(
@@ -139,10 +153,7 @@ export function updateProject(
     figmaMCPEnabled?: boolean
   },
 ) {
-  return request<Project>(`/api/projects/${encodeURIComponent(id)}`, {
-    method: 'PATCH',
-    body: JSON.stringify(input),
-  })
+  return jsonRequest<Project>(`/api/projects/${encodeURIComponent(id)}`, 'PATCH', input)
 }
 
 export function updateProjectProfile(id: string, profileId: string) {
@@ -162,9 +173,10 @@ export function updateProjectEnvironment(id: string, environment: LocalEnvironme
 }
 
 export function runEnvironmentAction(projectId: string, threadId: string, actionId: string) {
-  return request<ProcessWindow>(
+  return jsonRequest<ProcessWindow>(
     `${threadPath(projectId, threadId)}/environment/actions/${encodeURIComponent(actionId)}`,
-    { method: 'POST', body: '{}' },
+    'POST',
+    {},
   )
 }
 
@@ -173,10 +185,7 @@ export function updateProjectFigmaMCPEnabled(id: string, enabled: boolean) {
 }
 
 export function updateProjectOrder(profileId: string, projectIds: string[]) {
-  return request<void>('/api/projects/order', {
-    method: 'PUT',
-    body: JSON.stringify({ profileId, projectIds }),
-  })
+  return jsonRequest<void>('/api/projects/order', 'PUT', { profileId, projectIds })
 }
 
 export function listDirectorySuggestions(path: string, signal?: AbortSignal) {
@@ -202,10 +211,11 @@ export function createThread(
     nestedDepth?: number
   },
 ) {
-  return request<Thread>(`/api/projects/${encodeURIComponent(projectId)}/threads`, {
-    method: 'POST',
-    body: JSON.stringify(input),
-  })
+  return jsonRequest<Thread>(
+    `/api/projects/${encodeURIComponent(projectId)}/threads`,
+    'POST',
+    input,
+  )
 }
 
 function threadPath(projectId: string, threadId: string) {
@@ -213,10 +223,11 @@ function threadPath(projectId: string, threadId: string) {
 }
 
 export function updateThreadTitle(projectId: string, threadId: string, title: string) {
-  return request<Thread>(threadPath(projectId, threadId), {
-    method: 'PATCH',
-    body: JSON.stringify({ title, autoGenerated: false }),
-  })
+  return jsonRequest<Thread>(
+    threadPath(projectId, threadId),
+    'PATCH',
+    { title, autoGenerated: false },
+  )
 }
 
 function workflowPath(projectId: string, threadId: string, runId?: string) {
@@ -225,24 +236,15 @@ function workflowPath(projectId: string, threadId: string, runId?: string) {
 }
 
 export function pauseWorkflow(projectId: string, threadId: string, runId: string) {
-  return request<WorkflowRun>(`${workflowPath(projectId, threadId, runId)}/pause`, {
-    method: 'POST',
-    body: '{}',
-  })
+  return jsonRequest<WorkflowRun>(`${workflowPath(projectId, threadId, runId)}/pause`, 'POST', {})
 }
 
 export function resumeWorkflow(projectId: string, threadId: string, runId: string) {
-  return request<WorkflowRun>(`${workflowPath(projectId, threadId, runId)}/resume`, {
-    method: 'POST',
-    body: '{}',
-  })
+  return jsonRequest<WorkflowRun>(`${workflowPath(projectId, threadId, runId)}/resume`, 'POST', {})
 }
 
 export function stopWorkflow(projectId: string, threadId: string, runId: string) {
-  return request<WorkflowRun>(`${workflowPath(projectId, threadId, runId)}/stop`, {
-    method: 'POST',
-    body: '{}',
-  })
+  return jsonRequest<WorkflowRun>(`${workflowPath(projectId, threadId, runId)}/stop`, 'POST', {})
 }
 
 export function saveWorkflow(
@@ -251,10 +253,7 @@ export function saveWorkflow(
   runId: string,
   input: { name: string; scope: 'project' | 'personal'; overwrite?: boolean },
 ) {
-  return request<SavedWorkflow>(`${workflowPath(projectId, threadId, runId)}/save`, {
-    method: 'POST',
-    body: JSON.stringify(input),
-  })
+  return jsonRequest<SavedWorkflow>(`${workflowPath(projectId, threadId, runId)}/save`, 'POST', input)
 }
 
 export function updateThreadLimits(
@@ -262,24 +261,15 @@ export function updateThreadLimits(
   threadId: string,
   limits: { tokenLimit: number | null; costLimitUsd: number | null },
 ) {
-  return request<Thread>(`${threadPath(projectId, threadId)}/limits`, {
-    method: 'PUT',
-    body: JSON.stringify(limits),
-  })
+  return jsonRequest<Thread>(`${threadPath(projectId, threadId)}/limits`, 'PUT', limits)
 }
 
 export function setThreadArchived(projectId: string, threadId: string, archived: boolean) {
-  return request<Thread>(threadPath(projectId, threadId), {
-    method: 'PATCH',
-    body: JSON.stringify({ archived }),
-  })
+  return jsonRequest<Thread>(threadPath(projectId, threadId), 'PATCH', { archived })
 }
 
 export function setThreadBookmarked(projectId: string, threadId: string, bookmarked: boolean) {
-  return request<Thread>(threadPath(projectId, threadId), {
-    method: 'PATCH',
-    body: JSON.stringify({ bookmarked }),
-  })
+  return jsonRequest<Thread>(threadPath(projectId, threadId), 'PATCH', { bookmarked })
 }
 
 export function deleteThread(projectId: string, threadId: string) {
@@ -287,10 +277,11 @@ export function deleteThread(projectId: string, threadId: string) {
 }
 
 export function updateThreadOrder(projectId: string, threadIds: string[]) {
-  return request<void>(`/api/projects/${encodeURIComponent(projectId)}/threads/order`, {
-    method: 'PUT',
-    body: JSON.stringify({ threadIds }),
-  })
+  return jsonRequest<void>(
+    `/api/projects/${encodeURIComponent(projectId)}/threads/order`,
+    'PUT',
+    { threadIds },
+  )
 }
 
 export function acknowledgePiThreadActivity(projectId: string, threadId: string) {
@@ -313,14 +304,7 @@ export async function getThreadPlanMarkdown(
     signal,
   })
   if (!response.ok) {
-    let message = `Could not load the plan (${response.status})`
-    try {
-      const body = (await response.json()) as ErrorResponse
-      if (body.error) message = body.error
-    } catch {
-      // Keep the status-bearing fallback when the response is not JSON.
-    }
-    throw new Error(message)
+    throw new Error(await decodeApiError(response, `Could not load the plan (${response.status})`))
   }
   return response.text()
 }
@@ -335,11 +319,12 @@ export function performBrowserAction<Result = unknown>(
   action: BrowserActionRequest,
   signal?: AbortSignal,
 ) {
-  return request<BrowserActionResponse<Result>>(`${browserPath(projectId, threadId)}/actions`, {
-    method: 'POST',
-    body: JSON.stringify(action),
-    signal,
-  })
+  return jsonRequest<BrowserActionResponse<Result>>(
+    `${browserPath(projectId, threadId)}/actions`,
+    'POST',
+    action,
+    { signal },
+  )
 }
 
 export function browserStreamUrl(projectId: string, threadId: string) {
@@ -370,14 +355,7 @@ export async function getBrowserFrame(
   // A session may not exist yet, or it may not have produced its first frame.
   if (response.status === 404 || response.status === 204) return null
   if (!response.ok) {
-    let message = `Browser preview failed (${response.status})`
-    try {
-      const body = (await response.json()) as ErrorResponse
-      if (body.error) message = body.error
-    } catch {
-      // Keep the status-bearing fallback when the response is not JSON.
-    }
-    throw new Error(message)
+    throw new Error(await decodeApiError(response, `Browser preview failed (${response.status})`))
   }
   return response.blob()
 }
@@ -387,17 +365,15 @@ function gitBranchesPath(projectId: string, threadId: string) {
 }
 
 export function createGitBranch(projectId: string, threadId: string, name: string) {
-  return request<GitBranchState>(gitBranchesPath(projectId, threadId), {
-    method: 'POST',
-    body: JSON.stringify({ name }),
-  })
+  return jsonRequest<GitBranchState>(gitBranchesPath(projectId, threadId), 'POST', { name })
 }
 
 export function switchGitBranch(projectId: string, threadId: string, name: string) {
-  return request<GitBranchState>(`${gitBranchesPath(projectId, threadId)}/switch`, {
-    method: 'POST',
-    body: JSON.stringify({ name }),
-  })
+  return jsonRequest<GitBranchState>(
+    `${gitBranchesPath(projectId, threadId)}/switch`,
+    'POST',
+    { name },
+  )
 }
 
 export function uploadPiImage(id: string, image: Blob, signal?: AbortSignal) {

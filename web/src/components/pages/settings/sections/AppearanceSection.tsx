@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
-import { Check, LoaderCircle, Palette, RotateCcw, Save } from 'lucide-react'
+import { LoaderCircle, Palette, RotateCcw, Save } from 'lucide-react'
 import { updateSettings } from '../../../../api'
+import { useAsyncFeedback } from '../../../../lib/useAsyncFeedback'
 import { isHexColor } from '../../../../lib/validation'
 import { themesEqual, useTheme } from '../../../../theme'
 import type { AppSettings, ThemeColors, ThemeSettings } from '../../../../types'
@@ -8,7 +9,7 @@ import { GhostButton, PrimaryButton } from '../../../atoms/Button'
 import { TextInput } from '../../../atoms/Input'
 import { StatusBadge } from '../../../atoms/StatusBadge'
 import { Surface } from '../../../atoms/Surface'
-import { FeedbackMessage } from '../../../molecules/FeedbackMessage'
+import { ActionFeedback } from '../../../molecules/ActionFeedback'
 import { InfoCallout } from '../../../molecules/InfoCallout'
 import { SectionHeader } from '../../../molecules/SectionHeader'
 import { ThemeColorInput } from '../../../molecules/ThemeColorInput'
@@ -17,8 +18,6 @@ type AppearanceSectionProps = {
   settings: AppSettings
   onSettingsUpdated: (settings: AppSettings) => void
 }
-
-type SavingAction = 'save' | 'reset' | null
 
 type ThemeColorGroup = {
   title: string
@@ -85,9 +84,8 @@ const themeColorGroups: ThemeColorGroup[] = [
 export function AppearanceSection({ settings, onSettingsUpdated }: AppearanceSectionProps) {
   const { setTheme: applyTheme } = useTheme()
   const [theme, setTheme] = useState<ThemeSettings>(settings.theme)
-  const [saving, setSaving] = useState<SavingAction>(null)
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
+  const action = useAsyncFeedback<'save' | 'reset'>()
+  const saving = action.pendingAction
 
   const validTheme = theme.fontFamily.trim().length > 0
     && theme.fontFamily.trim().length <= 512
@@ -103,48 +101,43 @@ export function AppearanceSection({ settings, onSettingsUpdated }: AppearanceSec
       ...current,
       colors: { ...current.colors, [key]: value },
     }))
-    setError('')
-    setMessage('')
+    action.clearFeedback()
   }
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (saving) return
 
-    setSaving('save')
-    setError('')
-    setMessage('')
-    try {
-      const next = await updateSettings({
+    const next = await action.run(
+      'save',
+      () => updateSettings({
         theme: { ...theme, fontFamily: theme.fontFamily.trim() },
-      })
-      onSettingsUpdated(next)
-      setTheme(next.theme)
-      applyTheme(next.theme)
-      setMessage('Appearance saved and applied.')
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not save appearance settings.')
-    } finally {
-      setSaving(null)
-    }
+      }),
+      {
+        success: 'Appearance saved and applied.',
+        failure: 'Could not save appearance settings.',
+      },
+    )
+    if (!next) return
+    onSettingsUpdated(next)
+    setTheme(next.theme)
+    applyTheme(next.theme)
   }
 
   async function handleReset() {
     if (saving) return
-    setSaving('reset')
-    setError('')
-    setMessage('')
-    try {
-      const next = await updateSettings({ theme: settings.defaultTheme })
-      onSettingsUpdated(next)
-      setTheme(next.theme)
-      applyTheme(next.theme)
-      setMessage('Appearance reset to the default theme.')
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not reset appearance settings.')
-    } finally {
-      setSaving(null)
-    }
+    const next = await action.run(
+      'reset',
+      () => updateSettings({ theme: settings.defaultTheme }),
+      {
+        success: 'Appearance reset to the default theme.',
+        failure: 'Could not reset appearance settings.',
+      },
+    )
+    if (!next) return
+    onSettingsUpdated(next)
+    setTheme(next.theme)
+    applyTheme(next.theme)
   }
 
   return (
@@ -175,8 +168,7 @@ export function AppearanceSection({ settings, onSettingsUpdated }: AppearanceSec
               value={theme.fontFamily}
               onChange={(event) => {
                 setTheme((current) => ({ ...current, fontFamily: event.target.value }))
-                setError('')
-                setMessage('')
+                action.clearFeedback()
               }}
               maxLength={512}
               autoComplete="off"
@@ -195,8 +187,7 @@ export function AppearanceSection({ settings, onSettingsUpdated }: AppearanceSec
               value={theme.fontSize}
               onChange={(event) => {
                 setTheme((current) => ({ ...current, fontSize: Number(event.target.value) }))
-                setError('')
-                setMessage('')
+                action.clearFeedback()
               }}
               className="mt-1.5"
             />
@@ -251,22 +242,7 @@ export function AppearanceSection({ settings, onSettingsUpdated }: AppearanceSec
           Saving applies the theme to the interface and every terminal you open.
         </InfoCallout>
 
-        {error && (
-          <FeedbackMessage role="alert" tone="error" className="mt-4">
-            {error}
-          </FeedbackMessage>
-        )}
-        {message && (
-          <FeedbackMessage
-            role="status"
-            tone="success"
-            size="status"
-            className="mt-4 flex items-center gap-2"
-          >
-            <Check size={13} />
-            {message}
-          </FeedbackMessage>
-        )}
+        <ActionFeedback feedback={action.feedback} className="mt-4" />
       </div>
 
       <div className="flex flex-wrap items-center justify-end gap-2 border-t border-ghost-border/60 bg-ghost-black/15 px-4 py-3 sm:px-5">

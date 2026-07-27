@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/dire-kiwi/kiwi-code/internal/browsercontrol"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
+	"github.com/gorilla/websocket"
 )
 
 const browserProviderTestToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -32,6 +34,22 @@ type recordedBrowserAction struct {
 	ThreadID  string          `json:"threadId"`
 	Operation string          `json:"operation"`
 	Params    json.RawMessage `json:"params"`
+}
+
+type browserActionTestProvider struct {
+	action func(context.Context, browsercontrol.Request) (json.RawMessage, error)
+}
+
+func (p browserActionTestProvider) Action(ctx context.Context, request browsercontrol.Request) (json.RawMessage, error) {
+	return p.action(ctx, request)
+}
+
+func (browserActionTestProvider) OpenRecordingRange(context.Context, string, string, string, string) (browsercontrol.Recording, error) {
+	return browsercontrol.Recording{}, browsercontrol.ErrRecordingNotFound
+}
+
+func (browserActionTestProvider) Close(context.Context) error {
+	return nil
 }
 
 func TestBrowserStatusAndActionForwarding(t *testing.T) {
@@ -318,6 +336,161 @@ func TestBrowserFrame(t *testing.T) {
 	}
 }
 
+func TestBrowserStreamPairsFrameMetadataWithBinaryPayload(t *testing.T) {
+	var mu sync.Mutex
+	var generation int64
+	provider := browserActionTestProvider{action: func(_ context.Context, request browsercontrol.Request) (json.RawMessage, error) {
+		if request.Operation != "preview" {
+			return nil, fmt.Errorf("unexpected browser operation %q", request.Operation)
+		}
+		mu.Lock()
+		generation++
+		current := generation
+		mu.Unlock()
+		return browserStreamTestPreview(current), nil
+	}}
+	application, item, thread := newBrowserServerTestFixture(t, provider)
+	streamServer, streamURL := newBrowserStreamTestHTTPServer(t, application, item, thread)
+	defer streamServer.Close()
+
+	connection, controller := dialBrowserStreamTest(t, streamURL)
+	defer connection.Close()
+	if !controller {
+		t.Fatal("first browser stream connection was not the controller")
+	}
+
+	for range 2 {
+		metadata, payload := readBrowserStreamTestFrame(t, connection)
+		if metadata.Width != 1000+int(metadata.Generation) || metadata.Height != 700+int(metadata.Generation) {
+			t.Fatalf("frame metadata = %#v", metadata)
+		}
+		want := []byte{0xff, 0xd8, byte(metadata.Generation), 0xff, 0xd9}
+		if !bytes.Equal(payload, want) {
+			t.Fatalf("generation %d payload = %v, want %v", metadata.Generation, payload, want)
+		}
+	}
+}
+
+func TestBrowserStreamSurvivesTransientPreviewFailure(t *testing.T) {
+	var mu sync.Mutex
+	var previewCalls int64
+	provider := browserActionTestProvider{action: func(_ context.Context, request browsercontrol.Request) (json.RawMessage, error) {
+		if request.Operation != "preview" {
+			return nil, fmt.Errorf("unexpected browser operation %q", request.Operation)
+		}
+		mu.Lock()
+		previewCalls++
+		current := previewCalls
+		mu.Unlock()
+		if current == 2 {
+			return nil, browsercontrol.ErrUnavailable
+		}
+		return browserStreamTestPreview(current), nil
+	}}
+	application, item, thread := newBrowserServerTestFixture(t, provider)
+	streamServer, streamURL := newBrowserStreamTestHTTPServer(t, application, item, thread)
+	defer streamServer.Close()
+
+	connection, _ := dialBrowserStreamTest(t, streamURL)
+	defer connection.Close()
+	first, _ := readBrowserStreamTestFrame(t, connection)
+	afterFailure, _ := readBrowserStreamTestFrame(t, connection)
+	if first.Generation != 1 || afterFailure.Generation != 3 {
+		t.Fatalf("stream generations = %d then %d, want 1 then 3", first.Generation, afterFailure.Generation)
+	}
+}
+
+func TestBrowserStreamControllerLeaseHandoffAndCleanup(t *testing.T) {
+	var mu sync.Mutex
+	var generation int64
+	inputs := make(chan browsercontrol.Request, 2)
+	provider := browserActionTestProvider{action: func(_ context.Context, request browsercontrol.Request) (json.RawMessage, error) {
+		switch request.Operation {
+		case "preview":
+			mu.Lock()
+			generation++
+			current := generation
+			mu.Unlock()
+			return browserStreamTestPreview(current), nil
+		case "stream.input":
+			inputs <- request
+			return json.RawMessage(`{}`), nil
+		default:
+			return nil, fmt.Errorf("unexpected browser operation %q", request.Operation)
+		}
+	}}
+	application, item, thread := newBrowserServerTestFixture(t, provider)
+	streamServer, streamURL := newBrowserStreamTestHTTPServer(t, application, item, thread)
+	defer streamServer.Close()
+
+	first, firstIsController := dialBrowserStreamTest(t, streamURL)
+	defer first.Close()
+	if !firstIsController {
+		t.Fatal("first browser stream connection was not the controller")
+	}
+	observer, observerIsController := dialBrowserStreamTest(t, streamURL)
+	defer observer.Close()
+	if observerIsController {
+		t.Fatal("second browser stream connection unexpectedly became a controller")
+	}
+	if err := observer.WriteJSON(map[string]any{"type": "viewport", "width": 800, "height": 600}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case request := <-inputs:
+		t.Fatalf("observer input reached provider: %#v", request)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	// An abrupt client close must release the controller lease without closing
+	// the provider session or requiring the existing observer to reconnect.
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var successor *websocket.Conn
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		candidate, controller := dialBrowserStreamTest(t, streamURL)
+		if controller {
+			successor = candidate
+			break
+		}
+		_ = candidate.Close()
+		time.Sleep(10 * time.Millisecond)
+	}
+	if successor == nil {
+		t.Fatal("controller lease was not released after the controller socket closed")
+	}
+	defer successor.Close()
+	_, _ = readBrowserStreamTestFrame(t, successor)
+	if err := successor.WriteJSON(map[string]any{"type": "viewport", "width": 1024, "height": 768}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case request := <-inputs:
+		var input browserStreamInput
+		if err := json.Unmarshal(request.Params, &input); err != nil {
+			t.Fatal(err)
+		}
+		if input.Type != "viewport" || input.Width != 1024 || input.Height != 768 {
+			t.Fatalf("controller input = %#v", input)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("successor controller input did not reach the provider")
+	}
+	if err := successor.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := observer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	eventuallyStateTest(t, func() bool {
+		application.browserStreamLeases.mu.Lock()
+		defer application.browserStreamLeases.mu.Unlock()
+		return len(application.browserStreamLeases.leases) == 0
+	})
+}
+
 func TestBrowserFrameProviderErrors(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -565,6 +738,117 @@ func newBrowserHTTPFixture(t *testing.T, providerURL string) (*project.Store, pr
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/frame", application.browserFrame)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/stream", application.browserStream)
 	return store, item, item.Threads[0], mux
+}
+
+func newBrowserServerTestFixture(
+	t *testing.T,
+	provider browsercontrol.Provider,
+) (*Server, project.Project, project.Thread) {
+	t.Helper()
+	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Server{
+		projects:     store,
+		browser:      provider,
+		stateChanges: newStateChangeBroker(),
+	}, item, item.Threads[0]
+}
+
+func newBrowserStreamTestHTTPServer(
+	t *testing.T,
+	application *Server,
+	item project.Project,
+	thread project.Thread,
+) (*httptest.Server, string) {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/stream", application.browserStream)
+	server := httptest.NewServer(mux)
+	url := "ws" + strings.TrimPrefix(server.URL, "http") +
+		"/api/projects/" + item.ID + "/threads/" + thread.ID + "/browser/stream"
+	return server, url
+}
+
+type browserStreamTestMetadata struct {
+	Type       string `json:"type"`
+	Generation int64  `json:"generation"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+}
+
+func dialBrowserStreamTest(t *testing.T, url string) (*websocket.Conn, bool) {
+	t.Helper()
+	connection, response, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		if response != nil {
+			_ = response.Body.Close()
+		}
+		t.Fatal(err)
+	}
+	if err := connection.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		_ = connection.Close()
+		t.Fatal(err)
+	}
+	var control struct {
+		Type       string `json:"type"`
+		Controller bool   `json:"controller"`
+	}
+	if err := connection.ReadJSON(&control); err != nil {
+		_ = connection.Close()
+		t.Fatal(err)
+	}
+	if control.Type != "control" {
+		_ = connection.Close()
+		t.Fatalf("initial browser stream message = %#v", control)
+	}
+	return connection, control.Controller
+}
+
+func readBrowserStreamTestFrame(t *testing.T, connection *websocket.Conn) (browserStreamTestMetadata, []byte) {
+	t.Helper()
+	if err := connection.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	messageType, payload, err := connection.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messageType != websocket.TextMessage {
+		t.Fatalf("frame metadata message type = %d, want text", messageType)
+	}
+	var metadata browserStreamTestMetadata
+	if err := json.Unmarshal(payload, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadata.Type != "frame" || metadata.Generation <= 0 {
+		t.Fatalf("frame metadata = %#v", metadata)
+	}
+	messageType, payload, err = connection.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messageType != websocket.BinaryMessage {
+		t.Fatalf("frame payload message type = %d, want binary", messageType)
+	}
+	return metadata, payload
+}
+
+func browserStreamTestPreview(generation int64) json.RawMessage {
+	payload, _ := json.Marshal(browserPreviewResult{
+		Data:       base64.StdEncoding.EncodeToString([]byte{0xff, 0xd8, byte(generation), 0xff, 0xd9}),
+		MIMEType:   "image/jpeg",
+		Width:      1000 + int(generation),
+		Height:     700 + int(generation),
+		Generation: generation,
+		CapturedAt: "2026-01-02T03:04:05Z",
+	})
+	return payload
 }
 
 func TestBrowserStreamInputValidation(t *testing.T) {

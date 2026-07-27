@@ -52,6 +52,10 @@ func (h *terminalHandler) watchThreadTmuxSessions(projectID, threadID string, se
 
 	created := make([]*tmuxSessionWatch, 0, len(sessionNames))
 	h.tmuxWatchMu.Lock()
+	if h.tmuxWatchesStopped {
+		h.tmuxWatchMu.Unlock()
+		return func() {}
+	}
 	if h.tmuxWatches == nil {
 		h.tmuxWatches = make(map[string]*tmuxSessionWatch)
 	}
@@ -94,6 +98,62 @@ func (h *terminalHandler) watchThreadTmuxSessions(projectID, threadID string, se
 			h.tmuxWatchMu.Unlock()
 		})
 	}
+}
+
+// stopTmuxWatches terminates every control-mode client owned by this handler
+// and prevents state channels that are still winding down from creating new
+// ones. This is required during application restart because WebSockets are
+// hijacked connections and net/http shutdown does not close them for us.
+func (h *terminalHandler) stopTmuxWatches(ctx context.Context) error {
+	if h == nil {
+		return nil
+	}
+	h.tmuxWatchMu.Lock()
+	if h.tmuxWatchesStopped {
+		done := h.tmuxWatchesStopDone
+		h.tmuxWatchMu.Unlock()
+		select {
+		case <-done:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	h.tmuxWatchesStopped = true
+	h.tmuxWatchesStopDone = make(chan struct{})
+	done := h.tmuxWatchesStopDone
+	watches := make([]*tmuxSessionWatch, 0, len(h.tmuxWatches))
+	for sessionName, watch := range h.tmuxWatches {
+		watches = append(watches, watch)
+		delete(h.tmuxWatches, sessionName)
+		close(watch.stop)
+	}
+	h.tmuxWatchMu.Unlock()
+
+	go func() {
+		for _, watch := range watches {
+			<-watch.done
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (h *terminalHandler) stopTmuxWatchesOnContext(ctx context.Context) {
+	if h == nil || ctx == nil || ctx.Done() == nil {
+		return
+	}
+	go func() {
+		<-ctx.Done()
+		stopContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = h.stopTmuxWatches(stopContext)
+	}()
 }
 
 // wakeThreadTmuxWatchers is called when Kiwi Code may have created one of the

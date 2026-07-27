@@ -20,11 +20,14 @@ import {
 import { createThread, uploadPiImage } from '../../api'
 import {
   codingAgentSelectionForSetting,
+  codingAgentTargetForSelection,
   defaultCodingAgentSelection,
   fallbackCodingAgentConfigs,
   isClaudeGPTCodingAgent,
   isCodingAgent,
   isCodingAgentSelection,
+  isNativeCodingAgentSelection,
+  nativeCodingAgentLabel,
 } from '../../codingAgents'
 import {
   formatImageSize,
@@ -129,7 +132,7 @@ function rememberedNewThreadPreferences(projectId: string): NewThreadPreferences
 
     // Migrate preferences saved before model settings were remembered per agent.
     if (typeof candidate.model === 'string' && typeof candidate.thinkingLevel === 'string') {
-      const agent = codingAgentIdForSelection(candidate.codingAgent)
+      const agent = codingAgentTargetForSelection(candidate.codingAgent).agent
       agentModels[agent] ??= {
         model: candidate.model,
         thinkingLevel: candidate.thinkingLevel,
@@ -165,12 +168,6 @@ function initialPromptWithImages(prompt: string, imagePaths: string[]) {
   return [prompt, imagePaths.join('\n')].filter(Boolean).join('\n\n')
 }
 
-function codingAgentIdForSelection(selection: CodingAgentSelection): CodingAgent {
-  if (selection === 'pi-native') return 'pi'
-  if (selection === 'claude-native') return 'claude'
-  return selection
-}
-
 export function NewThreadScreen({
   project,
   onOpenSidebar,
@@ -203,7 +200,7 @@ export function NewThreadScreen({
   const [agentModels, setAgentModels] = useState<Partial<Record<CodingAgent, AgentModelPreferences>>>(
     rememberedPreferences?.agentModels ?? {},
   )
-  const initialAgentModel = agentModels[codingAgentIdForSelection(codingAgent)]
+  const initialAgentModel = agentModels[codingAgentTargetForSelection(codingAgent).agent]
   const [model, setModel] = useState(initialAgentModel?.model ?? '')
   const [thinkingLevel, setThinkingLevel] = useState(initialAgentModel?.thinkingLevel ?? '')
   const settings: AppSettings | null = settingsSubscription.state === 'ready'
@@ -244,7 +241,7 @@ export function NewThreadScreen({
     if (configs.length === 0) return
     setCodingAgents(configs)
     setCodingAgent((current) => configs.some((config) =>
-      config.id === codingAgentIdForSelection(current)) ? current : 'pi-native')
+      config.id === codingAgentTargetForSelection(current).agent) ? current : 'pi-native')
   }, [codingAgentsSubscription])
 
   useEffect(() => {
@@ -254,7 +251,7 @@ export function NewThreadScreen({
     const availableAgents = next.codingAgents.map(codingAgentSelectionForSetting)
     const configuredDefault = defaultCodingAgentSelection(next.codingAgents)
     const nextAgent = availableAgents.includes(configuredDefault) ? configuredDefault : 'pi-native'
-    const rememberedModel = agentModels[codingAgentIdForSelection(nextAgent)]
+    const rememberedModel = agentModels[codingAgentTargetForSelection(nextAgent).agent]
     setCodingAgent(nextAgent)
     setModel(rememberedModel?.model ?? '')
     setThinkingLevel(rememberedModel?.thinkingLevel ?? '')
@@ -262,7 +259,7 @@ export function NewThreadScreen({
 
   useEffect(() => {
     if (codingAgentsLoading) return
-    const agentId = codingAgentIdForSelection(codingAgent)
+    const agentId = codingAgentTargetForSelection(codingAgent).agent
     const config = codingAgents.find((agent) => agent.id === agentId)
       ?? fallbackCodingAgentConfigs.find((agent) => agent.id === agentId)
     if (!config) return
@@ -323,7 +320,8 @@ export function NewThreadScreen({
       setError('Select a base branch for the new worktree.')
       return
     }
-    if (codingAgent === 'pi-native' || codingAgent === 'claude-native') {
+    const agentTarget = codingAgentTargetForSelection(codingAgent)
+    if (isNativeCodingAgentSelection(codingAgent)) {
       const validation = validateImageAdditions(
         [],
         initialPromptImages.map(({ file }) => file),
@@ -344,7 +342,7 @@ export function NewThreadScreen({
         return upload.path
       }))
       setUploadingImages(false)
-      const nativeAgent = codingAgent === 'pi-native' || codingAgent === 'claude-native'
+      const nativeAgent = agentTarget.presentation === 'native'
       const firstTask = nativeAgent ? prompt : initialPromptWithImages(prompt, imagePaths)
       const thread = await createThread(project.id, {
         worktree: creatingWorktree,
@@ -357,14 +355,14 @@ export function NewThreadScreen({
         codingAgent,
         agentModels: {
           ...agentModels,
-          [codingAgentIdForSelection(codingAgent)]: { model, thinkingLevel },
+          [agentTarget.agent]: { model, thinkingLevel },
         },
       })
       writeNewThreadDraft(project.id, '')
       writeNewThreadPastes(project.id, [])
       onCreated(thread, {
-        agent: codingAgentIdForSelection(codingAgent),
-        presentation: nativeAgent ? 'native' : 'terminal',
+        agent: agentTarget.agent,
+        presentation: agentTarget.presentation,
         model,
         thinkingLevel,
         prompt: firstTask,
@@ -453,14 +451,10 @@ export function NewThreadScreen({
     { value: 'pi-native' as CodingAgentSelection, label: 'Pi Native' },
     { value: 'codex' as CodingAgentSelection, label: 'Codex CLI' },
   ]
-  const selectedAgentId = codingAgentIdForSelection(codingAgent)
+  const selectedAgentId = codingAgentTargetForSelection(codingAgent).agent
   const selectedAgent = codingAgents.find((agent) => agent.id === selectedAgentId)
     ?? fallbackCodingAgentConfigs[0]
-  const selectedAgentLabel = codingAgent === 'pi-native'
-    ? 'Pi Native'
-    : codingAgent === 'claude-native'
-      ? 'Claude Native'
-      : selectedAgent.label
+  const selectedAgentLabel = nativeCodingAgentLabel(codingAgent) ?? selectedAgent.label
   const startsAgent = Boolean(initialPrompt.trim() || initialPromptImages.length > 0)
   const selectedAgentModelsUnavailable = isClaudeGPTCodingAgent(selectedAgentId)
     && selectedAgent.models.length === 0
@@ -517,8 +511,8 @@ export function NewThreadScreen({
   }
 
   function handleCodingAgentChange(nextAgent: CodingAgentSelection) {
-    const nextAgentId = codingAgentIdForSelection(nextAgent)
-    const currentAgentId = codingAgentIdForSelection(codingAgent)
+    const nextAgentId = codingAgentTargetForSelection(nextAgent).agent
+    const currentAgentId = codingAgentTargetForSelection(codingAgent).agent
     const nextConfig = codingAgents.find((agent) => agent.id === nextAgentId)
       ?? fallbackCodingAgentConfigs.find((agent) => agent.id === nextAgentId)
     const nextAgentModels: Partial<Record<CodingAgent, AgentModelPreferences>> = {

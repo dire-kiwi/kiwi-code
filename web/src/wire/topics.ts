@@ -127,6 +127,7 @@ export const BrowserStatusTopic = parameterizedTopic(
   BrowserStatusResultSchema,
   ({ projectId, threadId }) => JSON.stringify([projectId, threadId]),
 )
+/** @deprecated Recordings are included in BrowserStatusTopic. */
 export const BrowserRecordingsTopic = parameterizedTopic(
   'browser.recordings',
   BrowserParamsSchema,

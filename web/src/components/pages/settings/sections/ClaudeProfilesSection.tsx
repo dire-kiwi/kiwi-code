@@ -2,7 +2,6 @@ import { useState, type FormEvent } from 'react'
 import {
   ArrowDown,
   ArrowUp,
-  Check,
   Crown,
   LoaderCircle,
   Plus,
@@ -11,12 +10,14 @@ import {
   UserRound,
 } from 'lucide-react'
 import { updateSettings } from '../../../../api'
+import { useAsyncFeedback } from '../../../../lib/useAsyncFeedback'
 import type { AppSettings, CodingAgentSetting } from '../../../../types'
 import { GhostButton, PrimaryButton } from '../../../atoms/Button'
 import { TextInput } from '../../../atoms/Input'
 import { Select } from '../../../atoms/Select'
 import { StatusBadge } from '../../../atoms/StatusBadge'
 import { Surface } from '../../../atoms/Surface'
+import { ActionFeedback } from '../../../molecules/ActionFeedback'
 import { FeedbackMessage } from '../../../molecules/FeedbackMessage'
 import { InfoCallout } from '../../../molecules/InfoCallout'
 import { DirectoryPathAutocomplete } from '../../../molecules/ProjectPathAutocomplete'
@@ -50,9 +51,8 @@ function agentTypeLabel(agent: CodingAgentSetting) {
 
 export function ClaudeProfilesSection({ settings, onSettingsUpdated }: ClaudeProfilesSectionProps) {
   const [codingAgents, setCodingAgents] = useState<CodingAgentSetting[]>(settings.codingAgents ?? [])
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
+  const action = useAsyncFeedback()
+  const saving = action.pending
 
   const normalizedAgents = codingAgents.map((agent) => ({
     ...agent,
@@ -79,8 +79,7 @@ export function ClaudeProfilesSection({ settings, onSettingsUpdated }: ClaudePro
   const agentsDirty = JSON.stringify(normalizedAgents) !== JSON.stringify(settings.codingAgents)
 
   function clearFeedback() {
-    setError('')
-    setMessage('')
+    action.clearFeedback()
   }
 
   function addAgent() {
@@ -133,19 +132,14 @@ export function ClaudeProfilesSection({ settings, onSettingsUpdated }: ClaudePro
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (saving) return
-    setSaving(true)
-    setError('')
-    setMessage('')
-    try {
-      const next = await updateSettings({ codingAgents: normalizedAgents })
-      onSettingsUpdated(next)
-      setCodingAgents(next.codingAgents)
-      setMessage('Coding agents saved.')
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not save coding agents.')
-    } finally {
-      setSaving(false)
-    }
+    const next = await action.run(
+      'default',
+      () => updateSettings({ codingAgents: normalizedAgents }),
+      { success: 'Coding agents saved.', failure: 'Could not save coding agents.' },
+    )
+    if (!next) return
+    onSettingsUpdated(next)
+    setCodingAgents(next.codingAgents)
   }
 
   return (
@@ -311,13 +305,7 @@ export function ClaudeProfilesSection({ settings, onSettingsUpdated }: ClaudePro
             Select one default and give every custom agent a unique label. Standard Claude Code agents also need a unique config directory.
           </FeedbackMessage>
         )}
-        {error && <FeedbackMessage role="alert" tone="error">{error}</FeedbackMessage>}
-        {message && (
-          <FeedbackMessage role="status" tone="success" size="status" className="flex items-center gap-2">
-            <Check size={13} />
-            {message}
-          </FeedbackMessage>
-        )}
+        <ActionFeedback feedback={action.feedback} />
       </div>
 
       <div className="flex items-center justify-end border-t border-ghost-border/60 bg-ghost-black/15 px-4 py-3 sm:px-5">
