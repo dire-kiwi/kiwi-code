@@ -122,6 +122,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	}
 	terminal.nativePi.stopOnContext(options.CleanupContext)
 	terminal.nativeClaude.stopOnContext(options.CleanupContext)
+	terminal.stopTmuxWatchesOnContext(options.CleanupContext)
 	browserProvider, err := configuredBrowserProvider(projects, options)
 	if err != nil {
 		return nil, err
@@ -302,13 +303,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
 
-// Close shuts down server-owned browser processes and contexts.
+// Close shuts down server-owned background clients, browser processes, and
+// contexts.
 func (s *Server) Close(ctx context.Context) error {
 	s.stopWorkflowProcessWatches()
-	if s.browser == nil {
-		return nil
+	var closeErrors []error
+	if s.terminal != nil {
+		if err := s.terminal.stopTmuxWatches(ctx); err != nil {
+			closeErrors = append(closeErrors, err)
+		}
 	}
-	return s.browser.Close(ctx)
+	if s.browser == nil {
+		return errors.Join(closeErrors...)
+	}
+	if err := s.browser.Close(ctx); err != nil {
+		closeErrors = append(closeErrors, err)
+	}
+	return errors.Join(closeErrors...)
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
