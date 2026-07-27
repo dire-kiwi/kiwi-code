@@ -45,8 +45,13 @@ import {
 } from '../../api'
 import { reloadFrontend } from '../../frontend-reload.mjs'
 import { formatCompactTokens, formatCompactUsd, usageDescription } from '../../lib/formatUsage'
-import { sidebarProjectActivityCounts, sidebarThreadActivity } from '../../sidebar-thread-activity.mjs'
-import { bookmarkedThreadPathIds, defaultVisibleRootThreadIds } from '../../sidebar-thread-visibility.mjs'
+import {
+  booleanStoredState,
+  guardedStoredStateCodec,
+  useStoredState,
+} from '../../lib/storedState'
+import { createSidebarThreadIndex } from '../../sidebar-thread-index.mjs'
+import { defaultVisibleRootThreadIds } from '../../sidebar-thread-visibility.mjs'
 import type { PiThreadActivity, ProcessWebServer, Profile, Project, Thread, ThreadUsageSnapshot } from '../../types'
 import { Button } from '../atoms/Button'
 import { IconButton } from '../atoms/IconButton'
@@ -110,42 +115,34 @@ const minSidebarWidth = 288
 const maxSidebarWidth = 384
 const sidebarWidthKeyboardStep = 16
 
-function readStoredValue(key: string) {
-  try {
-    return window.localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
+const sidebarViewCodec = guardedStoredStateCodec(
+  (raw) => raw,
+  (value): value is SidebarViewMode => value === 'activity' || value === 'tree',
+)
 
-function writeStoredValue(key: string, value: string) {
-  try {
-    window.localStorage.setItem(key, value)
-  } catch {
-    // Storage can be unavailable (private mode); the sidebar still works.
-  }
-}
-
-function readStoredIdSet(key: string): Set<string> {
-  const raw = readStoredValue(key)
-  if (!raw) return new Set()
-  try {
+const storedIdSetCodec = guardedStoredStateCodec<ReadonlySet<string>>(
+  (raw) => {
     const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return new Set()
-    return new Set(parsed.filter((id): id is string => typeof id === 'string'))
-  } catch {
-    return new Set()
-  }
-}
+    return Array.isArray(parsed)
+      && parsed.every((id) => typeof id === 'string')
+      ? new Set(parsed)
+      : parsed
+  },
+  (value): value is ReadonlySet<string> => value instanceof Set,
+  (value) => JSON.stringify([...value]),
+)
 
 function clampSidebarWidth(value: number) {
   return Math.min(maxSidebarWidth, Math.max(minSidebarWidth, Math.round(value)))
 }
 
-function readStoredSidebarWidth() {
-  const raw = Number(readStoredValue(sidebarWidthStorageKey))
-  return Number.isFinite(raw) && raw > 0 ? clampSidebarWidth(raw) : defaultSidebarWidth
-}
+const sidebarWidthCodec = guardedStoredStateCodec(
+  (raw) => {
+    const value = Number(raw)
+    return Number.isFinite(value) && value > 0 ? clampSidebarWidth(value) : value
+  },
+  (value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0,
+)
 
 type DragItem =
   | { kind: 'project'; id: string }
@@ -188,33 +185,6 @@ function webServerAddress(value: string) {
   } catch {
     return value
   }
-}
-
-function rootThreads(project: Project) {
-  return project.threads.filter((thread) => !thread.parentThreadId)
-}
-
-function orderedThreadTreeIds(project: Project, rootIds: string[]) {
-  const childrenByParent = new Map<string, Thread[]>()
-  for (const thread of project.threads) {
-    if (!thread.parentThreadId) continue
-    const children = childrenByParent.get(thread.parentThreadId) ?? []
-    children.push(thread)
-    childrenByParent.set(thread.parentThreadId, children)
-  }
-  const ordered: string[] = []
-  const seen = new Set<string>()
-  const appendTree = (threadId: string) => {
-    if (seen.has(threadId)) return
-    seen.add(threadId)
-    ordered.push(threadId)
-    for (const child of childrenByParent.get(threadId) ?? []) appendTree(child.id)
-  }
-  for (const rootId of rootIds) appendTree(rootId)
-  // Keep malformed/orphaned data addressable instead of dropping IDs from the
-  // complete-order request. The backend normally prevents this state.
-  for (const thread of project.threads) appendTree(thread.id)
-  return ordered
 }
 
 export function ProjectSidebar({
@@ -263,20 +233,32 @@ export function ProjectSidebar({
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   const [savingOrder, setSavingOrder] = useState(false)
   const [restarting, setRestarting] = useState(false)
-  const [viewMode, setViewMode] = useState<SidebarViewMode>(
-    () => readStoredValue(sidebarViewStorageKey) === 'tree' ? 'tree' : 'activity',
+  const [viewMode, setViewMode] = useStoredState(
+    sidebarViewStorageKey,
+    'activity',
+    sidebarViewCodec,
   )
-  const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth)
-  const [collapsedProjectIds, setCollapsedProjectIds] = useState<ReadonlySet<string>>(
-    () => readStoredIdSet(collapsedProjectsStorageKey),
+  const [sidebarWidth, setSidebarWidth] = useStoredState(
+    sidebarWidthStorageKey,
+    defaultSidebarWidth,
+    sidebarWidthCodec,
+  )
+  const [collapsedProjectIds, setCollapsedProjectIds] = useStoredState(
+    collapsedProjectsStorageKey,
+    () => new Set<string>(),
+    storedIdSetCodec,
   )
   const [expandedMoreProjectIds, setExpandedMoreProjectIds] = useState<ReadonlySet<string>>(() => new Set())
-  const [collapsedChildThreadIds, setCollapsedChildThreadIds] = useState<ReadonlySet<string>>(
-    () => readStoredIdSet(collapsedChildThreadsStorageKey),
+  const [collapsedChildThreadIds, setCollapsedChildThreadIds] = useStoredState(
+    collapsedChildThreadsStorageKey,
+    () => new Set<string>(),
+    storedIdSetCodec,
   )
   const [bookmarksOnly, setBookmarksOnly] = useState(false)
-  const [webServersCollapsed, setWebServersCollapsed] = useState(
-    () => readStoredValue(webServersCollapsedStorageKey) === 'true',
+  const [webServersCollapsed, setWebServersCollapsed] = useStoredState(
+    webServersCollapsedStorageKey,
+    false,
+    booleanStoredState,
   )
   const [threadMenuId, setThreadMenuId] = useState<string | null>(null)
   const draggedItemRef = useRef<DragItem | null>(null)
@@ -285,58 +267,37 @@ export function ProjectSidebar({
   const usageByThread = useMemo(() => new Map(
     usageSnapshots.map((snapshot) => [`${snapshot.projectId}\0${snapshot.threadId}`, snapshot]),
   ), [usageSnapshots])
-  const projectActivityCounts = useMemo(
-    () => sidebarProjectActivityCounts(projects, piActivities),
+  const threadIndex = useMemo(
+    () => createSidebarThreadIndex(projects, piActivities),
     [piActivities, projects],
   )
+  const projectActivityCounts = threadIndex.projectActivityCounts
   const bookmarkThreadIdsByProject = useMemo(() => new Map(
-    projects.map((project) => [project.id, new Set(bookmarkedThreadPathIds(project.threads))]),
-  ), [projects])
+    projects.map((project) => [
+      project.id,
+      new Set(threadIndex.tree(project.id)?.bookmarkedPathIds() ?? []),
+    ]),
+  ), [projects, threadIndex])
   const visibleProjects = bookmarksOnly
     ? projects.filter((project) => (bookmarkThreadIdsByProject.get(project.id)?.size ?? 0) > 0)
     : projects
 
   useEffect(() => {
-    writeStoredValue(sidebarViewStorageKey, viewMode)
-  }, [viewMode])
-
-  useEffect(() => {
-    writeStoredValue(sidebarWidthStorageKey, String(sidebarWidth))
-  }, [sidebarWidth])
-
-  useEffect(() => {
-    writeStoredValue(collapsedProjectsStorageKey, JSON.stringify([...collapsedProjectIds]))
-  }, [collapsedProjectIds])
-
-  useEffect(() => {
-    writeStoredValue(collapsedChildThreadsStorageKey, JSON.stringify([...collapsedChildThreadIds]))
-  }, [collapsedChildThreadIds])
-
-  useEffect(() => {
-    writeStoredValue(webServersCollapsedStorageKey, String(webServersCollapsed))
-  }, [webServersCollapsed])
-
-  useEffect(() => {
     if (!selectedThreadId) return
-    const project = projects.find((candidate) => candidate.threads.some((thread) => thread.id === selectedThreadId))
-    const selected = project?.threads.find((thread) => thread.id === selectedThreadId)
-    if (!project || !selected) return
+    const project = threadIndex.projectByThreadId.get(selectedThreadId)
+    const tree = project ? threadIndex.tree(project.id) : null
+    const selected = tree?.byId.get(selectedThreadId)
+    if (!project || !tree || !selected) return
 
-    const byId = new Map(project.threads.map((thread) => [thread.id, thread]))
-    const ancestors: string[] = []
-    let parentId = selected.parentThreadId
-    while (parentId) {
-      ancestors.push(parentId)
-      parentId = byId.get(parentId)?.parentThreadId
-    }
+    const ancestors = tree.ancestors(selected.id)
     if (ancestors.length > 0) {
       setCollapsedChildThreadIds((current) => {
         const next = new Set(current)
-        for (const id of ancestors) next.delete(id)
+        for (const ancestor of ancestors) next.delete(ancestor.id)
         return next.size === current.size ? current : next
       })
     }
-    const root = ancestors.length > 0 ? byId.get(ancestors.at(-1)!) : selected
+    const root = ancestors.at(-1) ?? selected
     if (root?.archivedAt) {
       setExpandedMoreProjectIds((current) => {
         if (current.has(project.id)) return current
@@ -349,7 +310,7 @@ export function ProjectSidebar({
       next.delete(project.id)
       return next
     })
-  }, [projects, selectedThreadId])
+  }, [selectedThreadId, setCollapsedChildThreadIds, setCollapsedProjectIds, threadIndex])
 
   async function handleProfileSelection(profileId: string) {
     if (profileId !== newProfileValue) {
@@ -455,7 +416,9 @@ export function ProjectSidebar({
 
   function startThreadDrag(event: DragEvent<HTMLButtonElement>, projectId: string, threadId: string) {
     const project = projects.find((item) => item.id === projectId)
-    const activeThreads = project ? rootThreads(project).filter((thread) => !thread.archivedAt) : []
+    const activeThreads = project
+      ? threadIndex.tree(project.id)?.roots.filter((thread) => !thread.archivedAt) ?? []
+      : []
     if (savingOrder || !project || activeThreads.length < 2 || !activeThreads.some((thread) => thread.id === threadId)) {
       event.preventDefault()
       return
@@ -529,7 +492,9 @@ export function ProjectSidebar({
     if (item?.kind !== 'thread' || item.projectId !== project.id || item.id === threadId) return
     event.preventDefault()
     event.stopPropagation()
-    const roots = rootThreads(project)
+    const tree = threadIndex.tree(project.id)
+    if (!tree) return
+    const roots = tree.roots
     const activeThreadIds = roots.filter((thread) => !thread.archivedAt).map((thread) => thread.id)
     const archivedThreadIds = roots.filter((thread) => thread.archivedAt).map((thread) => thread.id)
     const threadIds = reorderedIds(
@@ -539,7 +504,7 @@ export function ProjectSidebar({
       verticalDropPosition(event),
     )
     setActiveDrag(null)
-    saveThreadOrder(project, orderedThreadTreeIds(project, [...threadIds, ...archivedThreadIds]))
+    saveThreadOrder(project, tree.orderedTreeIds([...threadIds, ...archivedThreadIds]))
   }
 
   function handleProjectHandleKeyDown(event: KeyboardEvent<HTMLButtonElement>, projectId: string) {
@@ -559,7 +524,9 @@ export function ProjectSidebar({
     if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
     event.preventDefault()
     if (savingOrder) return
-    const roots = rootThreads(project)
+    const tree = threadIndex.tree(project.id)
+    if (!tree) return
+    const roots = tree.roots
     const activeThreadIds = roots.filter((thread) => !thread.archivedAt).map((thread) => thread.id)
     const archivedThreadIds = roots.filter((thread) => thread.archivedAt).map((thread) => thread.id)
     const index = activeThreadIds.indexOf(threadId)
@@ -567,7 +534,7 @@ export function ProjectSidebar({
     if (index < 0 || targetIndex < 0 || targetIndex >= activeThreadIds.length) return
     const reordered = [...activeThreadIds]
     ;[reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]]
-    saveThreadOrder(project, orderedThreadTreeIds(project, [...reordered, ...archivedThreadIds]))
+    saveThreadOrder(project, tree.orderedTreeIds([...reordered, ...archivedThreadIds]))
   }
 
   function renderThreadRow(
@@ -581,24 +548,15 @@ export function ProjectSidebar({
     const isChild = Boolean(thread.parentThreadId)
     const canReorder = !bookmarksOnly && !isChild && !archived && activeThreadCount > 1 && !savingOrder
     const selected = thread.id === selectedThreadId
-    const children = project.threads.filter((candidate) =>
-      candidate.parentThreadId === thread.id
-        && (!visibleThreadIds || visibleThreadIds.has(candidate.id))
+    const tree = threadIndex.tree(project.id)
+    const children = (tree?.children(thread.id) ?? []).filter((candidate) =>
+      (!visibleThreadIds || visibleThreadIds.has(candidate.id))
         && (!candidate.closedAt || bookmarksOnly),
     )
     const hasChildren = children.length > 0
     const childrenExpanded = bookmarksOnly ? hasChildren : !collapsedChildThreadIds.has(thread.id)
-    const descendantIds = new Set<string>()
-    const collectDescendants = (parentId: string) => {
-      for (const candidate of project.threads) {
-        if (candidate.parentThreadId !== parentId || descendantIds.has(candidate.id)) continue
-        descendantIds.add(candidate.id)
-        collectDescendants(candidate.id)
-      }
-    }
-    collectDescendants(thread.id)
     const usage = usageByThread.get(`${project.id}\0${thread.id}`)
-    const hasDescendantUsageScope = descendantIds.size > 0
+    const hasDescendantUsageScope = (tree?.descendants(thread.id).length ?? 0) > 0
     const displayedUsage = usage && (hasDescendantUsageScope ? usage.total : usage.own)
     const usageScope = hasDescendantUsageScope
       ? 'Total usage including all descendant threads'
@@ -606,12 +564,7 @@ export function ProjectSidebar({
     const usageTitle = displayedUsage
       ? `\n${usageScope}: ${usageDescription(displayedUsage)}${usage?.limitReached ? ' — limit reached' : ''}`
       : ''
-    const { activity: piActivity, childActivity } = sidebarThreadActivity(
-      project.threads,
-      piActivities,
-      project.id,
-      thread.id,
-    )
+    const { activity: piActivity, childActivity } = threadIndex.threadActivity(project.id, thread.id)
     const locationTitle = thread.worktree && thread.branch
       ? `${thread.branch}\n${thread.cwd}`
       : thread.cwd
@@ -770,7 +723,9 @@ export function ProjectSidebar({
   }
 
   function renderProjectThreadRows(project: Project) {
-    const roots = rootThreads(project)
+    const tree = threadIndex.tree(project.id)
+    if (!tree) return null
+    const roots = tree.roots
     const activeThreads = roots.filter((thread) => !thread.archivedAt)
     const archivedThreads = roots.filter((thread) => thread.archivedAt)
     if (bookmarksOnly) {
@@ -784,6 +739,8 @@ export function ProjectSidebar({
       project.threads,
       piActivities,
       project.id,
+      undefined,
+      tree,
     ))
     const displayedActiveThreads = expanded
       ? activeThreads
@@ -999,6 +956,7 @@ export function ProjectSidebar({
             <SidebarActivityView
               projects={projects}
               piActivities={piActivities}
+              threadIndex={threadIndex}
               usageSnapshots={usageSnapshots}
               selectedThreadId={selectedThreadId}
               deletingThreadId={deletingThreadId}

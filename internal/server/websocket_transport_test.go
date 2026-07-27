@@ -3,7 +3,10 @@ package server
 import (
 	"bytes"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -155,4 +158,85 @@ func TestTerminalOutputCreditAcknowledgementCannotUnderflow(t *testing.T) {
 	if got := credit.pending(); got != 0 {
 		t.Fatalf("pending credit after oversized acknowledgement = %d, want 0", got)
 	}
+}
+
+func TestWebSocketPeerReportsStalledInputQueue(t *testing.T) {
+	client, server := openWebSocketTransportTestPair(t)
+	peer := startWebSocketPeer(server, newWebSocketWriter(server), rawWebSocketMessage, "test input stalled")
+	defer peer.Stop()
+
+	for index := 0; index < 17; index++ {
+		if err := client.WriteMessage(websocket.TextMessage, []byte("message")); err != nil {
+			t.Fatalf("write message %d: %v", index, err)
+		}
+	}
+
+	select {
+	case err := <-peer.done:
+		if err == nil || err.Error() != "test input stalled" {
+			t.Fatalf("stalled peer error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("stalled peer input queue was not reported")
+	}
+}
+
+func TestPTYWebSocketBridgeReportsOutputWriteFailure(t *testing.T) {
+	client, server := openWebSocketTransportTestPair(t)
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+	bridge := startPTYWebSocketBridge(server, newWebSocketWriter(server), reader, 1, nil)
+	defer bridge.Stop()
+
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(writer, "terminal output"); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-bridge.terminalDone:
+		if err == nil {
+			t.Fatal("closed WebSocket accepted PTY output")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("PTY output write failure was not reported")
+	}
+	_ = client.Close()
+}
+
+func openWebSocketTransportTestPair(t *testing.T) (*websocket.Conn, *websocket.Conn) {
+	t.Helper()
+	serverConnection := make(chan *websocket.Conn, 1)
+	release := make(chan struct{})
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connection, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		serverConnection <- connection
+		<-release
+		_ = connection.Close()
+	}))
+	client, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http"), nil)
+	if err != nil {
+		httpServer.Close()
+		t.Fatal(err)
+	}
+	server := <-serverConnection
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = server.Close()
+		close(release)
+		httpServer.Close()
+	})
+	return client, server
 }

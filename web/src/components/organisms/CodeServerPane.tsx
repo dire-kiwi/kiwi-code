@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Code2,
   ExternalLink,
@@ -8,6 +8,7 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import { isDefaultBackendActive } from '../../backends'
+import { useDesktopSurfaceBounds } from '../../lib/useDesktopSurfaceBounds'
 import type { ConnectionStatus } from '../../types'
 import { Button } from '../atoms/Button'
 
@@ -20,18 +21,6 @@ export type CodeServerPaneProps = {
   suppressed?: boolean
   onStatusChange?: (status: ConnectionStatus) => void
   onWorkspaceShortcut?: (index: number) => void
-}
-
-function viewBounds(rect: DOMRect): KiwiCodeDesktopBrowserBounds | null {
-  const width = Math.round(rect.width)
-  const height = Math.round(rect.height)
-  if (width < 1 || height < 1) return null
-  return {
-    x: Math.max(0, Math.round(rect.left)),
-    y: Math.max(0, Math.round(rect.top)),
-    width,
-    height,
-  }
 }
 
 function errorMessage(reason: unknown) {
@@ -108,78 +97,24 @@ export function CodeServerPane({
     }
   }, [desktopBridge, projectId, threadId])
 
-  useLayoutEffect(() => {
-    if (!desktopBridge) return
-    const identity = { projectId, threadId }
-    let disposed = false
-    let shown = false
-    let animationFrame = 0
-
-    function hideView() {
-      shown = false
-      void desktopBridge!.hide(identity).catch(() => {})
-    }
-
-    function reportFailure(reason: unknown) {
-      if (disposed) return
-      hideView()
-      setBridgeError(errorMessage(reason))
-    }
-
-    function applyState(result: KiwiCodeDesktopCodeServerState) {
-      if (disposed) return
+  useDesktopSurfaceBounds<KiwiCodeDesktopCodeServerState>({
+    surfaceRef,
+    owner: desktopBridge,
+    identityKey: `${projectId}\0${threadId}\0${workspacePath}\0${retryKey}`,
+    enabled: Boolean(desktopBridge && active && !suppressed),
+    show: (bounds) => desktopBridge!.show({ projectId, threadId, workspacePath, bounds }),
+    setBounds: (bounds) => desktopBridge!.setBounds({ projectId, threadId, bounds }),
+    hide: () => desktopBridge!.hide({ projectId, threadId }),
+    onBeforeShow: () => {
+      setViewState((current) => ({ ...current, status: 'starting', error: '' }))
+      setBridgeError('')
+    },
+    onResult: (result) => {
       setViewState(result)
       setBridgeError(result.status === 'error' ? result.error : '')
-    }
-
-    function syncBounds() {
-      animationFrame = 0
-      if (disposed) return
-      const element = surfaceRef.current
-      const bounds = element ? viewBounds(element.getBoundingClientRect()) : null
-      if (!bounds) {
-        if (shown) hideView()
-        return
-      }
-
-      if (!shown) {
-        shown = true
-        setViewState((current) => ({ ...current, status: 'starting', error: '' }))
-        setBridgeError('')
-        void desktopBridge!.show({ ...identity, workspacePath, bounds }).then(applyState, reportFailure)
-      } else {
-        void desktopBridge!.setBounds({ ...identity, bounds }).then(applyState, reportFailure)
-      }
-    }
-
-    function scheduleBoundsSync() {
-      if (animationFrame) window.cancelAnimationFrame(animationFrame)
-      animationFrame = window.requestAnimationFrame(syncBounds)
-    }
-
-    if (!active || suppressed) {
-      hideView()
-      return () => {
-        disposed = true
-        hideView()
-      }
-    }
-
-    const observer = new ResizeObserver(scheduleBoundsSync)
-    if (surfaceRef.current) observer.observe(surfaceRef.current)
-    window.addEventListener('resize', scheduleBoundsSync)
-    window.addEventListener('scroll', scheduleBoundsSync, true)
-    syncBounds()
-
-    return () => {
-      disposed = true
-      if (animationFrame) window.cancelAnimationFrame(animationFrame)
-      observer.disconnect()
-      window.removeEventListener('resize', scheduleBoundsSync)
-      window.removeEventListener('scroll', scheduleBoundsSync, true)
-      hideView()
-    }
-  }, [active, desktopBridge, projectId, retryKey, suppressed, threadId, workspacePath])
+    },
+    onError: (reason) => setBridgeError(errorMessage(reason)),
+  })
 
   function retry() {
     setBridgeError('')

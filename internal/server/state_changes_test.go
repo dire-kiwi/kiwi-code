@@ -11,16 +11,12 @@ func TestStateChangeBrokerCoalescesMutationBursts(t *testing.T) {
 		"project",
 		"thread",
 		stateTopicBrowserStatus,
-		stateTopicBrowserRecordings,
 	)
 	defer subscription.Close()
 
 	for range 10_000 {
 		broker.publish(stateInvalidation{
 			topic: stateTopicBrowserStatus, projectID: "project", threadID: "thread",
-		})
-		broker.publish(stateInvalidation{
-			topic: stateTopicBrowserRecordings, projectID: "project", threadID: "thread",
 		})
 	}
 	if got := len(subscription.wake); got != 1 {
@@ -49,13 +45,12 @@ func TestStateChangeBrokerCoalescesMutationBursts(t *testing.T) {
 	}
 }
 
-func TestNotifyBrowserStateChangedCoalescesBothTopicInvalidations(t *testing.T) {
+func TestNotifyBrowserStateChangedPublishesStatusInvalidation(t *testing.T) {
 	server := &Server{stateChanges: newStateChangeBroker()}
 	subscription := server.stateChanges.subscribe(
 		"project",
 		"thread",
 		stateTopicBrowserStatus,
-		stateTopicBrowserRecordings,
 	)
 	defer subscription.Close()
 	server.notifyBrowserStateChanged("project", "thread")
@@ -89,7 +84,6 @@ func TestBrowserStreamStateInvalidationsAreThrottledPerThread(t *testing.T) {
 		"project",
 		"thread",
 		stateTopicBrowserStatus,
-		stateTopicBrowserRecordings,
 	)
 	defer subscription.Close()
 

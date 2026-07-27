@@ -237,6 +237,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/stream", server.browserStream)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/recordings/{recordingId}", server.browserRecording)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/pi/activity", server.updatePiActivity)
+	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/codex/activity", server.updateCodexActivity)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/claude/activity", server.updateClaudeActivity)
 	mux.HandleFunc("DELETE /api/projects/{id}/threads/{threadId}/pi/activity", server.acknowledgePiActivity)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/context/status", server.updateContextStatus)

@@ -271,6 +271,84 @@ func TestClaudeCommandUsesTheFixedPiWindow(t *testing.T) {
 	}
 }
 
+func TestCodexCommandUsesManagedPluginAndRelatedProjects(t *testing.T) {
+	directory := t.TempDir()
+	codexPath := filepath.Join(directory, codingAgentCodex)
+	piPath := filepath.Join(directory, codingAgentPi)
+	for _, path := range []string{codexPath, piPath} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", directory)
+	threadRoot := t.TempDir()
+	configPath := filepath.Join(threadRoot, ".config", "kiwi-sandbox.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(`{"relatedProjects":["../shared-library"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dataDirectory := t.TempDir()
+	installation, err := materializeCodexPlugin(dataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenPath := filepath.Join(dataDirectory, agentTokenFileName)
+	if err := os.WriteFile(tokenPath, []byte("codex-test-capability\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handler := &terminalHandler{
+		envPath:          "/usr/bin/env",
+		agentToken:       "codex-test-capability",
+		agentTokenPath:   tokenPath,
+		codexPlugin:      installation,
+		codexConfigPath:  filepath.Join(t.TempDir(), "codex-home"),
+		codexProfileName: managedCodexProfileName(dataDirectory),
+	}
+	command, args, notice, err := handler.commandForCodingAgentPane(
+		project.Project{ID: "project"},
+		project.Thread{ID: "thread", Cwd: threadRoot, ParentThreadID: "parent"},
+		codingAgentCodex,
+		"http://127.0.0.1:8080/api/projects/project/threads/thread",
+		"kiwi-code-project-thread-tools",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command != "/usr/bin/env" || notice != "" {
+		t.Fatalf("unexpected Codex command: %q %#v %q", command, args, notice)
+	}
+	joined := strings.Join(args, "\n")
+	for _, expected := range []string{
+		"--profile",
+		handler.codexProfileName,
+		"--add-dir",
+		filepath.Clean(filepath.Join(threadRoot, "../shared-library")),
+		"--dangerously-bypass-approvals-and-sandbox",
+		"--dangerously-bypass-hook-trust",
+		"CODEX_HOME=" + handler.codexConfigPath,
+		"KIWI_CODE_AGENT_TOKEN_FILE=" + handler.agentTokenPath,
+		"KIWI_CODE_CODING_AGENT=codex",
+		"KIWI_CODE_TMUX_SESSION=kiwi-code-project-thread-tools",
+		"KIWI_CODE_TMUX_WINDOW=pi",
+		"KIWI_CODE_THREAD_ENDPOINT=http://127.0.0.1:8080/api/projects/project/threads/thread",
+		"KIWI_CODE_PROJECT_ID=project",
+		"KIWI_CODE_THREAD_ID=thread",
+		"KIWI_CODE_PI_PATH=" + piPath,
+		codexPath,
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("Codex environment %q does not contain %q", joined, expected)
+		}
+	}
+	for _, forbidden := range []string{"KIWI_CODE_AGENT_TOKEN=", "KIWI_CODE_PARENT_THREAD_ID="} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("Codex environment %q unexpectedly contains %q", joined, forbidden)
+		}
+	}
+}
+
 func TestCodingAgentExitDedupeStateIsPrunedSafely(t *testing.T) {
 	handler := &terminalHandler{
 		agentWatches:        make(map[codingAgentWatchKey]struct{}),

@@ -247,19 +247,33 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 				Title: "Active fixture recording", StartedAt: startedAt.Format(time.RFC3339),
 				IdleTimeoutMS: &duration, IdleDeadlineAt: fixtureTime.Format(time.RFC3339),
 			},
-			Recordings: []browserStateRecording{{
+			Recordings: []browserStateRecording{
+				{
+					ID: "rec-active", State: "recording", TargetID: "page-fixture",
+					Title: "Active fixture recording", StartedAt: startedAt.Format(time.RFC3339),
+					IdleTimeoutMS: &duration, IdleDeadlineAt: fixtureTime.Format(time.RFC3339),
+				},
+				{
+					ID: "rec-complete", State: "completed", TargetID: "page-fixture",
+					Title: "Completed fixture recording", StartedAt: startedAt.Add(-time.Minute).Format(time.RFC3339),
+					FinishedAt: fixtureTime.Format(time.RFC3339), DurationMS: &duration, Bytes: &bytesValue,
+					MIMEType: "video/webm", Filename: "fixture.webm",
+				},
+			},
+		},
+		stateTopicBrowserRecordings: []browserStateRecording{
+			{
 				ID: "rec-active", State: "recording", TargetID: "page-fixture",
 				Title: "Active fixture recording", StartedAt: startedAt.Format(time.RFC3339),
 				IdleTimeoutMS: &duration, IdleDeadlineAt: fixtureTime.Format(time.RFC3339),
-			}},
+			},
+			{
+				ID: "rec-complete", State: "completed", TargetID: "page-fixture",
+				Title: "Completed fixture recording", StartedAt: startedAt.Add(-time.Minute).Format(time.RFC3339),
+				FinishedAt: fixtureTime.Format(time.RFC3339), DurationMS: &duration, Bytes: &bytesValue,
+				MIMEType: "video/webm", Filename: "fixture.webm",
+			},
 		},
-		stateTopicBrowserRecordings: []browserStateRecording{{
-			ID: "rec-fixture", State: "completed", TargetID: "page-fixture",
-			Title: "Fixture recording", StartedAt: fixtureTime.Format(time.RFC3339),
-			FinishedAt: fixtureTime.Add(time.Minute).Format(time.RFC3339),
-			DurationMS: &duration, Bytes: &bytesValue,
-			MIMEType: "video/webm", Filename: "fixture.webm",
-		}},
 		stateTopicTmuxSessions: []tmuxBrowserSession{{
 			Name: "fixture-session", Attached: true, Kind: "shell",
 			ProjectID: "project-1", ProjectName: "Fixture project",

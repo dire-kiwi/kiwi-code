@@ -1,13 +1,13 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
+
+	"github.com/dire-kiwi/kiwi-code/internal/wire"
 )
 
 const (
@@ -73,7 +73,7 @@ func (s *Server) decodeStateTopic(raw json.RawMessage, protectedOrigins []string
 	var header struct {
 		Tag string `json:"tag"`
 	}
-	if err := decodeStateTopicJSON(raw, &header, false); err != nil || strings.TrimSpace(header.Tag) == "" {
+	if err := wire.Decode(raw, &header); err != nil || strings.TrimSpace(header.Tag) == "" {
 		return nil, nil, errors.New("Invalid state topic.")
 	}
 	definition := s.stateTopicRegistry(protectedOrigins)[header.Tag]
@@ -92,7 +92,7 @@ func (s *Server) stateTopicRegistry(protectedOrigins []string) map[string]stateT
 		return stateTopicDefinition{
 			decode: func(raw json.RawMessage) (any, error) {
 				var params stateEmptyTopic
-				if err := decodeStateTopicJSON(raw, &params, true, "tag"); err != nil || params.Tag != tag {
+				if err := wire.DecodeExactObject(raw, &params, "tag"); err != nil || params.Tag != tag {
 					return nil, errors.New("Invalid state topic parameters.")
 				}
 				return params, nil
@@ -106,7 +106,7 @@ func (s *Server) stateTopicRegistry(protectedOrigins []string) map[string]stateT
 		return stateTopicDefinition{
 			decode: func(raw json.RawMessage) (any, error) {
 				var params stateProjectTopic
-				if err := decodeStateTopicJSON(raw, &params, true, "tag", "projectId"); err != nil ||
+				if err := wire.DecodeExactObject(raw, &params, "tag", "projectId"); err != nil ||
 					params.Tag != tag || strings.TrimSpace(params.ProjectID) == "" {
 					return nil, errors.New("Invalid state topic parameters.")
 				}
@@ -122,7 +122,7 @@ func (s *Server) stateTopicRegistry(protectedOrigins []string) map[string]stateT
 		return stateTopicDefinition{
 			decode: func(raw json.RawMessage) (any, error) {
 				var params stateThreadTopic
-				if err := decodeStateTopicJSON(raw, &params, true, "tag", "projectId", "threadId"); err != nil ||
+				if err := wire.DecodeExactObject(raw, &params, "tag", "projectId", "threadId"); err != nil ||
 					params.Tag != tag || strings.TrimSpace(params.ProjectID) == "" ||
 					strings.TrimSpace(params.ThreadID) == "" {
 					return nil, errors.New("Invalid state topic parameters.")
@@ -159,7 +159,7 @@ func (s *Server) stateTopicRegistry(protectedOrigins []string) map[string]stateT
 	registry[stateTopicCodingAgents] = stateTopicDefinition{
 		decode: func(raw json.RawMessage) (any, error) {
 			var params stateCodingAgentsTopic
-			if err := decodeStateTopicJSON(raw, &params, true, "tag", "projectId"); err != nil || params.Tag != stateTopicCodingAgents {
+			if err := wire.DecodeExactObject(raw, &params, "tag", "projectId"); err != nil || params.Tag != stateTopicCodingAgents {
 				return nil, errors.New("Invalid state topic parameters.")
 			}
 			return params, nil
@@ -171,7 +171,7 @@ func (s *Server) stateTopicRegistry(protectedOrigins []string) map[string]stateT
 	registry[stateTopicSandboxConfig] = stateTopicDefinition{
 		decode: func(raw json.RawMessage) (any, error) {
 			var params stateSandboxTopic
-			if err := decodeStateTopicJSON(raw, &params, true, "tag", "scope", "projectId", "threadId"); err != nil || params.Tag != stateTopicSandboxConfig {
+			if err := wire.DecodeExactObject(raw, &params, "tag", "scope", "projectId", "threadId"); err != nil || params.Tag != stateTopicSandboxConfig {
 				return nil, errors.New("Invalid state topic parameters.")
 			}
 			switch params.Scope {
@@ -193,79 +193,4 @@ func (s *Server) stateTopicRegistry(protectedOrigins []string) map[string]stateT
 		},
 	}
 	return registry
-}
-
-func decodeStateTopicJSON(raw json.RawMessage, target any, disallowUnknown bool, allowedKeys ...string) error {
-	if disallowUnknown {
-		if err := validateExactStateTopicKeys(raw, allowedKeys...); err != nil {
-			return err
-		}
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	if disallowUnknown {
-		decoder.DisallowUnknownFields()
-	}
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	var extra json.RawMessage
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("multiple JSON values")
-		}
-		return err
-	}
-	return nil
-}
-
-func validateExactStateTopicKeys(raw json.RawMessage, allowedKeys ...string) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	token, err := decoder.Token()
-	if err != nil {
-		return err
-	}
-	if delimiter, ok := token.(json.Delim); !ok || delimiter != '{' {
-		return errors.New("expected a JSON object")
-	}
-	allowed := make(map[string]struct{}, len(allowedKeys))
-	for _, key := range allowedKeys {
-		allowed[key] = struct{}{}
-	}
-	seen := make(map[string]struct{}, len(allowedKeys))
-	for decoder.More() {
-		token, err := decoder.Token()
-		if err != nil {
-			return err
-		}
-		key, ok := token.(string)
-		if !ok {
-			return errors.New("expected a JSON object key")
-		}
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("unknown field %q", key)
-		}
-		if _, duplicate := seen[key]; duplicate {
-			return fmt.Errorf("duplicate field %q", key)
-		}
-		seen[key] = struct{}{}
-		var value json.RawMessage
-		if err := decoder.Decode(&value); err != nil {
-			return err
-		}
-	}
-	token, err = decoder.Token()
-	if err != nil {
-		return err
-	}
-	if delimiter, ok := token.(json.Delim); !ok || delimiter != '}' {
-		return errors.New("expected the end of a JSON object")
-	}
-	var extra json.RawMessage
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("multiple JSON values")
-		}
-		return err
-	}
-	return nil
 }

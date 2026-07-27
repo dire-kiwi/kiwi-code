@@ -514,13 +514,13 @@ func decodeStateServerMessage(payload []byte) (stateServerMessage, error) {
 	var header struct {
 		Type string `json:"t"`
 	}
-	if err := decodeStateJSON(payload, &header, false); err != nil {
+	if err := wire.Decode(payload, &header); err != nil {
 		return stateServerMessage{}, err
 	}
 	switch header.Type {
 	case wire.ServerReady:
 		var value wire.ReadyMessage
-		if err := decodeStateJSON(payload, &value, true); err != nil {
+		if err := wire.DecodeDisallowUnknown(payload, &value); err != nil {
 			return stateServerMessage{}, err
 		}
 		if value.Protocol == 0 || value.InstanceID == "" || value.ServerTime.IsZero() {
@@ -534,7 +534,7 @@ func decodeStateServerMessage(payload []byte) (stateServerMessage, error) {
 		}, nil
 	case wire.ServerSnap:
 		var value wire.SnapshotMessage
-		if err := decodeStateJSON(payload, &value, true); err != nil {
+		if err := wire.DecodeDisallowUnknown(payload, &value); err != nil {
 			return stateServerMessage{}, err
 		}
 		if value.ID == 0 || value.Seq == 0 || len(value.Data) == 0 {
@@ -545,7 +545,7 @@ func decodeStateServerMessage(payload []byte) (stateServerMessage, error) {
 		}, nil
 	case wire.ServerSuberr:
 		var value wire.SubscribeErrorMessage
-		if err := decodeStateJSON(payload, &value, true); err != nil {
+		if err := wire.DecodeDisallowUnknown(payload, &value); err != nil {
 			return stateServerMessage{}, err
 		}
 		if value.ID == 0 || value.Error == "" {
@@ -554,7 +554,7 @@ func decodeStateServerMessage(payload []byte) (stateServerMessage, error) {
 		return stateServerMessage{Type: value.Type, ID: value.ID, Error: value.Error}, nil
 	case wire.ServerSubend:
 		var value wire.SubscribeEndMessage
-		if err := decodeStateJSON(payload, &value, true); err != nil {
+		if err := wire.DecodeDisallowUnknown(payload, &value); err != nil {
 			return stateServerMessage{}, err
 		}
 		if value.ID == 0 || value.Reason == "" {
@@ -563,31 +563,13 @@ func decodeStateServerMessage(payload []byte) (stateServerMessage, error) {
 		return stateServerMessage{Type: value.Type, ID: value.ID, Reason: value.Reason}, nil
 	case wire.ServerPong:
 		var value wire.PongMessage
-		if err := decodeStateJSON(payload, &value, true); err != nil {
+		if err := wire.DecodeDisallowUnknown(payload, &value); err != nil {
 			return stateServerMessage{}, err
 		}
 		return stateServerMessage{Type: value.Type, Timestamp: value.Timestamp}, nil
 	default:
 		return stateServerMessage{}, fmt.Errorf("unknown state message type %q", header.Type)
 	}
-}
-
-func decodeStateJSON(payload []byte, target any, disallowUnknown bool) error {
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	if disallowUnknown {
-		decoder.DisallowUnknownFields()
-	}
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	var extra json.RawMessage
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("multiple JSON values")
-		}
-		return err
-	}
-	return nil
 }
 
 func (c *stateClient) read(ctx context.Context) {

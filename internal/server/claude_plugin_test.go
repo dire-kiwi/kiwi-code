@@ -202,7 +202,7 @@ func TestClaudeBrowserMCPServer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, nodePath, filepath.Join(pluginRoot, "servers", "kiwi-code-browser.mjs"))
-	command.Env = append(os.Environ(),
+	command.Env = append(testEnvironmentWithoutColorConflicts(),
 		"KIWI_CODE_THREAD_ENDPOINT="+api.URL,
 		"KIWI_CODE_AGENT_TOKEN_FILE="+filepath.Join(pluginRoot, "..", agentTokenFileName),
 	)
@@ -405,7 +405,7 @@ func TestClaudePlansMCPServer(t *testing.T) {
 			w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 			_, _ = w.Write([]byte(content))
 		case r.Method == http.MethodPost && r.URL.Path == "/plans":
-			if got := r.Header.Get(claudePlanContextHeader); got != claudePlanContextFork {
+			if got := r.Header.Get(threadPlanContextHeader); got != claudePlanContextFork {
 				t.Errorf("Claude plan context = %q", got)
 			}
 			decoder := json.NewDecoder(r.Body)
@@ -426,7 +426,7 @@ func TestClaudePlansMCPServer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, nodePath, filepath.Join(pluginRoot, "servers", "kiwi-code-plans.mjs"))
-	command.Env = append(os.Environ(),
+	command.Env = append(testEnvironmentWithoutColorConflicts(),
 		"KIWI_CODE_THREAD_ENDPOINT="+api.URL,
 		"KIWI_CODE_AGENT_TOKEN_FILE="+filepath.Join(pluginRoot, "..", agentTokenFileName),
 	)
@@ -591,7 +591,7 @@ func TestClaudePluginHeartbeatReportsPromptStart(t *testing.T) {
 	startInput := `{"session_id":"session-1","hook_event_name":"UserPromptSubmit","prompt":"fix the status"}`
 	stopInput := `{"session_id":"session-1","hook_event_name":"Stop","stop_hook_active":false}`
 	stateDirectory := t.TempDir()
-	hookEnvironment := append(os.Environ(),
+	hookEnvironment := append(testEnvironmentWithoutColorConflicts(),
 		"KIWI_CODE_THREAD_ENDPOINT="+activityServer.URL,
 		"KIWI_CODE_PROJECT_ID=project",
 		"KIWI_CODE_THREAD_ID=thread",
@@ -703,7 +703,7 @@ func TestClaudePluginTerminalPrefersExplicitPromptOverStaleState(t *testing.T) {
 	if err := os.WriteFile(statePath, []byte(staleState), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	hookEnvironment := append(os.Environ(),
+	hookEnvironment := append(testEnvironmentWithoutColorConflicts(),
 		"KIWI_CODE_THREAD_ENDPOINT="+activityServer.URL,
 		"KIWI_CODE_PROJECT_ID=project",
 		"KIWI_CODE_THREAD_ID=thread",
@@ -763,7 +763,7 @@ func TestClaudePluginLegacyDirectHeartbeatStartsAfterFinishedState(t *testing.T)
 	if err := os.WriteFile(statePath, []byte(priorFinished), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	hookEnvironment := append(os.Environ(),
+	hookEnvironment := append(testEnvironmentWithoutColorConflicts(),
 		"KIWI_CODE_THREAD_ENDPOINT="+activityServer.URL,
 		"KIWI_CODE_PROJECT_ID=project",
 		"KIWI_CODE_THREAD_ID=thread",
@@ -832,7 +832,7 @@ func TestClaudePluginDelayedHeartbeatCannotReplaceNewerPromptState(t *testing.T)
 	defer activityServer.Close()
 
 	stateDirectory := t.TempDir()
-	hookEnvironment := append(os.Environ(),
+	hookEnvironment := append(testEnvironmentWithoutColorConflicts(),
 		"KIWI_CODE_THREAD_ENDPOINT="+activityServer.URL,
 		"KIWI_CODE_PROJECT_ID=project",
 		"KIWI_CODE_THREAD_ID=thread",
@@ -980,7 +980,7 @@ func TestClaudePluginNamesThreadWithPiFromFirstPrompt(t *testing.T) {
 	}
 	input := `{"session_id":"session-1","prompt_id":"prompt-1","hook_event_name":"UserPromptSubmit","prompt":"add status and titles"}`
 	stateDirectory := t.TempDir()
-	hookEnvironment := append(os.Environ(),
+	hookEnvironment := append(testEnvironmentWithoutColorConflicts(),
 		"KIWI_CODE_THREAD_ENDPOINT="+server.URL,
 		"KIWI_CODE_PROJECT_ID=project",
 		"KIWI_CODE_THREAD_ID=thread",
@@ -1045,4 +1045,15 @@ func TestClaudePluginNamesThreadWithPiFromFirstPrompt(t *testing.T) {
 	if activityState != "finished" || activityAgent != codingAgentClaudeGPT || activityPath != "/claude/activity" {
 		t.Fatalf("activity update = %q for %q at %q", activityState, activityAgent, activityPath)
 	}
+}
+
+func testEnvironmentWithoutColorConflicts() []string {
+	environment := make([]string, 0, len(os.Environ()))
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, "NO_COLOR=") || strings.HasPrefix(entry, "FORCE_COLOR=") {
+			continue
+		}
+		environment = append(environment, entry)
+	}
+	return environment
 }

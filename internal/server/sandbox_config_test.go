@@ -13,7 +13,7 @@ import (
 	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
-func TestClaudeRelatedProjectDirectoriesMatchSandboxExpansion(t *testing.T) {
+func TestCodingAgentRelatedProjectDirectoriesMatchSandboxExpansion(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	parent := t.TempDir()
@@ -26,7 +26,7 @@ func TestClaudeRelatedProjectDirectoriesMatchSandboxExpansion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := claudeRelatedProjectDirectories(project.Thread{Cwd: root})
+	got, err := codingAgentRelatedProjectDirectories(project.Thread{Cwd: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,11 +36,11 @@ func TestClaudeRelatedProjectDirectoriesMatchSandboxExpansion(t *testing.T) {
 		filepath.Join(os.TempDir(), "cache"),
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Claude related directories = %#v, want %#v", got, want)
+		t.Fatalf("coding-agent related directories = %#v, want %#v", got, want)
 	}
 }
 
-func TestClaudeRelatedProjectDirectoriesRejectMalformedConfig(t *testing.T) {
+func TestCodingAgentRelatedProjectDirectoriesRejectMalformedConfig(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".config"), 0o700); err != nil {
 		t.Fatal(err)
@@ -48,8 +48,8 @@ func TestClaudeRelatedProjectDirectoriesRejectMalformedConfig(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".config", "kiwi-sandbox.json"), []byte(`{"relatedProjects":"../shared"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := claudeRelatedProjectDirectories(project.Thread{Cwd: root}); err == nil {
-		t.Fatal("malformed relatedProjects did not prevent Claude launch")
+	if _, err := codingAgentRelatedProjectDirectories(project.Thread{Cwd: root}); err == nil {
+		t.Fatal("malformed relatedProjects did not prevent coding-agent launch")
 	}
 }
 

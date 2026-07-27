@@ -1,12 +1,13 @@
 import { useState, type FormEvent } from 'react'
-import { Check, FolderGit2, LoaderCircle, RotateCcw, Save } from 'lucide-react'
+import { FolderGit2, LoaderCircle, RotateCcw, Save } from 'lucide-react'
 import { updateSettings } from '../../../../api'
+import { useAsyncFeedback } from '../../../../lib/useAsyncFeedback'
 import type { AppSettings } from '../../../../types'
 import { GhostButton, PrimaryButton } from '../../../atoms/Button'
 import { TextInput } from '../../../atoms/Input'
 import { StatusBadge } from '../../../atoms/StatusBadge'
 import { Surface } from '../../../atoms/Surface'
-import { FeedbackMessage } from '../../../molecules/FeedbackMessage'
+import { ActionFeedback } from '../../../molecules/ActionFeedback'
 import { InfoCallout } from '../../../molecules/InfoCallout'
 import { SectionHeader } from '../../../molecules/SectionHeader'
 
@@ -15,13 +16,10 @@ type WorktreesSectionProps = {
   onSettingsUpdated: (settings: AppSettings) => void
 }
 
-type SavingAction = 'save' | 'reset' | null
-
 export function WorktreesSection({ settings, onSettingsUpdated }: WorktreesSectionProps) {
   const [worktreeBasePath, setWorktreeBasePath] = useState(settings.worktreeBasePath)
-  const [saving, setSaving] = useState<SavingAction>(null)
-  const [error, setError] = useState('')
-  const [savedMessage, setSavedMessage] = useState('')
+  const action = useAsyncFeedback<'save' | 'reset'>()
+  const saving = action.pendingAction
 
   const normalizedInput = worktreeBasePath.trim()
   const dirty = normalizedInput !== settings.worktreeBasePath
@@ -31,36 +29,29 @@ export function WorktreesSection({ settings, onSettingsUpdated }: WorktreesSecti
     event.preventDefault()
     if (!normalizedInput || saving) return
 
-    setSaving('save')
-    setError('')
-    setSavedMessage('')
-    try {
-      const next = await updateSettings(normalizedInput)
-      onSettingsUpdated(next)
-      setWorktreeBasePath(next.worktreeBasePath)
-      setSavedMessage('Worktree location saved.')
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not save settings.')
-    } finally {
-      setSaving(null)
-    }
+    const next = await action.run(
+      'save',
+      () => updateSettings(normalizedInput),
+      { success: 'Worktree location saved.', failure: 'Could not save settings.' },
+    )
+    if (!next) return
+    onSettingsUpdated(next)
+    setWorktreeBasePath(next.worktreeBasePath)
   }
 
   async function handleReset() {
     if (saving) return
-    setSaving('reset')
-    setError('')
-    setSavedMessage('')
-    try {
-      const next = await updateSettings('')
-      onSettingsUpdated(next)
-      setWorktreeBasePath(next.worktreeBasePath)
-      setSavedMessage('Worktree location reset to the default.')
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not reset settings.')
-    } finally {
-      setSaving(null)
-    }
+    const next = await action.run(
+      'reset',
+      () => updateSettings(''),
+      {
+        success: 'Worktree location reset to the default.',
+        failure: 'Could not reset settings.',
+      },
+    )
+    if (!next) return
+    onSettingsUpdated(next)
+    setWorktreeBasePath(next.worktreeBasePath)
   }
 
   return (
@@ -90,8 +81,7 @@ export function WorktreesSection({ settings, onSettingsUpdated }: WorktreesSecti
             value={worktreeBasePath}
             onChange={(event) => {
               setWorktreeBasePath(event.target.value)
-              setError('')
-              setSavedMessage('')
+              action.clearFeedback()
             }}
             required
             autoComplete="off"
@@ -113,22 +103,7 @@ export function WorktreesSection({ settings, onSettingsUpdated }: WorktreesSecti
           The selected directory is created when you save it.
         </InfoCallout>
 
-        {error && (
-          <FeedbackMessage role="alert" tone="error" className="mt-4">
-            {error}
-          </FeedbackMessage>
-        )}
-        {savedMessage && (
-          <FeedbackMessage
-            role="status"
-            tone="success"
-            size="status"
-            className="mt-4 flex items-center gap-2"
-          >
-            <Check size={13} />
-            {savedMessage}
-          </FeedbackMessage>
-        )}
+        <ActionFeedback feedback={action.feedback} className="mt-4" />
       </div>
 
       <div className="flex flex-wrap items-center justify-end gap-2 border-t border-ghost-border/60 bg-ghost-black/15 px-4 py-3 sm:px-5">

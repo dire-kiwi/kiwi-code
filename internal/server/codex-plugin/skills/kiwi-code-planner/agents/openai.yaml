@@ -1,0 +1,6 @@
+interface:
+  display_name: "Kiwi Code Planner"
+  short_description: "Create and retain an implementation-ready plan"
+  default_prompt: "Create a read-only implementation plan and publish it to this Kiwi Code thread."
+policy:
+  allow_implicit_invocation: true

@@ -50,17 +50,18 @@ const (
 	childThreadCreationSkillFork
 )
 
-type workflowChildIdentityContextKey struct{}
-
 type workflowChildIdentity struct {
 	RunID   string
 	AgentID string
 }
 
+type childThreadEndpoint func(projectID, threadID string) string
+
 type childThreadRunResponse struct {
-	Thread project.Thread      `json:"thread"`
-	Run    piNativeRunSnapshot `json:"run"`
-	Agent  string              `json:"agent"`
+	Thread   project.Thread      `json:"thread"`
+	Run      piNativeRunSnapshot `json:"run"`
+	Agent    string              `json:"agent"`
+	Existing bool                `json:"-"`
 }
 
 type listedChildThread struct {
@@ -161,12 +162,15 @@ func childThreadModelOptions(models []piModelCapability) []childThreadModelOptio
 	return options
 }
 
-func writeChildThreadModelValidationError(w http.ResponseWriter, status int, message string, models []piModelCapability) {
-	writeJSON(w, status, childThreadModelValidationError{
-		Error:           message,
-		Agent:           codingAgentPi,
-		AvailableModels: childThreadModelOptions(models),
-	})
+func childThreadModelValidationFailure(status int, message string, models []piModelCapability) *apiOperationFailure {
+	return &apiOperationFailure{
+		status: status,
+		body: childThreadModelValidationError{
+			Error:           message,
+			Agent:           codingAgentPi,
+			AvailableModels: childThreadModelOptions(models),
+		},
+	}
 }
 
 func childThreadModelValidationMessage(validationErr error) string {
@@ -371,25 +375,21 @@ func (s *Server) createSkillForkChild(w http.ResponseWriter, r *http.Request) {
 	s.createChildThreadAuthorized(w, r, childThreadCreationSkillFork)
 }
 
-func (s *Server) respondExistingSkillFork(
-	w http.ResponseWriter,
+func (s *Server) existingSkillForkResponse(
 	projectID string,
 	thread project.Thread,
-) {
+) (childThreadRunResponse, *apiOperationFailure) {
 	if thread.RollbackPending {
-		writeError(w, http.StatusConflict, "The matching skill fork is still being created; retry this request.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusConflict, "The matching skill fork is still being created; retry this request.")
 	}
 	if s.terminal == nil || s.terminal.nativePi == nil {
-		writeError(w, http.StatusServiceUnavailable, "Pi child management is unavailable.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusServiceUnavailable, "Pi child management is unavailable.")
 	}
 	run, found := s.terminal.nativePi.latestChildRun(projectID, thread.ID)
 	if !found {
-		writeError(w, http.StatusConflict, "The matching skill fork already exists, but its run state is unavailable after restart. Review the retained child thread.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusConflict, "The matching skill fork already exists, but its run state is unavailable after restart. Review the retained child thread.")
 	}
-	writeJSON(w, http.StatusOK, childThreadRunResponse{Thread: thread, Run: run, Agent: codingAgentPi})
+	return childThreadRunResponse{Thread: thread, Run: run, Agent: codingAgentPi, Existing: true}, nil
 }
 
 func (s *Server) stopSkillForkChild(w http.ResponseWriter, r *http.Request) {
@@ -428,7 +428,12 @@ func (s *Server) stopSkillForkChild(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Could not stop the skill fork child.")
 		return
 	}
-	s.closeChildThreadAuthorized(w, r)
+	closed, failure := s.closeChildThreadOperation(projectID, parentID, childID)
+	if failure != nil {
+		failure.write(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, closed)
 }
 
 // createChildThreadAuthorized keeps general direct child creation disabled
@@ -437,50 +442,68 @@ func (s *Server) stopSkillForkChild(w http.ResponseWriter, r *http.Request) {
 // its own per-run capability; skill forks use the managed Pi capability and do
 // not enter the workflow control plane.
 func (s *Server) createChildThreadAuthorized(w http.ResponseWriter, r *http.Request, source childThreadCreationSource) {
-	if source == childThreadCreationDirect && !s.allowChildThreadCreation {
-		writeError(w, http.StatusServiceUnavailable, "Direct sub-agent creation is temporarily disabled; use a context: fork skill or a Kiwi Code workflow.")
+	endpoint := func(projectID, threadID string) string {
+		return threadEndpointURL(r, projectID, threadID)
+	}
+	created, failure := s.createChildThreadOperation(
+		r.Context(),
+		http.MaxBytesReader(w, r.Body, maxChildThreadPromptBytes+(1<<20)),
+		r.PathValue("id"),
+		r.PathValue("threadId"),
+		source,
+		workflowChildIdentity{},
+		endpoint,
+	)
+	if failure != nil {
+		failure.write(w)
 		return
+	}
+	status := http.StatusCreated
+	if created.Existing {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, created)
+}
+
+func (s *Server) createChildThreadOperation(
+	ctx context.Context,
+	bodyReader io.Reader,
+	projectID, parentID string,
+	source childThreadCreationSource,
+	workflowIdentity workflowChildIdentity,
+	endpoint childThreadEndpoint,
+) (childThreadRunResponse, *apiOperationFailure) {
+	if source == childThreadCreationDirect && !s.allowChildThreadCreation {
+		return childThreadRunResponse{}, apiOperationError(http.StatusServiceUnavailable, "Direct sub-agent creation is temporarily disabled; use a context: fork skill or a Kiwi Code workflow.")
 	}
 	if source != childThreadCreationDirect && source != childThreadCreationWorkflow && source != childThreadCreationSkillFork {
-		writeError(w, http.StatusInternalServerError, "Invalid child creation source.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusInternalServerError, "Invalid child creation source.")
 	}
-	projectID := r.PathValue("id")
-	parentID := r.PathValue("threadId")
 	item, parent, err := s.projects.GetThread(projectID, parentID)
 	if errors.Is(err, project.ErrNotFound) || errors.Is(err, project.ErrThreadNotFound) {
-		writeError(w, http.StatusNotFound, "Parent thread not found.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusNotFound, "Parent thread not found.")
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not load the parent thread.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusInternalServerError, "Could not load the parent thread.")
 	}
 	if parent.RollbackPending {
-		writeError(w, http.StatusConflict, "The parent thread is being rolled back; no child thread was created.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusConflict, "The parent thread is being rolled back; no child thread was created.")
 	}
 	if parent.ArchivedAt != nil {
-		writeError(w, http.StatusConflict, "Restore the parent thread before creating a child.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusConflict, "Restore the parent thread before creating a child.")
 	}
 	if parent.ClosedAt != nil {
-		writeError(w, http.StatusConflict, "Reopen the parent thread before creating a child.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusConflict, "Reopen the parent thread before creating a child.")
 	}
 	if reached, _, budgetErr := s.threadBudgetReached(projectID, parentID); budgetErr != nil {
-		writeError(w, http.StatusInternalServerError, "Could not verify the parent thread's usage limit.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusInternalServerError, "Could not verify the parent thread's usage limit.")
 	} else if reached {
-		writeError(w, http.StatusConflict, "The parent thread's token or cost limit has been reached; no child thread was created.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusConflict, "The parent thread's token or cost limit has been reached; no child thread was created.")
 	}
 	if stopping, stopErr := s.childParentStopping(projectID, parentID); stopErr != nil {
-		writeError(w, http.StatusInternalServerError, "Could not verify that the parent thread is active.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusInternalServerError, "Could not verify that the parent thread is active.")
 	} else if stopping {
-		writeError(w, http.StatusConflict, "The parent thread is being deleted; no child thread was created.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusConflict, "The parent thread is being deleted; no child thread was created.")
 	}
 
 	var input struct {
@@ -494,73 +517,62 @@ func (s *Server) createChildThreadAuthorized(w http.ResponseWriter, r *http.Requ
 		NestedDepth   *int   `json:"nestedDepth"`
 		RequestID     string `json:"requestId"`
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxChildThreadPromptBytes+(1<<20)))
+	body, err := io.ReadAll(bodyReader)
 	if err != nil || !utf8.Valid(body) {
-		writeError(w, http.StatusBadRequest, "Invalid child thread details.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusBadRequest, "Invalid child thread details.")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid child thread details.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusBadRequest, "Invalid child thread details.")
 	}
 	input.Title = strings.TrimSpace(input.Title)
 	input.Agent = strings.TrimSpace(input.Agent)
 	input.RequestID = strings.TrimSpace(input.RequestID)
 	if input.Title == "" || strings.TrimSpace(input.Prompt) == "" {
-		writeError(w, http.StatusBadRequest, "A child title and prompt are required.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusBadRequest, "A child title and prompt are required.")
 	}
 	if len(input.Prompt) > maxChildThreadPromptBytes || !utf8.ValidString(input.Prompt) || strings.ContainsRune(input.Prompt, '\x00') {
-		writeError(w, http.StatusBadRequest, "The child prompt is too long or contains an invalid character.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusBadRequest, "The child prompt is too long or contains an invalid character.")
 	}
 	projectMaxDepth := s.projects.GetSettings().SubAgentNestingDepth
 	if item.SubAgentNestingDepthOverride != nil {
 		projectMaxDepth = *item.SubAgentNestingDepthOverride
 	}
 	if input.NestedDepth != nil && (*input.NestedDepth < 0 || *input.NestedDepth > projectMaxDepth) {
-		writeError(w, http.StatusBadRequest, "Nested depth must be between 0 and the project's maximum nesting depth.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusBadRequest, "Nested depth must be between 0 and the project's maximum nesting depth.")
 	}
 	if input.Agent == "" {
 		input.Agent = codingAgentPi
 	}
 	if input.Agent != codingAgentPi {
-		writeError(w, http.StatusBadRequest, "Only Pi child threads are supported for now.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusBadRequest, "Only Pi child threads are supported for now.")
 	}
 	if source == childThreadCreationSkillFork {
 		// Older already-running Pi extension processes do not send requestId.
 		// Keep that path compatible; newly materialized extensions always send a
 		// durable ID and receive idempotent creation/recovery semantics.
 		if input.RequestID != "" && !validChildSkillForkRequestID(input.RequestID) {
-			writeError(w, http.StatusBadRequest, "The skill fork request ID is invalid.")
-			return
+			return childThreadRunResponse{}, apiOperationError(http.StatusBadRequest, "The skill fork request ID is invalid.")
 		}
 		if input.RequestID != "" {
 			for _, existing := range item.Threads {
 				if existing.ParentThreadID == parentID && existing.SkillForkRequestID == input.RequestID {
-					s.respondExistingSkillFork(w, projectID, existing)
-					return
+					return s.existingSkillForkResponse(projectID, existing)
 				}
 			}
 		}
 	} else if input.RequestID != "" {
-		writeError(w, http.StatusBadRequest, "A request ID is only supported for context: fork skills.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusBadRequest, "A request ID is only supported for context: fork skills.")
 	}
 	launchOptions, err := normalizeCodingAgentLaunchOptions(codingAgentPi, input.Model, input.ThinkingLevel)
 	if err != nil {
-		writeChildThreadModelValidationError(w, http.StatusBadRequest, err.Error()+"; no child thread was created.", nil)
-		return
+		return childThreadRunResponse{}, childThreadModelValidationFailure(http.StatusBadRequest, err.Error()+"; no child thread was created.", nil)
 	}
 	worktree := false
 	if source == childThreadCreationSkillFork {
 		if input.Worktree != nil && *input.Worktree {
-			writeError(w, http.StatusBadRequest, "A context: fork skill must share the parent workspace.")
-			return
+			return childThreadRunResponse{}, apiOperationError(http.StatusBadRequest, "A context: fork skill must share the parent workspace.")
 		}
 	} else {
 		resolved := s.projects.ResolveSnapshot([]project.Project{item})
@@ -577,42 +589,36 @@ func (s *Server) createChildThreadAuthorized(w http.ResponseWriter, r *http.Requ
 	capabilityCwd := item.Path
 	baseRevision := ""
 	if worktree {
-		probeContext, cancelProbe := context.WithTimeout(r.Context(), childCapabilityProbeTimeout)
+		probeContext, cancelProbe := context.WithTimeout(ctx, childCapabilityProbeTimeout)
 		defer cancelProbe()
 		var resolveErr error
 		baseRevision, resolveErr = resolveChildCapabilityRevision(probeContext, item, baseBranch)
 		if resolveErr != nil {
-			writeError(w, http.StatusBadRequest, resolveErr.Error()+"; no child thread was created.")
-			return
+			return childThreadRunResponse{}, apiOperationError(http.StatusBadRequest, resolveErr.Error()+"; no child thread was created.")
 		}
 		probeCwd, cleanup, probeErr := createChildCapabilityProbeWorktree(probeContext, item, s.projects.DataDirectory(), baseRevision)
 		if probeErr != nil {
-			writeError(w, http.StatusBadRequest, "Could not prepare the child baseline for model validation; no child thread was created.")
-			return
+			return childThreadRunResponse{}, apiOperationError(http.StatusBadRequest, "Could not prepare the child baseline for model validation; no child thread was created.")
 		}
 		capabilityCwd = probeCwd
 		defer cleanup()
 	}
-	discoveryContext, cancelDiscovery := context.WithTimeout(r.Context(), codingAgentModelDiscoveryTimeout)
+	discoveryContext, cancelDiscovery := context.WithTimeout(ctx, codingAgentModelDiscoveryTimeout)
 	availableModels, discoveryErr := s.terminal.availablePiModelCapabilities(discoveryContext, capabilityCwd, true)
 	cancelDiscovery()
 	if discoveryErr != nil || len(availableModels) == 0 {
-		writeChildThreadModelValidationError(w, http.StatusServiceUnavailable, "Could not query Pi's available models in the child baseline; no child thread was created.", nil)
-		return
+		return childThreadRunResponse{}, childThreadModelValidationFailure(http.StatusServiceUnavailable, "Could not query Pi's available models in the child baseline; no child thread was created.", nil)
 	}
 	if validationErr := validatePiModelLaunchOptions(availableModels, launchOptions); validationErr != nil {
-		writeChildThreadModelValidationError(w, http.StatusBadRequest, childThreadModelValidationMessage(validationErr), availableModels)
-		return
+		return childThreadRunResponse{}, childThreadModelValidationFailure(http.StatusBadRequest, childThreadModelValidationMessage(validationErr), availableModels)
 	}
 	// Do not publish a child if the caller disappeared during capability
 	// discovery. After persistence starts, the operation is intentionally
 	// durable and can be recovered through its request ID.
-	if r.Context().Err() != nil {
-		writeError(w, http.StatusRequestTimeout, "The child request was cancelled before creation; no child thread was created.")
-		return
+	if ctx.Err() != nil {
+		return childThreadRunResponse{}, apiOperationError(http.StatusRequestTimeout, "The child request was cancelled before creation; no child thread was created.")
 	}
 
-	workflowIdentity, _ := r.Context().Value(workflowChildIdentityContextKey{}).(workflowChildIdentity)
 	thread, err := s.projects.AddThreadWithOptions(projectID, input.Title, project.AddThreadOptions{
 		Worktree:           worktree,
 		BaseBranch:         baseBranch,
@@ -627,51 +633,40 @@ func (s *Server) createChildThreadAuthorized(w http.ResponseWriter, r *http.Requ
 		CreationPending:    true,
 	})
 	if errors.Is(err, project.ErrChildCreationRequestExists) {
-		s.respondExistingSkillFork(w, projectID, thread)
-		return
+		return s.existingSkillForkResponse(projectID, thread)
 	}
 	// A save can be published before its final durability step reports an
 	// error. AddThreadWithOptions returns the persisted thread in that case so
 	// this request can still roll the transient creation back.
 	if err != nil && thread.ID != "" {
 		if rollbackErr := s.rollbackCreatedChildThread(item, thread, false, "persist child thread"); rollbackErr != nil {
-			writeError(w, http.StatusInternalServerError, "Could not save the child thread, and cleanup did not complete.")
-			return
+			return childThreadRunResponse{}, apiOperationError(http.StatusInternalServerError, "Could not save the child thread, and cleanup did not complete.")
 		}
-		writeError(w, http.StatusInternalServerError, "Could not save the child thread; no child thread was created.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusInternalServerError, "Could not save the child thread; no child thread was created.")
 	}
 	if errors.Is(err, project.ErrNotFound) || errors.Is(err, project.ErrThreadNotFound) {
-		writeError(w, http.StatusNotFound, "Parent thread not found.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusNotFound, "Parent thread not found.")
 	}
 	if errors.Is(err, project.ErrChildThreadDepthLimit) {
-		writeError(w, http.StatusConflict, "The effective sub-agent nesting depth for this thread tree has been reached.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusConflict, "The effective sub-agent nesting depth for this thread tree has been reached.")
 	}
 	if errors.Is(err, project.ErrThreadClosed) {
-		writeError(w, http.StatusConflict, "Reopen the parent thread before creating a child.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusConflict, "Reopen the parent thread before creating a child.")
 	}
 	if errors.Is(err, project.ErrThreadRollbackPending) {
-		writeError(w, http.StatusConflict, "The parent thread is being rolled back; no child thread was created.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusConflict, "The parent thread is being rolled back; no child thread was created.")
 	}
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusBadRequest, err.Error())
 	}
 	if stopping, stopErr := s.childParentStopping(projectID, parentID); stopErr != nil || stopping {
 		if rollbackErr := s.rollbackCreatedChildThread(item, thread, false, "verify parent remained active"); rollbackErr != nil {
-			writeError(w, http.StatusInternalServerError, "Child creation failed and cleanup did not complete.")
-			return
+			return childThreadRunResponse{}, apiOperationError(http.StatusInternalServerError, "Child creation failed and cleanup did not complete.")
 		}
 		if stopErr != nil {
-			writeError(w, http.StatusInternalServerError, "Could not verify that the parent thread remained active.")
-		} else {
-			writeError(w, http.StatusConflict, "The parent thread is being deleted; no child thread was created.")
+			return childThreadRunResponse{}, apiOperationError(http.StatusInternalServerError, "Could not verify that the parent thread remained active.")
 		}
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusConflict, "The parent thread is being deleted; no child thread was created.")
 	}
 
 	launchOptions.AllowPendingCreation = true
@@ -680,30 +675,26 @@ func (s *Server) createChildThreadAuthorized(w http.ResponseWriter, r *http.Requ
 		// thread. Browser work performed by that child must remain visible in
 		// the invoking thread's Browser workspace rather than creating a
 		// short-lived session owned by the retained child.
-		launchOptions.BrowserThreadEndpoint = threadEndpointURL(r, projectID, parentID)
+		launchOptions.BrowserThreadEndpoint = endpoint(projectID, parentID)
 	}
 	process, err := s.terminal.startPiNativeProcess(
 		item,
 		thread,
-		threadEndpointURL(r, projectID, thread.ID),
+		endpoint(projectID, thread.ID),
 		launchOptions,
 	)
 	if err != nil {
 		if rollbackErr := s.rollbackCreatedChildThread(item, thread, true, "start Pi"); rollbackErr != nil {
-			writeError(w, http.StatusInternalServerError, "Could not start Pi in the child thread, and cleanup did not complete.")
-			return
+			return childThreadRunResponse{}, apiOperationError(http.StatusInternalServerError, "Could not start Pi in the child thread, and cleanup did not complete.")
 		}
-		writeError(w, http.StatusInternalServerError, "Could not start Pi in the child thread.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusInternalServerError, "Could not start Pi in the child thread.")
 	}
 	run, err := process.startPrompt(input.Prompt)
 	if err != nil {
 		if rollbackErr := s.rollbackCreatedChildThread(item, thread, true, "send child prompt"); rollbackErr != nil {
-			writeError(w, http.StatusInternalServerError, "Could not send the child prompt to Pi, and cleanup did not complete.")
-			return
+			return childThreadRunResponse{}, apiOperationError(http.StatusInternalServerError, "Could not send the child prompt to Pi, and cleanup did not complete.")
 		}
-		writeError(w, http.StatusInternalServerError, "Could not send the child prompt to Pi.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusInternalServerError, "Could not send the child prompt to Pi.")
 	}
 	if s.childCreationBeforeCommit != nil {
 		s.childCreationBeforeCommit(thread)
@@ -711,17 +702,15 @@ func (s *Server) createChildThreadAuthorized(w http.ResponseWriter, r *http.Requ
 	committed, commitErr := s.projects.CommitThreadCreation(projectID, thread.ID)
 	if commitErr != nil && committed.ID == "" {
 		if rollbackErr := s.rollbackCreatedChildThread(item, thread, true, "commit child thread"); rollbackErr != nil {
-			writeError(w, http.StatusInternalServerError, "Could not commit the child thread, and cleanup did not complete.")
-			return
+			return childThreadRunResponse{}, apiOperationError(http.StatusInternalServerError, "Could not commit the child thread, and cleanup did not complete.")
 		}
-		writeError(w, http.StatusInternalServerError, "Could not commit the child thread; no child thread was created.")
-		return
+		return childThreadRunResponse{}, apiOperationError(http.StatusInternalServerError, "Could not commit the child thread; no child thread was created.")
 	}
 	if commitErr != nil {
 		log.Printf("child creation commit was published with a durability error: project=%q parent=%q thread=%q error=%v", item.ID, thread.ParentThreadID, thread.ID, commitErr)
 	}
 	thread = committed
-	writeJSON(w, http.StatusCreated, childThreadRunResponse{Thread: thread, Run: run, Agent: codingAgentPi})
+	return childThreadRunResponse{Thread: thread, Run: run, Agent: codingAgentPi}, nil
 }
 
 func (s *Server) listChildThreads(w http.ResponseWriter, r *http.Request) {
@@ -782,44 +771,43 @@ func (s *Server) closeChildThread(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAgentCapability(w, r) {
 		return
 	}
-	s.closeChildThreadAuthorized(w, r)
+	closed, failure := s.closeChildThreadOperation(
+		r.PathValue("id"),
+		r.PathValue("threadId"),
+		r.PathValue("childId"),
+	)
+	if failure != nil {
+		failure.write(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, closed)
 }
 
-func (s *Server) closeChildThreadAuthorized(w http.ResponseWriter, r *http.Request) {
-	projectID := r.PathValue("id")
-	parentID := r.PathValue("threadId")
-	childID := r.PathValue("childId")
+func (s *Server) closeChildThreadOperation(projectID, parentID, childID string) (project.Thread, *apiOperationFailure) {
 	item, child, err := s.projects.GetThread(projectID, childID)
 	if errors.Is(err, project.ErrNotFound) || errors.Is(err, project.ErrThreadNotFound) {
-		writeError(w, http.StatusNotFound, "Child thread not found.")
-		return
+		return project.Thread{}, apiOperationError(http.StatusNotFound, "Child thread not found.")
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not load the child thread.")
-		return
+		return project.Thread{}, apiOperationError(http.StatusInternalServerError, "Could not load the child thread.")
 	}
 	if child.ParentThreadID != parentID {
-		writeError(w, http.StatusNotFound, "Child thread not found.")
-		return
+		return project.Thread{}, apiOperationError(http.StatusNotFound, "Child thread not found.")
 	}
 	if child.RollbackPending {
-		writeError(w, http.StatusConflict, "The child thread is being rolled back.")
-		return
+		return project.Thread{}, apiOperationError(http.StatusConflict, "The child thread is being rolled back.")
 	}
 	if child.ClosedAt != nil {
-		writeJSON(w, http.StatusOK, child)
-		return
+		return child, nil
 	}
 	if hasOpenChildThreadDescendants(item.Threads, childID) {
-		writeError(w, http.StatusConflict, "Close this thread's open descendants before closing it.")
-		return
+		return project.Thread{}, apiOperationError(http.StatusConflict, "Close this thread's open descendants before closing it.")
 	}
 
 	closedAt := time.Now().UTC()
 	if run, found := s.terminal.nativePi.latestChildRun(projectID, childID); found {
 		if run.State == "starting" || run.State == "working" {
-			writeError(w, http.StatusConflict, "Wait for the child run to settle before closing it.")
-			return
+			return project.Thread{}, apiOperationError(http.StatusConflict, "Wait for the child run to settle before closing it.")
 		}
 		if run.FinishedAt != nil {
 			closedAt = run.FinishedAt.UTC()
@@ -827,27 +815,22 @@ func (s *Server) closeChildThreadAuthorized(w http.ResponseWriter, r *http.Reque
 	}
 	closed, err := s.projects.CloseChildThread(projectID, parentID, childID, closedAt)
 	if errors.Is(err, project.ErrNotFound) || errors.Is(err, project.ErrThreadNotFound) {
-		writeError(w, http.StatusNotFound, "Child thread not found.")
-		return
+		return project.Thread{}, apiOperationError(http.StatusNotFound, "Child thread not found.")
 	}
 	if errors.Is(err, project.ErrThreadHasOpenDescendants) {
-		writeError(w, http.StatusConflict, "Close this thread's open descendants before closing it.")
-		return
+		return project.Thread{}, apiOperationError(http.StatusConflict, "Close this thread's open descendants before closing it.")
 	}
 	if errors.Is(err, project.ErrThreadRollbackPending) {
-		writeError(w, http.StatusConflict, "The child thread is being rolled back.")
-		return
+		return project.Thread{}, apiOperationError(http.StatusConflict, "The child thread is being rolled back.")
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not retain the completed child thread.")
-		return
+		return project.Thread{}, apiOperationError(http.StatusInternalServerError, "Could not retain the completed child thread.")
 	}
 	if err := s.terminal.nativePi.stopThread(projectID, childID); err != nil {
 		_, _ = s.projects.ReopenChildThread(projectID, parentID, childID)
-		writeError(w, http.StatusInternalServerError, "Could not stop Pi in the child thread.")
-		return
+		return project.Thread{}, apiOperationError(http.StatusInternalServerError, "Could not stop Pi in the child thread.")
 	}
-	writeJSON(w, http.StatusOK, closed)
+	return closed, nil
 }
 
 func (s *Server) getChildThreadRun(w http.ResponseWriter, r *http.Request) {

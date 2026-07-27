@@ -21,24 +21,11 @@ func (s *Server) openSettingsTopic(ctx context.Context, channel *stateChannel) e
 	if changes != nil {
 		defer changes.Close()
 	}
-	snapshot := func() error { return channel.Snapshot(s.projects.GetSettings()) }
-	if err := snapshot(); err != nil {
-		return err
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-events:
-			if err := snapshot(); err != nil {
-				return err
-			}
-		case <-channel.Resnap():
-			if err := snapshot(); err != nil {
-				return err
-			}
-		}
-	}
+	return runSnapshotTopic(ctx, channel, events, snapshotTopicOptions{
+		updatesEnded: "Settings updates ended.",
+	}, func() error {
+		return channel.Snapshot(s.projects.GetSettings())
+	})
 }
 
 func (s *Server) openCodingAgentsTopic(ctx context.Context, projectID string, channel *stateChannel) error {
@@ -123,29 +110,10 @@ func (s *Server) openSandboxConfigTopic(ctx context.Context, params stateSandbox
 		}
 		return channel.Snapshot(state)
 	}
-	if err := snapshot(); err != nil {
-		return err
-	}
-	ticker := time.NewTicker(sandboxStateReconcileInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-events:
-			if err := snapshot(); err != nil {
-				return err
-			}
-		case <-ticker.C:
-			if err := snapshot(); err != nil {
-				return err
-			}
-		case <-channel.Resnap():
-			if err := snapshot(); err != nil {
-				return err
-			}
-		}
-	}
+	return runSnapshotTopic(ctx, channel, events, snapshotTopicOptions{
+		updatesEnded:      "Sandbox configuration updates ended.",
+		reconcileInterval: sandboxStateReconcileInterval,
+	}, snapshot)
 }
 
 func (s *Server) openCleanupTopic(ctx context.Context, channel *stateChannel) error {
@@ -197,30 +165,15 @@ func (s *Server) openSessionClosuresTopic(ctx context.Context, channel *stateCha
 	if changes != nil {
 		defer changes.Close()
 	}
-	snapshot := func() error {
+	return runSnapshotTopic(ctx, channel, events, snapshotTopicOptions{
+		updatesEnded: "Session closure updates ended.",
+	}, func() error {
 		overview, err := s.sessionClosureSnapshot()
 		if err != nil {
 			return stateTopicFailure("Could not load the tmux session closure log.")
 		}
 		return channel.Snapshot(overview)
-	}
-	if err := snapshot(); err != nil {
-		return err
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-events:
-			if err := snapshot(); err != nil {
-				return err
-			}
-		case <-channel.Resnap():
-			if err := snapshot(); err != nil {
-				return err
-			}
-		}
-	}
+	})
 }
 
 func (s *Server) openGitBranchesTopic(ctx context.Context, projectID string, channel *stateChannel) error {
@@ -287,32 +240,10 @@ func (s *Server) openTmuxSessionsTopic(ctx context.Context, channel *stateChanne
 		}
 		return channel.Snapshot(sessions)
 	}
-	if err := snapshot(); err != nil {
-		return err
-	}
-	ticker := time.NewTicker(tmuxStateReconcileInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case _, open := <-projectUpdates:
-			if !open {
-				return stateTopicFailure("Project updates ended.")
-			}
-			if err := snapshot(); err != nil {
-				return err
-			}
-		case <-ticker.C:
-			if err := snapshot(); err != nil {
-				return err
-			}
-		case <-channel.Resnap():
-			if err := snapshot(); err != nil {
-				return err
-			}
-		}
-	}
+	return runSnapshotTopic(ctx, channel, projectUpdates, snapshotTopicOptions{
+		updatesEnded:      "Project updates ended.",
+		reconcileInterval: tmuxStateReconcileInterval,
+	}, snapshot)
 }
 
 func (s *Server) openAgentSkillsTopic(ctx context.Context, channel *stateChannel) error {
@@ -323,36 +254,16 @@ func (s *Server) openAgentSkillsTopic(ctx context.Context, channel *stateChannel
 	if changes != nil {
 		defer changes.Close()
 	}
-	snapshot := func() error {
+	return runSnapshotTopic(ctx, channel, events, snapshotTopicOptions{
+		updatesEnded:      "Agent skill updates ended.",
+		reconcileInterval: agentSkillReconcileInterval,
+	}, func() error {
 		status, err := s.agentSkills.status()
 		if err != nil {
 			return stateTopicFailure("Could not inspect agent skills.")
 		}
 		return channel.Snapshot(status)
-	}
-	if err := snapshot(); err != nil {
-		return err
-	}
-	ticker := time.NewTicker(agentSkillReconcileInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-events:
-			if err := snapshot(); err != nil {
-				return err
-			}
-		case <-ticker.C:
-			if err := snapshot(); err != nil {
-				return err
-			}
-		case <-channel.Resnap():
-			if err := snapshot(); err != nil {
-				return err
-			}
-		}
-	}
+	})
 }
 
 func (s *Server) sessionClosureSnapshot() (sessionClosureOverview, error) {

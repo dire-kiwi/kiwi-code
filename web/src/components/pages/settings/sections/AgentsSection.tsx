@@ -1,13 +1,14 @@
 import { useState, type FormEvent } from 'react'
-import { Check, LoaderCircle, Network, Save, Workflow } from 'lucide-react'
+import { LoaderCircle, Network, Save, Workflow } from 'lucide-react'
 import { updateSettings } from '../../../../api'
+import { useAsyncFeedback } from '../../../../lib/useAsyncFeedback'
 import type { AppSettings } from '../../../../types'
 import { PrimaryButton } from '../../../atoms/Button'
 import { TextInput } from '../../../atoms/Input'
 import { Select } from '../../../atoms/Select'
 import { StatusBadge } from '../../../atoms/StatusBadge'
 import { Surface } from '../../../atoms/Surface'
-import { FeedbackMessage } from '../../../molecules/FeedbackMessage'
+import { ActionFeedback } from '../../../molecules/ActionFeedback'
 import { InfoCallout } from '../../../molecules/InfoCallout'
 import { SectionHeader } from '../../../molecules/SectionHeader'
 
@@ -18,18 +19,14 @@ type AgentsSectionProps = {
 
 export function AgentsSection({ settings, onSettingsUpdated }: AgentsSectionProps) {
   const [subAgentNestingDepth, setSubAgentNestingDepth] = useState(String(settings.subAgentNestingDepth))
-  const [nestingSaving, setNestingSaving] = useState(false)
-  const [nestingError, setNestingError] = useState('')
-  const [nestingMessage, setNestingMessage] = useState('')
+  const nestingFeedback = useAsyncFeedback()
 
   const [disableWorkflows, setDisableWorkflows] = useState(settings.disableWorkflows)
   const [workflowKeywordTrigger, setWorkflowKeywordTrigger] = useState(settings.workflowKeywordTriggerEnabled)
   const [workflowSizeGuideline, setWorkflowSizeGuideline] = useState<AppSettings['workflowSizeGuideline']>(
     settings.workflowSizeGuideline,
   )
-  const [workflowsSaving, setWorkflowsSaving] = useState(false)
-  const [workflowsError, setWorkflowsError] = useState('')
-  const [workflowsMessage, setWorkflowsMessage] = useState('')
+  const workflowsFeedback = useAsyncFeedback()
 
   const parsedNestingDepth = Number(subAgentNestingDepth)
   const nestingValueValid = subAgentNestingDepth.trim() !== ''
@@ -43,49 +40,45 @@ export function AgentsSection({ settings, onSettingsUpdated }: AgentsSectionProp
 
   async function handleNestingSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (nestingSaving) return
+    if (nestingFeedback.pending) return
     if (!nestingValueValid) {
-      setNestingError(`Depth must be a whole number from 0 to ${settings.maxSubAgentNestingDepth}.`)
+      nestingFeedback.showError(`Depth must be a whole number from 0 to ${settings.maxSubAgentNestingDepth}.`)
       return
     }
 
-    setNestingSaving(true)
-    setNestingError('')
-    setNestingMessage('')
-    try {
-      const next = await updateSettings({ subAgentNestingDepth: parsedNestingDepth })
-      onSettingsUpdated(next)
-      setSubAgentNestingDepth(String(next.subAgentNestingDepth))
-      setNestingMessage('Sub-agent nesting depth saved.')
-    } catch (reason) {
-      setNestingError(reason instanceof Error ? reason.message : 'Could not save sub-agent nesting depth.')
-    } finally {
-      setNestingSaving(false)
-    }
+    const next = await nestingFeedback.run(
+      'default',
+      () => updateSettings({ subAgentNestingDepth: parsedNestingDepth }),
+      {
+        success: 'Sub-agent nesting depth saved.',
+        failure: 'Could not save sub-agent nesting depth.',
+      },
+    )
+    if (!next) return
+    onSettingsUpdated(next)
+    setSubAgentNestingDepth(String(next.subAgentNestingDepth))
   }
 
   async function handleWorkflowsSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (workflowsSaving) return
-    setWorkflowsSaving(true)
-    setWorkflowsError('')
-    setWorkflowsMessage('')
-    try {
-      const next = await updateSettings({
+    if (workflowsFeedback.pending) return
+    const next = await workflowsFeedback.run(
+      'default',
+      () => updateSettings({
         disableWorkflows,
         workflowKeywordTriggerEnabled: workflowKeywordTrigger,
         workflowSizeGuideline,
-      })
-      onSettingsUpdated(next)
-      setDisableWorkflows(next.disableWorkflows)
-      setWorkflowKeywordTrigger(next.workflowKeywordTriggerEnabled)
-      setWorkflowSizeGuideline(next.workflowSizeGuideline)
-      setWorkflowsMessage('Dynamic workflow settings saved.')
-    } catch (reason) {
-      setWorkflowsError(reason instanceof Error ? reason.message : 'Could not save workflow settings.')
-    } finally {
-      setWorkflowsSaving(false)
-    }
+      }),
+      {
+        success: 'Dynamic workflow settings saved.',
+        failure: 'Could not save workflow settings.',
+      },
+    )
+    if (!next) return
+    onSettingsUpdated(next)
+    setDisableWorkflows(next.disableWorkflows)
+    setWorkflowKeywordTrigger(next.workflowKeywordTriggerEnabled)
+    setWorkflowSizeGuideline(next.workflowSizeGuideline)
   }
 
   return (
@@ -117,8 +110,7 @@ export function AgentsSection({ settings, onSettingsUpdated }: AgentsSectionProp
                 value={subAgentNestingDepth}
                 onChange={(event) => {
                   setSubAgentNestingDepth(event.target.value)
-                  setNestingError('')
-                  setNestingMessage('')
+                  nestingFeedback.clearFeedback()
                 }}
                 required
                 inputMode="numeric"
@@ -140,27 +132,17 @@ export function AgentsSection({ settings, onSettingsUpdated }: AgentsSectionProp
             it only blocks future child creation; existing child threads remain retained.
           </InfoCallout>
 
-          {nestingError && (
-            <FeedbackMessage role="alert" tone="error" className="mt-4">
-              {nestingError}
-            </FeedbackMessage>
-          )}
-          {nestingMessage && (
-            <FeedbackMessage role="status" tone="success" size="status" className="mt-4 flex items-center gap-2">
-              <Check size={13} />
-              {nestingMessage}
-            </FeedbackMessage>
-          )}
+          <ActionFeedback feedback={nestingFeedback.feedback} className="mt-4" />
         </div>
 
         <div className="flex items-center justify-end border-t border-ghost-border/60 bg-ghost-black/15 px-4 py-3 sm:px-5">
           <PrimaryButton
             type="submit"
             size="md"
-            disabled={!nestingDirty || !nestingValueValid || nestingSaving}
+            disabled={!nestingDirty || !nestingValueValid || nestingFeedback.pending}
             className="flex min-w-28 items-center justify-center gap-2"
           >
-            {nestingSaving ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
+            {nestingFeedback.pending ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
             Save depth
           </PrimaryButton>
         </div>
@@ -191,8 +173,7 @@ export function AgentsSection({ settings, onSettingsUpdated }: AgentsSectionProp
               checked={!disableWorkflows}
               onChange={(event) => {
                 setDisableWorkflows(!event.target.checked)
-                setWorkflowsError('')
-                setWorkflowsMessage('')
+                workflowsFeedback.clearFeedback()
               }}
               className="mt-0.5 size-4 accent-ghost-green"
             />
@@ -211,8 +192,7 @@ export function AgentsSection({ settings, onSettingsUpdated }: AgentsSectionProp
               disabled={disableWorkflows}
               onChange={(event) => {
                 setWorkflowKeywordTrigger(event.target.checked)
-                setWorkflowsError('')
-                setWorkflowsMessage('')
+                workflowsFeedback.clearFeedback()
               }}
               className="mt-0.5 size-4 accent-ghost-green"
             />
@@ -238,8 +218,7 @@ export function AgentsSection({ settings, onSettingsUpdated }: AgentsSectionProp
                 disabled={disableWorkflows}
                 onChange={(value) => {
                   setWorkflowSizeGuideline(value as AppSettings['workflowSizeGuideline'])
-                  setWorkflowsError('')
-                  setWorkflowsMessage('')
+                  workflowsFeedback.clearFeedback()
                 }}
                 aria-label="Workflow size guidance"
                 className="font-sans text-[10px]"
@@ -255,25 +234,17 @@ export function AgentsSection({ settings, onSettingsUpdated }: AgentsSectionProp
             In Pi, workflows activate from the current human prompt—use “ultracode,” directly ask to use or run a workflow, or invoke a saved /command—or from session-scoped Ultracode effort. Claude Code keeps its separate built-in Ultracode behavior.
           </InfoCallout>
 
-          {workflowsError && (
-            <FeedbackMessage role="alert" tone="error">{workflowsError}</FeedbackMessage>
-          )}
-          {workflowsMessage && (
-            <FeedbackMessage role="status" tone="success" size="status" className="flex items-center gap-2">
-              <Check size={13} />
-              {workflowsMessage}
-            </FeedbackMessage>
-          )}
+          <ActionFeedback feedback={workflowsFeedback.feedback} />
         </div>
 
         <div className="flex items-center justify-end border-t border-ghost-border/60 bg-ghost-black/15 px-4 py-3 sm:px-5">
           <PrimaryButton
             type="submit"
             size="md"
-            disabled={!workflowsDirty || workflowsSaving}
+            disabled={!workflowsDirty || workflowsFeedback.pending}
             className="flex min-w-28 items-center justify-center gap-2"
           >
-            {workflowsSaving ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
+            {workflowsFeedback.pending ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
             Save workflows
           </PrimaryButton>
         </div>

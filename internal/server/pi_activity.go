@@ -401,6 +401,10 @@ func (s *Server) updatePiActivity(w http.ResponseWriter, r *http.Request) {
 	s.updateAgentActivity(w, r, codingAgentPi, "Pi")
 }
 
+func (s *Server) updateCodexActivity(w http.ResponseWriter, r *http.Request) {
+	s.updateAgentActivity(w, r, codingAgentCodex, "Codex")
+}
+
 func (s *Server) updateClaudeActivity(w http.ResponseWriter, r *http.Request) {
 	s.updateAgentActivity(w, r, codingAgentClaude, "Claude")
 }
@@ -442,7 +446,14 @@ func (s *Server) updateAgentActivity(w http.ResponseWriter, r *http.Request, age
 	activityAgent := agent
 	if input.Agent != "" {
 		requestedAgent, normalizeErr := normalizeCodingAgent(input.Agent)
-		if normalizeErr != nil || agent != codingAgentClaude || !isClaudeCodingAgent(requestedAgent) {
+		validAgent := false
+		switch agent {
+		case codingAgentCodex:
+			validAgent = normalizeErr == nil && requestedAgent == codingAgentCodex
+		case codingAgentClaude:
+			validAgent = normalizeErr == nil && isClaudeCodingAgent(requestedAgent)
+		}
+		if !validAgent {
 			writeError(w, http.StatusBadRequest, "Unknown "+label+" coding agent.")
 			return
 		}

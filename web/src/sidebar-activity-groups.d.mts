@@ -1,3 +1,5 @@
+import type { SidebarThreadIndex } from './sidebar-thread-index.mjs'
+
 export type ActivityGroupThread = {
   id: string
   createdAt: string
@@ -41,6 +43,11 @@ export function activityViewGroups(
   projects: readonly ActivityGroupProject[],
   activities: readonly ActivityGroupActivity[],
   recentLimit?: number,
+  index?: SidebarThreadIndex<
+    ActivityGroupThread,
+    ActivityGroupProject,
+    ActivityGroupActivity
+  >,
 ): ActivityViewGroups
 
 export function formatRelativeShort(

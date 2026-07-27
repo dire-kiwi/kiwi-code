@@ -1,16 +1,17 @@
-import { useEffect, useState } from 'react'
-import { Check, Folder, Frame, Network, UserRound } from 'lucide-react'
+import { useEffect } from 'react'
+import { Folder, Frame, Network, UserRound } from 'lucide-react'
 import {
   updateProjectFigmaMCPEnabled,
   updateProjectProfile,
   updateProjectSubAgentNestingDepth,
 } from '../../../../api'
 import { MAX_SUB_AGENT_NESTING_DEPTH } from '../../../../lib/validation'
+import { useAsyncFeedback } from '../../../../lib/useAsyncFeedback'
 import type { Profile, Project } from '../../../../types'
 import { Select } from '../../../atoms/Select'
 import { StatusBadge } from '../../../atoms/StatusBadge'
 import { Surface } from '../../../atoms/Surface'
-import { FeedbackMessage } from '../../../molecules/FeedbackMessage'
+import { ActionFeedback } from '../../../molecules/ActionFeedback'
 import { SectionHeader } from '../../../molecules/SectionHeader'
 
 type ProjectGeneralSectionProps = {
@@ -20,79 +21,63 @@ type ProjectGeneralSectionProps = {
 }
 
 export function ProjectGeneralSection({ project, profiles, onProjectUpdated }: ProjectGeneralSectionProps) {
-  const [profileSaving, setProfileSaving] = useState(false)
-  const [profileError, setProfileError] = useState('')
-  const [profileMessage, setProfileMessage] = useState('')
-  const [nestingSaving, setNestingSaving] = useState(false)
-  const [nestingError, setNestingError] = useState('')
-  const [nestingMessage, setNestingMessage] = useState('')
-  const [figmaSaving, setFigmaSaving] = useState(false)
-  const [figmaError, setFigmaError] = useState('')
-  const [figmaMessage, setFigmaMessage] = useState('')
+  const profileAction = useAsyncFeedback()
+  const nestingAction = useAsyncFeedback()
+  const figmaAction = useAsyncFeedback()
 
   useEffect(() => {
-    setProfileError('')
-    setProfileMessage('')
-    setNestingError('')
-    setNestingMessage('')
-    setFigmaError('')
-    setFigmaMessage('')
-  }, [project.id])
+    profileAction.clearFeedback()
+    nestingAction.clearFeedback()
+    figmaAction.clearFeedback()
+  }, [
+    figmaAction.clearFeedback,
+    nestingAction.clearFeedback,
+    profileAction.clearFeedback,
+    project.id,
+  ])
 
   const profileName = profiles.find((profile) => profile.id === project.profileId)?.name
 
   async function handleProfileChange(profileId: string) {
-    if (profileId === project.profileId || profileSaving) return
-    setProfileSaving(true)
-    setProfileError('')
-    setProfileMessage('')
-    try {
-      const updated = await updateProjectProfile(project.id, profileId)
-      onProjectUpdated(updated)
-      setProfileMessage('Project moved to the selected profile.')
-    } catch (reason) {
-      setProfileError(reason instanceof Error ? reason.message : 'Could not move the project.')
-    } finally {
-      setProfileSaving(false)
-    }
+    if (profileId === project.profileId || profileAction.pending) return
+    const updated = await profileAction.run(
+      'default',
+      () => updateProjectProfile(project.id, profileId),
+      {
+        success: 'Project moved to the selected profile.',
+        failure: 'Could not move the project.',
+      },
+    )
+    if (updated) onProjectUpdated(updated)
   }
 
   async function handleNestingChange(value: string) {
-    if (nestingSaving) return
+    if (nestingAction.pending) return
     const depth = value === 'inherit' ? null : Number(value)
     if (depth !== null && (!Number.isInteger(depth) || depth < 0 || depth > MAX_SUB_AGENT_NESTING_DEPTH)) return
     if (depth === (project.subAgentNestingDepthOverride ?? null)) return
 
-    setNestingSaving(true)
-    setNestingError('')
-    setNestingMessage('')
-    try {
-      const updated = await updateProjectSubAgentNestingDepth(project.id, depth)
-      onProjectUpdated(updated)
-      setNestingMessage('Sub-agent nesting saved.')
-    } catch (reason) {
-      setNestingError(reason instanceof Error ? reason.message : 'Could not update sub-agent nesting.')
-    } finally {
-      setNestingSaving(false)
-    }
+    const updated = await nestingAction.run(
+      'default',
+      () => updateProjectSubAgentNestingDepth(project.id, depth),
+      { success: 'Sub-agent nesting saved.', failure: 'Could not update sub-agent nesting.' },
+    )
+    if (updated) onProjectUpdated(updated)
   }
 
   async function handleFigmaToggle(enabled: boolean) {
-    if (figmaSaving || enabled === project.figmaMCPEnabled) return
-    setFigmaSaving(true)
-    setFigmaError('')
-    setFigmaMessage('')
-    try {
-      const updated = await updateProjectFigmaMCPEnabled(project.id, enabled)
-      onProjectUpdated(updated)
-      setFigmaMessage(updated.figmaMCPEnabled
-        ? 'Figma MCP enabled. Restart the coding agent to load its tools.'
-        : 'Figma MCP disabled. Restart the coding agent to drop its tools.')
-    } catch (reason) {
-      setFigmaError(reason instanceof Error ? reason.message : 'Could not update Figma MCP.')
-    } finally {
-      setFigmaSaving(false)
-    }
+    if (figmaAction.pending || enabled === project.figmaMCPEnabled) return
+    const updated = await figmaAction.run(
+      'default',
+      () => updateProjectFigmaMCPEnabled(project.id, enabled),
+      {
+        success: enabled
+          ? 'Figma MCP enabled. Restart the coding agent to load its tools.'
+          : 'Figma MCP disabled. Restart the coding agent to drop its tools.',
+        failure: 'Could not update Figma MCP.',
+      },
+    )
+    if (updated) onProjectUpdated(updated)
   }
 
   return (
@@ -119,22 +104,16 @@ export function ProjectGeneralSection({ project, profiles, onProjectUpdated }: P
               value={project.profileId}
               options={profiles.map((profile) => ({ value: profile.id, label: profile.name }))}
               onChange={(profileId) => void handleProfileChange(profileId)}
-              disabled={profileSaving}
-              aria-describedby={profileError ? 'project-profile-error' : undefined}
+              disabled={profileAction.pending}
+              aria-describedby={profileAction.feedback?.tone === 'error' ? 'project-profile-error' : undefined}
               leadingIcon={<Folder size={12} />}
             />
           </div>
-          {profileError && (
-            <FeedbackMessage id="project-profile-error" role="alert" tone="error" className="mt-4">
-              {profileError}
-            </FeedbackMessage>
-          )}
-          {profileMessage && (
-            <FeedbackMessage role="status" tone="success" size="status" className="mt-4 flex items-center gap-2">
-              <Check size={13} />
-              {profileMessage}
-            </FeedbackMessage>
-          )}
+          <ActionFeedback
+            id="project-profile-error"
+            feedback={profileAction.feedback}
+            className="mt-4"
+          />
         </div>
       </Surface>
 
@@ -174,8 +153,10 @@ export function ProjectGeneralSection({ project, profiles, onProjectUpdated }: P
                 })),
               ]}
               onChange={(depth) => void handleNestingChange(depth)}
-              disabled={nestingSaving}
-              aria-describedby={nestingError ? 'project-sub-agent-depth-error' : 'project-sub-agent-depth-help'}
+              disabled={nestingAction.pending}
+              aria-describedby={nestingAction.feedback?.tone === 'error'
+                ? 'project-sub-agent-depth-error'
+                : 'project-sub-agent-depth-help'}
               leadingIcon={<Network size={12} />}
             />
           </div>
@@ -183,17 +164,11 @@ export function ProjectGeneralSection({ project, profiles, onProjectUpdated }: P
             0 disables child agents for this project. Choose “Use global setting” to inherit the depth
             configured in the application settings.
           </p>
-          {nestingError && (
-            <FeedbackMessage id="project-sub-agent-depth-error" role="alert" tone="error" className="mt-4">
-              {nestingError}
-            </FeedbackMessage>
-          )}
-          {nestingMessage && (
-            <FeedbackMessage role="status" tone="success" size="status" className="mt-4 flex items-center gap-2">
-              <Check size={13} />
-              {nestingMessage}
-            </FeedbackMessage>
-          )}
+          <ActionFeedback
+            id="project-sub-agent-depth-error"
+            feedback={nestingAction.feedback}
+            className="mt-4"
+          />
         </div>
       </Surface>
 
@@ -215,7 +190,7 @@ export function ProjectGeneralSection({ project, profiles, onProjectUpdated }: P
             <input
               type="checkbox"
               checked={project.figmaMCPEnabled}
-              disabled={figmaSaving}
+              disabled={figmaAction.pending}
               onChange={(event) => void handleFigmaToggle(event.target.checked)}
               className="mt-0.5 size-4 accent-ghost-green"
             />
@@ -228,17 +203,11 @@ export function ProjectGeneralSection({ project, profiles, onProjectUpdated }: P
             </span>
           </label>
 
-          {figmaError && (
-            <FeedbackMessage id="project-figma-mcp-error" role="alert" tone="error" className="mt-4">
-              {figmaError}
-            </FeedbackMessage>
-          )}
-          {figmaMessage && (
-            <FeedbackMessage role="status" tone="success" size="status" className="mt-4 flex items-center gap-2">
-              <Check size={13} />
-              {figmaMessage}
-            </FeedbackMessage>
-          )}
+          <ActionFeedback
+            id="project-figma-mcp-error"
+            feedback={figmaAction.feedback}
+            className="mt-4"
+          />
         </div>
       </Surface>
     </>

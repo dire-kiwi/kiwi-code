@@ -17,7 +17,7 @@ func DecodeClientMessage(payload []byte) (ClientMessage, error) {
 	var header struct {
 		Type string `json:"t"`
 	}
-	if err := decodeStrict(payload, &header, false); err != nil {
+	if err := Decode(payload, &header); err != nil {
 		return ClientMessage{}, invalidMessage(err)
 	}
 
@@ -28,7 +28,7 @@ func DecodeClientMessage(payload []byte) (ClientMessage, error) {
 			Protocol *int   `json:"protocol"`
 			Client   string `json:"client"`
 		}
-		if err := decodeStrict(payload, &value, true, "t", "protocol", "client"); err != nil {
+		if err := DecodeExactObject(payload, &value, "t", "protocol", "client"); err != nil {
 			return ClientMessage{}, invalidMessage(err)
 		}
 		if value.Protocol == nil || !validClientName(value.Client) {
@@ -41,7 +41,7 @@ func DecodeClientMessage(payload []byte) (ClientMessage, error) {
 			ID    uint32          `json:"id"`
 			Topic json.RawMessage `json:"topic"`
 		}
-		if err := decodeStrict(payload, &value, true, "t", "id", "topic"); err != nil {
+		if err := DecodeExactObject(payload, &value, "t", "id", "topic"); err != nil {
 			return ClientMessage{}, invalidMessage(err)
 		}
 		if value.ID == 0 || !jsonObject(value.Topic) {
@@ -53,7 +53,7 @@ func DecodeClientMessage(payload []byte) (ClientMessage, error) {
 			Type string `json:"t"`
 			ID   uint32 `json:"id"`
 		}
-		if err := decodeStrict(payload, &value, true, "t", "id"); err != nil {
+		if err := DecodeExactObject(payload, &value, "t", "id"); err != nil {
 			return ClientMessage{}, invalidMessage(err)
 		}
 		if value.ID == 0 {
@@ -65,7 +65,7 @@ func DecodeClientMessage(payload []byte) (ClientMessage, error) {
 			Type      string `json:"t"`
 			Timestamp *int64 `json:"ts"`
 		}
-		if err := decodeStrict(payload, &value, true, "t", "ts"); err != nil {
+		if err := DecodeExactObject(payload, &value, "t", "ts"); err != nil {
 			return ClientMessage{}, invalidMessage(err)
 		}
 		if value.Timestamp == nil {
@@ -81,12 +81,28 @@ func Encode(value any) ([]byte, error) {
 	return json.Marshal(value)
 }
 
-func decodeStrict(payload []byte, target any, disallowUnknown bool, allowedKeys ...string) error {
-	if disallowUnknown {
-		if err := validateExactObjectKeys(payload, allowedKeys...); err != nil {
-			return err
-		}
+// Decode decodes exactly one JSON value. It rejects trailing values while
+// retaining encoding/json's normal field matching for partial header reads.
+func Decode(payload []byte, target any) error {
+	return decode(payload, target, false)
+}
+
+// DecodeDisallowUnknown decodes exactly one JSON value and rejects fields that
+// are not represented by target.
+func DecodeDisallowUnknown(payload []byte, target any) error {
+	return decode(payload, target, true)
+}
+
+// DecodeExactObject decodes exactly one JSON object whose keys must match the
+// supplied names byte-for-byte and occur at most once.
+func DecodeExactObject(payload []byte, target any, allowedKeys ...string) error {
+	if err := validateExactObjectKeys(payload, allowedKeys...); err != nil {
+		return err
 	}
+	return decode(payload, target, true)
+}
+
+func decode(payload []byte, target any, disallowUnknown bool) error {
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	if disallowUnknown {
 		decoder.DisallowUnknownFields()
@@ -94,14 +110,7 @@ func decodeStrict(payload []byte, target any, disallowUnknown bool, allowedKeys 
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}
-	var extra json.RawMessage
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("multiple JSON values")
-		}
-		return err
-	}
-	return nil
+	return requireEOF(decoder)
 }
 
 // validateExactObjectKeys closes two gaps in encoding/json's struct decoder:
@@ -149,6 +158,10 @@ func validateExactObjectKeys(payload []byte, allowedKeys ...string) error {
 	if delimiter, ok := token.(json.Delim); !ok || delimiter != '}' {
 		return errors.New("expected the end of a JSON object")
 	}
+	return nil
+}
+
+func requireEOF(decoder *json.Decoder) error {
 	var extra json.RawMessage
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err == nil {

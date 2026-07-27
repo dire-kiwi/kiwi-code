@@ -1,12 +1,13 @@
 import { useState, type FormEvent } from 'react'
-import { Archive, Check, Clock3, FolderGit2, LoaderCircle, Save } from 'lucide-react'
+import { Archive, Clock3, FolderGit2, LoaderCircle, Save } from 'lucide-react'
 import { updateSettings } from '../../../../api'
+import { useAsyncFeedback } from '../../../../lib/useAsyncFeedback'
 import { MAX_CLEANUP_RETENTION_DAYS } from '../../../../lib/validation'
 import type { AppSettings } from '../../../../types'
 import { PrimaryButton } from '../../../atoms/Button'
 import { TextInput } from '../../../atoms/Input'
 import { Surface } from '../../../atoms/Surface'
-import { FeedbackMessage } from '../../../molecules/FeedbackMessage'
+import { ActionFeedback } from '../../../molecules/ActionFeedback'
 import { InfoCallout } from '../../../molecules/InfoCallout'
 import { SectionHeader } from '../../../molecules/SectionHeader'
 
@@ -22,9 +23,7 @@ export function CleanupSection({ settings, onSettingsUpdated }: CleanupSectionPr
   const [orphanedWorktreeRetentionDays, setOrphanedWorktreeRetentionDays] = useState(
     String(settings.orphanedWorktreeRetentionDays),
   )
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
+  const action = useAsyncFeedback()
 
   const parsedArchivedDays = Number(archivedThreadRetentionDays)
   const parsedOrphanedDays = Number(orphanedWorktreeRetentionDays)
@@ -43,29 +42,27 @@ export function CleanupSection({ settings, onSettingsUpdated }: CleanupSectionPr
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (saving) return
+    if (action.pending) return
     if (!valuesValid) {
-      setError(`Retention must be a whole number from 0 to ${MAX_CLEANUP_RETENTION_DAYS} days.`)
+      action.showError(`Retention must be a whole number from 0 to ${MAX_CLEANUP_RETENTION_DAYS} days.`)
       return
     }
 
-    setSaving(true)
-    setError('')
-    setMessage('')
-    try {
-      const next = await updateSettings({
+    const next = await action.run(
+      'default',
+      () => updateSettings({
         archivedThreadRetentionDays: parsedArchivedDays,
         orphanedWorktreeRetentionDays: parsedOrphanedDays,
-      })
-      onSettingsUpdated(next)
-      setArchivedThreadRetentionDays(String(next.archivedThreadRetentionDays))
-      setOrphanedWorktreeRetentionDays(String(next.orphanedWorktreeRetentionDays))
-      setMessage('Automatic cleanup settings saved.')
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not save cleanup settings.')
-    } finally {
-      setSaving(false)
-    }
+      }),
+      {
+        success: 'Automatic cleanup settings saved.',
+        failure: 'Could not save cleanup settings.',
+      },
+    )
+    if (!next) return
+    onSettingsUpdated(next)
+    setArchivedThreadRetentionDays(String(next.archivedThreadRetentionDays))
+    setOrphanedWorktreeRetentionDays(String(next.orphanedWorktreeRetentionDays))
   }
 
   return (
@@ -97,8 +94,7 @@ export function CleanupSection({ settings, onSettingsUpdated }: CleanupSectionPr
               value={archivedThreadRetentionDays}
               onChange={(event) => {
                 setArchivedThreadRetentionDays(event.target.value)
-                setError('')
-                setMessage('')
+                action.clearFeedback()
               }}
               required
               inputMode="numeric"
@@ -126,8 +122,7 @@ export function CleanupSection({ settings, onSettingsUpdated }: CleanupSectionPr
               value={orphanedWorktreeRetentionDays}
               onChange={(event) => {
                 setOrphanedWorktreeRetentionDays(event.target.value)
-                setError('')
-                setMessage('')
+                action.clearFeedback()
               }}
               required
               inputMode="numeric"
@@ -145,27 +140,17 @@ export function CleanupSection({ settings, onSettingsUpdated }: CleanupSectionPr
           Cleanup runs when Kiwi Code starts and then once per hour. A worktree becomes unattached when its thread or project is deleted.
         </InfoCallout>
 
-        {error && (
-          <FeedbackMessage role="alert" tone="error">
-            {error}
-          </FeedbackMessage>
-        )}
-        {message && (
-          <FeedbackMessage role="status" tone="success" size="status" className="flex items-center gap-2">
-            <Check size={13} />
-            {message}
-          </FeedbackMessage>
-        )}
+        <ActionFeedback feedback={action.feedback} />
       </div>
 
       <div className="flex items-center justify-end border-t border-ghost-border/60 bg-ghost-black/15 px-4 py-3 sm:px-5">
         <PrimaryButton
           type="submit"
           size="md"
-          disabled={!dirty || !valuesValid || saving}
+          disabled={!dirty || !valuesValid || action.pending}
           className="flex min-w-28 items-center justify-center gap-2"
         >
-          {saving ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
+          {action.pending ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
           Save cleanup
         </PrimaryButton>
       </div>

@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -873,9 +872,19 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 	if _, err := store.UpdateSettingsValues(project.SettingsUpdate{CodingAgents: &profiles}); err != nil {
 		t.Fatal(err)
 	}
+	codexDataDirectory := t.TempDir()
+	codexPlugin, err := materializeCodexPlugin(codexDataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler := &terminalHandler{
 		projects:             store,
 		envPath:              "/usr/bin/env",
+		agentToken:           "coding-agent-test-capability",
+		agentTokenPath:       filepath.Join(codexDataDirectory, agentTokenFileName),
+		codexPlugin:          codexPlugin,
+		codexConfigPath:      filepath.Join(t.TempDir(), "codex"),
+		codexProfileName:     managedCodexProfileName(codexDataDirectory),
 		claudePluginPath:     "/plugin/kiwi-code",
 		claudeGPTProfilePath: profilePath,
 		cliProxyAPIBaseURL:   "http://127.0.0.1:18317",
@@ -951,8 +960,20 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 			if len(args) < len(test.wantTail) || !reflect.DeepEqual(args[len(args)-len(test.wantTail):], test.wantTail) {
 				t.Fatalf("args tail = %#v, want %#v", args, test.wantTail)
 			}
-			if test.agent == codingAgentCodex && !slices.Contains(args, "--dangerously-bypass-approvals-and-sandbox") {
-				t.Fatalf("Codex args = %#v, missing unrestricted execution flag", args)
+			if test.agent == codingAgentCodex {
+				for _, expected := range []string{
+					"--dangerously-bypass-approvals-and-sandbox",
+					"--dangerously-bypass-hook-trust",
+					"--profile",
+					managedCodexProfileName(codexDataDirectory),
+					"CODEX_HOME=" + handler.codexConfigPath,
+					"KIWI_CODE_AGENT_TOKEN_FILE=" + filepath.Join(codexDataDirectory, agentTokenFileName),
+					"KIWI_CODE_CODING_AGENT=codex",
+				} {
+					if !strings.Contains(joined, expected) {
+						t.Fatalf("Codex args %#v do not contain %q", args, expected)
+					}
+				}
 			}
 			if validClaudeCodeProfileAgent(test.agent) {
 				for _, expected := range []string{

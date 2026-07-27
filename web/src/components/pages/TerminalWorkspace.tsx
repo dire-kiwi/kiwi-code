@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   Activity,
@@ -12,11 +12,16 @@ import {
   SquareTerminal,
 } from 'lucide-react'
 import { runEnvironmentAction, touchThreadTmuxActivity } from '../../api'
-import { configuredCodingAgentChoices, isCodingAgent } from '../../codingAgents'
+import {
+  codingAgentSelectionForTarget,
+  codingAgentTargetForSelection,
+  configuredCodingAgentChoices,
+  isCodingAgent,
+} from '../../codingAgents'
+import { guardedStoredStateCodec, useStoredState } from '../../lib/storedState'
 import { workspacePath } from '../../routes'
 import type {
   AgentContextStatus,
-  AgentContextStatusSource,
   CodingAgent,
   CodingAgentSelection,
   ConnectionStatus,
@@ -44,7 +49,7 @@ import { TerminalSession } from '../organisms/TerminalSession'
 import { ThreadPlanViewer } from '../organisms/ThreadPlanViewer'
 import { ThreadProjectSidebar } from '../organisms/ThreadProjectSidebar'
 import { TmuxWindowTabs } from '../organisms/TmuxWindowTabs'
-import { useSubscription } from '../../wire/react'
+import { useLastReadySubscriptionData, useSubscription } from '../../wire/react'
 import { SettingsTopic, ThreadStatusTopic } from '../../wire/topics'
 
 type TerminalWorkspaceProps = {
@@ -100,16 +105,6 @@ function codingAgentStorageKey(projectId: string, threadId: string) {
   return `kiwi-code:coding-agent:${projectId}:${threadId}`
 }
 
-function rememberedCodingAgent(projectId: string, threadId: string): CodingAgent {
-  try {
-    const value = window.localStorage.getItem(codingAgentStorageKey(projectId, threadId))
-    if (isCodingAgent(value)) return value
-  } catch {
-    // Storage can be unavailable under restrictive browser policies.
-  }
-  return 'pi'
-}
-
 function piPresentationStorageKey(projectId: string, threadId: string) {
   return `kiwi-code:pi-presentation:${projectId}:${threadId}`
 }
@@ -118,15 +113,15 @@ function claudePresentationStorageKey(projectId: string, threadId: string) {
   return `kiwi-code:claude-presentation:${projectId}:${threadId}`
 }
 
-function rememberedPresentation(storageKey: string, fallback: PiPresentation): PiPresentation {
-  try {
-    const value = window.localStorage.getItem(storageKey)
-    if (value === 'native' || value === 'terminal') return value
-  } catch {
-    // Storage can be unavailable under restrictive browser policies.
-  }
-  return fallback
-}
+const codingAgentCodec = guardedStoredStateCodec(
+  (raw) => raw,
+  isCodingAgent,
+)
+
+const presentationCodec = guardedStoredStateCodec(
+  (raw) => raw,
+  (value): value is PiPresentation => value === 'native' || value === 'terminal',
+)
 
 export function TerminalWorkspace({
   project,
@@ -155,7 +150,9 @@ export function TerminalWorkspace({
     projectId: project.id,
     threadId: thread.id,
   })
-  const [codingAgentChoices, setCodingAgentChoices] = useState(() => {
+  const settings = useLastReadySubscriptionData(settingsSubscription)
+  const statusSnapshot = useLastReadySubscriptionData(statusSubscription) as ThreadStatusSnapshot | null
+  const initialCodingAgentChoices = useMemo(() => {
     if (!initialCodingAgent || fallbackWorkspaceCodingAgents.some((agent) => agent.id === initialCodingAgent)) {
       return fallbackWorkspaceCodingAgents
     }
@@ -163,21 +160,41 @@ export function TerminalWorkspace({
       { id: initialCodingAgent, label: initialCodingAgent === 'codex' ? 'Codex CLI' : 'Claude Code' },
       ...fallbackWorkspaceCodingAgents,
     ]
-  })
-  const [codingAgent, setCodingAgent] = useState<CodingAgent>(() =>
-    readOnlySubagent ? 'pi' : initialCodingAgent ?? rememberedCodingAgent(project.id, thread.id),
+  }, [initialCodingAgent])
+  const codingAgentChoices = useMemo(
+    () => settings
+      ? configuredCodingAgentChoices(settings.codingAgents)
+      : initialCodingAgentChoices,
+    [initialCodingAgentChoices, settings],
   )
-  const [piPresentation, setPiPresentation] = useState<PiPresentation>(() =>
-    readOnlySubagent
+  const [codingAgent, setCodingAgent] = useStoredState<CodingAgent>(
+    codingAgentStorageKey(project.id, thread.id),
+    readOnlySubagent ? 'pi' : initialCodingAgent ?? 'pi',
+    codingAgentCodec,
+    {
+      load: !readOnlySubagent && !initialCodingAgent,
+      save: !readOnlySubagent,
+    },
+  )
+  const [piPresentation, setPiPresentation] = useStoredState<PiPresentation>(
+    piPresentationStorageKey(project.id, thread.id),
+    readOnlySubagent || initialCodingAgent !== 'pi' || !initialPresentation
       ? 'native'
-      : initialCodingAgent === 'pi' && initialPresentation
-        ? initialPresentation
-        : rememberedPresentation(piPresentationStorageKey(project.id, thread.id), 'native'),
+      : initialPresentation,
+    presentationCodec,
+    {
+      load: !readOnlySubagent && !(initialCodingAgent === 'pi' && initialPresentation),
+      save: !readOnlySubagent,
+    },
   )
-  const [claudePresentation, setClaudePresentation] = useState<PiPresentation>(() =>
-    initialCodingAgent === 'claude' && initialPresentation
-      ? initialPresentation
-      : rememberedPresentation(claudePresentationStorageKey(project.id, thread.id), 'terminal'),
+  const [claudePresentation, setClaudePresentation] = useStoredState<PiPresentation>(
+    claudePresentationStorageKey(project.id, thread.id),
+    initialCodingAgent === 'claude' && initialPresentation ? initialPresentation : 'terminal',
+    presentationCodec,
+    {
+      load: !(initialCodingAgent === 'claude' && initialPresentation),
+      save: !readOnlySubagent,
+    },
   )
   const [piNativeOpened, setPiNativeOpened] = useState(() => piPresentation === 'native')
   const [piTerminalOpened, setPiTerminalOpened] = useState(() => piPresentation === 'terminal')
@@ -199,21 +216,11 @@ export function TerminalWorkspace({
   }))
   const [processWindows, setProcessWindows] = useState<ProcessWindow[]>([])
   const [selectedProcessId, setSelectedProcessId] = useState<string | null>(null)
-  const [processesLoading, setProcessesLoading] = useState(true)
-  const [processesError, setProcessesError] = useState('')
   const [branchState, setBranchState] = useState<GitBranchState | null>(null)
-  const [contextStatuses, setContextStatuses] = useState<Partial<Record<AgentContextStatusSource, AgentContextStatus>>>({})
   const [nativeContextStatus, setNativeContextStatus] = useState<AgentContextStatus | null>(null)
   const [claudeNativeContextStatus, setClaudeNativeContextStatus] = useState<AgentContextStatus | null>(null)
-  const [branchesLoading, setBranchesLoading] = useState(true)
-  const [branchesError, setBranchesError] = useState('')
   const [shellWindows, setShellWindows] = useState<TmuxWindow[]>([])
-  const [shellWindowsLoading, setShellWindowsLoading] = useState(true)
-  const [shellWindowsError, setShellWindowsError] = useState('')
   const [workflowRuns, setWorkflowRuns] = useState<WorkflowRun[]>([])
-  const [workflowsError, setWorkflowsError] = useState('')
-  const [threadPlans, setThreadPlans] = useState<ThreadPlan[]>([])
-  const [plansError, setPlansError] = useState('')
   const [selectedPlan, setSelectedPlan] = useState<ThreadPlan | null>(null)
   const [branchOverlayOpen, setBranchOverlayOpen] = useState(false)
   const [runningEnvironmentAction, setRunningEnvironmentAction] = useState<string | null>(null)
@@ -241,11 +248,10 @@ export function TerminalWorkspace({
   }, [project.id, thread.id])
 
   useEffect(() => {
-    if (settingsSubscription.state !== 'ready') return
-    const choices = configuredCodingAgentChoices(settingsSubscription.data.codingAgents)
-    setCodingAgentChoices(choices)
-    setCodingAgent((current) => choices.some((choice) => choice.id === current) ? current : 'pi')
-  }, [settingsSubscription])
+    setCodingAgent((current) =>
+      codingAgentChoices.some((choice) => choice.id === current) ? current : 'pi',
+    )
+  }, [codingAgentChoices, setCodingAgent])
 
   const markToolOpened = useCallback((tool: WorkspaceTool) => {
     setOpenedTools((current) => (current.includes(tool) ? current : [...current, tool]))
@@ -275,14 +281,7 @@ export function TerminalWorkspace({
 
   function selectCodingAgent(selection: CodingAgentSelection) {
     if (readOnlySubagent) return
-    const agent: CodingAgent = selection === 'claude-native'
-      ? 'claude'
-      : selection === 'pi-native'
-        ? 'pi'
-        : selection
-    const presentation: PiPresentation = selection === 'pi-native' || selection === 'claude-native'
-      ? 'native'
-      : 'terminal'
+    const { agent, presentation } = codingAgentTargetForSelection(selection)
     const selectionUnchanged = agent === codingAgent
       && (agent !== 'pi' || presentation === piPresentation)
       && (agent !== 'claude' || presentation === claudePresentation)
@@ -306,80 +305,38 @@ export function TerminalWorkspace({
   }
 
   useEffect(() => {
-    if (readOnlySubagent) return
-    try {
-      window.localStorage.setItem(codingAgentStorageKey(project.id, thread.id), codingAgent)
-    } catch {
-      // The selection still works for this page when storage is unavailable.
-    }
-  }, [codingAgent, project.id, readOnlySubagent, thread.id])
-
-  useEffect(() => {
-    if (readOnlySubagent) return
-    try {
-      window.localStorage.setItem(piPresentationStorageKey(project.id, thread.id), piPresentation)
-    } catch {
-      // The selection still works for this page when storage is unavailable.
-    }
-  }, [piPresentation, project.id, readOnlySubagent, thread.id])
-
-  useEffect(() => {
-    if (readOnlySubagent) return
-    try {
-      window.localStorage.setItem(claudePresentationStorageKey(project.id, thread.id), claudePresentation)
-    } catch {
-      // The selection still works for this page when storage is unavailable.
-    }
-  }, [claudePresentation, project.id, readOnlySubagent, thread.id])
-
-  useEffect(() => {
     markToolOpened(activeTool)
     setSelectedPlan(null)
   }, [activeTool, markToolOpened])
 
   useEffect(() => {
-    if (statusSubscription.state === 'loading') {
-      setProcessesLoading(true)
-      setBranchesLoading(true)
-      setShellWindowsLoading(true)
-      return
-    }
-    if (statusSubscription.state === 'error') {
-      const message = statusSubscription.error.message
-      setProcessesError(message)
-      setBranchesError(message)
-      setShellWindowsError(message)
-      setWorkflowsError(message)
-      setPlansError(message)
-      setProcessesLoading(false)
-      setBranchesLoading(false)
-      setShellWindowsLoading(false)
-      return
-    }
-    const snapshot: ThreadStatusSnapshot = statusSubscription.data
-    const retainIfEqual = <T,>(current: T, next: T) => (
-      JSON.stringify(current) === JSON.stringify(next) ? current : next
-    )
-    setProcessWindows((current) => retainIfEqual(current, snapshot.processes as ProcessWindow[]))
+    const snapshot = statusSnapshot
+    if (!snapshot) return
+    setProcessWindows(snapshot.processes as ProcessWindow[])
     setSelectedProcessId((current) =>
       current && snapshot.processes.some((window) => window.id === current)
         ? current
         : snapshot.processes[0]?.id ?? null,
     )
-    setBranchState((current) => retainIfEqual(current, snapshot.gitBranches))
-    setContextStatuses((current) => retainIfEqual(current, snapshot.contextStatuses))
-    setShellWindows((current) => retainIfEqual(current, snapshot.shellWindows as TmuxWindow[]))
-    setWorkflowRuns((current) => retainIfEqual(current, snapshot.workflows as WorkflowRun[]))
-    setThreadPlans((current) => retainIfEqual(current, snapshot.plans as ThreadPlan[]))
-    setProcessesError(snapshot.errors.processes ?? '')
-    setBranchesError(snapshot.errors.gitBranches ?? '')
-    setShellWindowsError(snapshot.errors.shellWindows ?? '')
-    setWorkflowsError(snapshot.errors.workflows ?? '')
-    setPlansError(snapshot.errors.plans ?? '')
-    setProcessesLoading(false)
-    setBranchesLoading(false)
-    setShellWindowsLoading(false)
-  }, [statusSubscription])
+    setBranchState(snapshot.gitBranches)
+    setShellWindows(snapshot.shellWindows as TmuxWindow[])
+    setWorkflowRuns(snapshot.workflows as WorkflowRun[])
+  }, [statusSnapshot])
+
+  const statusError = statusSubscription.state === 'error'
+    ? statusSubscription.error.message
+    : ''
+  const statusLoading = statusSnapshot === null && statusSubscription.state === 'loading'
+  const processesLoading = statusLoading
+  const branchesLoading = statusLoading
+  const shellWindowsLoading = statusLoading
+  const processesError = statusError || statusSnapshot?.errors.processes || ''
+  const branchesError = statusError || statusSnapshot?.errors.gitBranches || ''
+  const shellWindowsError = statusError || statusSnapshot?.errors.shellWindows || ''
+  const workflowsError = statusError || statusSnapshot?.errors.workflows || ''
+  const plansError = statusError || statusSnapshot?.errors.plans || ''
+  const contextStatuses = statusSnapshot?.contextStatuses ?? {}
+  const threadPlans = (statusSnapshot?.plans ?? []) as ThreadPlan[]
 
   useEffect(() => {
     setNativeContextStatus(null)
@@ -444,11 +401,14 @@ export function TerminalWorkspace({
   const availableCodingAgents = readOnlySubagent
     ? codingAgentChoices.filter((agent) => agent.id === 'pi-native')
     : codingAgentChoices
-  const codingAgentSelection: CodingAgentSelection = codingAgent === 'claude'
-    ? claudePresentation === 'native' ? 'claude-native' : 'claude'
-    : codingAgent === 'pi'
-      ? piPresentation === 'native' ? 'pi-native' : 'pi'
-      : codingAgent
+  const codingAgentSelection = codingAgentSelectionForTarget(
+    codingAgent,
+    codingAgent === 'claude'
+      ? claudePresentation
+      : codingAgent === 'pi'
+        ? piPresentation
+        : 'terminal',
+  )
   const selectedCodingAgent = availableCodingAgents.find((agent) => agent.id === codingAgentSelection) ?? availableCodingAgents[0]
   const contextStatus = codingAgent === 'claude'
     ? claudePresentation === 'native' ? claudeNativeContextStatus : null

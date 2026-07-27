@@ -16,6 +16,13 @@ import { piThinkingLevelIds } from '../../codingAgents'
 import { classNames } from '../../lib/classNames'
 import { formatDuration } from '../../lib/formatDuration'
 import {
+  formatNativeActivityAge,
+  formatNativeActivityClock,
+  nativeConnectionDescription,
+  nativeResponseDescription,
+  NATIVE_AGENT_RESPONSE_STALE_AFTER_MS,
+} from '../../lib/nativeAgentDiagnostics'
+import {
   imageFilesFromClipboard,
   isSupportedPiImageType,
   piNativePromptImagePolicy,
@@ -29,6 +36,8 @@ import {
   writePiNativeWorkflowDismissed,
 } from '../../lib/promptDrafts'
 import { useImageAttachments } from '../../lib/useImageAttachments'
+import { useNativeActivityLog } from '../../lib/useNativeActivityLog'
+import { useNativeAgentSocket } from '../../lib/useNativeAgentSocket'
 import {
   collapsePromptPaste,
   expandPromptPastes,
@@ -143,14 +152,6 @@ type PiSessionStats = {
   contextUsage?: PiContextUsage
 }
 
-type PiActivityRecord = {
-  id: number
-  at: number
-  event: string
-  summary: string
-  repeats: number
-}
-
 type PiEventStamp = {
   at: number
   label: string
@@ -212,10 +213,6 @@ type PiRpcEvent = {
   aborted?: boolean
 }
 
-const RECONNECT_STABLE_AFTER_MS = 5_000
-const PI_INSPECTION_INTERVAL_MS = 4_000
-const PI_RESPONSE_STALE_AFTER_MS = 12_000
-const PI_ACTIVITY_LOG_LIMIT = 24
 const WORKFLOW_DISMISS_MARKER = '\u2063kiwi-code-no-ultracode\u2063'
 const ULTRACODE_KEYWORD_PATTERN = /\bultracode\b/i
 
@@ -307,7 +304,7 @@ export function PiNativePane({
   const [notice, setNotice] = useState('')
   const [showJumpToLatest, setShowJumpToLatest] = useState(false)
   const [activityExpanded, setActivityExpanded] = useState(false)
-  const [activityLog, setActivityLog] = useState<PiActivityRecord[]>([])
+  const { activityLog, appendActivity } = useNativeActivityLog()
   const [latestRpcEvent, setLatestRpcEvent] = useState<PiEventStamp | null>(null)
   const [latestWorkEvent, setLatestWorkEvent] = useState<PiEventStamp | null>(null)
   const [runPhase, setRunPhase] = useState('Idle')
@@ -318,15 +315,11 @@ export function PiNativePane({
   const [lastProbeLatency, setLastProbeLatency] = useState<number | null>(null)
   const [lastProbeSentAt, setLastProbeSentAt] = useState<number | null>(null)
   const [clockNow, setClockNow] = useState(() => Date.now())
-  const [connectionAttempt, setConnectionAttempt] = useState(0)
-  const socketRef = useRef<WebSocket | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
   const activeRef = useRef(active)
   const readOnlyRef = useRef(readOnly)
   const atBottomRef = useRef(true)
-  const reconnectAttemptsRef = useRef(0)
-  const activitySequenceRef = useRef(0)
   const isStreamingRef = useRef(false)
   const runPhaseRef = useRef('Idle')
   const runStartedAtRef = useRef<number | null>(null)
@@ -371,22 +364,6 @@ export function PiNativePane({
   const updateConnectionStatus = useCallback((status: ConnectionStatus) => {
     setConnectionStatus(status)
     onStatusChangeRef.current(status)
-  }, [])
-
-  const appendActivity = useCallback((event: string, summary: string, at = Date.now()) => {
-    setActivityLog((current) => {
-      const latest = current[0]
-      if (latest && latest.event === event && latest.summary === summary && at - latest.at < 1_500) {
-        return [{ ...latest, at, repeats: latest.repeats + 1 }, ...current.slice(1)]
-      }
-      return [{
-        id: activitySequenceRef.current += 1,
-        at,
-        event,
-        summary,
-        repeats: 1,
-      }, ...current].slice(0, PI_ACTIVITY_LOG_LIMIT)
-    })
   }, [])
 
   const updateRunPhase = useCallback((phase: string, event?: string, summary?: string, at = Date.now()) => {
@@ -788,116 +765,43 @@ export function PiNativePane({
     setSelectedSlashIndex(0)
   }, [clearDraftImages, readOnly])
 
-  useEffect(() => {
-    let disposed = false
-    let reconnectTimer: ReturnType<typeof window.setTimeout> | undefined
-    let stableTimer: ReturnType<typeof window.setTimeout> | undefined
-    let inspectionTimer: ReturnType<typeof window.setInterval> | undefined
-    let piReady = false
-    let reconnectAllowed = true
-    updateConnectionStatus('connecting')
-    onContextStatusChangeRef.current(null)
-    setConnectedAt(null)
-    setLastPiResponseAt(null)
-    setLastProbeLatency(null)
-    setLastProbeSentAt(null)
-    probeSentAtRef.current = null
-    setError('')
-
+  const nativeSocketUrl = useMemo(() => {
     const params = new URLSearchParams()
-    if (!readOnlyRef.current && initialModelRef.current) params.set('model', initialModelRef.current)
-    if (!readOnlyRef.current && initialThinkingRef.current) params.set('thinking', initialThinkingRef.current)
+    if (!readOnlyRef.current && initialModelRef.current) {
+      params.set('model', initialModelRef.current)
+    }
+    if (!readOnlyRef.current && initialThinkingRef.current) {
+      params.set('thinking', initialThinkingRef.current)
+    }
     const url = apiWebSocketUrl(
       `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/pi/native`,
     )
     url.search = params.toString()
-    const socket = new WebSocket(url)
-    socketRef.current = socket
+    return url.toString()
+  }, [projectId, threadId])
 
-    socket.addEventListener('open', () => {
-      if (disposed) {
-        socket.close(1000, 'Native Pi pane closed')
-        return
-      }
-      stableTimer = window.setTimeout(() => {
-        if (!disposed && socket.readyState === WebSocket.OPEN) reconnectAttemptsRef.current = 0
-      }, RECONNECT_STABLE_AFTER_MS)
-      inspectionTimer = window.setInterval(() => {
-        const now = Date.now()
-        const pendingSince = probeSentAtRef.current
-        if (
-          disposed
-          || !piReady
-          || socket.readyState !== WebSocket.OPEN
-          || (pendingSince !== null && now - pendingSince <= PI_RESPONSE_STALE_AFTER_MS)
-        ) return
-        const sentAt = now
-        markProbeSent(sentAt)
-        socket.send(JSON.stringify({ type: 'get_state' }))
-      }, PI_INSPECTION_INTERVAL_MS)
-    })
+  const resetConnectionDiagnostics = useCallback(() => {
+    setConnectedAt(null)
+    setLastPiResponseAt(null)
+    setLastProbeLatency(null)
+    setLastProbeSentAt(null)
+    setError('')
+  }, [])
 
-    socket.addEventListener('message', (messageEvent) => {
-      if (disposed || typeof messageEvent.data !== 'string') return
-      try {
-        const event = JSON.parse(messageEvent.data) as PiRpcEvent
-        if (event.type === 'pi_native_ready') piReady = true
-        if (event.type === 'pi_native_fatal') reconnectAllowed = false
-        handleEvent(event, socket)
-      } catch {
-        setError('Pi sent an unreadable conversation update.')
-      }
-    })
-
-    socket.addEventListener('error', () => {
-      if (!disposed) {
-        appendActivity('connection_error', 'The native Pi WebSocket reported an error.')
-        onContextStatusChangeRef.current(null)
-        updateConnectionStatus('error')
-      }
-    })
-
-    socket.addEventListener('close', (event) => {
-      piReady = false
-      if (stableTimer !== undefined) window.clearTimeout(stableTimer)
-      if (inspectionTimer !== undefined) window.clearInterval(inspectionTimer)
-      if (disposed) return
-      const closeReason = event.reason.trim() || (event.code === 1006 ? 'connection ended without a close frame' : 'no reason supplied')
-      const closeDetail = `code ${event.code}, ${closeReason}, ${event.wasClean ? 'clean' : 'unclean'}`
-      console.info('Native Pi WebSocket closed.', {
-        projectId,
-        threadId,
-        code: event.code,
-        reason: event.reason,
-        wasClean: event.wasClean,
-        reconnecting: reconnectAllowed,
-      })
-      if (!reconnectAllowed) {
-        appendActivity('connection_closed', `Connection closed (${closeDetail}); automatic reconnect is disabled for this startup error.`)
-        onContextStatusChangeRef.current(null)
-        updateConnectionStatus('error')
-        return
-      }
-      appendActivity('connection_closed', `Connection lost (${closeDetail}); Kiwi Code is reconnecting.`)
-      onContextStatusChangeRef.current(null)
-      updateConnectionStatus('connecting')
-      const delay = Math.min(250 * 2 ** reconnectAttemptsRef.current, 2_000)
-      reconnectAttemptsRef.current += 1
-      reconnectTimer = window.setTimeout(() => {
-        if (!disposed) setConnectionAttempt((value) => value + 1)
-      }, delay)
-    })
-
-    return () => {
-      disposed = true
-      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
-      if (stableTimer !== undefined) window.clearTimeout(stableTimer)
-      if (inspectionTimer !== undefined) window.clearInterval(inspectionTimer)
-      if (socket.readyState < WebSocket.CLOSING) socket.close(1000, 'Native Pi pane closed')
-      if (socketRef.current === socket) socketRef.current = null
-      onContextStatusChangeRef.current(null)
-    }
-  }, [appendActivity, connectionAttempt, handleEvent, markProbeSent, projectId, threadId, updateConnectionStatus])
+  const { send: sendSocketCommand, socketRef } = useNativeAgentSocket<PiRpcEvent>({
+    agentName: 'Pi',
+    fatalEventType: 'pi_native_fatal',
+    onActivity: appendActivity,
+    onAttempt: resetConnectionDiagnostics,
+    onContextReset: () => onContextStatusChangeRef.current(null),
+    onError: setError,
+    onEvent: handleEvent,
+    onProbeSent: markProbeSent,
+    onStatusChange: updateConnectionStatus,
+    probeSentAtRef,
+    readyEventType: 'pi_native_ready',
+    url: nativeSocketUrl,
+  })
 
   const timeline = useMemo(
     () => buildTimeline(messages, liveAssistant, toolStates, isStreaming),
@@ -943,16 +847,6 @@ export function PiNativePane({
     const frame = window.requestAnimationFrame(() => textareaRef.current?.focus())
     return () => window.cancelAnimationFrame(frame)
   }, [active, readOnly])
-
-  function sendSocketCommand(command: Record<string, unknown> & { type: string }): boolean {
-    const socket = socketRef.current
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      setError('Pi is still connecting.')
-      return false
-    }
-    socket.send(JSON.stringify(command))
-    return true
-  }
 
   function clearSubmittedDraft() {
     setDraft('')
@@ -1291,14 +1185,14 @@ export function PiNativePane({
   const workEventAge = latestWorkEvent === null ? null : Math.max(0, clockNow - latestWorkEvent.at)
   const rpcResponsive = connectionStatus === 'open'
     && responseAge !== null
-    && responseAge <= PI_RESPONSE_STALE_AFTER_MS
+    && responseAge <= NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
   const responseOverdue = connectionStatus === 'open' && (
     responseAge !== null
-      ? responseAge > PI_RESPONSE_STALE_AFTER_MS
-      : connectedAt !== null && clockNow - connectedAt > PI_RESPONSE_STALE_AFTER_MS
+      ? responseAge > NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
+      : connectedAt !== null && clockNow - connectedAt > NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
   )
   const probePending = lastProbeSentAt !== null
-    && clockNow - lastProbeSentAt <= PI_RESPONSE_STALE_AFTER_MS
+    && clockNow - lastProbeSentAt <= NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
   const rpcTone: PiStatusTone = rpcResponsive ? 'healthy' : responseOverdue ? 'warning' : 'idle'
   const monitorTone: PiStatusTone = connectionStatus === 'error' || connectionStatus === 'closed'
     ? 'error'
@@ -1317,10 +1211,10 @@ export function PiNativePane({
       `Captured: ${new Date().toISOString()}`,
       `Transport: ${connectionStatus}`,
       `Agent: ${isStreaming ? `${runPhase} for ${formatDuration(runElapsed)}` : 'idle'}`,
-      `Pi RPC: ${rpcResponseDescription(responseAge, connectedAt, clockNow)}`,
+      `Pi RPC: ${nativeResponseDescription('Pi', responseAge, connectedAt, clockNow)}`,
       `Last probe latency: ${lastProbeLatency === null ? 'unknown' : `${lastProbeLatency}ms`}`,
-      `Last RPC event: ${latestRpcEvent ? `${latestRpcEvent.label} (${formatActivityAge(clockNow - latestRpcEvent.at)})` : 'none'}`,
-      `Last work event: ${latestWorkEvent ? `${latestWorkEvent.label} (${formatActivityAge(clockNow - latestWorkEvent.at)})` : 'none'}`,
+      `Last RPC event: ${latestRpcEvent ? `${latestRpcEvent.label} (${formatNativeActivityAge(clockNow - latestRpcEvent.at)})` : 'none'}`,
+      `Last work event: ${latestWorkEvent ? `${latestWorkEvent.label} (${formatNativeActivityAge(clockNow - latestWorkEvent.at)})` : 'none'}`,
       `Run events observed: ${runEventCount}`,
       '',
       'Recent lifecycle events:',
@@ -1343,12 +1237,12 @@ export function PiNativePane({
         {
           label: 'Transport',
           tone: connectionStatus === 'open' ? 'healthy' : monitorTone,
-          value: connectionDescription(connectionStatus),
+          value: nativeConnectionDescription(connectionStatus),
         },
         {
           label: 'Pi RPC',
           tone: rpcTone,
-          value: rpcResponseDescription(responseAge, connectedAt, clockNow),
+          value: nativeResponseDescription('Pi', responseAge, connectedAt, clockNow),
           detail: lastProbeLatency !== null ? `${lastProbeLatency}ms round trip` : undefined,
         },
         {
@@ -1359,17 +1253,17 @@ export function PiNativePane({
         },
         {
           label: 'Last work event',
-          tone: workEventAge !== null && workEventAge < PI_RESPONSE_STALE_AFTER_MS
+          tone: workEventAge !== null && workEventAge < NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
             ? 'working'
             : 'idle',
           value: latestWorkEvent ? <code>{latestWorkEvent.label}</code> : 'No agent events observed yet',
-          detail: latestWorkEvent ? formatActivityAge(workEventAge ?? 0) : undefined,
+          detail: latestWorkEvent ? formatNativeActivityAge(workEventAge ?? 0) : undefined,
         },
       ]}
       sessionUsage={<PiSessionUsage stats={sessionStats} latestCacheHitRate={latestCacheHitRate} />}
       activityLog={activityLog.map((entry) => ({
         ...entry,
-        clock: formatActivityClock(entry.at),
+        clock: formatNativeActivityClock(entry.at),
       }))}
       onInspect={inspectNow}
       onCopy={() => void copyActivityDiagnostics()}
@@ -1484,42 +1378,6 @@ export function PiNativePane({
       />
     </section>
   )
-}
-
-function connectionDescription(status: ConnectionStatus): string {
-  switch (status) {
-    case 'open': return 'WebSocket connected'
-    case 'connecting': return 'WebSocket reconnecting'
-    case 'error': return 'WebSocket error'
-    case 'closed': return 'WebSocket closed'
-  }
-}
-
-function rpcResponseDescription(responseAge: number | null, connectedAt: number | null, now: number): string {
-  if (responseAge !== null) {
-    return responseAge <= PI_RESPONSE_STALE_AFTER_MS
-      ? `Responded ${formatActivityAge(responseAge)}`
-      : `Last response ${formatActivityAge(responseAge)}`
-  }
-  if (connectedAt === null) return 'Waiting for a connection'
-  const wait = Math.max(0, now - connectedAt)
-  return wait <= PI_RESPONSE_STALE_AFTER_MS
-    ? 'Waiting for the first Pi response'
-    : `No Pi response for ${formatDuration(wait)}`
-}
-
-function formatActivityAge(ageMs: number): string {
-  const safeAge = Math.max(0, ageMs)
-  if (safeAge < 1_500) return 'just now'
-  return `${formatDuration(safeAge)} ago`
-}
-
-function formatActivityClock(timestamp: number): string {
-  return new Intl.DateTimeFormat(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(timestamp)
 }
 
 function piRpcEventLabel(event: PiRpcEvent): string {

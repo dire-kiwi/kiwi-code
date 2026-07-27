@@ -284,32 +284,41 @@ func (s *Server) startSavedWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid saved workflow invocation.")
 		return
 	}
-	forward := map[string]any{
-		"script":          string(script),
-		"model":           input.Model,
-		"thinkingLevel":   input.ThinkingLevel,
-		"closeOnComplete": input.CloseOnComplete,
-	}
 	if input.Args != nil {
 		if len(input.Args) > maxWorkflowArgsBytes || !json.Valid(input.Args) {
 			writeError(w, http.StatusBadRequest, "Workflow args must be valid JSON no larger than 1 MiB.")
 			return
 		}
-		forward["args"] = input.Args
 	}
-	if input.CloseOnComplete == nil {
-		delete(forward, "closeOnComplete")
+	args := input.Args
+	if args != nil {
+		args, err = json.Marshal(args)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Could not prepare the saved workflow invocation.")
+			return
+		}
 	}
-	body, err := json.Marshal(forward)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not prepare the saved workflow invocation.")
+	target, failure := s.prepareWorkflowStart(r.PathValue("id"), r.PathValue("threadId"))
+	if failure != nil {
+		failure.write(w)
 		return
 	}
-	request := r.Clone(r.Context())
-	request.Body = io.NopCloser(bytes.NewReader(body))
-	capture := newCapturedResponse()
-	s.startWorkflow(capture, request)
-	copyCapturedResponse(w, capture)
+	run, failure := s.startWorkflowRun(
+		target,
+		workflowStartInput{
+			Script:          string(script),
+			Args:            args,
+			Model:           input.Model,
+			ThinkingLevel:   input.ThinkingLevel,
+			CloseOnComplete: input.CloseOnComplete,
+		},
+		threadEndpointURL(r, target.item.ID, target.thread.ID),
+	)
+	if failure != nil {
+		failure.write(w)
+		return
+	}
+	writeJSON(w, http.StatusCreated, run)
 }
 
 func (s *Server) saveWorkflow(w http.ResponseWriter, r *http.Request) {

@@ -1,14 +1,12 @@
 package server
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -16,10 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/dire-kiwi/kiwi-code/internal/broadcast"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
 	"github.com/gorilla/websocket"
 )
@@ -47,18 +43,9 @@ type claudeNativeManager struct {
 }
 
 type claudeNativeProcess struct {
-	key              piNativeProcessKey
+	*nativeProcessCore
 	launchOptions    codingAgentLaunchOptions
 	sessionDirectory string
-	command          *exec.Cmd
-	stdin            io.WriteCloser
-	events           *broadcast.Broker[[]byte]
-	done             chan struct{}
-	writeMu          sync.Mutex
-	exitMu           sync.RWMutex
-	exitText         string
-	request          atomic.Uint64
-	stopping         atomic.Bool
 
 	stateMu   sync.Mutex
 	streaming bool
@@ -71,6 +58,14 @@ type claudeNativeProcess struct {
 	usageSession  string
 	usageTotals   threadUsageTotals
 	usageReporter func(piNativeProcessKey, string, threadUsageTotals)
+}
+
+var claudeProcessSpec = nativeProcessSpec{
+	displayName:         "Claude",
+	endedMessage:        "Claude session ended.",
+	unexpectedMessage:   "Claude exited unexpectedly. Reconnect to resume the saved conversation.",
+	writeAfterExitError: "native Claude process ended",
+	stopTimeout:         claudeNativeStopTimeout,
 }
 
 type claudeNativeClientMessage struct {
@@ -117,15 +112,10 @@ func (m *claudeNativeManager) resolveFigmaMCPURL(item project.Project) string {
 }
 
 func (m *claudeNativeManager) stopOnContext(ctx context.Context) {
-	if m == nil || ctx == nil || ctx.Done() == nil {
+	if m == nil {
 		return
 	}
-	m.contextWatchOnce.Do(func() {
-		go func() {
-			<-ctx.Done()
-			m.stopAll()
-		}()
-	})
+	stopNativeProcessesOnContext(ctx, &m.contextWatchOnce, m.stopAll)
 }
 
 func (h *terminalHandler) serveClaudeNative(w http.ResponseWriter, r *http.Request) {
@@ -335,31 +325,13 @@ func (h *terminalHandler) startClaudeNativeProcess(
 		return nil, errors.New("native Claude is unavailable")
 	}
 
-	h.sessionMu.Lock()
-	mutation, err := h.lockTerminalMutationLocked(item.ID, thread.ID)
-	if err != nil {
-		h.sessionMu.Unlock()
-		return nil, err
-	}
-	if err := h.ensureTerminalThreadActiveLocked(item.ID, thread.ID); err != nil {
-		releaseErr := mutation.Release()
-		h.sessionMu.Unlock()
-		return nil, errors.Join(err, releaseErr)
-	}
-	h.sessionMu.Unlock()
-	process, startErr := h.nativeClaude.getOrStart(item, thread, threadEndpoint, launchOptions)
-	releaseErr := mutation.Release()
-	h.sessionMu.Lock()
-	fenceErr := h.finishTerminalThreadMutationLocked(item, thread)
-	h.sessionMu.Unlock()
-
-	if combined := errors.Join(startErr, fenceErr, releaseErr); combined != nil {
+	return withTerminalThreadMutation(h, item, thread, func() (*claudeNativeProcess, error) {
+		return h.nativeClaude.getOrStart(item, thread, threadEndpoint, launchOptions)
+	}, func(process *claudeNativeProcess) {
 		if process != nil {
 			_ = h.nativeClaude.stopThread(item.ID, thread.ID)
 		}
-		return nil, combined
-	}
-	return process, nil
+	})
 }
 
 func (h *terminalHandler) restartClaudeNativeProcess(
@@ -377,31 +349,13 @@ func (h *terminalHandler) restartClaudeNativeProcess(
 		return nil, errors.New("native Claude is unavailable")
 	}
 
-	h.sessionMu.Lock()
-	mutation, err := h.lockTerminalMutationLocked(item.ID, thread.ID)
-	if err != nil {
-		h.sessionMu.Unlock()
-		return nil, err
-	}
-	if err := h.ensureTerminalThreadActiveLocked(item.ID, thread.ID); err != nil {
-		releaseErr := mutation.Release()
-		h.sessionMu.Unlock()
-		return nil, errors.Join(err, releaseErr)
-	}
-	h.sessionMu.Unlock()
-	process, restartErr := h.nativeClaude.restart(expected, item, thread, threadEndpoint, launchOptions, resetSession)
-	releaseErr := mutation.Release()
-	h.sessionMu.Lock()
-	fenceErr := h.finishTerminalThreadMutationLocked(item, thread)
-	h.sessionMu.Unlock()
-
-	if combined := errors.Join(restartErr, fenceErr, releaseErr); combined != nil {
+	return withTerminalThreadMutation(h, item, thread, func() (*claudeNativeProcess, error) {
+		return h.nativeClaude.restart(expected, item, thread, threadEndpoint, launchOptions, resetSession)
+	}, func(process *claudeNativeProcess) {
 		if process != nil && process != expected {
 			_ = h.nativeClaude.stopThread(item.ID, thread.ID)
 		}
-		return nil, combined
-	}
-	return process, nil
+	})
 }
 
 func (m *claudeNativeManager) getOrStart(
@@ -529,7 +483,7 @@ func (m *claudeNativeManager) startProcess(
 	}
 	// Kiwi Sandbox is intentionally not loaded into Claude for now. Preserve
 	// its related-project ergonomics through Claude's native --add-dir flag.
-	relatedDirectories, err := claudeRelatedProjectDirectories(thread)
+	relatedDirectories, err := codingAgentRelatedProjectDirectories(thread)
 	if err != nil {
 		return nil, err
 	}
@@ -555,37 +509,19 @@ func (m *claudeNativeManager) startProcess(
 			"KIWI_CODE_CODING_AGENT="+codingAgentClaude,
 		)...,
 	)
-	stdin, err := command.StdinPipe()
+	core, stdout, stderr, err := startNativeCommand(key, claudeProcessSpec, command)
 	if err != nil {
-		return nil, fmt.Errorf("open native Claude input: %w", err)
-	}
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		_ = stdin.Close()
-		return nil, fmt.Errorf("open native Claude output: %w", err)
-	}
-	stderr, err := command.StderrPipe()
-	if err != nil {
-		_ = stdin.Close()
-		return nil, fmt.Errorf("open native Claude diagnostics: %w", err)
-	}
-	if err := command.Start(); err != nil {
-		_ = stdin.Close()
-		return nil, fmt.Errorf("start native Claude: %w", err)
+		return nil, err
 	}
 
 	process := &claudeNativeProcess{
-		key:              key,
-		launchOptions:    launchOptions,
-		sessionDirectory: sessionDirectory,
-		command:          command,
-		stdin:            stdin,
-		events:           broadcast.NewBroker[[]byte](broadcast.DefaultMaxPending * 2),
-		done:             make(chan struct{}),
-		sessionID:        resumeSessionID,
-		usageReporter:    m.usageReporter,
+		nativeProcessCore: core,
+		launchOptions:     launchOptions,
+		sessionDirectory:  sessionDirectory,
+		sessionID:         resumeSessionID,
+		usageReporter:     m.usageReporter,
 	}
-	process.readOutput(stdout)
+	process.readOutput(stdout, process.publishClaudeEvent)
 	process.readDiagnostics(stderr)
 	return process, nil
 }
@@ -655,42 +591,6 @@ func removeIfExists(path string) error {
 		return nil
 	}
 	return err
-}
-
-func (p *claudeNativeProcess) readOutput(output io.Reader) {
-	go func() {
-		reader := bufio.NewReader(output)
-		for {
-			line, err := reader.ReadBytes('\n')
-			line = bytes.TrimSuffix(line, []byte{'\n'})
-			line = bytes.TrimSuffix(line, []byte{'\r'})
-			if len(line) > 0 {
-				p.publishClaudeEvent(line)
-			}
-			if err != nil {
-				if !errors.Is(err, io.EOF) {
-					log.Printf("read native Claude output: project=%q thread=%q error=%v", p.key.ProjectID, p.key.ThreadID, err)
-				}
-				return
-			}
-		}
-	}()
-}
-
-func (p *claudeNativeProcess) readDiagnostics(output io.Reader) {
-	go func() {
-		scanner := bufio.NewScanner(output)
-		scanner.Buffer(make([]byte, 64*1024), 1<<20)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line != "" {
-				log.Printf("native Claude: project=%q thread=%q %s", p.key.ProjectID, p.key.ThreadID, line)
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			log.Printf("read native Claude diagnostics: project=%q thread=%q error=%v", p.key.ProjectID, p.key.ThreadID, err)
-		}
-	}()
 }
 
 func (p *claudeNativeProcess) publishClaudeEvent(payload []byte) {
@@ -912,31 +812,13 @@ func (p *claudeNativeProcess) historySnapshot() ([]claudeNativeHistoryEntry, err
 }
 
 func (p *claudeNativeProcess) run(onExit func()) {
-	go func() {
-		err := p.command.Wait()
-		message := "Claude session ended."
-		if err != nil && !p.stopping.Load() {
-			message = "Claude exited unexpectedly. Reconnect to resume the saved conversation."
-			log.Printf("native Claude exited: project=%q thread=%q error=%v", p.key.ProjectID, p.key.ThreadID, err)
-		}
+	p.nativeProcessCore.run(func(string) {
 		p.setStreaming(false)
-		p.exitMu.Lock()
-		p.exitText = message
-		p.exitMu.Unlock()
-		close(p.done)
-		onExit()
-	}()
+	}, onExit)
 }
 
 func (p *claudeNativeProcess) send(payload []byte) error {
-	payload = append(bytes.Clone(payload), '\n')
-	p.writeMu.Lock()
-	defer p.writeMu.Unlock()
-	if channelClosed(p.done) {
-		return errors.New("native Claude process ended")
-	}
-	_, err := p.stdin.Write(payload)
-	return err
+	return p.writeLine(payload)
 }
 
 func (p *claudeNativeProcess) sendPrompt(message string, images []piNativeClientImage) error {
@@ -1010,37 +892,17 @@ func claudeNativePromptContent(message string, references []piNativeClientImage)
 }
 
 func (p *claudeNativeProcess) exitMessage() string {
-	p.exitMu.RLock()
-	defer p.exitMu.RUnlock()
-	if p.exitText == "" {
-		return "Claude session ended."
+	if p == nil {
+		return claudeProcessSpec.endedMessage
 	}
-	return p.exitText
+	return p.nativeProcessCore.exitMessage()
 }
 
 func (p *claudeNativeProcess) stop() error {
-	if p == nil || channelClosed(p.done) {
+	if p == nil {
 		return nil
 	}
-	p.stopping.Store(true)
-	_ = p.stdin.Close()
-	if p.command.Process != nil {
-		_ = p.command.Process.Signal(os.Interrupt)
-	}
-	timer := time.NewTimer(claudeNativeStopTimeout)
-	defer timer.Stop()
-	select {
-	case <-p.done:
-		return nil
-	case <-timer.C:
-		if p.command.Process != nil {
-			if err := p.command.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-				return err
-			}
-		}
-		<-p.done
-		return nil
-	}
+	return p.nativeProcessCore.stop()
 }
 
 func (m *claudeNativeManager) stopThread(projectID, threadID string) error {
@@ -1062,18 +924,11 @@ func (m *claudeNativeManager) stopProject(projectID string) error {
 		return nil
 	}
 	m.mu.Lock()
-	processes := make([]*claudeNativeProcess, 0)
-	for key, process := range m.processes {
-		if key.ProjectID == projectID {
-			processes = append(processes, process)
-		}
-	}
+	processes := collectNativeProcesses(m.processes, func(key nativeProcessKey) bool {
+		return key.ProjectID == projectID
+	})
 	m.mu.Unlock()
-	var stopErrors []error
-	for _, process := range processes {
-		stopErrors = append(stopErrors, process.stop())
-	}
-	return errors.Join(stopErrors...)
+	return stopNativeProcessSet(processes, (*claudeNativeProcess).stop)
 }
 
 func (m *claudeNativeManager) removeThread(projectID, threadID string) error {
@@ -1120,10 +975,7 @@ func (m *claudeNativeManager) stopAll() {
 		return
 	}
 	m.mu.Lock()
-	processes := make([]*claudeNativeProcess, 0, len(m.processes))
-	for _, process := range m.processes {
-		processes = append(processes, process)
-	}
+	processes := collectNativeProcesses(m.processes, func(nativeProcessKey) bool { return true })
 	m.mu.Unlock()
 	for _, process := range processes {
 		if err := process.stop(); err != nil {
