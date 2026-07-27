@@ -350,17 +350,20 @@ export function TerminalWorkspace({
       return
     }
     const snapshot: ThreadStatusSnapshot = statusSubscription.data
-    setProcessWindows(snapshot.processes as ProcessWindow[])
+    const retainIfEqual = <T,>(current: T, next: T) => (
+      JSON.stringify(current) === JSON.stringify(next) ? current : next
+    )
+    setProcessWindows((current) => retainIfEqual(current, snapshot.processes as ProcessWindow[]))
     setSelectedProcessId((current) =>
       current && snapshot.processes.some((window) => window.id === current)
         ? current
         : snapshot.processes[0]?.id ?? null,
     )
-    setBranchState(snapshot.gitBranches)
-    setContextStatuses(snapshot.contextStatuses)
-    setShellWindows(snapshot.shellWindows as TmuxWindow[])
-    setWorkflowRuns(snapshot.workflows as WorkflowRun[])
-    setThreadPlans(snapshot.plans as ThreadPlan[])
+    setBranchState((current) => retainIfEqual(current, snapshot.gitBranches))
+    setContextStatuses((current) => retainIfEqual(current, snapshot.contextStatuses))
+    setShellWindows((current) => retainIfEqual(current, snapshot.shellWindows as TmuxWindow[]))
+    setWorkflowRuns((current) => retainIfEqual(current, snapshot.workflows as WorkflowRun[]))
+    setThreadPlans((current) => retainIfEqual(current, snapshot.plans as ThreadPlan[]))
     setProcessesError(snapshot.errors.processes ?? '')
     setBranchesError(snapshot.errors.gitBranches ?? '')
     setShellWindowsError(snapshot.errors.shellWindows ?? '')

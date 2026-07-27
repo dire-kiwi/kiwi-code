@@ -204,6 +204,7 @@ const skillForkRequests = [];
 const planRequests = [];
 let skillForkResponseResult = "Child research result";
 let skillForkCreateState = "starting";
+let skillForkCreateFailures = 0;
 globalThis.fetch = async (url, init = {}) => {
   const request = { url: String(url), init };
   if (request.url.endsWith("/plans/plan-1")) {
@@ -239,6 +240,10 @@ globalThis.fetch = async (url, init = {}) => {
   }
   skillForkRequests.push(request);
   if (request.url.endsWith("/skill-forks")) {
+    if (skillForkCreateFailures > 0) {
+      skillForkCreateFailures -= 1;
+      return Response.json({ error: "temporary fork outage" }, { status: 503 });
+    }
     return Response.json({
       thread: { id: "skill-child", title: "deep-research · Explore" },
       run: {
@@ -313,6 +318,7 @@ assert.equal(skillRequest.model, "openai-codex/gpt-test");
 assert.equal(skillRequest.thinkingLevel, "high");
 assert.equal(skillRequest.agent, "pi");
 assert.equal(skillRequest.worktree, false);
+assert.equal(skillRequest.requestId, "fork-skill");
 assert.equal(skillRequest.title, "deep-research · Explore");
 assert.match(skillRequest.prompt, /Research alpha beta in src files\./);
 assert.match(skillRequest.prompt, /Full request: "alpha beta" "src files"\./);
@@ -337,6 +343,21 @@ assert.equal(skillForkRequests.length, 2);
 assert.match(JSON.parse(skillForkRequests[0].init.body).prompt, /ARGUMENTS: append-this/);
 assert.match(manualResult.content[0].text, /Forked skill result truncated by/);
 assert.ok(Buffer.byteLength(manualResult.content[0].text, "utf8") < 52 * 1024);
+
+skillForkRequests.length = 0;
+skillForkCreateFailures = 1;
+skillForkResponseResult = "recovered after retry";
+const retriedFork = await skillForkTools[0].execute(
+  "retry-fork",
+  { skill: "manual-fork", arguments: "retry" },
+  undefined,
+  undefined,
+  {},
+);
+assert.equal(retriedFork.content[0].text, "recovered after retry");
+assert.equal(skillForkRequests.length, 3);
+assert.equal(JSON.parse(skillForkRequests[0].init.body).requestId, "retry-fork");
+assert.equal(skillForkRequests[0].init.body, skillForkRequests[1].init.body);
 
 skillForkRequests.length = 0;
 skillForkCreateState = "starting";

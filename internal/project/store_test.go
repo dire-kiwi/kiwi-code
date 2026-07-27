@@ -3226,3 +3226,50 @@ func TestFigmaMCPProjectToggleRoundTrip(t *testing.T) {
 		t.Fatalf("disable Figma MCP = %#v, err=%v", updated, err)
 	}
 }
+
+func TestStoreDeduplicatesPersistedSkillForkRequests(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "projects.json")
+	store, err := NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Example", t.TempDir(), PersonalProfileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := item.Threads[0]
+	options := AddThreadOptions{
+		ParentThreadID:     parent.ID,
+		SkillForkRequestID: "tool-call:planner-1",
+		CreationPending:    true,
+	}
+	created, err := store.AddThreadWithOptions(item.ID, "Planner", options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.SkillForkRequestID != options.SkillForkRequestID {
+		t.Fatalf("skill fork request ID = %q", created.SkillForkRequestID)
+	}
+	if _, err := store.CommitThreadCreation(item.ID, created.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing, err := reloaded.AddThreadWithOptions(item.ID, "Duplicate planner", options)
+	if !errors.Is(err, ErrChildCreationRequestExists) {
+		t.Fatalf("duplicate skill fork error = %v", err)
+	}
+	if existing.ID != created.ID {
+		t.Fatalf("duplicate skill fork returned %q, want %q", existing.ID, created.ID)
+	}
+	persisted, err := reloaded.Get(item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted.Threads) != 2 {
+		t.Fatalf("duplicate request created another thread: %#v", persisted.Threads)
+	}
+}

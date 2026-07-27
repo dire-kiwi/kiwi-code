@@ -303,6 +303,13 @@ func (h *terminalHandler) serveTmuxBrowserTerminal(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusNotFound, "Tmux window not found.")
 		return
 	}
+	protocol := 1
+	if r.URL.Query().Get("protocol") == strconv.Itoa(terminalProtocolV2) {
+		protocol = terminalProtocolV2
+	}
+	diagnostics := newTerminalConnectionDiagnostics(r, "", "", "tmux")
+	diagnostics.mark("accepted")
+	defer diagnostics.finish()
 
 	// Validate the target before upgrading, but create the temporary linked
 	// view only after the WebSocket handshake succeeds.
@@ -312,6 +319,14 @@ func (h *terminalHandler) serveTmuxBrowserTerminal(w http.ResponseWriter, r *htt
 	}
 	defer connection.Close()
 	connection.SetReadLimit(1 << 20)
+	h.activeSetups.Add(1)
+	setupActive := true
+	defer func() {
+		if setupActive {
+			h.activeSetups.Add(-1)
+		}
+	}()
+	diagnostics.mark("websocket-upgraded")
 
 	writer := newWebSocketWriter(connection)
 	closeWithError := func(message string) {
@@ -334,19 +349,18 @@ func (h *terminalHandler) serveTmuxBrowserTerminal(w http.ResponseWriter, r *htt
 		return
 	}
 	defer h.closeTmuxViewSession(viewSessionName)
+	diagnostics.mark("view-ready")
 	if managed {
-		if err := h.markTmuxSessionUsed(sessionName, time.Now()); err != nil {
-			log.Printf("record tmux browser session use: session=%q error=%v", sessionName, err)
-		}
 		defer func() { _ = h.markTmuxSessionUsed(sessionName, time.Now()) }()
 	}
 
-	if err := h.configureTmuxClipboard(); err != nil {
-		log.Printf("configure tmux clipboard: %v", err)
-	}
 	cols := boundedDimension(r.URL.Query().Get("cols"), 80)
 	rows := boundedDimension(r.URL.Query().Get("rows"), 24)
-	attachArguments := []string{"attach-session"}
+	attachArguments := []string{
+		"set-option", "-q", "-s", "set-clipboard", "external",
+		";",
+		"attach-session",
+	}
 	if managed {
 		attachArguments = append(attachArguments, "-c", thread.Cwd)
 	}
@@ -364,9 +378,25 @@ func (h *terminalHandler) serveTmuxBrowserTerminal(w http.ResponseWriter, r *htt
 		}
 		_ = command.Wait()
 	}()
+	diagnostics.mark("pty-attached")
 
-	bridge := startPTYWebSocketBridge(connection, writer, ptmx)
+	if protocol >= terminalProtocolV2 {
+		if err := writer.Write(websocket.TextMessage, []byte(`{"type":"terminal_ready","protocol":2}`)); err != nil {
+			return
+		}
+		diagnostics.mark("ready-sent")
+	}
+	bridge := startPTYWebSocketBridge(connection, writer, ptmx, protocol, func() {
+		diagnostics.mark("first-output")
+	})
 	defer bridge.Stop()
+	setupActive = false
+	h.activeSetups.Add(-1)
+	if managed {
+		if err := h.markTmuxSessionUsed(sessionName, time.Now()); err != nil {
+			log.Printf("record tmux browser session use: session=%q error=%v", sessionName, err)
+		}
+	}
 	for {
 		select {
 		case <-bridge.terminalDone:

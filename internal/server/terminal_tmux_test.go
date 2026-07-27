@@ -139,6 +139,133 @@ func TestTerminalAttachEnablesTmuxClipboardForwarding(t *testing.T) {
 	}
 }
 
+func TestTerminalProtocolV2BackpressureResumesAfterAcknowledgement(t *testing.T) {
+	handler, item := newIsolatedTmuxHandler(t)
+	thread := item.Threads[0]
+	server := newTerminalTestServer(handler)
+	defer server.Close()
+
+	target, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.Scheme = "ws"
+	target.Path = fmt.Sprintf("/api/projects/%s/threads/%s/terminal", item.ID, thread.ID)
+	query := target.Query()
+	query.Set("tool", "terminal")
+	query.Set("protocol", "2")
+	target.RawQuery = query.Encode()
+	connection, _, err := websocket.DefaultDialer.Dial(target.String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	_ = connection.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	messageType, payload, err := connection.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messageType != websocket.TextMessage || string(payload) != `{"type":"terminal_ready","protocol":2}` {
+		t.Fatalf("terminal ready frame = type %d payload %q", messageType, payload)
+	}
+	messageType, payload, err = connection.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messageType != websocket.BinaryMessage {
+		t.Fatalf("initial terminal frame type = %d", messageType)
+	}
+	if err := connection.WriteJSON(clientMessage{Type: "ack", Bytes: uint32(len(payload))}); err != nil {
+		t.Fatal(err)
+	}
+	_ = connection.SetReadDeadline(time.Time{})
+
+	frames := make(chan []byte, 16)
+	readErrors := make(chan error, 1)
+	stopReading := make(chan struct{})
+	defer close(stopReading)
+	go func() {
+		for {
+			messageType, payload, err := connection.ReadMessage()
+			if err != nil {
+				readErrors <- err
+				return
+			}
+			if messageType == websocket.BinaryMessage {
+				select {
+				case frames <- append([]byte(nil), payload...):
+				case <-stopReading:
+					return
+				}
+			}
+		}
+	}()
+
+	const outputToken = "PROTOCOL_V2_FLOW_CONTROL_COMPLETE"
+	command := "yes x | head -c 700000; printf '\\nPROTOCOL_V2_%s\\n' 'FLOW_CONTROL_COMPLETE'\n"
+	if err := connection.WriteMessage(websocket.BinaryMessage, []byte(command)); err != nil {
+		t.Fatal(err)
+	}
+
+	var output bytes.Buffer
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	for output.Len() < 300*1024 {
+		select {
+		case frame := <-frames:
+			output.Write(frame)
+		case err := <-readErrors:
+			t.Fatalf("read terminal output after %d bytes: %v", output.Len(), err)
+		case <-deadline.C:
+			t.Fatalf("terminal output stopped after %d bytes before using its credit", output.Len())
+		}
+	}
+
+	quiet := time.NewTimer(300 * time.Millisecond)
+	for {
+		select {
+		case frame := <-frames:
+			output.Write(frame)
+			if !quiet.Stop() {
+				<-quiet.C
+			}
+			quiet.Reset(300 * time.Millisecond)
+		case err := <-readErrors:
+			quiet.Stop()
+			t.Fatalf("read paused terminal output after %d bytes: %v", output.Len(), err)
+		case <-quiet.C:
+			goto paused
+		}
+	}
+
+paused:
+	if output.Len() > terminalOutputCreditBytes {
+		t.Fatalf("terminal delivered %d unacknowledged bytes, credit limit is %d", output.Len(), terminalOutputCreditBytes)
+	}
+	if strings.Contains(output.String(), outputToken) {
+		t.Fatal("terminal delivered output beyond the credit window before acknowledgement")
+	}
+	if err := connection.WriteJSON(clientMessage{Type: "ack", Bytes: uint32(output.Len())}); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline.Reset(10 * time.Second)
+	for !strings.Contains(output.String(), outputToken) {
+		select {
+		case frame := <-frames:
+			output.Write(frame)
+			if err := connection.WriteJSON(clientMessage{Type: "ack", Bytes: uint32(len(frame))}); err != nil {
+				t.Fatal(err)
+			}
+		case err := <-readErrors:
+			t.Fatalf("read resumed terminal output: %v", err)
+		case <-deadline.C:
+			t.Fatalf("terminal did not resume after acknowledgement; received %d bytes", output.Len())
+		}
+	}
+}
+
 func TestTerminalOutputFansOutOnlyToClientsAttachedToThatSession(t *testing.T) {
 	handler, item := newIsolatedTmuxHandler(t)
 	firstThread := item.Threads[0]

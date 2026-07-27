@@ -116,14 +116,14 @@ done
 
 	parent := item.Threads[0]
 	path := "/api/projects/" + item.ID + "/threads/" + parent.ID + "/skill-forks"
-	body := `{"title":"deep-research","prompt":"Run the loaded skill.","agent":"pi","model":"custom/model-a","worktree":false}`
+	body := `{"title":"deep-research","prompt":"Run the loaded skill.","agent":"pi","model":"custom/model-a","worktree":false,"requestId":"fork-deep-research"}`
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body)))
 	if unauthorized.Code != http.StatusForbidden {
 		t.Fatalf("unauthorized skill fork status = %d, body = %s", unauthorized.Code, unauthorized.Body.String())
 	}
 	isolatedRequest := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(
-		`{"title":"isolated","prompt":"Do not run.","agent":"pi","model":"custom/model-a","worktree":true}`,
+		`{"title":"isolated","prompt":"Do not run.","agent":"pi","model":"custom/model-a","worktree":true,"requestId":"fork-isolated"}`,
 	))
 	isolatedRequest.Header.Set(agentTokenHeader, server.terminal.agentToken)
 	isolatedResponse := httptest.NewRecorder()
@@ -144,9 +144,35 @@ done
 		t.Fatal(err)
 	}
 	if created.Thread.ParentThreadID != parent.ID || created.Thread.Worktree ||
-		created.Thread.WorkflowRunID != "" || created.Thread.WorkflowAgentID != "" || created.Run.ID == 0 {
+		created.Thread.WorkflowRunID != "" || created.Thread.WorkflowAgentID != "" ||
+		created.Thread.SkillForkRequestID != "fork-deep-research" || created.Run.ID == 0 {
 		t.Fatalf("created skill fork = %#v", created)
 	}
+
+	// A retry after the child transaction committed must recover the exact run
+	// instead of creating a second visible child.
+	retryRequest := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
+	retryRequest.Header.Set(agentTokenHeader, server.terminal.agentToken)
+	retryResponse := httptest.NewRecorder()
+	handler.ServeHTTP(retryResponse, retryRequest)
+	if retryResponse.Code != http.StatusOK {
+		t.Fatalf("retried skill fork status = %d, body = %s", retryResponse.Code, retryResponse.Body.String())
+	}
+	var retried childThreadRunResponse
+	if err := json.NewDecoder(retryResponse.Body).Decode(&retried); err != nil {
+		t.Fatal(err)
+	}
+	if retried.Thread.ID != created.Thread.ID || retried.Run.ID != created.Run.ID {
+		t.Fatalf("retried skill fork = %#v, want thread %q run %d", retried, created.Thread.ID, created.Run.ID)
+	}
+	persistedAfterRetry, err := store.Get(item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(persistedAfterRetry.Threads) != 2 {
+		t.Fatalf("retried skill fork created duplicates: %#v", persistedAfterRetry.Threads)
+	}
+
 	runs, err := server.workflows.list(item.ID, parent.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -193,7 +219,7 @@ done
 	}
 
 	cancelRequest := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(
-		`{"title":"cancel-me","prompt":"Keep running","agent":"pi","model":"custom/model-a","worktree":false}`,
+		`{"title":"cancel-me","prompt":"Keep running","agent":"pi","model":"custom/model-a","worktree":false,"requestId":"fork-cancel"}`,
 	))
 	cancelRequest.Header.Set(agentTokenHeader, server.terminal.agentToken)
 	cancelResponse := httptest.NewRecorder()

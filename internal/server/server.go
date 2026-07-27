@@ -37,6 +37,7 @@ type Server struct {
 	threadMessages            *childThreadMessageStore
 	stateChanges              *stateChangeBroker
 	browserStateInvalidations browserStateInvalidationThrottle
+	processWebServerCache     sidebarProcessWebServerCache
 	workflows                 *workflowManager
 	plans                     *threadPlanManager
 	sessionClosures           *sessionClosureLog
@@ -406,6 +407,7 @@ func clientProjects(projects []project.Project) []project.Project {
 		threads := make([]project.Thread, 0, len(item.Threads))
 		for _, thread := range item.Threads {
 			if !thread.RollbackPending {
+				thread.SkillForkRequestID = ""
 				threads = append(threads, thread)
 			}
 		}

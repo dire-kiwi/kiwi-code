@@ -29,6 +29,7 @@ var ErrThreadClosed = errors.New("thread is closed")
 var ErrThreadTreeChanged = errors.New("thread tree changed")
 var ErrChildThreadDepthLimit = errors.New("sub-agent nesting depth limit reached")
 var ErrThreadRollbackPending = errors.New("thread creation rollback is pending")
+var ErrChildCreationRequestExists = errors.New("child creation request already exists")
 var ErrProfileNotFound = errors.New("profile not found")
 var ErrInvalidOrder = errors.New("invalid order")
 
@@ -65,6 +66,7 @@ type Thread struct {
 	AgentThinkingLevel   string     `json:"agentThinkingLevel,omitempty"`
 	WorkflowRunID        string     `json:"workflowRunId,omitempty"`
 	WorkflowAgentID      string     `json:"workflowAgentId,omitempty"`
+	SkillForkRequestID   string     `json:"skillForkRequestId,omitempty"`
 	NestedDepth          *int       `json:"nestedDepth,omitempty"`
 	Worktree             bool       `json:"worktree,omitempty"`
 	Branch               string     `json:"branch,omitempty"`
@@ -250,6 +252,7 @@ type AddThreadOptions struct {
 	AgentThinkingLevel string
 	WorkflowRunID      string
 	WorkflowAgentID    string
+	SkillForkRequestID string
 	NestedDepth        *int
 	CreationPending    bool
 }
@@ -266,6 +269,18 @@ func validWorkflowIdentity(value string) bool {
 			continue
 		}
 		return false
+	}
+	return true
+}
+
+func validSkillForkRequestID(value string) bool {
+	if value == "" || len(value) > 200 || !utf8.ValidString(value) {
+		return false
+	}
+	for _, character := range value {
+		if character < 0x20 || character == 0x7f {
+			return false
+		}
 	}
 	return true
 }
@@ -655,6 +670,7 @@ func readProjectsFile(path string) ([]Project, error) {
 		}
 		seenThreads := make(map[string]struct{}, len(item.Threads))
 		threadsByID := make(map[string]Thread, len(item.Threads))
+		seenSkillForkRequests := make(map[string]string)
 		for _, thread := range item.Threads {
 			if thread.ID == "" {
 				return nil, fmt.Errorf("decode projects: thread ID is required in project %q", item.ID)
@@ -667,6 +683,16 @@ func readProjectsFile(path string) ([]Project, error) {
 			if (thread.WorkflowRunID == "") != (thread.WorkflowAgentID == "") ||
 				(thread.WorkflowRunID != "" && (!validWorkflowIdentity(thread.WorkflowRunID) || !validWorkflowIdentity(thread.WorkflowAgentID))) {
 				return nil, fmt.Errorf("decode projects: thread %q has an invalid workflow identity", thread.ID)
+			}
+			if thread.SkillForkRequestID != "" {
+				if !validSkillForkRequestID(thread.SkillForkRequestID) || thread.ParentThreadID == "" || thread.WorkflowRunID != "" {
+					return nil, fmt.Errorf("decode projects: thread %q has an invalid skill fork request ID", thread.ID)
+				}
+				requestKey := thread.ParentThreadID + "\x00" + thread.SkillForkRequestID
+				if existing, duplicate := seenSkillForkRequests[requestKey]; duplicate {
+					return nil, fmt.Errorf("decode projects: threads %q and %q have the same skill fork request ID", existing, thread.ID)
+				}
+				seenSkillForkRequests[requestKey] = thread.ID
 			}
 			if thread.RollbackCleanupReady && !thread.RollbackPending {
 				return nil, fmt.Errorf("decode projects: thread %q has rollback cleanup ready without a pending rollback", thread.ID)
@@ -1976,12 +2002,21 @@ func (s *Store) AddThreadWithOptions(projectID, title string, options AddThreadO
 	options.AgentThinkingLevel = strings.TrimSpace(options.AgentThinkingLevel)
 	options.WorkflowRunID = strings.TrimSpace(options.WorkflowRunID)
 	options.WorkflowAgentID = strings.TrimSpace(options.WorkflowAgentID)
+	options.SkillForkRequestID = strings.TrimSpace(options.SkillForkRequestID)
 	if (options.WorkflowRunID == "") != (options.WorkflowAgentID == "") ||
 		(options.WorkflowRunID != "" && (!validWorkflowIdentity(options.WorkflowRunID) || !validWorkflowIdentity(options.WorkflowAgentID))) {
 		return Thread{}, errors.New("workflow run and agent IDs must be valid and supplied together")
 	}
 	if options.WorkflowRunID != "" && options.ParentThreadID == "" {
 		return Thread{}, errors.New("workflow identity requires a parent thread")
+	}
+	if options.SkillForkRequestID != "" {
+		if !validSkillForkRequestID(options.SkillForkRequestID) {
+			return Thread{}, errors.New("skill fork request ID is invalid")
+		}
+		if options.ParentThreadID == "" || options.WorkflowRunID != "" {
+			return Thread{}, errors.New("skill fork request ID requires a non-workflow child thread")
+		}
 	}
 	if !options.Worktree && (options.BaseBranch != "" || options.BaseRevision != "") {
 		return Thread{}, errors.New("a base branch or revision can only be used with a Git worktree")
@@ -2007,6 +2042,13 @@ func (s *Store) AddThreadWithOptions(projectID, title string, options AddThreadO
 	for index := range s.projects {
 		if s.projects[index].ID != projectID {
 			continue
+		}
+		if options.SkillForkRequestID != "" {
+			for _, existing := range s.projects[index].Threads {
+				if existing.ParentThreadID == options.ParentThreadID && existing.SkillForkRequestID == options.SkillForkRequestID {
+					return cloneThread(existing), ErrChildCreationRequestExists
+				}
+			}
 		}
 		limit := s.subAgentNestingDepth
 		if override := s.projects[index].SubAgentNestingDepthOverride; override != nil {
@@ -2063,6 +2105,7 @@ func (s *Store) AddThreadWithOptions(projectID, title string, options AddThreadO
 			AgentThinkingLevel: options.AgentThinkingLevel,
 			WorkflowRunID:      options.WorkflowRunID,
 			WorkflowAgentID:    options.WorkflowAgentID,
+			SkillForkRequestID: options.SkillForkRequestID,
 			NestedDepth:        nestedDepth,
 			RollbackPending:    options.CreationPending,
 		}

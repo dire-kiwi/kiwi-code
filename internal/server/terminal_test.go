@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dire-kiwi/kiwi-code/internal/project"
+	"github.com/gorilla/websocket"
 )
 
 func TestTerminalEndpointDoesNotStartTmuxForPlainHTTP(t *testing.T) {
@@ -473,5 +475,178 @@ func TestTmuxLoggingDisabled(t *testing.T) {
 				t.Fatalf("tmux command directory = %q, want empty", command.Dir)
 			}
 		})
+	}
+}
+
+func TestTerminalProtocolV2SignalsReadinessAndAcceptsBinaryInput(t *testing.T) {
+	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := item.Threads[0]
+
+	directory := t.TempDir()
+	statePath := filepath.Join(directory, "session-created")
+	tmuxPath := filepath.Join(directory, "tmux")
+	script := `#!/bin/sh
+shift 2
+for argument in "$@"; do
+  if [ "$argument" = "attach-session" ]; then
+    printf 'fake-ready\n'
+    while IFS= read -r line; do
+      printf 'echo:%s\n' "$line"
+    done
+    exit 0
+  fi
+done
+case "$1" in
+  has-session)
+    [ -f "$KIWI_CODE_FAKE_TMUX_STATE" ]
+    exit $?
+    ;;
+  new-session)
+    : > "$KIWI_CODE_FAKE_TMUX_STATE"
+    printf '0\t@1\t123\n'
+    exit 0
+    ;;
+  set-option)
+    exit 0
+    ;;
+esac
+exit 1
+`
+	if err := os.WriteFile(tmuxPath, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KIWI_CODE_FAKE_TMUX_STATE", statePath)
+	handler := newTerminalHandlerUnreconciledWithOptions(store, originPolicy{}, "kcv-terminal-v2")
+	handler.tmuxPath = tmuxPath
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/terminal", handler.serve)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	url := "ws" + strings.TrimPrefix(server.URL, "http") +
+		"/api/projects/" + item.ID + "/threads/" + thread.ID + "/terminal?tool=terminal&protocol=2"
+	connection, response, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		if response != nil {
+			_ = response.Body.Close()
+		}
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	_ = connection.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	messageType, payload, err := connection.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messageType != websocket.TextMessage || string(payload) != `{"type":"terminal_ready","protocol":2}` {
+		t.Fatalf("terminal ready frame = type %d payload %q", messageType, payload)
+	}
+	messageType, payload, err = connection.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messageType != websocket.BinaryMessage || !strings.Contains(string(payload), "fake-ready") {
+		t.Fatalf("terminal output frame = type %d payload %q", messageType, payload)
+	}
+	if err := connection.WriteJSON(clientMessage{Type: "ack", Bytes: uint32(len(payload))}); err != nil {
+		t.Fatal(err)
+	}
+	if err := connection.WriteMessage(websocket.BinaryMessage, []byte("hello\n")); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		messageType, payload, err = connection.ReadMessage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if messageType == websocket.BinaryMessage && strings.Contains(string(payload), "echo:hello") {
+			break
+		}
+	}
+}
+
+func TestTmuxSessionSetupRunsUnrelatedThreadsConcurrently(t *testing.T) {
+	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := item.Threads[0]
+	second, err := store.AddThread(item.ID, "Second")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	directory := t.TempDir()
+	callsPath := filepath.Join(directory, "has-session-calls")
+	timeoutPath := filepath.Join(directory, "serialized")
+	tmuxPath := filepath.Join(directory, "tmux")
+	script := `#!/bin/sh
+shift 2
+case "$1" in
+  has-session)
+    printf '%s\n' "$*" >> "$KIWI_CODE_TMUX_CONCURRENCY_CALLS"
+    count=0
+    while [ "$(wc -l < "$KIWI_CODE_TMUX_CONCURRENCY_CALLS" | tr -d ' ')" -lt 2 ]; do
+      count=$((count + 1))
+      if [ "$count" -ge 200 ]; then
+        : > "$KIWI_CODE_TMUX_CONCURRENCY_TIMEOUT"
+        break
+      fi
+      sleep 0.01
+    done
+    exit 1
+    ;;
+  new-session)
+    printf '0\t@%s\t123\n' "$$"
+    exit 0
+    ;;
+  set-option)
+    exit 0
+    ;;
+esac
+exit 1
+`
+	if err := os.WriteFile(tmuxPath, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KIWI_CODE_TMUX_CONCURRENCY_CALLS", callsPath)
+	t.Setenv("KIWI_CODE_TMUX_CONCURRENCY_TIMEOUT", timeoutPath)
+	handler := newTerminalHandlerUnreconciledWithOptions(store, originPolicy{}, "kcv-thread-parallel")
+	handler.tmuxPath = tmuxPath
+
+	results := make(chan error, 2)
+	for _, thread := range []project.Thread{first, second} {
+		thread := thread
+		go func() {
+			_, _, _, ensureErr := handler.ensureTmuxSession(item, thread, "terminal")
+			results <- ensureErr
+		}()
+	}
+	for range 2 {
+		select {
+		case ensureErr := <-results:
+			if ensureErr != nil {
+				t.Fatalf("ensure unrelated tmux session: %v", ensureErr)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("unrelated tmux session setup did not finish")
+		}
+	}
+	if _, err := os.Stat(timeoutPath); err == nil {
+		t.Fatal("unrelated tmux session setup was serialized by the global lock")
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
 	}
 }

@@ -20,15 +20,16 @@ type Broker[T any] struct {
 type Subscription[T any] struct {
 	broker *Broker[T]
 
-	mu         sync.Mutex
-	queue      []T
-	head       int
-	maxPending int
-	latestOnly bool
-	closed     bool
-	wake       chan struct{}
-	done       chan struct{}
-	events     chan T
+	mu          sync.Mutex
+	queue       []T
+	head        int
+	maxPending  int
+	latestOnly  bool
+	coalesceKey func(T) string
+	closed      bool
+	wake        chan struct{}
+	done        chan struct{}
+	events      chan T
 }
 
 // NewBroker creates a broker with a bounded backlog for each subscriber.
@@ -46,24 +47,33 @@ func NewBroker[T any](maxPending int) *Broker[T] {
 // Subscribe registers a new subscription. Call Close when it is no longer
 // needed.
 func (b *Broker[T]) Subscribe() *Subscription[T] {
-	return b.subscribe(false)
+	return b.subscribe(false, nil)
 }
 
 // SubscribeLatest creates a snapshot-style subscription. While its consumer
 // is busy, one pending value is retained and newer values replace it. It never
 // disconnects because of producer bursts.
 func (b *Broker[T]) SubscribeLatest() *Subscription[T] {
-	return b.subscribe(true)
+	return b.subscribe(true, nil)
 }
 
-func (b *Broker[T]) subscribe(latestOnly bool) *Subscription[T] {
+// SubscribeCoalesced preserves event order while replacing adjacent pending
+// values with the same nonempty key. It is intended for cumulative streaming
+// updates where the newest value supersedes an older value, while lifecycle
+// events around those updates must never be dropped.
+func (b *Broker[T]) SubscribeCoalesced(key func(T) string) *Subscription[T] {
+	return b.subscribe(false, key)
+}
+
+func (b *Broker[T]) subscribe(latestOnly bool, coalesceKey func(T) string) *Subscription[T] {
 	subscription := &Subscription[T]{
-		broker:     b,
-		maxPending: b.maxPending,
-		latestOnly: latestOnly,
-		wake:       make(chan struct{}, 1),
-		done:       make(chan struct{}),
-		events:     make(chan T),
+		broker:      b,
+		maxPending:  b.maxPending,
+		latestOnly:  latestOnly,
+		coalesceKey: coalesceKey,
+		wake:        make(chan struct{}, 1),
+		done:        make(chan struct{}),
+		events:      make(chan T),
 	}
 
 	b.mu.Lock()
@@ -82,8 +92,9 @@ func (b *Broker[T]) subscribe(latestOnly bool) *Subscription[T] {
 
 // Publish queues value for every current subscriber. Ordered subscriptions
 // receive every value and disconnect if their bounded queue overflows. Latest
-// subscriptions replace their one pending value and never overflow-disconnect.
-// Neither mode can delay this publisher or another subscriber.
+// subscriptions replace their one pending value; coalesced subscriptions only
+// replace adjacent pending values with the same key. No mode can delay this
+// publisher or another subscriber.
 func (b *Broker[T]) Publish(value T) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -119,6 +130,13 @@ func (s *Subscription[T]) enqueue(value T) bool {
 	if s.latestOnly && len(s.queue)-s.head > 0 {
 		s.queue[len(s.queue)-1] = value
 		return true
+	}
+	if s.coalesceKey != nil && len(s.queue)-s.head > 0 {
+		key := s.coalesceKey(value)
+		if key != "" && key == s.coalesceKey(s.queue[len(s.queue)-1]) {
+			s.queue[len(s.queue)-1] = value
+			return true
+		}
 	}
 	if len(s.queue)-s.head >= s.maxPending {
 		s.queue = nil
