@@ -18,11 +18,16 @@ export function createSeatbeltProfile(decision: PolicyDecision): string {
     "(allow mach-lookup)",
     "(allow ipc-posix*)",
     "(allow system-socket)",
+    // Runtime path discovery must be able to inspect lexical ancestors such as
+    // /var, /etc, /opt, and /tmp before macOS resolves their symlink targets.
+    // This exposes metadata only; file contents and writes remain path-scoped.
+    "(allow file-read-metadata)",
     // macOS 26 processes read the root directory while starting. Without this
     // exact-path grant, even /bin/pwd aborts before it can inspect an allowed cwd.
     // Keep this separate from decision.read so it does not become (subpath "/").
     '(allow file-read-data (literal "/"))',
   ];
+  if (decision.pty) appendPtyAccess(lines);
   if (decision.network) lines.push("(allow network*)");
   if (decision.unrestricted) {
     lines.push("(allow file-read*)", "(allow file-write*)");
@@ -32,6 +37,19 @@ export function createSeatbeltProfile(decision: PolicyDecision): string {
   }
   appendPaths(lines, "file-write*", decision.deniedWrite, "deny");
   return `${lines.join("\n")}\n`;
+}
+
+function appendPtyAccess(lines: string[]): void {
+  // openpty() requires the pseudo-tty operation plus read/write and ioctl access
+  // to the multiplexor and its dynamically selected slave. Match only modern
+  // macOS PTY slaves, not arbitrary /dev nodes.
+  lines.push(
+    "(allow pseudo-tty)",
+    "(allow file-read* file-write* file-ioctl",
+    '  (literal "/dev/ptmx")',
+    '  (regex #"^/dev/ttys[0-9][0-9][0-9]$")',
+    ")",
+  );
 }
 
 function appendPaths(lines: string[], operation: string, paths: string[], action: "allow" | "deny" = "allow"): void {

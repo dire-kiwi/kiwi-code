@@ -4,6 +4,7 @@
     "write": ["$CWD", "$TMPDIR"]
   },
   "network": false,
+  "pty": false,
   "shell": "/bin/zsh",
   "relatedProjects": ["../shared-library", "~/projects/related-service"],
   "commands": [

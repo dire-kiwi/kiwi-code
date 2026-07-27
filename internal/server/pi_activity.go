@@ -70,6 +70,11 @@ type piActivityTracker struct {
 	// consumers always reread current state, so an authoritative snapshot can
 	// never be followed by an older queued payload.
 	changes *broadcast.Broker[struct{}]
+	// stateChanged reports transitions between distinct agent states, never the
+	// repeated heartbeats that keep an unchanged state fresh. Inactivity cleanup
+	// treats it as evidence that a thread is still doing something, so a stalled
+	// agent repeating one state must not look like progress.
+	stateChanged func(projectID, threadID string, at time.Time)
 }
 
 func newPiActivityTracker() *piActivityTracker {
@@ -112,6 +117,14 @@ func (t *piActivityTracker) updateAgentTokenAt(
 	state piActivityState,
 	now time.Time,
 ) (*piThreadActivity, bool, bool) {
+	// Registered before the lock so it runs after the deferred unlock: the hook
+	// shells out to tmux and must never hold the tracker's mutex.
+	changedState := false
+	defer func() {
+		if changedState && t.stateChanged != nil {
+			t.stateChanged(projectID, threadID, now)
+		}
+	}()
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	key := piActivityKey{projectID: projectID, threadID: threadID, agent: agent, session: session}
@@ -190,6 +203,10 @@ func (t *piActivityTracker) updateAgentTokenAt(
 	previous, exists := t.activities[key]
 	startedWorking := state == piActivityWorking &&
 		(startedPrompt || (token == "" && (!exists || previous.State != piActivityWorking)))
+	// A new prompt on a key that is already working is a real change too: the
+	// state repeats, but the thread genuinely started fresh work.
+	changedState = startedPrompt || (exists && previous.State != state) ||
+		(!exists && state != piActivityIdle)
 	if state == piActivityIdle {
 		if exists {
 			delete(t.activities, key)

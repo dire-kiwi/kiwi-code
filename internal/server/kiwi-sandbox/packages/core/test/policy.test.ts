@@ -17,12 +17,13 @@ test("project config replaces global top-level fields", async () => {
   const root = await mkdtemp(join(tmpdir(), "kiwi-sandbox-config-"));
   const global = join(root, "global.json");
   const project = join(root, "project.json");
-  await writeFile(global, JSON.stringify({ defaults: { read: ["/global"], write: [] }, network: false }));
-  await writeFile(project, JSON.stringify({ commands: [{ pattern: "gh *" }], network: true, relatedProjects: ["../shared", "~/personal"] }));
+  await writeFile(global, JSON.stringify({ defaults: { read: ["/global"], write: [] }, network: false, pty: false }));
+  await writeFile(project, JSON.stringify({ commands: [{ pattern: "gh *" }], network: true, pty: true, relatedProjects: ["../shared", "~/personal"] }));
   const config = await loadConfig([global, project]);
   assert.deepEqual(config.defaults, { read: ["/global"], write: [] });
   assert.equal(config.commands[0]?.pattern, "gh *");
   assert.equal(config.network, true);
+  assert.equal(config.pty, true);
   assert.deepEqual(config.relatedProjects, ["../shared", "~/personal"]);
 });
 
@@ -99,6 +100,8 @@ test("unknown configuration fields fail closed", async () => {
   await assert.rejects(() => loadConfig([path]), /unknown field.*netowrk/);
   await writeFile(path, JSON.stringify({ commands: [{ pattern: "git *", netowrk: false }] }));
   await assert.rejects(() => loadConfig([path]), /unknown field.*netowrk/);
+  await writeFile(path, JSON.stringify({ pty: "yes" }));
+  await assert.rejects(() => loadConfig([path]), /pty must be boolean/);
 });
 
 test("command strings are shorthand for unrestricted filesystem rules", async () => {
@@ -129,6 +132,8 @@ test("built-in defaults run arbitrary commands without network or broad file acc
   assert.equal(config.commands.length, 0);
   assert.equal(decision.rule, "defaults");
   assert.equal(decision.network, false);
+  assert.equal(decision.pty, false);
+  assert.doesNotMatch(createSeatbeltProfile(decision), /^\(allow pseudo-tty\)$/m);
   await assertPathAllowed(join(cwd, "new-file.txt"), decision, "write");
   await assert.rejects(
     () => assertPathAllowed(join(homedir(), ".ssh", "id_ed25519"), decision, "read"),
@@ -230,6 +235,53 @@ test("simple command detector rejects composition and substitution", () => {
   assert.equal(isSimpleCommand("gh status > /tmp/result"), false);
 });
 
+test("Seatbelt profiles allow metadata globally without allowing contents or writes globally", () => {
+  const profile = createSeatbeltProfile({
+    rule: "defaults",
+    unrestricted: false,
+    read: [],
+    write: [],
+    deniedWrite: [],
+    network: false,
+    pty: false,
+  });
+  assert.match(profile, /^\(allow file-read-metadata\)$/m);
+  assert.doesNotMatch(profile, /^\(allow file-read-data\)$/m);
+  assert.doesNotMatch(profile, /^\(allow file-read\*\)$/m);
+  assert.doesNotMatch(profile, /^\(allow file-write\*\)$/m);
+});
+
+test("Seatbelt profiles require explicit PTY access without allowing arbitrary devices", () => {
+  for (const unrestricted of [false, true]) {
+    const disabledProfile = createSeatbeltProfile({
+      rule: "defaults",
+      unrestricted,
+      read: [],
+      write: [],
+      deniedWrite: [],
+      network: false,
+      pty: false,
+    });
+    assert.doesNotMatch(disabledProfile, /^\(allow pseudo-tty\)$/m);
+    assert.doesNotMatch(disabledProfile, /\/dev\/ptmx|\/dev\/ttys/);
+
+    const profile = createSeatbeltProfile({
+      rule: "defaults",
+      unrestricted,
+      read: [],
+      write: [],
+      deniedWrite: [],
+      network: false,
+      pty: true,
+    });
+    assert.match(profile, /^\(allow pseudo-tty\)$/m);
+    assert.match(profile, /\(allow file-read\* file-write\* file-ioctl\n/);
+    assert.match(profile, /\(literal "\/dev\/ptmx"\)/);
+    assert.match(profile, /\(regex #"\^\/dev\/ttys\[0-9\]\[0-9\]\[0-9\]\$"\)/);
+    assert.doesNotMatch(profile, /\(subpath "\/dev"\)/);
+  }
+});
+
 test("Seatbelt profiles allow the lexical xcode-select runtime path read-only", () => {
   const profile = createSeatbeltProfile({
     rule: "defaults",
@@ -238,6 +290,7 @@ test("Seatbelt profiles allow the lexical xcode-select runtime path read-only", 
     write: [],
     deniedWrite: [],
     network: false,
+    pty: false,
   });
   assert.match(profile, /\(literal "\/var\/select"\)/);
   assert.match(profile, /\(subpath "\/var\/select"\)/);

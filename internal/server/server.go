@@ -148,6 +148,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	}
 	server.allowChildThreadCreation = childThreadCreationEnabled
 	terminal.threadStatusChanged = server.notifyThreadStatusChanged
+	server.piActivity.stateChanged = terminal.markThreadTmuxStatusChanged
 	terminal.workflowChanged = server.queueWorkflowProcessReconcile
 	terminal.budgetReached = server.threadBudgetReached
 	terminal.nativePi.usageReporter = func(key piNativeProcessKey, sessionID string, totals threadUsageTotals) {
