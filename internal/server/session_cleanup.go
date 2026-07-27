@@ -24,22 +24,27 @@ const (
 	tmuxSessionInactivityLimit = 24 * time.Hour
 	sessionClosureLogFileName  = "tmux-session-closures.json"
 	maxSessionClosureEvents    = 500
+	tmuxLastUsedOption         = "@kiwi-code-last-used"
+	tmuxStatusChangedOption    = "@kiwi-code-last-status-change"
 )
 
+// tmuxSessionActivity deliberately ignores tmux's own session_activity,
+// session_last_attached, and session_attached. Kiwi Code keeps a control-mode
+// client attached to every thread's tools session for the backend's lifetime, so
+// all three report the backend watching itself rather than the user doing
+// anything. Only Kiwi Code's own signals count: the visit ping and agent state
+// transitions. session_created is kept as the floor for a session nobody has
+// touched yet.
 type tmuxSessionActivity struct {
-	Name           string
-	Attached       bool
-	CreatedAt      time.Time
-	ActivityAt     time.Time
-	LastAttachedAt time.Time
-	RecordedUseAt  time.Time
-	SourceSession  string
+	Name            string
+	CreatedAt       time.Time
+	RecordedUseAt   time.Time
+	StatusChangedAt time.Time
 }
 
 type inactiveThreadSessions struct {
 	SessionNames   []string
 	LastActivityAt time.Time
-	Attached       bool
 }
 
 type sessionClosureEvent struct {
@@ -258,7 +263,7 @@ func (s *Server) closeInactiveTmuxSessions(now time.Time) error {
 				continue
 			}
 			sessions := inactiveSessionsForThread(item, thread, activities)
-			if len(sessions.SessionNames) == 0 || sessions.Attached || sessions.LastActivityAt.After(now.Add(-tmuxSessionInactivityLimit)) {
+			if len(sessions.SessionNames) == 0 || sessions.LastActivityAt.After(now.Add(-tmuxSessionInactivityLimit)) {
 				continue
 			}
 			closed, closeErr := s.terminal.closeInactiveThreadSessions(item, thread, now, tmuxSessionInactivityLimit)
@@ -315,7 +320,7 @@ func (h *terminalHandler) closeInactiveThreadSessions(item project.Project, thre
 			return err
 		}
 		sessions := inactiveSessionsForThread(item, thread, activities)
-		if len(sessions.SessionNames) == 0 || sessions.Attached || sessions.LastActivityAt.After(now.Add(-limit)) {
+		if len(sessions.SessionNames) == 0 || sessions.LastActivityAt.After(now.Add(-limit)) {
 			return nil
 		}
 		if err := h.stopNamedTmuxSessionsAndViews(threadTmuxSessionNameSet(item, thread.ID)); err != nil {
@@ -376,13 +381,30 @@ func (h *terminalHandler) markThreadTmuxSessionsUsed(item project.Project, threa
 	return nil
 }
 
+// markThreadTmuxStatusChanged records an agent state transition on the thread's
+// canonical sessions. It is best-effort and deliberately lock-free: it only
+// writes a timestamp option, so losing one to a session that is being created or
+// stopped costs nothing beyond the thread looking slightly less recently active.
+func (h *terminalHandler) markThreadTmuxStatusChanged(projectID, threadID string, changedAt time.Time) {
+	if h == nil || h.tmuxPath == "" {
+		return
+	}
+	for _, tool := range []string{"terminal", "process"} {
+		sessionName := tmuxSessionName(projectID, threadID, tool)
+		_ = h.tmuxCommand(
+			"set-option", "-t", exactTmuxCurrentWindowTarget(sessionName),
+			tmuxStatusChangedOption, strconv.FormatInt(changedAt.UTC().Unix(), 10),
+		).Run()
+	}
+}
+
 func (h *terminalHandler) markTmuxSessionUsed(sessionName string, usedAt time.Time) error {
 	if strings.TrimSpace(sessionName) == "" {
 		return errors.New("tmux session name is required")
 	}
 	output, err := h.tmuxCommand(
 		"set-option", "-t", exactTmuxCurrentWindowTarget(sessionName),
-		"@kiwi-code-last-used", strconv.FormatInt(usedAt.UTC().Unix(), 10),
+		tmuxLastUsedOption, strconv.FormatInt(usedAt.UTC().Unix(), 10),
 	).CombinedOutput()
 	if err != nil {
 		return tmuxCommandError("record tmux session use", output, err)
@@ -393,7 +415,7 @@ func (h *terminalHandler) markTmuxSessionUsed(sessionName string, usedAt time.Ti
 func (h *terminalHandler) tmuxSessionActivities() ([]tmuxSessionActivity, error) {
 	output, err := h.tmuxCommand(
 		"list-sessions", "-F",
-		"#{session_name}\t#{?session_attached,1,0}\t#{session_created}\t#{session_activity}\t#{session_last_attached}\t#{@kiwi-code-last-used}\t#{@kiwi-code-source-session}",
+		"#{session_name}\t#{session_created}\t#{"+tmuxLastUsedOption+"}\t#{"+tmuxStatusChangedOption+"}",
 	).CombinedOutput()
 	if err != nil {
 		if isMissingTmuxServer(output, err) {
@@ -408,34 +430,27 @@ func parseTmuxSessionActivities(output []byte) ([]tmuxSessionActivity, error) {
 	lines := strings.FieldsFunc(string(output), func(r rune) bool { return r == '\n' || r == '\r' })
 	activities := make([]tmuxSessionActivity, 0, len(lines))
 	for _, line := range lines {
-		parts := strings.SplitN(line, "\t", 7)
-		if len(parts) != 7 || strings.TrimSpace(parts[0]) == "" || (parts[1] != "0" && parts[1] != "1") {
+		parts := strings.SplitN(line, "\t", 4)
+		if len(parts) != 4 || strings.TrimSpace(parts[0]) == "" {
 			return nil, fmt.Errorf("parse tmux session activity: %q", line)
 		}
-		createdAt, err := parseTmuxUnixTime(parts[2], true)
+		createdAt, err := parseTmuxUnixTime(parts[1], true)
 		if err != nil {
 			return nil, fmt.Errorf("parse tmux session creation time: %w", err)
 		}
-		activityAt, err := parseTmuxUnixTime(parts[3], false)
-		if err != nil {
-			return nil, fmt.Errorf("parse tmux session activity time: %w", err)
-		}
-		lastAttachedAt, err := parseTmuxUnixTime(parts[4], false)
-		if err != nil {
-			return nil, fmt.Errorf("parse tmux session attachment time: %w", err)
-		}
-		recordedUseAt, err := parseTmuxUnixTime(parts[5], false)
+		recordedUseAt, err := parseTmuxUnixTime(parts[2], false)
 		if err != nil {
 			return nil, fmt.Errorf("parse recorded tmux session use time: %w", err)
 		}
+		statusChangedAt, err := parseTmuxUnixTime(parts[3], false)
+		if err != nil {
+			return nil, fmt.Errorf("parse recorded tmux session status change time: %w", err)
+		}
 		activities = append(activities, tmuxSessionActivity{
-			Name:           strings.TrimSpace(parts[0]),
-			Attached:       parts[1] == "1",
-			CreatedAt:      createdAt,
-			ActivityAt:     activityAt,
-			LastAttachedAt: lastAttachedAt,
-			RecordedUseAt:  recordedUseAt,
-			SourceSession:  strings.TrimSpace(parts[6]),
+			Name:            strings.TrimSpace(parts[0]),
+			CreatedAt:       createdAt,
+			RecordedUseAt:   recordedUseAt,
+			StatusChangedAt: statusChangedAt,
 		})
 	}
 	return activities, nil
@@ -463,16 +478,11 @@ func inactiveSessionsForThread(item project.Project, thread project.Thread, acti
 		result.LastActivityAt = thread.LastPromptAt.UTC()
 	}
 	for _, activity := range activities {
-		_, canonical := names[activity.Name]
-		_, linkedView := names[activity.SourceSession]
-		if !canonical && !linkedView {
+		if _, canonical := names[activity.Name]; !canonical {
 			continue
 		}
-		if canonical {
-			result.SessionNames = append(result.SessionNames, activity.Name)
-		}
-		result.Attached = result.Attached || activity.Attached
-		for _, timestamp := range []time.Time{activity.CreatedAt, activity.ActivityAt, activity.LastAttachedAt, activity.RecordedUseAt} {
+		result.SessionNames = append(result.SessionNames, activity.Name)
+		for _, timestamp := range []time.Time{activity.CreatedAt, activity.RecordedUseAt, activity.StatusChangedAt} {
 			if timestamp.After(result.LastActivityAt) {
 				result.LastActivityAt = timestamp.UTC()
 			}
