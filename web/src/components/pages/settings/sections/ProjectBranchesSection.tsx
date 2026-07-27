@@ -1,11 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Check, Folder, FolderGit2, LoaderCircle, Save } from 'lucide-react'
+import { Folder, FolderGit2, LoaderCircle, Save } from 'lucide-react'
 import { updateProjectWorktreeBranchPrefix } from '../../../../api'
+import { useAsyncFeedback } from '../../../../lib/useAsyncFeedback'
 import type { Project } from '../../../../types'
 import { PrimaryButton } from '../../../atoms/Button'
 import { TextInput } from '../../../atoms/Input'
 import { Surface } from '../../../atoms/Surface'
-import { FeedbackMessage } from '../../../molecules/FeedbackMessage'
+import { ActionFeedback } from '../../../molecules/ActionFeedback'
 import { InfoCallout } from '../../../molecules/InfoCallout'
 import { SectionHeader } from '../../../molecules/SectionHeader'
 
@@ -16,15 +17,13 @@ type ProjectBranchesSectionProps = {
 
 export function ProjectBranchesSection({ project, onProjectUpdated }: ProjectBranchesSectionProps) {
   const [branchPrefix, setBranchPrefix] = useState(project.worktreeBranchPrefix)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
+  const action = useAsyncFeedback()
+  const saving = action.pending
 
   useEffect(() => {
     setBranchPrefix(project.worktreeBranchPrefix)
-    setError('')
-    setMessage('')
-  }, [project.id, project.worktreeBranchPrefix])
+    action.clearFeedback()
+  }, [action.clearFeedback, project.id, project.worktreeBranchPrefix])
 
   const normalizedBranchPrefix = branchPrefix.trim()
   const dirty = normalizedBranchPrefix.length > 0
@@ -34,19 +33,14 @@ export function ProjectBranchesSection({ project, onProjectUpdated }: ProjectBra
     event.preventDefault()
     if (!dirty || saving) return
 
-    setSaving(true)
-    setError('')
-    setMessage('')
-    try {
-      const updated = await updateProjectWorktreeBranchPrefix(project.id, normalizedBranchPrefix)
-      onProjectUpdated(updated)
-      setBranchPrefix(updated.worktreeBranchPrefix)
-      setMessage('Branch prefix saved.')
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not update the branch prefix.')
-    } finally {
-      setSaving(false)
-    }
+    const updated = await action.run(
+      'default',
+      () => updateProjectWorktreeBranchPrefix(project.id, normalizedBranchPrefix),
+      { success: 'Branch prefix saved.', failure: 'Could not update the branch prefix.' },
+    )
+    if (!updated) return
+    onProjectUpdated(updated)
+    setBranchPrefix(updated.worktreeBranchPrefix)
   }
 
   return (
@@ -76,8 +70,7 @@ export function ProjectBranchesSection({ project, onProjectUpdated }: ProjectBra
               value={branchPrefix}
               onChange={(event) => {
                 setBranchPrefix(event.target.value)
-                setError('')
-                setMessage('')
+                action.clearFeedback()
               }}
               maxLength={100}
               disabled={saving}
@@ -85,7 +78,7 @@ export function ProjectBranchesSection({ project, onProjectUpdated }: ProjectBra
               autoComplete="off"
               spellCheck={false}
               placeholder="kiwi-code/"
-              aria-describedby={error
+              aria-describedby={action.feedback?.tone === 'error'
                 ? 'project-worktree-branch-prefix-error'
                 : 'project-worktree-branch-prefix-help'}
               className="mt-2.5"
@@ -98,17 +91,11 @@ export function ProjectBranchesSection({ project, onProjectUpdated }: ProjectBra
             branches are not renamed.
           </InfoCallout>
 
-          {error && (
-            <FeedbackMessage id="project-worktree-branch-prefix-error" role="alert" tone="error" className="mt-4">
-              {error}
-            </FeedbackMessage>
-          )}
-          {message && (
-            <FeedbackMessage role="status" tone="success" size="status" className="mt-4 flex items-center gap-2">
-              <Check size={13} />
-              {message}
-            </FeedbackMessage>
-          )}
+          <ActionFeedback
+            id="project-worktree-branch-prefix-error"
+            feedback={action.feedback}
+            className="mt-4"
+          />
         </div>
 
         <div className="flex items-center justify-end border-t border-ghost-border/60 bg-ghost-black/15 px-4 py-3 sm:px-5">

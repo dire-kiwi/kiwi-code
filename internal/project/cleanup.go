@@ -424,122 +424,116 @@ func (s *Store) saveOrphanedWorktreesLocked() error {
 	return nil
 }
 
-func (s *Store) CleanupOrphanedWorktrees(now time.Time) (result WorktreeCleanupResult, err error) {
+func (s *Store) CleanupOrphanedWorktrees(now time.Time) (WorktreeCleanupResult, error) {
 	now = now.UTC()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	mutation, err := s.lockAndReloadProjectMutationsLocked()
-	if err != nil {
-		return WorktreeCleanupResult{}, err
-	}
-	defer func() {
-		err = errors.Join(err, mutation.Release())
-	}()
+	return withProjectMutationResult(s, func() (WorktreeCleanupResult, error) {
+		result := WorktreeCleanupResult{}
 
-	activePaths := make(map[string]struct{})
-	activeThreads := make(map[string]struct{})
-	for _, item := range s.projects {
-		for _, thread := range item.Threads {
-			if !thread.Worktree {
-				continue
-			}
-			activeThreads[worktreeThreadKey(item.ID, thread.ID)] = struct{}{}
-			if thread.WorktreePath != "" {
-				activePaths[worktreeIdentityPath(thread.WorktreePath)] = struct{}{}
+		activePaths := make(map[string]struct{})
+		activeThreads := make(map[string]struct{})
+		for _, item := range s.projects {
+			for _, thread := range item.Threads {
+				if !thread.Worktree {
+					continue
+				}
+				activeThreads[worktreeThreadKey(item.ID, thread.ID)] = struct{}{}
+				if thread.WorktreePath != "" {
+					activePaths[worktreeIdentityPath(thread.WorktreePath)] = struct{}{}
+				}
 			}
 		}
-	}
 
-	changed := false
-	tracked := make(map[string]struct{}, len(s.orphanedWorktrees))
-	orphaned := make([]orphanedWorktree, 0, len(s.orphanedWorktrees))
-	for _, record := range s.orphanedWorktrees {
-		path := filepath.Clean(record.WorktreePath)
-		identity := worktreeIdentityPath(path)
-		_, activePath := activePaths[identity]
-		_, activeThread := activeThreads[worktreeThreadKey(record.ProjectID, record.ThreadID)]
-		if activePath || activeThread {
+		changed := false
+		tracked := make(map[string]struct{}, len(s.orphanedWorktrees))
+		orphaned := make([]orphanedWorktree, 0, len(s.orphanedWorktrees))
+		for _, record := range s.orphanedWorktrees {
+			path := filepath.Clean(record.WorktreePath)
+			identity := worktreeIdentityPath(path)
+			_, activePath := activePaths[identity]
+			_, activeThread := activeThreads[worktreeThreadKey(record.ProjectID, record.ThreadID)]
+			if activePath || activeThread {
+				changed = true
+				continue
+			}
+			record.WorktreePath = path
+			tracked[identity] = struct{}{}
+			orphaned = append(orphaned, record)
+		}
+
+		discovered, discoveryErr := discoverManagedOrphanedWorktrees(s.projects, activePaths, activeThreads, tracked, now)
+		if len(discovered) > 0 {
+			orphaned = append(orphaned, discovered...)
 			changed = true
-			continue
 		}
-		record.WorktreePath = path
-		tracked[identity] = struct{}{}
-		orphaned = append(orphaned, record)
-	}
 
-	discovered, discoveryErr := discoverManagedOrphanedWorktrees(s.projects, activePaths, activeThreads, tracked, now)
-	if len(discovered) > 0 {
-		orphaned = append(orphaned, discovered...)
-		changed = true
-	}
-
-	retentionDays := s.orphanedWorktreeRetentionDays
-	kept := make([]orphanedWorktree, 0, len(orphaned))
-	cleanupErrors := []error{discoveryErr}
-	for _, record := range orphaned {
-		info, statErr := os.Stat(record.WorktreePath)
-		if errors.Is(statErr, os.ErrNotExist) {
-			if pruneErr := pruneOrphanedWorktree(record); pruneErr != nil {
+		retentionDays := s.orphanedWorktreeRetentionDays
+		kept := make([]orphanedWorktree, 0, len(orphaned))
+		cleanupErrors := []error{discoveryErr}
+		for _, record := range orphaned {
+			info, statErr := os.Stat(record.WorktreePath)
+			if errors.Is(statErr, os.ErrNotExist) {
+				if pruneErr := pruneOrphanedWorktree(record); pruneErr != nil {
+					kept = append(kept, record)
+					cleanupErrors = append(cleanupErrors, pruneErr)
+					continue
+				}
+				changed = true
+				continue
+			}
+			if statErr != nil {
 				kept = append(kept, record)
-				cleanupErrors = append(cleanupErrors, pruneErr)
+				cleanupErrors = append(cleanupErrors, fmt.Errorf("inspect unattached worktree %q: %w", record.WorktreePath, statErr))
+				continue
+			}
+			if !info.IsDir() {
+				kept = append(kept, record)
+				cleanupErrors = append(cleanupErrors, fmt.Errorf("unattached worktree %q is not a directory", record.WorktreePath))
+				continue
+			}
+			if retentionDays == 0 || now.Before(record.DetachedAt.Add(time.Duration(retentionDays)*24*time.Hour)) {
+				kept = append(kept, record)
+				continue
+			}
+
+			status, statusErr := gitOutput(record.WorktreePath, "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none")
+			if statusErr != nil {
+				kept = append(kept, record)
+				cleanupErrors = append(cleanupErrors, fmt.Errorf("check unattached worktree %q: %w", record.WorktreePath, statusErr))
+				continue
+			}
+			if strings.TrimSpace(string(status)) != "" {
+				kept = append(kept, record)
+				result.RetainedWithChanges = append(result.RetainedWithChanges, record.WorktreePath)
+				continue
+			}
+			if strings.TrimSpace(record.CleanupScript) != "" {
+				workingDirectory := strings.TrimSpace(record.CleanupWorkingDirectory)
+				if workingDirectory == "" {
+					workingDirectory = record.WorktreePath
+				}
+				if cleanupErr := runEnvironmentScript(workingDirectory, record.CleanupScript, record.CleanupVariables); cleanupErr != nil {
+					kept = append(kept, record)
+					cleanupErrors = append(cleanupErrors, fmt.Errorf("run cleanup script for unattached worktree %q: %w", record.WorktreePath, cleanupErr))
+					continue
+				}
+			}
+			if removeErr := removeOrphanedWorktree(record); removeErr != nil {
+				kept = append(kept, record)
+				cleanupErrors = append(cleanupErrors, removeErr)
 				continue
 			}
 			changed = true
-			continue
-		}
-		if statErr != nil {
-			kept = append(kept, record)
-			cleanupErrors = append(cleanupErrors, fmt.Errorf("inspect unattached worktree %q: %w", record.WorktreePath, statErr))
-			continue
-		}
-		if !info.IsDir() {
-			kept = append(kept, record)
-			cleanupErrors = append(cleanupErrors, fmt.Errorf("unattached worktree %q is not a directory", record.WorktreePath))
-			continue
-		}
-		if retentionDays == 0 || now.Before(record.DetachedAt.Add(time.Duration(retentionDays)*24*time.Hour)) {
-			kept = append(kept, record)
-			continue
+			result.Deleted = append(result.Deleted, record.WorktreePath)
 		}
 
-		status, statusErr := gitOutput(record.WorktreePath, "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none")
-		if statusErr != nil {
-			kept = append(kept, record)
-			cleanupErrors = append(cleanupErrors, fmt.Errorf("check unattached worktree %q: %w", record.WorktreePath, statusErr))
-			continue
-		}
-		if strings.TrimSpace(string(status)) != "" {
-			kept = append(kept, record)
-			result.RetainedWithChanges = append(result.RetainedWithChanges, record.WorktreePath)
-			continue
-		}
-		if strings.TrimSpace(record.CleanupScript) != "" {
-			workingDirectory := strings.TrimSpace(record.CleanupWorkingDirectory)
-			if workingDirectory == "" {
-				workingDirectory = record.WorktreePath
-			}
-			if cleanupErr := runEnvironmentScript(workingDirectory, record.CleanupScript, record.CleanupVariables); cleanupErr != nil {
-				kept = append(kept, record)
-				cleanupErrors = append(cleanupErrors, fmt.Errorf("run cleanup script for unattached worktree %q: %w", record.WorktreePath, cleanupErr))
-				continue
+		s.orphanedWorktrees = kept
+		if changed {
+			if saveErr := s.saveOrphanedWorktreesLocked(); saveErr != nil {
+				cleanupErrors = append(cleanupErrors, saveErr)
 			}
 		}
-		if removeErr := removeOrphanedWorktree(record); removeErr != nil {
-			kept = append(kept, record)
-			cleanupErrors = append(cleanupErrors, removeErr)
-			continue
-		}
-		changed = true
-		result.Deleted = append(result.Deleted, record.WorktreePath)
-	}
-
-	s.orphanedWorktrees = kept
-	if changed {
-		if saveErr := s.saveOrphanedWorktreesLocked(); saveErr != nil {
-			cleanupErrors = append(cleanupErrors, saveErr)
-		}
-	}
-	return result, errors.Join(cleanupErrors...)
+		return result, errors.Join(cleanupErrors...)
+	})
 }
 
 func discoverManagedOrphanedWorktrees(

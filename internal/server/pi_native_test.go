@@ -5,6 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,6 +17,7 @@ import (
 
 	"github.com/dire-kiwi/kiwi-code/internal/broadcast"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
+	"github.com/gorilla/websocket"
 )
 
 func TestPiNativeBrowserEventCoalesceKeyOnlyCompactsCumulativeUpdates(t *testing.T) {
@@ -173,9 +177,11 @@ func TestPiNativeGetStateRemembersTheActiveSession(t *testing.T) {
 	sessionDirectory := t.TempDir()
 	sessionFile := writePiNativeTestSession(t, sessionDirectory, "active.jsonl", "active", t.TempDir())
 	process := &piNativeProcess{
-		key:              piNativeProcessKey{ProjectID: "project", ThreadID: "thread"},
+		nativeProcessCore: &nativeProcessCore{
+			key:    piNativeProcessKey{ProjectID: "project", ThreadID: "thread"},
+			events: broadcast.NewBroker[[]byte](4),
+		},
 		sessionDirectory: sessionDirectory,
-		events:           broadcast.NewBroker[[]byte](4),
 		runs:             make(map[uint64]piNativeRunSnapshot),
 	}
 	payload, err := json.Marshal(map[string]any{
@@ -653,9 +659,12 @@ func TestPiNativeRunTrackingMarksAssistantErrorsFailed(t *testing.T) {
 func TestPiNativeAutomaticCompactionRefreshesDisplayHistory(t *testing.T) {
 	writer := &piNativeTestWriteCloser{}
 	process := &piNativeProcess{
-		stdin:  writer,
-		done:   make(chan struct{}),
-		events: broadcast.NewBroker[[]byte](1),
+		nativeProcessCore: &nativeProcessCore{
+			spec:   piProcessSpec,
+			stdin:  writer,
+			done:   make(chan struct{}),
+			events: broadcast.NewBroker[[]byte](1),
+		},
 	}
 	process.publishPiEvent([]byte(`{"type":"compaction_end","reason":"threshold","aborted":false}`))
 
@@ -676,7 +685,11 @@ func TestPiNativeAutomaticCompactionRefreshesDisplayHistory(t *testing.T) {
 
 func TestPiNativeClientCommandsReceiveRequestIDs(t *testing.T) {
 	writer := &piNativeTestWriteCloser{}
-	process := &piNativeProcess{stdin: writer, done: make(chan struct{})}
+	process := &piNativeProcess{nativeProcessCore: &nativeProcessCore{
+		spec:  piProcessSpec,
+		stdin: writer,
+		done:  make(chan struct{}),
+	}}
 	if err := process.sendClientCommand(piNativeRPCCommand{Type: "get_commands"}); err != nil {
 		t.Fatal(err)
 	}
@@ -896,6 +909,216 @@ done
 	}
 	if _, err := os.Stat(sessionDirectory); !os.IsNotExist(err) {
 		t.Fatalf("native Pi session directory remained after thread removal: %v", err)
+	}
+}
+
+func TestServePiNativeEndToEnd(t *testing.T) {
+	harness := newPiNativeWebSocketHarness(t, `#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *'"type":"get_state"'*)
+      printf '%s\n' '{"type":"response","command":"get_state","success":true,"data":{"isStreaming":false,"thinkingLevel":"high","messageCount":0,"pendingMessageCount":0}}'
+      ;;
+    *'"type":"get_messages"'*)
+      printf '%s\n' '{"type":"response","command":"get_messages","success":true,"data":{"messages":[]}}'
+      ;;
+    *'"type":"get_entries"'*)
+      printf '%s\n' '{"type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":null}}'
+      ;;
+    *'"type":"get_session_stats"'*)
+      printf '%s\n' '{"type":"response","command":"get_session_stats","success":true,"data":{"totalMessages":1,"toolCalls":0,"tokens":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0,"total":15},"cost":0.01}}'
+      ;;
+    *'"type":"prompt"'*)
+      printf '%s\n' '{"type":"response","command":"prompt","success":true}'
+      printf '%s\n' '{"type":"agent_start"}'
+      printf '%s\n' '{"type":"message_start","message":{"role":"user","content":"hi","timestamp":1}}'
+      printf '%s\n' '{"type":"message_update","message":{"role":"assistant","content":[{"type":"text","text":"Hello"}],"timestamp":2},"assistantMessageEvent":{"type":"text_delta","delta":"Hello"}}'
+      printf '%s\n' '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Hello"}],"timestamp":2}}'
+      printf '%s\n' '{"type":"agent_settled"}'
+      ;;
+    *'"type":"compact"'*)
+      printf '%s\n' '{"type":"response","command":"compact","success":true,"data":{"summary":"Saved context"}}'
+      ;;
+  esac
+done
+`)
+
+	connection, _, err := websocket.DefaultDialer.Dial(
+		harness.websocketURL()+"?model=openai%2Fgpt-5.6&thinking=high",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+
+	readPiNativeWebSocketEvent(t, connection, "pi_native_ready", "")
+	state := readPiNativeWebSocketEvent(t, connection, "response", "get_state")
+	data, ok := state["data"].(map[string]any)
+	if !ok || data["thinkingLevel"] != "high" {
+		t.Fatalf("initial Pi state = %#v", state)
+	}
+	readPiNativeWebSocketEvent(t, connection, "response", "get_messages")
+	readPiNativeWebSocketEvent(t, connection, "pi_native_history", "")
+	readPiNativeWebSocketEvent(t, connection, "response", "get_session_stats")
+
+	if err := connection.WriteJSON(map[string]any{"type": "prompt", "message": "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	message := readPiNativeWebSocketEvent(t, connection, "message_end", "")
+	assistant, ok := message["message"].(map[string]any)
+	if !ok || assistant["role"] != "assistant" {
+		t.Fatalf("assistant message = %#v", message)
+	}
+	readPiNativeWebSocketEvent(t, connection, "agent_settled", "")
+
+	if err := connection.WriteJSON(map[string]any{"type": "restart"}); err != nil {
+		t.Fatal(err)
+	}
+	readPiNativeWebSocketEvent(t, connection, "pi_native_restarting", "")
+	readPiNativeWebSocketEvent(t, connection, "pi_native_reloaded", "")
+	readPiNativeWebSocketEvent(t, connection, "response", "get_state")
+}
+
+func TestServePiNativeSlowSubscriberClosesWithoutStoppingProcess(t *testing.T) {
+	harness := newPiNativeWebSocketHarness(t, `#!/bin/sh
+while IFS= read -r line; do
+  :
+done
+`)
+	process, err := harness.handler.nativePi.getOrStart(
+		harness.item,
+		harness.thread,
+		"http://127.0.0.1:1/api/projects/"+harness.item.ID+"/threads/"+harness.thread.ID,
+		codingAgentLaunchOptions{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Keep the production behavior but make the bounded backlog tiny so this
+	// characterization test does not depend on kernel socket buffer sizes.
+	process.events = broadcast.NewBroker[[]byte](1)
+
+	connection, _, err := websocket.DefaultDialer.Dial(harness.websocketURL(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+	readPiNativeWebSocketEvent(t, connection, "pi_native_ready", "")
+
+	for index := 0; index < 64; index++ {
+		process.events.Publish([]byte(fmt.Sprintf(`{"type":"burst","index":%d}`, index)))
+	}
+
+	if err := connection.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		_, _, readErr := connection.ReadMessage()
+		if readErr == nil {
+			continue
+		}
+		var closeErr *websocket.CloseError
+		if !errors.As(readErr, &closeErr) {
+			t.Fatalf("slow subscriber read error = %v, want WebSocket close", readErr)
+		}
+		if closeErr.Code != websocket.CloseTryAgainLater {
+			t.Fatalf("slow subscriber close code = %d, want %d", closeErr.Code, websocket.CloseTryAgainLater)
+		}
+		break
+	}
+
+	if channelClosed(process.done) {
+		t.Fatal("slow WebSocket subscriber stopped the native Pi process")
+	}
+	current, err := harness.handler.nativePi.getOrStart(
+		harness.item,
+		harness.thread,
+		"http://127.0.0.1:1",
+		codingAgentLaunchOptions{},
+	)
+	if err != nil || current != process {
+		t.Fatalf("native Pi process after slow subscriber = %p, %v; want %p", current, err, process)
+	}
+
+	fast := process.events.Subscribe()
+	defer fast.Close()
+	marker := []byte(`{"type":"after_overflow"}`)
+	process.events.Publish(marker)
+	select {
+	case payload, open := <-fast.Events():
+		if !open || !bytes.Equal(payload, marker) {
+			t.Fatalf("event flow after overflow = %s, open=%t", payload, open)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("native Pi event flow stalled after slow subscriber closed")
+	}
+}
+
+type piNativeWebSocketHarness struct {
+	item    project.Project
+	thread  project.Thread
+	handler *terminalHandler
+	server  *httptest.Server
+}
+
+func newPiNativeWebSocketHarness(t *testing.T, script string) piNativeWebSocketHarness {
+	t.Helper()
+	directory := t.TempDir()
+	fakePi := filepath.Join(directory, "fake-pi")
+	if err := os.WriteFile(fakePi, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := project.NewStore(filepath.Join(directory, "data", "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := item.Threads[0]
+	socketName := fmt.Sprintf("kcv-pi-%x", time.Now().UnixNano())
+	if socketName == "" || socketName == tmuxSocketName {
+		t.Fatalf("invalid isolated tmux socket %q", socketName)
+	}
+	handler := newTerminalHandlerUnreconciledWithOptions(store, originPolicy{}, socketName)
+	// Native Pi does not require tmux. Make any accidental tmux dependency fail
+	// without touching the canonical production server.
+	handler.tmuxPath = ""
+	handler.nativePi.piPath = fakePi
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/pi/native", handler.servePiNative)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	t.Cleanup(handler.nativePi.stopAll)
+	return piNativeWebSocketHarness{item: item, thread: thread, handler: handler, server: server}
+}
+
+func (h piNativeWebSocketHarness) websocketURL() string {
+	return "ws" + strings.TrimPrefix(h.server.URL, "http") +
+		"/api/projects/" + h.item.ID + "/threads/" + h.thread.ID + "/pi/native"
+}
+
+func readPiNativeWebSocketEvent(t *testing.T, connection *websocket.Conn, eventType, command string) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := connection.SetReadDeadline(deadline); err != nil {
+			t.Fatal(err)
+		}
+		_, payload, err := connection.ReadMessage()
+		if err != nil {
+			t.Fatalf("read while waiting for native Pi %s/%s: %v", eventType, command, err)
+		}
+		var event map[string]any
+		if err := json.Unmarshal(payload, &event); err != nil {
+			t.Fatalf("decode native Pi event while waiting for %s/%s: %v", eventType, command, err)
+		}
+		if event["type"] == eventType && (command == "" || event["command"] == command) {
+			return event
+		}
 	}
 }
 

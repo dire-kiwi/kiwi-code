@@ -1,4 +1,7 @@
-import { activityDisplayThread } from './sidebar-thread-activity.mjs'
+import {
+  createSidebarThreadIndex,
+  sidebarThreadKey,
+} from './sidebar-thread-index.mjs'
 
 export const recentThreadLimit = 8
 
@@ -101,15 +104,16 @@ function publicEntry({ projectId, threadId, at }) {
  * ordered by their newest member. Recent holds only active root threads and is
  * capped at recentLimit; the overflow is reported as hiddenRecentCount.
  */
-export function activityViewGroups(projects, activities, recentLimit = recentThreadLimit) {
+export function activityViewGroups(
+  projects,
+  activities,
+  recentLimit = recentThreadLimit,
+  index = createSidebarThreadIndex(projects, activities),
+) {
   const threadsByKey = new Map()
-  const threadsByProject = new Map()
   let order = 0
-  for (const project of projects) {
-    threadsByProject.set(project.id, project.threads)
-    for (const thread of project.threads) {
-      threadsByKey.set(entryKey(project.id, thread.id), { projectId: project.id, thread, order: order++ })
-    }
+  for (const [key, { project, thread }] of index.entryByKey) {
+    threadsByKey.set(key, { projectId: project.id, thread, order: order++ })
   }
 
   const included = new Set()
@@ -117,12 +121,9 @@ export function activityViewGroups(projects, activities, recentLimit = recentThr
     const entriesByKey = new Map()
     for (const activity of activities) {
       if (activity.state !== state) continue
-      const projectThreads = threadsByProject.get(activity.projectId)
-      const displayThread = projectThreads
-        ? activityDisplayThread(projectThreads, activity)
-        : null
+      const displayThread = index.tree(activity.projectId)?.activityDisplayThread(activity, true)
       if (!displayThread) continue
-      const key = entryKey(activity.projectId, displayThread.id)
+      const key = sidebarThreadKey(activity.projectId, displayThread.id)
       const found = threadsByKey.get(key)
       if (!found || found.thread.archivedAt || included.has(key)) continue
       const promptAt = threadRecency(found.thread)

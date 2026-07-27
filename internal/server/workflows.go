@@ -688,6 +688,95 @@ func (m *workflowManager) runnerCommand(manifestPath, scriptPath, endpoint, envP
 type workflowProcessLauncher func(project.Project, project.Thread, string, string) (processWindow, error)
 type workflowProcessStopper func(project.Project, project.Thread, string) error
 
+func workflowManifest(record workflowRunRecord, endpoint string) workflowRunnerManifest {
+	return workflowRunnerManifest{
+		Version:              workflowManifestVersion,
+		RunID:                record.ID,
+		Attempt:              record.Attempt,
+		Endpoint:             endpoint,
+		Token:                record.Token,
+		ScriptPath:           record.ScriptPath,
+		HasArgs:              record.HasArgs,
+		Args:                 cloneRawMessage(record.Args),
+		DefaultModel:         record.DefaultModel,
+		DefaultThinkingLevel: record.DefaultEffort,
+		CloseOnComplete:      record.CloseChildren,
+		MaxConcurrency:       16,
+	}
+}
+
+func workflowWindowName(runID string) string {
+	suffix := strings.TrimPrefix(runID, "wf-")
+	if len(suffix) > 6 {
+		suffix = suffix[:6]
+	}
+	return "workflow-" + suffix
+}
+
+func (s *Server) workflowStopper() workflowProcessStopper {
+	if s.workflowProcessStopper != nil {
+		return s.workflowProcessStopper
+	}
+	return s.terminal.stopWorkflowProcess
+}
+
+func (s *Server) workflowRunnerCommand(record workflowRunRecord, endpoint string) (string, error) {
+	manifestPath := filepath.Join(filepath.Dir(record.ScriptPath), workflowManifestFileName)
+	return s.workflows.runnerCommand(manifestPath, record.ScriptPath, endpoint, s.terminal.envPath)
+}
+
+func (s *Server) launchWorkflowWindow(item project.Project, thread project.Thread, record workflowRunRecord, command string) (processWindow, error) {
+	launcher := s.workflowProcessLauncher
+	if launcher == nil {
+		launcher = s.terminal.newProcessWindow
+	}
+	return launcher(item, thread, workflowWindowName(record.ID), command)
+}
+
+func (s *Server) workflowLifecycleChanged(projectID, threadID string) {
+	s.refreshWorkflowProcessWatch(projectID, threadID)
+	s.notifyThreadStatusChanged(projectID, threadID)
+}
+
+func (s *Server) failWorkflowStart(record workflowRunRecord, cause error) {
+	_, _ = s.workflows.mutate(record.ProjectID, record.ThreadID, record.ID, func(run *workflowRunRecord) error {
+		now := time.Now().UTC()
+		run.State = workflowStateFailed
+		run.Error = truncateWorkflowText(cause.Error(), maxWorkflowErrorBytes)
+		run.FinishedAt = &now
+		return nil
+	})
+	s.workflowLifecycleChanged(record.ProjectID, record.ThreadID)
+}
+
+func (s *Server) failWorkflowResume(record workflowRunRecord, cause error) {
+	_, _ = s.workflows.mutate(record.ProjectID, record.ThreadID, record.ID, func(run *workflowRunRecord) error {
+		if workflowIsActive(run.State) {
+			run.State = workflowStatePaused
+			run.Error = truncateWorkflowText(cause.Error(), maxWorkflowErrorBytes)
+			run.ProcessID = ""
+			for index := range run.Agents {
+				if run.Agents[index].State != workflowAgentStateFinished {
+					run.Agents[index].State = workflowAgentStatePaused
+				}
+			}
+		}
+		return nil
+	})
+	s.workflowLifecycleChanged(record.ProjectID, record.ThreadID)
+}
+
+func (s *Server) stopWorkflowRuntime(item project.Project, thread project.Thread, record workflowRunRecord) error {
+	var err error
+	if record.ProcessID != "" {
+		err = errors.Join(err, s.workflowStopper()(item, thread, record.ProcessID))
+	}
+	for _, childID := range workflowChildThreadIDs(item, record.ID) {
+		err = errors.Join(err, s.terminal.nativePi.stopThread(item.ID, childID))
+	}
+	return err
+}
+
 type workflowProcessWatch struct {
 	stop       func()
 	retry      *time.Timer
@@ -1071,61 +1160,65 @@ recordLoop:
 	return records, transient
 }
 
+type workflowStartInput struct {
+	Script          string          `json:"script"`
+	Args            json.RawMessage `json:"args"`
+	Model           string          `json:"model"`
+	ThinkingLevel   string          `json:"thinkingLevel"`
+	CloseOnComplete *bool           `json:"closeOnComplete"`
+}
+
+type workflowStartTarget struct {
+	item   project.Project
+	thread project.Thread
+}
+
+func (s *Server) prepareWorkflowStart(projectID, threadID string) (workflowStartTarget, *apiOperationFailure) {
+	if s.workflowsDisabled() {
+		return workflowStartTarget{}, apiOperationError(http.StatusServiceUnavailable, "Dynamic workflows are disabled in Settings or by the startup environment.")
+	}
+	if s.workflows == nil || s.workflows.nodePath == "" || s.workflows.permissionFlag == "" {
+		return workflowStartTarget{}, apiOperationError(http.StatusServiceUnavailable, "Workflow execution requires a Node.js runtime with permission-model support.")
+	}
+	item, thread, err := s.projects.GetThread(projectID, threadID)
+	if errors.Is(err, project.ErrNotFound) || errors.Is(err, project.ErrThreadNotFound) {
+		return workflowStartTarget{}, apiOperationError(http.StatusNotFound, "Thread not found.")
+	}
+	if err != nil {
+		return workflowStartTarget{}, apiOperationError(http.StatusInternalServerError, "Could not load the workflow thread.")
+	}
+	if thread.RollbackPending || thread.ArchivedAt != nil || thread.ClosedAt != nil {
+		return workflowStartTarget{}, apiOperationError(http.StatusConflict, "The thread must be open and active before starting a workflow.")
+	}
+	nesting, err := s.projects.SubAgentNestingContext(projectID, threadID)
+	if err != nil {
+		return workflowStartTarget{}, apiOperationError(http.StatusInternalServerError, "Could not load the thread's workflow nesting limit.")
+	}
+	if nesting.CurrentDepth >= nesting.MaxDepth {
+		return workflowStartTarget{}, apiOperationError(http.StatusConflict, "The effective sub-agent nesting depth for this thread tree has been reached.")
+	}
+	if reached, _, budgetErr := s.threadBudgetReached(projectID, threadID); budgetErr != nil {
+		return workflowStartTarget{}, apiOperationError(http.StatusInternalServerError, "Could not verify the thread's usage limit.")
+	} else if reached {
+		return workflowStartTarget{}, apiOperationError(http.StatusConflict, "The thread's token or cost limit has been reached; no workflow was started.")
+	}
+	if _, activated := s.workflowActivationForStart(item, thread, false); !activated {
+		return workflowStartTarget{}, apiOperationError(http.StatusConflict, "The current human prompt did not activate workflows. Use “ultracode”, explicitly ask to use/run a workflow, or invoke a saved workflow command.")
+	}
+	return workflowStartTarget{item: item, thread: thread}, nil
+}
+
 func (s *Server) startWorkflow(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAgentCapability(w, r) {
 		return
 	}
-	if s.workflowsDisabled() {
-		writeError(w, http.StatusServiceUnavailable, "Dynamic workflows are disabled in Settings or by the startup environment.")
-		return
-	}
-	if s.workflows == nil || s.workflows.nodePath == "" || s.workflows.permissionFlag == "" {
-		writeError(w, http.StatusServiceUnavailable, "Workflow execution requires a Node.js runtime with permission-model support.")
-		return
-	}
-	projectID := r.PathValue("id")
-	threadID := r.PathValue("threadId")
-	item, thread, err := s.projects.GetThread(projectID, threadID)
-	if errors.Is(err, project.ErrNotFound) || errors.Is(err, project.ErrThreadNotFound) {
-		writeError(w, http.StatusNotFound, "Thread not found.")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not load the workflow thread.")
-		return
-	}
-	if thread.RollbackPending || thread.ArchivedAt != nil || thread.ClosedAt != nil {
-		writeError(w, http.StatusConflict, "The thread must be open and active before starting a workflow.")
-		return
-	}
-	nesting, err := s.projects.SubAgentNestingContext(projectID, threadID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not load the thread's workflow nesting limit.")
-		return
-	}
-	if nesting.CurrentDepth >= nesting.MaxDepth {
-		writeError(w, http.StatusConflict, "The effective sub-agent nesting depth for this thread tree has been reached.")
-		return
-	}
-	if reached, _, budgetErr := s.threadBudgetReached(projectID, threadID); budgetErr != nil {
-		writeError(w, http.StatusInternalServerError, "Could not verify the thread's usage limit.")
-		return
-	} else if reached {
-		writeError(w, http.StatusConflict, "The thread's token or cost limit has been reached; no workflow was started.")
-		return
-	}
-	if _, activated := s.workflowActivationForStart(item, thread, false); !activated {
-		writeError(w, http.StatusConflict, "The current human prompt did not activate workflows. Use “ultracode”, explicitly ask to use/run a workflow, or invoke a saved workflow command.")
+	target, failure := s.prepareWorkflowStart(r.PathValue("id"), r.PathValue("threadId"))
+	if failure != nil {
+		failure.write(w)
 		return
 	}
 
-	var input struct {
-		Script          string          `json:"script"`
-		Args            json.RawMessage `json:"args"`
-		Model           string          `json:"model"`
-		ThinkingLevel   string          `json:"thinkingLevel"`
-		CloseOnComplete *bool           `json:"closeOnComplete"`
-	}
+	var input workflowStartInput
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxWorkflowRequestBytes))
 	if err != nil || !utf8.Valid(body) {
 		writeError(w, http.StatusBadRequest, "Invalid workflow details.")
@@ -1141,18 +1234,36 @@ func (s *Server) startWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid workflow details.")
 		return
 	}
-	if strings.TrimSpace(input.Script) == "" || len(input.Script) > maxWorkflowScriptBytes || strings.ContainsRune(input.Script, '\x00') {
-		writeError(w, http.StatusBadRequest, "A valid workflow script is required.")
+	snapshot, failure := s.startWorkflowRun(
+		target,
+		input,
+		threadEndpointURL(r, target.item.ID, target.thread.ID),
+	)
+	if failure != nil {
+		failure.write(w)
 		return
 	}
+	writeJSON(w, http.StatusCreated, snapshot)
+}
+
+func (s *Server) startWorkflowRun(
+	target workflowStartTarget,
+	input workflowStartInput,
+	threadEndpoint string,
+) (workflowRunSnapshot, *apiOperationFailure) {
+	item := target.item
+	thread := target.thread
+	projectID := item.ID
+	threadID := thread.ID
+	if strings.TrimSpace(input.Script) == "" || len(input.Script) > maxWorkflowScriptBytes || strings.ContainsRune(input.Script, '\x00') {
+		return workflowRunSnapshot{}, apiOperationError(http.StatusBadRequest, "A valid workflow script is required.")
+	}
 	if input.Args != nil && (len(input.Args) > maxWorkflowArgsBytes || !json.Valid(input.Args)) {
-		writeError(w, http.StatusBadRequest, "Workflow args must be valid JSON no larger than 1 MiB.")
-		return
+		return workflowRunSnapshot{}, apiOperationError(http.StatusBadRequest, "Workflow args must be valid JSON no larger than 1 MiB.")
 	}
 	launchOptions, err := normalizeCodingAgentLaunchOptions(codingAgentPi, input.Model, input.ThinkingLevel)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+		return workflowRunSnapshot{}, apiOperationError(http.StatusBadRequest, err.Error())
 	}
 	// Admission and durable record creation are one critical section so
 	// concurrent starts cannot all observe the same free slot.
@@ -1160,8 +1271,7 @@ func (s *Server) startWorkflow(w http.ResponseWriter, r *http.Request) {
 	defer s.workflows.startMu.Unlock()
 	runs, err := s.workflows.list(projectID, threadID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not inspect existing workflows.")
-		return
+		return workflowRunSnapshot{}, apiOperationError(http.StatusInternalServerError, "Could not inspect existing workflows.")
 	}
 	runs = s.reconcileWorkflowProcesses(item, thread, runs)
 	active := 0
@@ -1175,32 +1285,26 @@ func (s *Server) startWorkflow(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if active >= maxActiveWorkflowsPerThread {
-		writeError(w, http.StatusConflict, "This thread already has the maximum number of active workflows.")
-		return
+		return workflowRunSnapshot{}, apiOperationError(http.StatusConflict, "This thread already has the maximum number of active workflows.")
 	}
 	if unsettled >= maxRetainedWorkflowsPerThread {
-		writeError(w, http.StatusConflict, "This thread already has the maximum number of active or paused workflows. Stop one before starting another.")
-		return
+		return workflowRunSnapshot{}, apiOperationError(http.StatusConflict, "This thread already has the maximum number of active or paused workflows. Stop one before starting another.")
 	}
 	if _, activated := s.workflowActivationForStart(item, thread, true); !activated {
-		writeError(w, http.StatusConflict, "Workflow activation expired before the run could start. Ask to use/run a workflow again.")
-		return
+		return workflowRunSnapshot{}, apiOperationError(http.StatusConflict, "Workflow activation expired before the run could start. Ask to use/run a workflow again.")
 	}
 
 	runID, err := newWorkflowIdentifier("wf-", 8)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not create a workflow identifier.")
-		return
+		return workflowRunSnapshot{}, apiOperationError(http.StatusInternalServerError, "Could not create a workflow identifier.")
 	}
 	token, err := newWorkflowIdentifier("", 32)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not create a workflow capability.")
-		return
+		return workflowRunSnapshot{}, apiOperationError(http.StatusInternalServerError, "Could not create a workflow capability.")
 	}
 	directory, err := s.workflows.runDirectory(projectID, threadID, runID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not prepare the workflow directory.")
-		return
+		return workflowRunSnapshot{}, apiOperationError(http.StatusInternalServerError, "Could not prepare the workflow directory.")
 	}
 	scriptPath := filepath.Join(directory, workflowScriptFileName)
 	closeChildren := true
@@ -1226,56 +1330,19 @@ func (s *Server) startWorkflow(w http.ResponseWriter, r *http.Request) {
 		DefaultEffort: launchOptions.ThinkingLevel,
 		CloseChildren: closeChildren,
 	}
-	manifest := workflowRunnerManifest{
-		Version:              workflowManifestVersion,
-		RunID:                runID,
-		Attempt:              1,
-		Endpoint:             threadEndpointURL(r, projectID, threadID),
-		Token:                token,
-		ScriptPath:           scriptPath,
-		HasArgs:              input.Args != nil,
-		Args:                 cloneRawMessage(input.Args),
-		DefaultModel:         launchOptions.Model,
-		DefaultThinkingLevel: launchOptions.ThinkingLevel,
-		CloseOnComplete:      closeChildren,
-		MaxConcurrency:       16,
-	}
+	manifest := workflowManifest(record, threadEndpoint)
 	if err := s.workflows.create(record, []byte(input.Script), manifest); err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not persist the workflow.")
-		return
+		return workflowRunSnapshot{}, apiOperationError(http.StatusInternalServerError, "Could not persist the workflow.")
 	}
-	manifestPath := filepath.Join(directory, workflowManifestFileName)
-	command, err := s.workflows.runnerCommand(manifestPath, scriptPath, manifest.Endpoint, s.terminal.envPath)
+	command, err := s.workflowRunnerCommand(record, manifest.Endpoint)
 	if err != nil {
-		_, _ = s.workflows.mutate(projectID, threadID, runID, func(run *workflowRunRecord) error {
-			now := time.Now().UTC()
-			run.State = workflowStateFailed
-			run.Error = truncateWorkflowText(err.Error(), maxWorkflowErrorBytes)
-			run.FinishedAt = &now
-			return nil
-		})
-		s.refreshWorkflowProcessWatch(projectID, threadID)
-		s.notifyThreadStatusChanged(projectID, threadID)
-		writeError(w, http.StatusServiceUnavailable, err.Error())
-		return
+		s.failWorkflowStart(record, err)
+		return workflowRunSnapshot{}, apiOperationError(http.StatusServiceUnavailable, err.Error())
 	}
-	launcher := s.workflowProcessLauncher
-	if launcher == nil {
-		launcher = s.terminal.newProcessWindow
-	}
-	window, err := launcher(item, thread, "workflow-"+strings.TrimPrefix(runID, "wf-")[:6], command)
+	window, err := s.launchWorkflowWindow(item, thread, record, command)
 	if err != nil {
-		_, _ = s.workflows.mutate(projectID, threadID, runID, func(run *workflowRunRecord) error {
-			now := time.Now().UTC()
-			run.State = workflowStateFailed
-			run.Error = truncateWorkflowText(err.Error(), maxWorkflowErrorBytes)
-			run.FinishedAt = &now
-			return nil
-		})
-		s.refreshWorkflowProcessWatch(projectID, threadID)
-		s.notifyThreadStatusChanged(projectID, threadID)
-		writeError(w, http.StatusServiceUnavailable, "Could not start the workflow process.")
-		return
+		s.failWorkflowStart(record, err)
+		return workflowRunSnapshot{}, apiOperationError(http.StatusServiceUnavailable, "Could not start the workflow process.")
 	}
 	record, err = s.workflows.mutate(projectID, threadID, runID, func(run *workflowRunRecord) error {
 		if !workflowIsActive(run.State) {
@@ -1285,18 +1352,12 @@ func (s *Server) startWorkflow(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		stopper := s.workflowProcessStopper
-		if stopper == nil {
-			stopper = s.terminal.stopWorkflowProcess
-		}
-		_ = stopper(item, thread, window.ID)
+		_ = s.workflowStopper()(item, thread, window.ID)
 		s.refreshWorkflowProcessWatch(projectID, threadID)
-		writeError(w, http.StatusInternalServerError, "Could not finish starting the workflow.")
-		return
+		return workflowRunSnapshot{}, apiOperationError(http.StatusInternalServerError, "Could not finish starting the workflow.")
 	}
-	s.refreshWorkflowProcessWatch(projectID, threadID)
-	s.notifyThreadStatusChanged(projectID, threadID)
-	writeJSON(w, http.StatusCreated, workflowSnapshot(record))
+	s.workflowLifecycleChanged(projectID, threadID)
+	return workflowSnapshot(record), nil
 }
 
 func (s *Server) listWorkflows(w http.ResponseWriter, r *http.Request) {
@@ -1382,20 +1443,9 @@ func (s *Server) stopWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, workflowSnapshot(record))
 		return
 	}
-	var processStopErr error
-	if record.ProcessID != "" {
-		stopper := s.workflowProcessStopper
-		if stopper == nil {
-			stopper = s.terminal.stopWorkflowProcess
-		}
-		processStopErr = stopper(item, thread, record.ProcessID)
-	}
-	var childStopErr error
-	for _, childID := range workflowChildThreadIDs(item, record.ID) {
-		childStopErr = errors.Join(childStopErr, s.terminal.nativePi.stopThread(projectID, childID))
-	}
+	runtimeErr := s.stopWorkflowRuntime(item, thread, record)
 	updated, updateErr := s.workflows.mutate(projectID, threadID, runID, func(run *workflowRunRecord) error {
-		if run.State == workflowStateStopped && processStopErr == nil && childStopErr == nil {
+		if run.State == workflowStateStopped && runtimeErr == nil {
 			run.ProcessID = ""
 		}
 		return nil
@@ -1403,9 +1453,8 @@ func (s *Server) stopWorkflow(w http.ResponseWriter, r *http.Request) {
 	if updateErr == nil {
 		record = updated
 	}
-	s.refreshWorkflowProcessWatch(projectID, threadID)
-	s.notifyThreadStatusChanged(projectID, threadID)
-	if processStopErr != nil || childStopErr != nil || updateErr != nil {
+	s.workflowLifecycleChanged(projectID, threadID)
+	if errors.Join(runtimeErr, updateErr) != nil {
 		writeError(w, http.StatusInternalServerError, "The workflow was marked stopped, but one or more runner processes could not be stopped. Retry stop to finish cleanup.")
 		return
 	}
@@ -1675,29 +1724,6 @@ func (s *Server) workflowRunnerEvent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-type capturedResponse struct {
-	header http.Header
-	status int
-	body   bytes.Buffer
-}
-
-func newCapturedResponse() *capturedResponse {
-	return &capturedResponse{header: make(http.Header)}
-}
-
-func (w *capturedResponse) Header() http.Header { return w.header }
-func (w *capturedResponse) WriteHeader(status int) {
-	if w.status == 0 {
-		w.status = status
-	}
-}
-func (w *capturedResponse) Write(contents []byte) (int, error) {
-	if w.status == 0 {
-		w.status = http.StatusOK
-	}
-	return w.body.Write(contents)
-}
-
 func (s *Server) bindWorkflowAgentResponse(record workflowRunRecord, agentID string, created childThreadRunResponse) error {
 	_, err := s.workflows.mutate(record.ProjectID, record.ThreadID, record.ID, func(run *workflowRunRecord) error {
 		if !workflowIsActive(run.State) {
@@ -1713,20 +1739,6 @@ func (s *Server) bindWorkflowAgentResponse(record workflowRunRecord, agentID str
 		return nil
 	})
 	return err
-}
-
-func copyCapturedResponse(destination http.ResponseWriter, response *capturedResponse) {
-	for name, values := range response.header {
-		for _, value := range values {
-			destination.Header().Add(name, value)
-		}
-	}
-	status := response.status
-	if status == 0 {
-		status = http.StatusOK
-	}
-	destination.WriteHeader(status)
-	_, _ = destination.Write(response.body.Bytes())
 }
 
 func (s *Server) createWorkflowAgent(w http.ResponseWriter, r *http.Request) {
@@ -1865,22 +1877,20 @@ func (s *Server) createWorkflowAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requestContext := context.WithValue(
-		context.WithoutCancel(r.Context()),
-		workflowChildIdentityContextKey{},
-		workflowChildIdentity{RunID: record.ID, AgentID: agentID},
-	)
-	request := r.Clone(requestContext)
-	request.Body = io.NopCloser(bytes.NewReader(body))
-	capture := newCapturedResponse()
-	s.createChildThreadAuthorized(capture, request, childThreadCreationWorkflow)
-	if capture.status != http.StatusCreated {
-		copyCapturedResponse(w, capture)
-		return
+	endpoint := func(projectID, threadID string) string {
+		return threadEndpointURL(r, projectID, threadID)
 	}
-	var created childThreadRunResponse
-	if err := json.Unmarshal(capture.body.Bytes(), &created); err != nil || created.Thread.ID == "" || created.Run.ID == 0 {
-		writeError(w, http.StatusInternalServerError, "Workflow agent creation returned an invalid response.")
+	created, failure := s.createChildThreadOperation(
+		context.WithoutCancel(r.Context()),
+		bytes.NewReader(body),
+		record.ProjectID,
+		record.ThreadID,
+		childThreadCreationWorkflow,
+		workflowChildIdentity{RunID: record.ID, AgentID: agentID},
+		endpoint,
+	)
+	if failure != nil {
+		failure.write(w)
 		return
 	}
 	err = s.bindWorkflowAgentResponse(record, agentID, created)
@@ -1889,7 +1899,7 @@ func (s *Server) createWorkflowAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Could not bind the workflow agent to its thread.")
 		return
 	}
-	copyCapturedResponse(w, capture)
+	writeJSON(w, http.StatusCreated, created)
 }
 
 func (s *Server) recoverWorkflowAgentRun(record workflowRunRecord, agentID string, r *http.Request) (piNativeRunSnapshot, error) {
@@ -2017,6 +2027,14 @@ func (s *Server) closeWorkflowAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Workflow agent not found.")
 		return
 	}
-	r.SetPathValue("childId", record.Agents[agentIndex].ThreadID)
-	s.closeChildThreadAuthorized(w, r)
+	closed, failure := s.closeChildThreadOperation(
+		record.ProjectID,
+		record.ThreadID,
+		record.Agents[agentIndex].ThreadID,
+	)
+	if failure != nil {
+		failure.write(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, closed)
 }

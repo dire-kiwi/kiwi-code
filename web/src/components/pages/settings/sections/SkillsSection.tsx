@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Check, Download, LoaderCircle, Sparkles } from 'lucide-react'
+import { Download, LoaderCircle, Sparkles } from 'lucide-react'
 import { installAgentSkill } from '../../../../api'
+import { useAsyncFeedback } from '../../../../lib/useAsyncFeedback'
 import type { AgentSkillStatus } from '../../../../types'
 import { PrimaryButton } from '../../../atoms/Button'
 import { StatusBadge } from '../../../atoms/StatusBadge'
 import { Surface } from '../../../atoms/Surface'
 import { LoadErrorPanel, LoadingPanel } from '../../../molecules/AsyncStatePanel'
-import { FeedbackMessage } from '../../../molecules/FeedbackMessage'
+import { ActionFeedback } from '../../../molecules/ActionFeedback'
 import { InfoCallout } from '../../../molecules/InfoCallout'
 import { SectionHeader } from '../../../molecules/SectionHeader'
 import { useSubscription } from '../../../../wire/react'
@@ -17,9 +18,7 @@ export function SkillsSection() {
   const [agentSkill, setAgentSkill] = useState<AgentSkillStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
-  const [installing, setInstalling] = useState(false)
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
+  const action = useAsyncFeedback()
 
   useEffect(() => {
     if (subscription.state === 'loading') {
@@ -37,19 +36,16 @@ export function SkillsSection() {
   }, [subscription])
 
   async function handleInstall() {
-    if (installing) return
-    setInstalling(true)
-    setError('')
-    setMessage('')
-    try {
-      const next = await installAgentSkill()
-      setAgentSkill(next)
-      setMessage('Agent skills installed. Start a new Pi session or use /reload to load them.')
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not install the agent skills.')
-    } finally {
-      setInstalling(false)
-    }
+    if (action.pending) return
+    const next = await action.run(
+      'default',
+      installAgentSkill,
+      {
+        success: 'Agent skills installed. Start a new Pi session or use /reload to load them.',
+        failure: 'Could not install the agent skills.',
+      },
+    )
+    if (next) setAgentSkill(next)
   }
 
   if (loading) return <LoadingPanel label="Loading agent skill status" />
@@ -97,21 +93,7 @@ export function SkillsSection() {
           <span className="font-mono text-ghost-blue">/reload</span> in an existing Pi session after installation.
         </InfoCallout>
 
-        {error && (
-          <FeedbackMessage role="alert" tone="error" className="mt-4">
-            {error}
-          </FeedbackMessage>
-        )}
-        {message && (
-          <FeedbackMessage
-            role="status"
-            tone="success"
-            className="mt-4 flex items-center gap-2"
-          >
-            <Check size={13} className="shrink-0" />
-            {message}
-          </FeedbackMessage>
-        )}
+        <ActionFeedback feedback={action.feedback} className="mt-4" />
       </div>
 
       <div className="flex items-center justify-end border-t border-ghost-border/60 bg-ghost-black/15 px-4 py-3 sm:px-5">
@@ -119,10 +101,10 @@ export function SkillsSection() {
           type="button"
           size="md"
           onClick={() => void handleInstall()}
-          disabled={installing}
+          disabled={action.pending}
           className="flex min-w-32 items-center justify-center gap-2"
         >
-          {installing ? <LoaderCircle size={14} className="animate-spin" /> : <Download size={14} />}
+          {action.pending ? <LoaderCircle size={14} className="animate-spin" /> : <Download size={14} />}
           {agentSkill.upToDate ? 'Reinstall skills' : agentSkill.installed ? 'Update skills' : 'Install skills'}
         </PrimaryButton>
       </div>

@@ -904,6 +904,81 @@ func TestSeparateStoresRebaseProjectMutationsOnLatestPersistence(t *testing.T) {
 	assertPersistedProjectIDs(t, dataFile, beta.ID)
 }
 
+func TestSeparateStaleStoresMergeDifferentThreadFields(t *testing.T) {
+	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
+	first, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := first.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	threadID := item.Threads[0].ID
+
+	if _, err := first.UpdateThreadTitle(item.ID, threadID, "Renamed by first Store", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.SetThreadBookmarked(item.ID, threadID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	_, persisted, err := first.GetThreadPersisted(item.ID, threadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Title != "Renamed by first Store" || !persisted.Bookmarked {
+		t.Fatalf("stale Store mutation lost a different thread field: %#v", persisted)
+	}
+}
+
+func TestFailedStoreMutationReleasesLeaseForLaterStore(t *testing.T) {
+	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
+	failing, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := failing.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	later, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	injected := errors.New("injected save failure while lease is held")
+	failing.addThreadSave = func() error { return injected }
+	if _, err := failing.AddThread(item.ID, "Must fail"); !errors.Is(err, injected) {
+		t.Fatalf("failed mutation error = %v, want %v", err, injected)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := later.UpdateThreadTitle(item.ID, item.Threads[0].ID, "Mutation after failure", false)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("later Store mutation failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("later Store mutation remained blocked by the failed mutation's lease")
+	}
+
+	_, persisted, err := failing.GetThreadPersisted(item.ID, item.Threads[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Title != "Mutation after failure" {
+		t.Fatalf("later Store mutation was not persisted: %#v", persisted)
+	}
+}
+
 func TestStaleStoreRevalidatesCachedNotFoundBeforeDelete(t *testing.T) {
 	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
 	writer, err := NewStore(dataFile)
