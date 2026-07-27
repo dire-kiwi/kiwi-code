@@ -857,18 +857,28 @@ export function PiNativePane({
       }
     })
 
-    socket.addEventListener('close', () => {
+    socket.addEventListener('close', (event) => {
       piReady = false
       if (stableTimer !== undefined) window.clearTimeout(stableTimer)
       if (inspectionTimer !== undefined) window.clearInterval(inspectionTimer)
       if (disposed) return
+      const closeReason = event.reason.trim() || (event.code === 1006 ? 'connection ended without a close frame' : 'no reason supplied')
+      const closeDetail = `code ${event.code}, ${closeReason}, ${event.wasClean ? 'clean' : 'unclean'}`
+      console.info('Native Pi WebSocket closed.', {
+        projectId,
+        threadId,
+        code: event.code,
+        reason: event.reason,
+        wasClean: event.wasClean,
+        reconnecting: reconnectAllowed,
+      })
       if (!reconnectAllowed) {
-        appendActivity('connection_closed', 'Connection closed; automatic reconnect is disabled for this startup error.')
+        appendActivity('connection_closed', `Connection closed (${closeDetail}); automatic reconnect is disabled for this startup error.`)
         onContextStatusChangeRef.current(null)
         updateConnectionStatus('error')
         return
       }
-      appendActivity('connection_closed', 'Connection lost; Kiwi Code is reconnecting.')
+      appendActivity('connection_closed', `Connection lost (${closeDetail}); Kiwi Code is reconnecting.`)
       onContextStatusChangeRef.current(null)
       updateConnectionStatus('connecting')
       const delay = Math.min(250 * 2 ** reconnectAttemptsRef.current, 2_000)

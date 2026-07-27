@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useMatch, useNavigate } from 'react-router-dom'
 import {
   acknowledgePiThreadActivity,
@@ -118,6 +118,64 @@ function visibleProjectSnapshots(items: Project[]) {
   return items.map((project) => {
     const threads = project.threads.filter((thread) => !thread.rollbackPending)
     return threads.length === project.threads.length ? project : { ...project, threads }
+  })
+}
+
+function sameThreads(current: readonly Thread[], next: readonly Thread[]) {
+  if (current.length !== next.length) return false
+  return current.every((thread, index) => {
+    const candidate = next[index]
+    return candidate
+      && candidate.id === thread.id
+      && candidate.title === thread.title
+      && candidate.cwd === thread.cwd
+      && candidate.createdAt === thread.createdAt
+      && candidate.lastPromptAt === thread.lastPromptAt
+      && candidate.parentThreadId === thread.parentThreadId
+      && candidate.agentModel === thread.agentModel
+      && candidate.agentThinkingLevel === thread.agentThinkingLevel
+      && candidate.workflowRunId === thread.workflowRunId
+      && candidate.workflowAgentId === thread.workflowAgentId
+      && candidate.worktree === thread.worktree
+      && candidate.branch === thread.branch
+      && candidate.worktreePath === thread.worktreePath
+      && candidate.autoNamed === thread.autoNamed
+      && candidate.closedAt === thread.closedAt
+      && candidate.archivedAt === thread.archivedAt
+      && candidate.bookmarked === thread.bookmarked
+      && candidate.tokenLimit === thread.tokenLimit
+      && candidate.costLimitUsd === thread.costLimitUsd
+      && candidate.nestedDepth === thread.nestedDepth
+      && candidate.rollbackPending === thread.rollbackPending
+      && candidate.rollbackCleanupReady === thread.rollbackCleanupReady
+  })
+}
+
+function sameProfiles(current: readonly Profile[], next: readonly Profile[]) {
+  if (current.length !== next.length) return false
+  return current.every((profile, index) => {
+    const candidate = next[index]
+    return candidate && candidate.id === profile.id && candidate.name === profile.name
+  })
+}
+
+function sameProjects(current: readonly Project[], next: readonly Project[]) {
+  if (current.length !== next.length) return false
+  return current.every((project, index) => {
+    const candidate = next[index]
+    return candidate
+      && candidate.id === project.id
+      && candidate.name === project.name
+      && candidate.path === project.path
+      && candidate.profileId === project.profileId
+      && candidate.host === project.host
+      && candidate.isGitRepo === project.isGitRepo
+      && candidate.createdAt === project.createdAt
+      && candidate.subAgentNestingDepthOverride === project.subAgentNestingDepthOverride
+      && candidate.worktreeBranchPrefix === project.worktreeBranchPrefix
+      && candidate.figmaMCPEnabled === project.figmaMCPEnabled
+      && JSON.stringify(candidate.environment) === JSON.stringify(project.environment)
+      && sameThreads(project.threads, candidate.threads)
   })
 }
 
@@ -339,14 +397,16 @@ export default function App() {
 
   useEffect(() => {
     if (projectSubscription.state === 'ready') {
-      setProjects(visibleProjectSnapshots(projectSubscription.data as Project[]))
+      const next = visibleProjectSnapshots(projectSubscription.data as Project[])
+      setProjects((current) => sameProjects(current, next) ? current : next)
       setProjectsHydrated(true)
     }
   }, [projectSubscription])
 
   useEffect(() => {
     if (profileSubscription.state === 'ready') {
-      setProfiles(profileSubscription.data as Profile[])
+      const next = profileSubscription.data as Profile[]
+      setProfiles((current) => sameProfiles(current, next) ? current : next)
       setProfilesHydrated(true)
     }
   }, [profileSubscription])
@@ -359,13 +419,19 @@ export default function App() {
 
   useEffect(() => {
     if (usageSubscription.state === 'ready') {
-      setUsageSnapshots(usageSubscription.data as ThreadUsageSnapshot[])
+      const next = usageSubscription.data as ThreadUsageSnapshot[]
+      startTransition(() => setUsageSnapshots((current) => (
+        JSON.stringify(current) === JSON.stringify(next) ? current : next
+      )))
     }
   }, [usageSubscription])
 
   useEffect(() => {
     if (processSubscription.state === 'ready') {
-      setProcessWebServers(processSubscription.data as ProcessWebServer[])
+      const next = processSubscription.data as ProcessWebServer[]
+      startTransition(() => setProcessWebServers((current) => (
+        JSON.stringify(current) === JSON.stringify(next) ? current : next
+      )))
     }
   }, [processSubscription])
 

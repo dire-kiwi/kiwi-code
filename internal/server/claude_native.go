@@ -343,9 +343,11 @@ func (h *terminalHandler) startClaudeNativeProcess(
 		h.sessionMu.Unlock()
 		return nil, errors.Join(err, releaseErr)
 	}
+	h.sessionMu.Unlock()
 	process, startErr := h.nativeClaude.getOrStart(item, thread, threadEndpoint, launchOptions)
-	fenceErr := h.finishTerminalThreadMutationLocked(item, thread)
 	releaseErr := mutation.Release()
+	h.sessionMu.Lock()
+	fenceErr := h.finishTerminalThreadMutationLocked(item, thread)
 	h.sessionMu.Unlock()
 
 	if combined := errors.Join(startErr, fenceErr, releaseErr); combined != nil {
@@ -383,9 +385,11 @@ func (h *terminalHandler) restartClaudeNativeProcess(
 		h.sessionMu.Unlock()
 		return nil, errors.Join(err, releaseErr)
 	}
+	h.sessionMu.Unlock()
 	process, restartErr := h.nativeClaude.restart(expected, item, thread, threadEndpoint, launchOptions, resetSession)
-	fenceErr := h.finishTerminalThreadMutationLocked(item, thread)
 	releaseErr := mutation.Release()
+	h.sessionMu.Lock()
+	fenceErr := h.finishTerminalThreadMutationLocked(item, thread)
 	h.sessionMu.Unlock()
 
 	if combined := errors.Join(restartErr, fenceErr, releaseErr); combined != nil {

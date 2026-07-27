@@ -9,6 +9,8 @@ import {
 import { Type } from "typebox";
 
 const pollIntervalMs = 750;
+const progressHeartbeatMs = 5_000;
+const requestRetryAttempts = 4;
 const maxVisibleResultBytes = 50 * 1024;
 const maxThreadPlanContentBytes = 256 * 1024;
 const threadEndpoint = process.env.KIWI_CODE_THREAD_ENDPOINT?.replace(/\/+$/, "") ?? "";
@@ -72,6 +74,18 @@ function ensureAvailable(): void {
 	}
 }
 
+class KiwiCodeRequestError extends Error {
+	readonly retryable: boolean;
+	readonly status?: number;
+
+	constructor(message: string, retryable: boolean, status?: number) {
+		super(message);
+		this.name = "KiwiCodeRequestError";
+		this.retryable = retryable;
+		this.status = status;
+	}
+}
+
 async function requestResponse(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<Response> {
 	ensureAvailable();
 	let response: Response;
@@ -87,7 +101,10 @@ async function requestResponse(path: string, init: RequestInit = {}, signal?: Ab
 		});
 	} catch (reason) {
 		if (signal?.aborted) throw new Error("The Kiwi Code request was cancelled.");
-		throw new Error(`Could not reach Kiwi Code: ${reason instanceof Error ? reason.message : String(reason)}`);
+		throw new KiwiCodeRequestError(
+			`Could not reach Kiwi Code: ${reason instanceof Error ? reason.message : String(reason)}`,
+			true,
+		);
 	}
 	if (!response.ok) {
 		let message = `Kiwi Code returned HTTP ${response.status}.`;
@@ -97,7 +114,12 @@ async function requestResponse(path: string, init: RequestInit = {}, signal?: Ab
 		} catch {
 			// Keep the HTTP fallback.
 		}
-		throw new Error(message);
+		const retryable = response.status === 408
+			|| response.status === 409
+			|| response.status === 425
+			|| response.status === 429
+			|| response.status >= 500;
+		throw new KiwiCodeRequestError(message, retryable, response.status);
 	}
 	return response;
 }
@@ -112,6 +134,27 @@ async function requestText(path: string, init: RequestInit = {}, signal?: AbortS
 	const response = await requestResponse(path, init, signal);
 	if (response.status === 204) return "";
 	return response.text();
+}
+
+async function requestWithRetry<T>(
+	path: string,
+	init: RequestInit,
+	signal?: AbortSignal,
+): Promise<T> {
+	let lastError: unknown;
+	for (let attempt = 0; attempt < requestRetryAttempts; attempt += 1) {
+		try {
+			return await request<T>(path, init, signal);
+		} catch (reason) {
+			lastError = reason;
+			if (!(reason instanceof KiwiCodeRequestError) || !reason.retryable || attempt === requestRetryAttempts - 1) {
+				throw reason;
+			}
+			const delay = Math.min(250 * 2 ** attempt, 2_000) + Math.floor(Math.random() * 100);
+			await sleep(delay, signal);
+		}
+	}
+	throw lastError;
 }
 
 function sleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
@@ -137,7 +180,7 @@ function progress(skill: ForkedSkill, child: ChildThread, run: ChildRun): string
 }
 
 async function readRun(threadID: string, runID: number, signal?: AbortSignal): Promise<ChildRun> {
-	return request<ChildRun>(
+	return requestWithRetry<ChildRun>(
 		`/children/${encodeURIComponent(threadID)}/runs/${encodeURIComponent(String(runID))}`,
 		{},
 		signal,
@@ -157,19 +200,32 @@ async function waitForRun(
 	onUpdate?: (run: ChildRun) => void,
 ): Promise<ChildRun> {
 	let run = created.run;
+	let lastProgressKey = "";
+	let lastProgressAt = 0;
+	const report = (force = false) => {
+		const key = `${run.state}\u0000${run.error ?? ""}`;
+		const now = Date.now();
+		if (!force && key === lastProgressKey && now - lastProgressAt < progressHeartbeatMs) return;
+		lastProgressKey = key;
+		lastProgressAt = now;
+		onUpdate?.(run);
+	};
 	try {
 		while (run.state === "starting" || run.state === "working") {
-			onUpdate?.(run);
+			report();
 			await sleep(pollIntervalMs, signal);
 			run = await readRun(created.thread.id, run.id, signal);
 		}
-		onUpdate?.(run);
+		report(true);
 		return run;
 	} catch (reason) {
 		if (signal?.aborted) {
 			try { await stopChild(created.thread.id); } catch { /* Leave the retained child open if cleanup fails. */ }
 		}
-		throw reason;
+		const message = reason instanceof Error ? reason.message : String(reason);
+		throw new Error(
+			`Forked skill child ${created.thread.id}, run ${created.run.id}, was last ${run.state}: ${message}`,
+		);
 	}
 }
 
@@ -414,7 +470,9 @@ export default function (pi: ExtensionAPI) {
 			skill: Type.String({ description: "Exact loaded skill name without the skill: prefix" }),
 			arguments: Type.Optional(Type.String({ description: "User arguments or request supplied to the skill" })),
 		}),
-		async execute(_toolCallID, params, signal, onUpdate, ctx: ExtensionContext) {
+		async execute(toolCallID, params, signal, onUpdate, ctx: ExtensionContext) {
+			const requestID = toolCallID.trim();
+			if (!requestID) throw new Error("Pi did not provide a durable tool call ID for this forked skill.");
 			const skillName = params.skill.trim();
 			const skill = loadForkedSkills(pi).find((candidate) => candidate.name === skillName);
 			if (!skill) {
@@ -429,13 +487,20 @@ export default function (pi: ExtensionAPI) {
 				prompt: renderSkillPrompt(skill, params.arguments?.trim() ?? ""),
 				agent: "pi",
 				worktree: false,
+				requestId: requestID,
 			};
 			if (model) body.model = model;
 			if (thinkingLevel) body.thinkingLevel = thinkingLevel;
-			const created = await request<CreatedChild>("/skill-forks", {
-				method: "POST",
-				body: JSON.stringify(body),
-			}, signal);
+			let created: CreatedChild;
+			try {
+				created = await requestWithRetry<CreatedChild>("/skill-forks", {
+					method: "POST",
+					body: JSON.stringify(body),
+				}, signal);
+			} catch (reason) {
+				const message = reason instanceof Error ? reason.message : String(reason);
+				throw new Error(`Could not create forked skill ${skill.name} (request ${requestID}): ${message}`);
+			}
 			const run = await waitForRun(created, signal, (current) => onUpdate?.({
 				content: [{ type: "text", text: progress(skill, created.thread, current) }],
 				details: {

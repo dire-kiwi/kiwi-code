@@ -191,7 +191,7 @@ export function TerminalSession({
         overviewRulerWidth: 0,
         rightClickSelectsWord: true,
         scrollback: 10_000,
-        smoothScrollDuration: 120,
+        smoothScrollDuration: 0,
         theme: toTerminalTheme(configuredTheme),
       })
       const fit = new FitAddon()
@@ -220,7 +220,9 @@ export function TerminalSession({
       const params = new URLSearchParams({
         cols: String(terminal.cols),
         rows: String(terminal.rows),
+        protocol: '2',
       })
+      if (import.meta.env.DEV) params.set('diagnostics', '1')
       let terminalPath: string
       if (tmuxSession && tmuxWindow) {
         params.set('session', tmuxSession)
@@ -242,8 +244,14 @@ export function TerminalSession({
       }
       const socketUrl = apiWebSocketUrl(terminalPath)
       socketUrl.search = params.toString()
+      const socketStartedAt = performance.now()
       const socket = new WebSocket(socketUrl)
       socket.binaryType = 'arraybuffer'
+      const inputEncoder = new TextEncoder()
+      let terminalReady = false
+      let firstOutputReceived = false
+      let pendingAcknowledgementBytes = 0
+      let acknowledgementTimer: ReturnType<typeof window.setTimeout> | undefined
       let escapeHandledOnKeyDown = false
       let lastEscapeKeyboardEventAt = Number.NEGATIVE_INFINITY
       let lastPointerDownAt = Number.NEGATIVE_INFINITY
@@ -276,7 +284,30 @@ export function TerminalSession({
 
       function sendTerminalInput(data: string) {
         if (socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: 'input', data }))
+          socket.send(inputEncoder.encode(data))
+        }
+      }
+
+      function flushOutputAcknowledgement() {
+        if (acknowledgementTimer !== undefined) {
+          window.clearTimeout(acknowledgementTimer)
+          acknowledgementTimer = undefined
+        }
+        if (pendingAcknowledgementBytes <= 0 || socket.readyState !== WebSocket.OPEN) return
+        const bytes = pendingAcknowledgementBytes
+        pendingAcknowledgementBytes = 0
+        socket.send(JSON.stringify({ type: 'ack', bytes }))
+      }
+
+      function acknowledgeOutput(bytes: number) {
+        if (disposed || bytes <= 0) return
+        pendingAcknowledgementBytes += bytes
+        if (pendingAcknowledgementBytes >= 32 * 1024) {
+          flushOutputAcknowledgement()
+          return
+        }
+        if (acknowledgementTimer === undefined) {
+          acknowledgementTimer = window.setTimeout(flushOutputAcknowledgement, 2)
         }
       }
 
@@ -355,18 +386,19 @@ export function TerminalSession({
         onStatusChangeRef.current(next)
       }
 
-      socket.addEventListener('open', () => {
-        if (disposed) {
-          socket.close(1000, 'Terminal pane closed')
-          return
-        }
+      function markTerminalReady(source: 'control' | 'output') {
+        if (terminalReady || disposed) return
+        terminalReady = true
         updateStatus('open')
-        reconnectStableTimer = window.setTimeout(() => {
-          if (!disposed && socket.readyState === WebSocket.OPEN) reconnectAttemptsRef.current = 0
-        }, RECONNECT_STABLE_AFTER_MS)
-        socket.send(
-          JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }),
-        )
+        if (import.meta.env.DEV) {
+          console.debug('Terminal became ready.', {
+            projectId,
+            threadId,
+            tool,
+            source,
+            milliseconds: Math.round((performance.now() - socketStartedAt) * 10) / 10,
+          })
+        }
         if (activeRef.current) terminal.focus()
 
         const prompt = initialPromptRef.current
@@ -377,15 +409,57 @@ export function TerminalSession({
           initialPromptSentRef.current = true
           onInitialPromptSentRef.current?.()
         }
+      }
+
+      socket.addEventListener('open', () => {
+        if (disposed) {
+          socket.close(1000, 'Terminal pane closed')
+          return
+        }
+        reconnectStableTimer = window.setTimeout(() => {
+          if (!disposed && socket.readyState === WebSocket.OPEN) reconnectAttemptsRef.current = 0
+        }, RECONNECT_STABLE_AFTER_MS)
+        socket.send(
+          JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }),
+        )
       })
 
       socket.addEventListener('message', (event) => {
         if (disposed) return
         if (typeof event.data === 'string') {
+          try {
+            const control = JSON.parse(event.data) as { type?: unknown; protocol?: unknown; data?: unknown }
+            if (control.type === 'terminal_ready' && control.protocol === 2) {
+              markTerminalReady('control')
+              return
+            }
+            if (control.type === 'terminal_output' && typeof control.data === 'string') {
+              markTerminalReady('control')
+              terminal.write(control.data)
+              return
+            }
+          } catch {
+            // Protocol v1 servers can still send terminal output as text.
+          }
+          markTerminalReady('output')
           terminal.write(event.data)
-        } else {
-          terminal.write(new Uint8Array(event.data as ArrayBuffer))
+          return
         }
+
+        const output = new Uint8Array(event.data as ArrayBuffer)
+        markTerminalReady('output')
+        if (!firstOutputReceived) {
+          firstOutputReceived = true
+          if (import.meta.env.DEV) {
+            console.debug('Terminal received first output.', {
+              projectId,
+              threadId,
+              tool,
+              milliseconds: Math.round((performance.now() - socketStartedAt) * 10) / 10,
+            })
+          }
+        }
+        terminal.write(output, () => acknowledgeOutput(output.byteLength))
       })
 
       socket.addEventListener('error', () => {
@@ -509,6 +583,7 @@ export function TerminalSession({
         if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
         if (reconnectStableTimer !== undefined) window.clearTimeout(reconnectStableTimer)
         if (pasteNoticeTimer !== undefined) window.clearTimeout(pasteNoticeTimer)
+        if (acknowledgementTimer !== undefined) window.clearTimeout(acknowledgementTimer)
         uploadController.abort()
         window.removeEventListener('keydown', handleTerminalKeyDown, true)
         window.removeEventListener('keyup', handleTerminalKeyUp, true)

@@ -16,6 +16,24 @@ import (
 	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
+func TestPiNativeBrowserEventCoalesceKeyOnlyCompactsCumulativeUpdates(t *testing.T) {
+	tests := []struct {
+		payload string
+		want    string
+	}{
+		{payload: `{"type":"message_update","message":{"role":"assistant"}}`, want: "message_update"},
+		{payload: `{"type":"tool_execution_update","toolCallId":"call-1"}`, want: "tool_execution_update\x00call-1"},
+		{payload: `{"type":"tool_execution_update"}`, want: ""},
+		{payload: `{"type":"message_end"}`, want: ""},
+		{payload: `{"type":`, want: ""},
+	}
+	for _, test := range tests {
+		if got := piNativeBrowserEventCoalesceKey([]byte(test.payload)); got != test.want {
+			t.Fatalf("coalesce key for %s = %q, want %q", test.payload, got, test.want)
+		}
+	}
+}
+
 func TestStartPiNativeProcessRejectsRollbackPendingThread(t *testing.T) {
 	handler := &terminalHandler{}
 	_, err := handler.startPiNativeProcess(

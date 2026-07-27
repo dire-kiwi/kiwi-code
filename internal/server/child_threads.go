@@ -30,6 +30,18 @@ const (
 	childProbeCleanupTimeout    = 15 * time.Second
 )
 
+func validChildSkillForkRequestID(value string) bool {
+	if value == "" || len(value) > 200 || !utf8.ValidString(value) {
+		return false
+	}
+	for _, character := range value {
+		if character < 0x20 || character == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
 type childThreadCreationSource uint8
 
 const (
@@ -359,6 +371,27 @@ func (s *Server) createSkillForkChild(w http.ResponseWriter, r *http.Request) {
 	s.createChildThreadAuthorized(w, r, childThreadCreationSkillFork)
 }
 
+func (s *Server) respondExistingSkillFork(
+	w http.ResponseWriter,
+	projectID string,
+	thread project.Thread,
+) {
+	if thread.RollbackPending {
+		writeError(w, http.StatusConflict, "The matching skill fork is still being created; retry this request.")
+		return
+	}
+	if s.terminal == nil || s.terminal.nativePi == nil {
+		writeError(w, http.StatusServiceUnavailable, "Pi child management is unavailable.")
+		return
+	}
+	run, found := s.terminal.nativePi.latestChildRun(projectID, thread.ID)
+	if !found {
+		writeError(w, http.StatusConflict, "The matching skill fork already exists, but its run state is unavailable after restart. Review the retained child thread.")
+		return
+	}
+	writeJSON(w, http.StatusOK, childThreadRunResponse{Thread: thread, Run: run, Agent: codingAgentPi})
+}
+
 func (s *Server) stopSkillForkChild(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAgentCapability(w, r) {
 		return
@@ -459,6 +492,7 @@ func (s *Server) createChildThreadAuthorized(w http.ResponseWriter, r *http.Requ
 		Worktree      *bool  `json:"worktree"`
 		BaseBranch    string `json:"baseBranch"`
 		NestedDepth   *int   `json:"nestedDepth"`
+		RequestID     string `json:"requestId"`
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxChildThreadPromptBytes+(1<<20)))
 	if err != nil || !utf8.Valid(body) {
@@ -473,6 +507,7 @@ func (s *Server) createChildThreadAuthorized(w http.ResponseWriter, r *http.Requ
 	}
 	input.Title = strings.TrimSpace(input.Title)
 	input.Agent = strings.TrimSpace(input.Agent)
+	input.RequestID = strings.TrimSpace(input.RequestID)
 	if input.Title == "" || strings.TrimSpace(input.Prompt) == "" {
 		writeError(w, http.StatusBadRequest, "A child title and prompt are required.")
 		return
@@ -494,6 +529,26 @@ func (s *Server) createChildThreadAuthorized(w http.ResponseWriter, r *http.Requ
 	}
 	if input.Agent != codingAgentPi {
 		writeError(w, http.StatusBadRequest, "Only Pi child threads are supported for now.")
+		return
+	}
+	if source == childThreadCreationSkillFork {
+		// Older already-running Pi extension processes do not send requestId.
+		// Keep that path compatible; newly materialized extensions always send a
+		// durable ID and receive idempotent creation/recovery semantics.
+		if input.RequestID != "" && !validChildSkillForkRequestID(input.RequestID) {
+			writeError(w, http.StatusBadRequest, "The skill fork request ID is invalid.")
+			return
+		}
+		if input.RequestID != "" {
+			for _, existing := range item.Threads {
+				if existing.ParentThreadID == parentID && existing.SkillForkRequestID == input.RequestID {
+					s.respondExistingSkillFork(w, projectID, existing)
+					return
+				}
+			}
+		}
+	} else if input.RequestID != "" {
+		writeError(w, http.StatusBadRequest, "A request ID is only supported for context: fork skills.")
 		return
 	}
 	launchOptions, err := normalizeCodingAgentLaunchOptions(codingAgentPi, input.Model, input.ThinkingLevel)
@@ -549,6 +604,13 @@ func (s *Server) createChildThreadAuthorized(w http.ResponseWriter, r *http.Requ
 		writeChildThreadModelValidationError(w, http.StatusBadRequest, childThreadModelValidationMessage(validationErr), availableModels)
 		return
 	}
+	// Do not publish a child if the caller disappeared during capability
+	// discovery. After persistence starts, the operation is intentionally
+	// durable and can be recovered through its request ID.
+	if r.Context().Err() != nil {
+		writeError(w, http.StatusRequestTimeout, "The child request was cancelled before creation; no child thread was created.")
+		return
+	}
 
 	workflowIdentity, _ := r.Context().Value(workflowChildIdentityContextKey{}).(workflowChildIdentity)
 	thread, err := s.projects.AddThreadWithOptions(projectID, input.Title, project.AddThreadOptions{
@@ -560,9 +622,14 @@ func (s *Server) createChildThreadAuthorized(w http.ResponseWriter, r *http.Requ
 		AgentThinkingLevel: launchOptions.ThinkingLevel,
 		WorkflowRunID:      workflowIdentity.RunID,
 		WorkflowAgentID:    workflowIdentity.AgentID,
+		SkillForkRequestID: input.RequestID,
 		NestedDepth:        input.NestedDepth,
 		CreationPending:    true,
 	})
+	if errors.Is(err, project.ErrChildCreationRequestExists) {
+		s.respondExistingSkillFork(w, projectID, thread)
+		return
+	}
 	// A save can be published before its final durability step reports an
 	// error. AddThreadWithOptions returns the persisted thread in that case so
 	// this request can still roll the transient creation back.

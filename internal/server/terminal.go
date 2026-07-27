@@ -60,7 +60,10 @@ type terminalHandler struct {
 	stoppingProjects      map[string]struct{}
 	stoppingThreads       map[terminalThreadKey]struct{}
 	viewCounter           atomic.Uint64
+	activeSetups          atomic.Int64
+	viewMu                sync.Mutex
 	activeViews           map[string]struct{}
+	viewReconciledAt      map[terminalThreadKey]time.Time
 	tmuxWatchMu           sync.Mutex
 	tmuxWatches           map[string]*tmuxSessionWatch
 	agentWatchMu          sync.Mutex
@@ -95,10 +98,11 @@ const (
 var threadSessionTools = [...]string{"terminal", "nvim", "lazygit", "pi"}
 
 type clientMessage struct {
-	Type string `json:"type"`
-	Data string `json:"data,omitempty"`
-	Cols uint16 `json:"cols,omitempty"`
-	Rows uint16 `json:"rows,omitempty"`
+	Type  string `json:"type"`
+	Data  string `json:"data,omitempty"`
+	Cols  uint16 `json:"cols,omitempty"`
+	Rows  uint16 `json:"rows,omitempty"`
+	Bytes uint32 `json:"bytes,omitempty"`
 }
 
 type tmuxWindow struct {
@@ -112,6 +116,7 @@ type tmuxWindowTarget struct {
 	ID        string
 	ServerPID string
 	ProcessID string
+	Tagged    bool
 }
 
 type tmuxAgentPane struct {
@@ -381,6 +386,7 @@ func (h *terminalHandler) startCodingAgent(w http.ResponseWriter, r *http.Reques
 		agent,
 		launchOptions,
 		false,
+		nil,
 	)
 	if err != nil {
 		if errors.Is(err, errCodingAgentEnded) {
@@ -476,6 +482,13 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	protocol := 1
+	if r.URL.Query().Get("protocol") == strconv.Itoa(terminalProtocolV2) {
+		protocol = terminalProtocolV2
+	}
+	diagnostics := newTerminalConnectionDiagnostics(r, item.ID, thread.ID, tool)
+	diagnostics.mark("accepted")
+	defer diagnostics.finish()
 
 	// Upgrade before creating or attaching tmux. A rejected origin or failed
 	// handshake must not leave behind a session or temporary view.
@@ -485,6 +498,14 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	defer connection.Close()
 	connection.SetReadLimit(1 << 20)
+	h.activeSetups.Add(1)
+	setupActive := true
+	defer func() {
+		if setupActive {
+			h.activeSetups.Add(-1)
+		}
+	}()
+	diagnostics.mark("websocket-upgraded")
 
 	writer := newWebSocketWriter(connection)
 	closeWithError := func(message string) {
@@ -530,6 +551,7 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 			codingAgent,
 			launchOptions,
 			restartCodingAgent,
+			&target,
 		)
 		if err != nil {
 			if errors.Is(err, errCodingAgentEnded) || (tool == "pi" && h.hasLogicalCodingAgentExit(item.ID, thread.ID, codingAgent)) {
@@ -596,6 +618,7 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	diagnostics.mark("canonical-target-ready")
 	closeSetupFailure := func(message string) {
 		if agentPaneID != "" {
 			state, stateErr := h.tmuxPaneExitState(agentPaneID)
@@ -612,9 +635,6 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 		closeWithError(message)
 	}
 
-	if err := h.markTmuxSessionUsed(sessionName, time.Now()); err != nil {
-		log.Printf("record tmux session use: session=%q error=%v", sessionName, err)
-	}
 	defer func() { _ = h.markTmuxSessionUsed(sessionName, time.Now()) }()
 
 	// Shell clients attach to their standalone session so the shell tab API can
@@ -647,21 +667,19 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 		attachSessionName = viewSessionName
 		defer h.closeTmuxViewSession(viewSessionName)
 	}
-	if err := h.configureTmuxClipboard(); err != nil {
-		// Clipboard integration should not prevent the terminal from opening on
-		// older tmux versions, but keep the failure visible to the server owner.
-		log.Printf("configure tmux clipboard: %v", err)
-	}
+	diagnostics.mark("view-ready")
 
 	cols := boundedDimension(r.URL.Query().Get("cols"), 80)
 	rows := boundedDimension(r.URL.Query().Get("rows"), 24)
 	cmd := h.tmuxCommand(
-		"attach-session",
-		"-c", thread.Cwd,
+		"set-option", "-q", "-s", "set-clipboard", "external",
+		";",
+		"attach-session", "-c", thread.Cwd,
 		"-t", exactTmuxSessionTarget(attachSessionName),
 	)
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})
 	if err != nil {
+		log.Printf("attach tmux terminal: project=%q thread=%q tool=%q error=%v", item.ID, thread.ID, tool, err)
 		closeSetupFailure("Could not attach to the terminal session")
 		return
 	}
@@ -672,14 +690,36 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = cmd.Wait()
 	}()
+	diagnostics.mark("pty-attached")
 
+	if protocol >= terminalProtocolV2 {
+		if err := writer.Write(websocket.TextMessage, []byte(`{"type":"terminal_ready","protocol":2}`)); err != nil {
+			return
+		}
+		diagnostics.mark("ready-sent")
+	}
 	if created && notice != "" {
-		if err := writer.Write(websocket.BinaryMessage, []byte(notice)); err != nil {
+		messageType := websocket.BinaryMessage
+		payload := []byte(notice)
+		if protocol >= terminalProtocolV2 {
+			messageType = websocket.TextMessage
+			payload, _ = json.Marshal(map[string]string{"type": "terminal_output", "data": notice})
+		}
+		if err := writer.Write(messageType, payload); err != nil {
 			return
 		}
 	}
-	bridge := startPTYWebSocketBridge(connection, writer, ptmx)
+	bridge := startPTYWebSocketBridge(connection, writer, ptmx, protocol, func() {
+		diagnostics.mark("first-output")
+	})
 	defer bridge.Stop()
+	setupActive = false
+	h.activeSetups.Add(-1)
+	// Once tmux is attached, update cleanup bookkeeping without holding up the
+	// WebSocket-ready signal or the first PTY output.
+	if err := h.markTmuxSessionUsed(sessionName, time.Now()); err != nil {
+		log.Printf("record tmux session use: session=%q error=%v", sessionName, err)
+	}
 	var agentPoll <-chan time.Time
 	var agentPollTicker *time.Ticker
 	if agentPaneID != "" {
@@ -825,6 +865,7 @@ func (h *terminalHandler) ensureTmuxSessionWithCodingAgent(
 		initialAgent,
 		codingAgentLaunchOptions{},
 		restartCodingAgent,
+		nil,
 	)
 }
 
@@ -836,6 +877,7 @@ func (h *terminalHandler) ensureTmuxSessionWithCodingAgentOptions(
 	initialAgent string,
 	launchOptions codingAgentLaunchOptions,
 	restartCodingAgent bool,
+	targetOut *tmuxWindowTarget,
 ) (sessionName, notice string, created bool, err error) {
 	tool, err = normalizeTerminalTool(tool)
 	if err != nil {
@@ -849,31 +891,40 @@ func (h *terminalHandler) ensureTmuxSessionWithCodingAgentOptions(
 	}
 	sessionName = tmuxSessionName(item.ID, thread.ID, tool)
 
-	// Starting a session and adding its fixed windows must be atomic within the
-	// server. Otherwise two browser connections can create duplicate named
-	// windows at the same time.
+	// Starting a session and adding its fixed windows must be atomic for this
+	// thread. Acquire the cross-process per-thread lease in the canonical lock
+	// order, then release the global state lock so unrelated thread tabs can
+	// prepare their tmux sessions concurrently.
 	h.sessionMu.Lock()
-	defer h.sessionMu.Unlock()
 	mutation, mutationErr := h.lockTerminalMutationLocked(item.ID, thread.ID)
 	if mutationErr != nil {
+		h.sessionMu.Unlock()
 		return "", "", false, mutationErr
 	}
-	defer func() {
-		err = errors.Join(err, mutation.Release())
-	}()
-	if err := h.ensureTerminalThreadActiveLocked(item.ID, thread.ID); err != nil {
-		return "", "", false, err
+	if activeErr := h.ensureTerminalThreadActiveLocked(item.ID, thread.ID); activeErr != nil {
+		releaseErr := mutation.Release()
+		h.sessionMu.Unlock()
+		return "", "", false, errors.Join(activeErr, releaseErr)
 	}
+	h.sessionMu.Unlock()
 	defer func() {
-		if fenceErr := h.finishTerminalThreadMutationLocked(item, thread); fenceErr != nil {
+		// Release the per-thread lease before reacquiring sessionMu. Cleanup
+		// operations acquire these locks in the opposite lifetime (sessionMu
+		// first), so this boundary prevents deadlock while the durable stop
+		// marker remains the final authority.
+		releaseErr := mutation.Release()
+		h.sessionMu.Lock()
+		fenceErr := h.finishTerminalThreadMutationLocked(item, thread)
+		h.sessionMu.Unlock()
+		if fenceErr != nil {
 			sessionName = ""
 			notice = ""
 			created = false
-			err = errors.Join(err, fenceErr)
 		}
+		err = errors.Join(err, releaseErr, fenceErr)
 	}()
 	if tool != "terminal" {
-		if err := h.reconcileThreadTmuxStateLocked(item, thread); err != nil {
+		if err := h.reconcileThreadTmuxStateUnderLease(item, thread); err != nil {
 			return "", "", false, err
 		}
 	}
@@ -950,6 +1001,10 @@ func (h *terminalHandler) ensureTmuxSessionWithCodingAgentOptions(
 				_ = h.killTmuxSessionIncarnation(sessionName, target.ServerPID)
 				return "", "", false, configureErr
 			}
+			target.Tagged = true
+			if targetOut != nil {
+				*targetOut = target
+			}
 			if tool == codingAgentPi {
 				if startErr := h.startCodingAgentWindow(item, thread, sessionName, target, initialAgent); startErr != nil {
 					if !errors.Is(startErr, errCodingAgentEnded) {
@@ -974,7 +1029,7 @@ func (h *terminalHandler) ensureTmuxSessionWithCodingAgentOptions(
 		}
 	}
 
-	_, notice, created, err = h.ensureSharedTmuxWindow(
+	ensuredTarget, ensuredNotice, ensuredCreated, ensureErr := h.ensureSharedTmuxWindow(
 		item,
 		thread,
 		tool,
@@ -984,10 +1039,13 @@ func (h *terminalHandler) ensureTmuxSessionWithCodingAgentOptions(
 		launchOptions,
 		restartCodingAgent,
 	)
-	if err != nil {
-		return "", "", false, err
+	if ensureErr != nil {
+		return "", "", false, ensureErr
 	}
-	return sessionName, notice, created, nil
+	if targetOut != nil {
+		*targetOut = ensuredTarget
+	}
+	return sessionName, ensuredNotice, ensuredCreated, nil
 }
 
 func (h *terminalHandler) ensureSharedTmuxWindow(
@@ -1005,8 +1063,14 @@ func (h *terminalHandler) ensureSharedTmuxWindow(
 		return tmuxWindowTarget{}, "", false, err
 	}
 	if found {
-		if err := h.configureSharedToolWindow(sessionName, target, tool); err != nil {
-			return tmuxWindowTarget{}, "", false, err
+		// A matching tool tag is the completion marker for fixed-window setup.
+		// Legacy name-only windows are adopted and tagged once; warm attaches do
+		// not repeat four option commands and a rename before every first byte.
+		if !target.Tagged {
+			if err := h.configureSharedToolWindow(sessionName, target, tool); err != nil {
+				return tmuxWindowTarget{}, "", false, err
+			}
+			target.Tagged = true
 		}
 		return target, "", false, nil
 	}
@@ -1044,6 +1108,7 @@ func (h *terminalHandler) ensureSharedTmuxWindow(
 		_ = h.killTmuxWindowIncarnation(target.ID, target.ServerPID)
 		return tmuxWindowTarget{}, "", false, err
 	}
+	target.Tagged = true
 	if tool == codingAgentPi {
 		if err := h.startCodingAgentWindow(item, thread, sessionName, target, initialAgent); err != nil {
 			if !errors.Is(err, errCodingAgentEnded) {
@@ -1086,10 +1151,44 @@ func (h *terminalHandler) confirmStartedCodingAgentRestart(projectID, threadID, 
 	return errors.New("replacement coding agent pane was not found")
 }
 
-// reconcileThreadTmuxStateLocked recovers stale linked views before the normal
-// existence check is allowed to create replacement fixed windows. The caller
-// must hold sessionMu and the thread mutation lease so browser requests in this
-// server and overlapping backend processes cannot race recovery with creation.
+// reconcileThreadTmuxStateUnderLease recovers stale linked views before the
+// normal existence check creates replacement fixed windows. The caller holds
+// the durable per-thread mutation lease; active/stop fencing happens at the
+// caller's sessionMu boundaries.
+func (h *terminalHandler) reconcileThreadTmuxStateUnderLease(item project.Project, thread project.Thread) error {
+	canonicalSession := tmuxSessionName(item.ID, thread.ID, "process")
+	key := terminalThreadKey{ProjectID: item.ID, ThreadID: thread.ID}
+	h.viewMu.Lock()
+	lastReconciled := h.viewReconciledAt[key]
+	h.viewMu.Unlock()
+	shouldReconcileViews := lastReconciled.IsZero() || time.Since(lastReconciled) >= 10*time.Second
+	if !shouldReconcileViews {
+		// A canonical session can disappear while its linked tool windows remain
+		// alive in detached browser views. Bypass the routine scan throttle in
+		// that recovery case so opening a tab adopts the existing process rather
+		// than starting a replacement coding agent.
+		canonicalExists, err := h.tmuxSessionExists(canonicalSession)
+		if err != nil {
+			return err
+		}
+		shouldReconcileViews = !canonicalExists
+	}
+	if shouldReconcileViews {
+		if err := h.reconcileStaleTmuxViewsLocked(item.ID, thread.ID, canonicalSession); err != nil {
+			return err
+		}
+		h.viewMu.Lock()
+		if h.viewReconciledAt == nil {
+			h.viewReconciledAt = make(map[terminalThreadKey]time.Time)
+		}
+		h.viewReconciledAt[key] = time.Now()
+		h.viewMu.Unlock()
+	}
+	return h.prepareCanonicalCodingAgentWindowsLocked(item.ID, thread.ID, canonicalSession)
+}
+
+// reconcileThreadTmuxStateLocked is retained for callers that keep sessionMu
+// for their complete mutation transaction.
 func (h *terminalHandler) reconcileThreadTmuxStateLocked(item project.Project, thread project.Thread) (err error) {
 	if err := h.ensureTerminalThreadActiveLocked(item.ID, thread.ID); err != nil {
 		return err
@@ -1097,11 +1196,7 @@ func (h *terminalHandler) reconcileThreadTmuxStateLocked(item project.Project, t
 	defer func() {
 		err = errors.Join(err, h.finishTerminalThreadMutationLocked(item, thread))
 	}()
-	canonicalSession := tmuxSessionName(item.ID, thread.ID, "process")
-	if err := h.reconcileStaleTmuxViewsLocked(item.ID, thread.ID, canonicalSession); err != nil {
-		return err
-	}
-	return h.prepareCanonicalCodingAgentWindowsLocked(item.ID, thread.ID, canonicalSession)
+	return h.reconcileThreadTmuxStateUnderLease(item, thread)
 }
 
 func (h *terminalHandler) reconcileThreadTmuxState(item project.Project, thread project.Thread) (err error) {
@@ -3212,22 +3307,17 @@ func (h *terminalHandler) configureSharedToolWindow(sessionName string, target t
 		{"allow-rename", "off"},
 		{"@kiwi-code-tool", tool},
 	}
-	for _, option := range options {
-		if err := h.setTmuxWindowOption(targetName, option[0], option[1]); err != nil {
-			return err
+	arguments := make([]string, 0, len(options)*7+5)
+	for index, option := range options {
+		if index > 0 {
+			arguments = append(arguments, ";")
 		}
+		arguments = append(arguments, "set-option", "-w", "-t", targetName, option[0], option[1])
 	}
-	output, err := h.tmuxCommand("rename-window", "-t", targetName, tool).CombinedOutput()
+	arguments = append(arguments, ";", "rename-window", "-t", targetName, tool)
+	output, err := h.tmuxCommand(arguments...).CombinedOutput()
 	if err != nil {
-		return tmuxCommandError("name tmux window", output, err)
-	}
-	return nil
-}
-
-func (h *terminalHandler) configureTmuxClipboard() error {
-	output, err := h.tmuxCommand("set-option", "-s", "set-clipboard", "external").CombinedOutput()
-	if err != nil {
-		return tmuxCommandError("enable tmux clipboard forwarding", output, err)
+		return tmuxCommandError("configure shared tmux window", output, err)
 	}
 	return nil
 }
@@ -3236,7 +3326,7 @@ func (h *terminalHandler) tmuxToolWindow(sessionName, tool string) (tmuxWindowTa
 	output, err := h.tmuxCommand(
 		"list-windows",
 		"-t", exactTmuxSessionTarget(sessionName),
-		"-F", "#{window_index}\t#{window_id}\t#{window_name}\t#{@kiwi-code-tool}",
+		"-F", "#{window_index}\t#{window_id}\t#{window_name}\t#{@kiwi-code-tool}\t#{pid}",
 	).CombinedOutput()
 	if err != nil {
 		return tmuxWindowTarget{}, false, tmuxCommandError("find tmux window", output, err)
@@ -3246,16 +3336,17 @@ func (h *terminalHandler) tmuxToolWindow(sessionName, tool string) (tmuxWindowTa
 	hasNamedTarget := false
 	lines := strings.FieldsFunc(string(output), func(r rune) bool { return r == '\n' || r == '\r' })
 	for _, line := range lines {
-		parts := strings.SplitN(line, "\t", 4)
-		if len(parts) != 4 {
+		parts := strings.SplitN(line, "\t", 5)
+		if len(parts) != 5 {
 			return tmuxWindowTarget{}, false, fmt.Errorf("parse tmux tool window: %q", line)
 		}
 		index, err := strconv.Atoi(parts[0])
 		if err != nil {
 			return tmuxWindowTarget{}, false, fmt.Errorf("parse tmux tool window index: %w", err)
 		}
-		target := tmuxWindowTarget{Index: index, ID: parts[1]}
+		target := tmuxWindowTarget{Index: index, ID: parts[1], ServerPID: parts[4]}
 		if parts[3] == tool {
+			target.Tagged = true
 			return target, true, nil
 		}
 		if !hasNamedTarget && parts[3] == "" && parts[2] == tool {
@@ -3268,27 +3359,32 @@ func (h *terminalHandler) tmuxToolWindow(sessionName, tool string) (tmuxWindowTa
 
 func (h *terminalHandler) createTmuxViewSession(item project.Project, thread project.Thread, sourceSession string, sourceWindow tmuxWindowTarget) (viewSessionName string, err error) {
 	h.sessionMu.Lock()
-	defer h.sessionMu.Unlock()
 	mutation, mutationErr := h.lockTerminalMutationLocked(item.ID, thread.ID)
 	if mutationErr != nil {
+		h.sessionMu.Unlock()
 		return "", mutationErr
 	}
-	defer func() {
-		err = errors.Join(err, mutation.Release())
-	}()
-	var viewServerPID string
-	if err := h.ensureTerminalThreadActiveLocked(item.ID, thread.ID); err != nil {
-		return "", err
+	if activeErr := h.ensureTerminalThreadActiveLocked(item.ID, thread.ID); activeErr != nil {
+		releaseErr := mutation.Release()
+		h.sessionMu.Unlock()
+		return "", errors.Join(activeErr, releaseErr)
 	}
+	h.sessionMu.Unlock()
+
+	var viewServerPID string
 	defer func() {
-		if fenceErr := h.finishTerminalThreadMutationLocked(item, thread); fenceErr != nil {
+		releaseErr := mutation.Release()
+		h.sessionMu.Lock()
+		fenceErr := h.finishTerminalThreadMutationLocked(item, thread)
+		if fenceErr != nil {
 			if viewSessionName != "" {
 				_ = h.killTmuxSessionIncarnation(viewSessionName, viewServerPID)
 				h.unregisterTmuxViewLocked(viewSessionName)
 			}
 			viewSessionName = ""
-			err = errors.Join(err, fenceErr)
 		}
+		h.sessionMu.Unlock()
+		err = errors.Join(err, releaseErr, fenceErr)
 	}()
 	viewSessionName, viewServerPID, err = h.createTmuxViewSessionLocked(sourceSession, sourceWindow)
 	return viewSessionName, err
@@ -3298,8 +3394,6 @@ func (h *terminalHandler) createTmuxViewSession(item project.Project, thread pro
 // session that may not belong to a Kiwi Code project. Managed project views use
 // createTmuxViewSession so their durable deletion fence remains authoritative.
 func (h *terminalHandler) createTmuxBrowserViewSession(sourceSession string, sourceWindow tmuxWindowTarget) (string, error) {
-	h.sessionMu.Lock()
-	defer h.sessionMu.Unlock()
 	viewSessionName, _, err := h.createTmuxViewSessionLocked(sourceSession, sourceWindow)
 	return viewSessionName, err
 }
@@ -3361,15 +3455,15 @@ func (h *terminalHandler) createTmuxViewSessionLocked(sourceSession string, sour
 			cleanup()
 			return "", "", fmt.Errorf("finish tmux terminal view: %w", err)
 		}
-		for option, value := range map[string]string{
-			"@kiwi-code-source-session": sourceSession,
-			"@kiwi-code-owner-pid":      strconv.Itoa(os.Getpid()),
-		} {
-			output, optionErr := h.tmuxCommand("set-option", "-t", exactTmuxCurrentWindowTarget(viewName), option, value).CombinedOutput()
-			if optionErr != nil {
-				cleanup()
-				return "", "", tmuxCommandError("configure tmux terminal view", output, optionErr)
-			}
+		viewTarget := exactTmuxCurrentWindowTarget(viewName)
+		output, optionErr := h.tmuxCommand(
+			"set-option", "-t", viewTarget, "@kiwi-code-source-session", sourceSession,
+			";",
+			"set-option", "-t", viewTarget, "@kiwi-code-owner-pid", strconv.Itoa(os.Getpid()),
+		).CombinedOutput()
+		if optionErr != nil {
+			cleanup()
+			return "", "", tmuxCommandError("configure tmux terminal view", output, optionErr)
 		}
 		return viewName, dummy.ServerPID, nil
 	}
@@ -3377,13 +3471,13 @@ func (h *terminalHandler) createTmuxViewSessionLocked(sourceSession string, sour
 }
 
 func (h *terminalHandler) closeTmuxViewSession(viewName string) {
-	h.sessionMu.Lock()
-	defer h.sessionMu.Unlock()
 	_ = h.tmuxCommand("kill-session", "-t", exactTmuxSessionTarget(viewName)).Run()
 	h.unregisterTmuxViewLocked(viewName)
 }
 
 func (h *terminalHandler) registerTmuxViewLocked(viewName string) {
+	h.viewMu.Lock()
+	defer h.viewMu.Unlock()
 	if h.activeViews == nil {
 		h.activeViews = make(map[string]struct{})
 	}
@@ -3391,10 +3485,14 @@ func (h *terminalHandler) registerTmuxViewLocked(viewName string) {
 }
 
 func (h *terminalHandler) unregisterTmuxViewLocked(viewName string) {
+	h.viewMu.Lock()
 	delete(h.activeViews, viewName)
+	h.viewMu.Unlock()
 }
 
 func (h *terminalHandler) tmuxViewIsActiveLocked(viewName string) bool {
+	h.viewMu.Lock()
+	defer h.viewMu.Unlock()
 	_, active := h.activeViews[viewName]
 	return active
 }
