@@ -4,6 +4,7 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ComponentPropsWithoutRef,
@@ -13,7 +14,7 @@ import {
   type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown } from 'lucide-react'
+import { Check, ChevronDown, Search } from 'lucide-react'
 import { classNames } from '../../lib/classNames'
 
 export type SelectOption = {
@@ -40,6 +41,8 @@ export type SelectProps = Omit<
   rootClassName?: string
   menuClassName?: string
   optionClassName?: string
+  searchable?: boolean
+  searchPlaceholder?: string
 }
 
 const rootStyles: Record<SelectVariant, string> = {
@@ -96,6 +99,8 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
     rootClassName,
     menuClassName,
     optionClassName,
+    searchable = false,
+    searchPlaceholder = 'Search options…',
     className,
     disabled,
     type = 'button',
@@ -113,12 +118,24 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const searchRef = useRef('')
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [open, setOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(-1)
+  const [query, setQuery] = useState('')
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({})
 
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const visibleOptionIndices = useMemo(() => options.flatMap((option, index) => (
+    !searchable || !normalizedQuery || optionText(option).toLocaleLowerCase().includes(normalizedQuery)
+      ? [index]
+      : []
+  )), [normalizedQuery, options, searchable])
+  const visibleEnabledIndices = useMemo(
+    () => visibleOptionIndices.filter((index) => !options[index]?.disabled),
+    [options, visibleOptionIndices],
+  )
   const selectedIndex = options.findIndex((option) => option.value === value)
   const selectedOption = selectedIndex >= 0 ? options[selectedIndex] : undefined
 
@@ -139,6 +156,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
 
   const closeMenu = useCallback(() => {
     setOpen(false)
+    setQuery('')
     searchRef.current = ''
     if (searchTimerRef.current) {
       clearTimeout(searchTimerRef.current)
@@ -157,14 +175,13 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
   }, [disabled, firstEnabledIndex, options, selectedIndex])
 
   const moveActive = useCallback((direction: 1 | -1) => {
-    const enabledIndices = options.flatMap((option, index) => option.disabled ? [] : [index])
-    if (enabledIndices.length === 0) return
-    const currentPosition = enabledIndices.indexOf(activeIndex)
+    if (visibleEnabledIndices.length === 0) return
+    const currentPosition = visibleEnabledIndices.indexOf(activeIndex)
     const nextPosition = currentPosition < 0
-      ? direction === 1 ? 0 : enabledIndices.length - 1
-      : (currentPosition + direction + enabledIndices.length) % enabledIndices.length
-    setActiveIndex(enabledIndices[nextPosition]!)
-  }, [activeIndex, options])
+      ? direction === 1 ? 0 : visibleEnabledIndices.length - 1
+      : (currentPosition + direction + visibleEnabledIndices.length) % visibleEnabledIndices.length
+    setActiveIndex(visibleEnabledIndices[nextPosition]!)
+  }, [activeIndex, visibleEnabledIndices])
 
   const chooseOption = useCallback((index: number) => {
     const option = options[index]
@@ -193,6 +210,41 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
         setOpen(true)
         return
       }
+    }
+  }
+
+  function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.nativeEvent.isComposing) return
+
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault()
+        moveActive(1)
+        return
+      case 'ArrowUp':
+        event.preventDefault()
+        moveActive(-1)
+        return
+      case 'Home':
+        event.preventDefault()
+        setActiveIndex(visibleEnabledIndices[0] ?? -1)
+        return
+      case 'End':
+        event.preventDefault()
+        setActiveIndex(visibleEnabledIndices.at(-1) ?? -1)
+        return
+      case 'Enter':
+        if (activeIndex < 0) return
+        event.preventDefault()
+        chooseOption(activeIndex)
+        return
+      case 'Escape':
+        event.preventDefault()
+        closeMenu()
+        triggerRef.current?.focus()
+        return
+      case 'Tab':
+        closeMenu()
     }
   }
 
@@ -262,7 +314,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
         ? Math.max(bounds.width, 160)
         : bounds.width
     const width = Math.max(0, Math.min(minimumWidth, viewportWidth - menuViewportMargin * 2))
-    const desiredHeight = Math.min(menuMaximumHeight, options.length * 32 + 8)
+    const desiredHeight = Math.min(menuMaximumHeight, options.length * 32 + 8 + (searchable ? 38 : 0))
     const spaceBelow = viewportHeight - bounds.bottom - menuGap - menuViewportMargin
     const spaceAbove = bounds.top - menuGap - menuViewportMargin
     const openUpward = spaceBelow < desiredHeight && spaceAbove > spaceBelow
@@ -282,7 +334,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
         ? { bottom: viewportHeight - bounds.top + menuGap, top: 'auto' }
         : { bottom: 'auto', top: bounds.bottom + menuGap }),
     })
-  }, [menuAlign, options.length, variant])
+  }, [menuAlign, options.length, searchable, variant])
 
   useLayoutEffect(() => {
     if (!open) return
@@ -296,13 +348,16 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
   }, [open, updateMenuPosition])
 
   useLayoutEffect(() => {
-    if (!open || activeIndex < 0) return
+    if (!open) return
     const frame = requestAnimationFrame(() => {
-      const option = document.getElementById(`${listboxId}-option-${activeIndex}`)
-      option?.scrollIntoView({ block: 'nearest' })
+      if (searchable) searchInputRef.current?.focus()
+      if (activeIndex >= 0) {
+        const option = document.getElementById(`${listboxId}-option-${activeIndex}`)
+        option?.scrollIntoView({ block: 'nearest' })
+      }
     })
     return () => cancelAnimationFrame(frame)
-  }, [activeIndex, listboxId, open])
+  }, [activeIndex, listboxId, open, searchable])
 
   useEffect(() => {
     if (!open) return
@@ -341,11 +396,11 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
   useEffect(() => {
     if (!open) return
     setActiveIndex((current) => {
-      if (current >= 0 && current < options.length && !options[current]?.disabled) return current
-      if (selectedIndex >= 0 && !options[selectedIndex]?.disabled) return selectedIndex
-      return firstEnabledIndex()
+      if (visibleEnabledIndices.includes(current)) return current
+      if (visibleEnabledIndices.includes(selectedIndex)) return selectedIndex
+      return visibleEnabledIndices[0] ?? -1
     })
-  }, [firstEnabledIndex, open, options, selectedIndex])
+  }, [open, selectedIndex, visibleEnabledIndices])
 
   const selectedText = selectedOption ? optionText(selectedOption) : undefined
   const associatedLabel = Array.from(triggerRef.current?.labels ?? [])
@@ -353,58 +408,101 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
     .filter(Boolean)
     .join(' ') || undefined
   const menuLabel = ariaLabel ?? (ariaLabelledBy ? undefined : associatedLabel)
+  const optionNodes = visibleOptionIndices.map((index) => {
+    const option = options[index]!
+    const selected = option.value === value
+    const active = index === activeIndex
+    const text = optionText(option)
+    return (
+      <div
+        key={`${option.value}-${index}`}
+        id={`${listboxId}-option-${index}`}
+        role="option"
+        aria-selected={selected}
+        aria-disabled={option.disabled || undefined}
+        className={classNames(
+          'flex min-h-7 w-full select-none items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
+          option.disabled
+            ? 'cursor-not-allowed text-ghost-faint opacity-55'
+            : active
+              ? 'cursor-pointer bg-ghost-raised text-ghost-bright-white'
+              : 'cursor-pointer text-ghost-muted hover:bg-ghost-raised/65 hover:text-ghost-bright-white',
+          selected && !option.disabled && 'text-ghost-green',
+          optionClassName,
+        )}
+        title={text || undefined}
+        onPointerMove={() => {
+          if (!option.disabled) setActiveIndex(index)
+        }}
+        onPointerDown={(event) => {
+          if (event.pointerType === 'mouse') event.preventDefault()
+        }}
+        onClick={() => chooseOption(index)}
+      >
+        <span className="grid size-3 shrink-0 place-items-center" aria-hidden="true">
+          {selected && <Check size={11} strokeWidth={2.25} />}
+        </span>
+        <span className="min-w-0 flex-1 truncate">{option.label}</span>
+      </div>
+    )
+  })
+  const emptySearch = searchable && optionNodes.length === 0
+    ? <p className="px-2 py-5 text-center text-ghost-faint">No matching options</p>
+    : null
   const menu = open && typeof document !== 'undefined'
     ? createPortal(
         <div
           ref={menuRef}
-          id={listboxId}
-          role="listbox"
-          aria-label={menuLabel}
-          aria-labelledby={menuLabel ? undefined : ariaLabelledBy ?? triggerId}
+          id={searchable ? undefined : listboxId}
+          role={searchable ? undefined : 'listbox'}
+          aria-label={searchable ? undefined : menuLabel}
+          aria-labelledby={searchable || menuLabel ? undefined : ariaLabelledBy ?? triggerId}
           className={classNames(
-            'fixed z-[100] overflow-y-auto overscroll-contain rounded-lg border border-ghost-border/90 bg-ghost-panel p-1 shadow-[0_16px_42px_color-mix(in_srgb,var(--theme-color-canvas)_70%,transparent)]',
+            'fixed z-[100] rounded-lg border border-ghost-border/90 bg-ghost-panel p-1 shadow-[0_16px_42px_color-mix(in_srgb,var(--theme-color-canvas)_70%,transparent)]',
+            searchable
+              ? 'flex flex-col overflow-hidden'
+              : 'overflow-y-auto overscroll-contain',
             menuTextStyles[variant],
             menuClassName,
           )}
           style={menuStyle}
         >
-          {options.map((option, index) => {
-            const selected = option.value === value
-            const active = index === activeIndex
-            const text = optionText(option)
-            return (
+          {searchable ? (
+            <>
+              <label className="relative mb-1 block shrink-0 border-b border-ghost-border/65 pb-1">
+                <span className="sr-only">{searchPlaceholder}</span>
+                <Search
+                  size={11}
+                  className="pointer-events-none absolute left-2 top-1/2 -translate-y-[calc(50%+2px)] text-ghost-faint"
+                  aria-hidden="true"
+                />
+                <input
+                  ref={searchInputRef}
+                  type="search"
+                  value={query}
+                  placeholder={searchPlaceholder}
+                  aria-label={searchPlaceholder}
+                  aria-controls={listboxId}
+                  aria-activedescendant={activeIndex >= 0
+                    ? `${listboxId}-option-${activeIndex}`
+                    : undefined}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                  className="h-7 w-full rounded-md border-0 bg-ghost-black/35 pl-7 pr-2 font-mono text-[9px] text-ghost-bright-white outline-none placeholder:text-ghost-faint focus:bg-ghost-black/55 focus:ring-1 focus:ring-ghost-green/30"
+                />
+              </label>
               <div
-                key={`${option.value}-${index}`}
-                id={`${listboxId}-option-${index}`}
-                role="option"
-                aria-selected={selected}
-                aria-disabled={option.disabled || undefined}
-                className={classNames(
-                  'flex min-h-7 w-full select-none items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
-                  option.disabled
-                    ? 'cursor-not-allowed text-ghost-faint opacity-55'
-                    : active
-                      ? 'cursor-pointer bg-ghost-raised text-ghost-bright-white'
-                      : 'cursor-pointer text-ghost-muted hover:bg-ghost-raised/65 hover:text-ghost-bright-white',
-                  selected && !option.disabled && 'text-ghost-green',
-                  optionClassName,
-                )}
-                title={text || undefined}
-                onPointerMove={() => {
-                  if (!option.disabled) setActiveIndex(index)
-                }}
-                onPointerDown={(event) => {
-                  if (event.pointerType === 'mouse') event.preventDefault()
-                }}
-                onClick={() => chooseOption(index)}
+                id={listboxId}
+                role="listbox"
+                aria-label={menuLabel}
+                aria-labelledby={menuLabel ? undefined : ariaLabelledBy ?? triggerId}
+                className="min-h-0 overflow-y-auto overscroll-contain"
               >
-                <span className="grid size-3 shrink-0 place-items-center" aria-hidden="true">
-                  {selected && <Check size={11} strokeWidth={2.25} />}
-                </span>
-                <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                {optionNodes}
+                {emptySearch}
               </div>
-            )
-          })}
+            </>
+          ) : optionNodes}
         </div>,
         document.body,
       )
