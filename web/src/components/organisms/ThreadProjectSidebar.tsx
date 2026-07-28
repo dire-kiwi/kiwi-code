@@ -8,6 +8,8 @@ import {
   FolderGit2,
   GitBranch,
   LoaderCircle,
+  Lock,
+  LockOpen,
   PanelRightClose,
   PanelRightOpen,
   Pencil,
@@ -15,7 +17,7 @@ import {
   SquareTerminal,
   X,
 } from 'lucide-react'
-import { updateThreadTitle } from '../../api'
+import { setThreadTitleLocked, updateThreadTitle } from '../../api'
 import { formatWhen } from '../../lib/formatWhen'
 import { threadSandboxPath } from '../../routes'
 import type { Project, Thread, ThreadPlan, ThreadUsageSnapshot, WorkflowRun } from '../../types'
@@ -76,6 +78,8 @@ export function ThreadProjectSidebar({
   const [title, setTitle] = useState(thread.title)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [locking, setLocking] = useState(false)
+  const [lockError, setLockError] = useState('')
   const threadsById = new Map(project.threads.map((candidate) => [candidate.id, candidate]))
   let mainThread = thread
   const visitedAncestors = new Set<string>()
@@ -114,12 +118,18 @@ export function ThreadProjectSidebar({
   }, [editing, thread.title])
 
   useEffect(() => {
+    if (thread.titleLocked) setEditing(false)
+    setLockError('')
+  }, [thread.id, thread.titleLocked])
+
+  useEffect(() => {
     if (!editing || !expanded || tab !== 'thread') return
     const frame = requestAnimationFrame(() => inputRef.current?.select())
     return () => cancelAnimationFrame(frame)
   }, [editing, expanded, tab])
 
   function beginEditing() {
+    if (thread.titleLocked) return
     setTitle(thread.title)
     setError('')
     setEditing(true)
@@ -160,6 +170,21 @@ export function ThreadProjectSidebar({
     if (event.key !== 'Escape') return
     event.preventDefault()
     cancelEditing()
+  }
+
+  async function toggleTitleLock() {
+    if (locking) return
+    setLocking(true)
+    setLockError('')
+    try {
+      const updated = await setThreadTitleLocked(project.id, thread.id, !thread.titleLocked)
+      onThreadUpdated(updated)
+      if (updated.titleLocked) setEditing(false)
+    } catch (reason) {
+      setLockError(reason instanceof Error ? reason.message : 'Could not update the title lock.')
+    } finally {
+      setLocking(false)
+    }
   }
 
   function handleTabListKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -282,9 +307,37 @@ export function ThreadProjectSidebar({
                 className="px-4 py-4"
               >
                 <section>
-                  <p className="font-mono text-[8px] font-semibold uppercase tracking-[0.16em] text-ghost-faint">
-                    Thread
-                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-mono text-[8px] font-semibold uppercase tracking-[0.16em] text-ghost-faint">
+                      Thread
+                    </p>
+                    <IconButton
+                      type="button"
+                      shrink
+                      variant="ghost"
+                      onClick={() => void toggleTitleLock()}
+                      disabled={locking}
+                      aria-pressed={Boolean(thread.titleLocked)}
+                      aria-label={thread.titleLocked ? 'Unlock thread title' : 'Lock thread title'}
+                      title={thread.titleLocked ? 'Unlock title' : 'Lock title so agents cannot rename it'}
+                      className={thread.titleLocked ? 'text-ghost-green' : 'text-ghost-dim'}
+                    >
+                      {locking
+                        ? <LoaderCircle size={13} className="animate-spin" />
+                        : thread.titleLocked ? <Lock size={13} /> : <LockOpen size={13} />}
+                    </IconButton>
+                  </div>
+
+                  {thread.titleLocked && (
+                    <p className="mt-1.5 px-2 text-[9px] leading-4 text-ghost-dim">
+                      Title locked. Unlock it to rename; agents cannot override it.
+                    </p>
+                  )}
+                  {lockError && (
+                    <p role="alert" className="mt-1.5 px-2 text-[10px] leading-4 text-ghost-bright-red">
+                      {lockError}
+                    </p>
+                  )}
 
                   {editing ? (
                     <form onSubmit={(event) => void handleSubmit(event)} className="mt-2.5">
@@ -333,15 +386,18 @@ export function ThreadProjectSidebar({
                     <Button
                       type="button"
                       onClick={beginEditing}
-                      aria-label={`Edit thread name: ${thread.title}`}
-                      className="group mt-2.5 flex w-full items-start gap-2 rounded-xl border border-transparent px-2 py-2 text-left transition hover:border-ghost-border/70 hover:bg-ghost-raised/55"
-                      title="Edit thread name"
+                      disabled={Boolean(thread.titleLocked)}
+                      aria-label={thread.titleLocked ? `Thread name locked: ${thread.title}` : `Edit thread name: ${thread.title}`}
+                      className="group mt-2.5 flex w-full items-start gap-2 rounded-xl border border-transparent px-2 py-2 text-left transition enabled:hover:border-ghost-border/70 enabled:hover:bg-ghost-raised/55 disabled:cursor-default"
+                      title={thread.titleLocked ? 'Unlock the title to edit it' : 'Edit thread name'}
                     >
                       <SquareTerminal size={15} className="mt-0.5 shrink-0 text-ghost-green" />
                       <span className="min-w-0 flex-1 break-words text-sm font-semibold leading-5 text-ghost-bright-white">
                         {thread.title}
                       </span>
-                      <Pencil size={12} className="mt-1 shrink-0 text-ghost-faint transition group-hover:text-ghost-green" />
+                      {thread.titleLocked
+                        ? <Lock size={12} className="mt-1 shrink-0 text-ghost-green" />
+                        : <Pencil size={12} className="mt-1 shrink-0 text-ghost-faint transition group-hover:text-ghost-green" />}
                     </Button>
                   )}
 

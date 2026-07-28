@@ -230,6 +230,10 @@ export function updateThreadTitle(projectId: string, threadId: string, title: st
   )
 }
 
+export function setThreadTitleLocked(projectId: string, threadId: string, titleLocked: boolean) {
+  return jsonRequest<Thread>(threadPath(projectId, threadId), 'PATCH', { titleLocked })
+}
+
 function workflowPath(projectId: string, threadId: string, runId?: string) {
   const base = `${threadPath(projectId, threadId)}/workflows`
   return runId ? `${base}/${encodeURIComponent(runId)}` : base
