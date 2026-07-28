@@ -10,9 +10,10 @@ import {
 } from 'react'
 import {
   Bot,
-  Folder,
   GitBranch,
+  GitFork,
   ImagePlus,
+  Laptop,
   LoaderCircle,
   Plus,
   X,
@@ -176,20 +177,21 @@ export function NewThreadScreen({
 }: NewThreadScreenProps) {
   const codingAgentsSubscription = useSubscription(CodingAgentsTopic, { projectId: project.id })
   const settingsSubscription = useSubscription(SettingsTopic, undefined)
-  const branchesSubscription = useSubscription(
-    GitBranchesTopic,
-    { projectId: project.id },
-    { enabled: project.isGitRepo },
-  )
+  // Ask Git directly instead of relying on the project snapshot's repository
+  // flag. That flag can briefly be stale, especially for projects that already
+  // have managed worktree threads, and used to leave "project folder" as the
+  // only available choice.
+  const branchesSubscription = useSubscription(GitBranchesTopic, { projectId: project.id })
   const settingsInitializedRef = useRef(false)
   const [rememberedPreferences] = useState(() => rememberedNewThreadPreferences(project.id))
+  const hasManagedWorktree = project.threads.some((thread) => thread.worktree)
   const [location, setLocation] = useState<ThreadLocation>(() => {
-    if (!project.isGitRepo) return 'project'
+    if (!project.isGitRepo && !hasManagedWorktree) return 'project'
     return rememberedPreferences?.location ?? 'worktree'
   })
   const [baseBranch, setBaseBranch] = useState(rememberedPreferences?.baseBranch ?? '')
   const [branchState, setBranchState] = useState<GitBranchState | null>(null)
-  const [branchesLoading, setBranchesLoading] = useState(project.isGitRepo)
+  const [branchesLoading, setBranchesLoading] = useState(true)
   const [branchLoadError, setBranchLoadError] = useState('')
   const [codingAgents, setCodingAgents] = useState<CodingAgentConfig[]>(fallbackCodingAgentConfigs)
   const [codingAgentsLoading, setCodingAgentsLoading] = useState(true)
@@ -280,10 +282,6 @@ export function NewThreadScreen({
   }, [codingAgent, codingAgents, codingAgentsLoading, model, thinkingLevel])
 
   useEffect(() => {
-    if (!project.isGitRepo) {
-      setBranchesLoading(false)
-      return
-    }
     if (branchesSubscription.state === 'loading') {
       setBranchesLoading(true)
       return
@@ -296,6 +294,7 @@ export function NewThreadScreen({
     const next = branchesSubscription.data as GitBranchState
     setBranchState(next)
     if (!next.isRepository) {
+      setLocation('project')
       setBaseBranch('')
       setBranchLoadError('This project is no longer inside a Git repository.')
       return
@@ -308,7 +307,7 @@ export function NewThreadScreen({
       }
       return next.branches[0]?.name ?? ''
     })
-  }, [branchesSubscription, project.isGitRepo])
+  }, [branchesSubscription])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -470,22 +469,42 @@ export function NewThreadScreen({
     value: option.id,
     label: option.label,
   }))
-  // One flat dropdown covers both choices: the project folder, or a worktree
-  // from any local branch. Picking a branch selects the worktree location too.
-  const workdirValue = location === 'project' ? 'project' : `worktree:${baseBranch}`
-  const workdirOptions = [
-    { value: 'project', label: 'project folder' },
-    ...(project.isGitRepo
-      ? (branchState?.branches ?? []).map((branch) => ({
-          value: `worktree:${branch.name}`,
-          label: `worktree · ${branch.name}${branch.current ? ' (current)' : ''}`,
-        }))
-      : []),
+  const worktreeAvailable = branchState?.isRepository
+    ?? (project.isGitRepo || hasManagedWorktree)
+  const locationOptions = [
+    {
+      value: 'project',
+      textValue: 'Work locally',
+      label: (
+        <span className="flex min-w-0 items-center gap-1">
+          <Laptop size={11} className="shrink-0" />
+          <span className="truncate">Work locally</span>
+        </span>
+      ),
+    },
+    {
+      value: 'worktree',
+      textValue: 'New worktree',
+      disabled: branchesLoading || !worktreeAvailable,
+      label: (
+        <span className="flex min-w-0 items-center gap-1">
+          <GitFork size={11} className="shrink-0" />
+          <span className="truncate">New worktree</span>
+        </span>
+      ),
+    },
   ]
-  if (!workdirOptions.some((option) => option.value === workdirValue)) {
-    workdirOptions.unshift({
-      value: workdirValue,
-      label: `worktree · ${branchesLoading ? 'loading…' : 'select branch'}`,
+  const branchOptions = (branchState?.branches ?? []).map((branch) => ({
+    value: branch.name,
+    label: `${branch.name}${branch.current ? ' (current)' : ''}`,
+  }))
+  if (baseBranch && !branchOptions.some((option) => option.value === baseBranch)) {
+    branchOptions.unshift({ value: baseBranch, label: baseBranch })
+  }
+  if (branchOptions.length === 0) {
+    branchOptions.push({
+      value: '',
+      label: branchesLoading ? 'Loading branches…' : 'No local branches',
     })
   }
   const settingsNotice = selectedAgentModelsUnavailable
@@ -529,17 +548,6 @@ export function NewThreadScreen({
     setError('')
   }
 
-  function handleWorkdirChange(value: string) {
-    if (value === 'project') {
-      setLocation('project')
-    } else if (value.startsWith('worktree:')) {
-      setLocation('worktree')
-      const branch = value.slice('worktree:'.length)
-      if (branch) setBaseBranch(branch)
-    }
-    setError('')
-  }
-
   function handleModelChange(nextModel: string) {
     setModel(nextModel)
     setAgentModels((current) => ({
@@ -574,58 +582,81 @@ export function NewThreadScreen({
         className="relative mx-auto w-full max-w-[38rem]"
       >
         <Surface variant="elevated-panel" className="p-4 sm:p-5">
-          <div className="flex min-w-0 flex-wrap items-center gap-y-1 border-b border-ghost-border/45 px-0.5 pb-2">
-            <div className="flex h-[26px] min-w-0 items-center">
-              <Select
-                id="thread-coding-agent"
-                variant="inline"
-                aria-label="Coding agent"
-                value={codingAgent}
-                options={configuredAgentOptions}
-                onChange={(agent) => handleCodingAgentChange(agent as CodingAgentSelection)}
-                disabled={submitting}
-                leadingIcon={<Bot size={11} />}
-              />
+          <div className="min-w-0 border-b border-ghost-border/45 px-0.5 pb-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-y-1">
+              <div className="flex h-[26px] min-w-0 items-center">
+                <Select
+                  id="thread-coding-agent"
+                  variant="inline"
+                  aria-label="Coding agent"
+                  value={codingAgent}
+                  options={configuredAgentOptions}
+                  onChange={(agent) => handleCodingAgentChange(agent as CodingAgentSelection)}
+                  disabled={submitting}
+                  leadingIcon={<Bot size={11} />}
+                />
+              </div>
+              <label className={classNames(inlineSettingClass, inlineDividerClass)}>
+                <span>Model</span>
+                <Select
+                  id="thread-agent-model"
+                  variant="inline"
+                  value={model}
+                  options={modelSelectOptions.some((option) => option.value === model)
+                    ? modelSelectOptions
+                    : [{ value: model, label: 'Select model' }, ...modelSelectOptions]}
+                  onChange={handleModelChange}
+                  disabled={submitting || selectedAgentModelsUnavailable}
+                  style={{ maxWidth: '7.5rem' }}
+                />
+              </label>
+              <label className={classNames(inlineSettingClass, inlineDividerClass)}>
+                <span>Thinking</span>
+                <Select
+                  id="thread-agent-thinking"
+                  variant="inline"
+                  value={thinkingLevel}
+                  options={thinkingSelectOptions.some((option) => option.value === thinkingLevel)
+                    ? thinkingSelectOptions
+                    : [{ value: thinkingLevel, label: 'Default' }, ...thinkingSelectOptions]}
+                  onChange={handleThinkingLevelChange}
+                  disabled={submitting}
+                  style={{ maxWidth: '90px' }}
+                />
+              </label>
             </div>
-            <label className={classNames(inlineSettingClass, inlineDividerClass)}>
-              <span>Model</span>
+            <div className="mt-1 flex h-[26px] min-w-0 items-center gap-1.5">
               <Select
-                id="thread-agent-model"
+                id="thread-location"
                 variant="inline"
-                value={model}
-                options={modelSelectOptions.some((option) => option.value === model)
-                  ? modelSelectOptions
-                  : [{ value: model, label: 'Select model' }, ...modelSelectOptions]}
-                onChange={handleModelChange}
-                disabled={submitting || selectedAgentModelsUnavailable}
-                style={{ maxWidth: '7.5rem' }}
-              />
-            </label>
-            <label className={classNames(inlineSettingClass, inlineDividerClass)}>
-              <span>Thinking</span>
-              <Select
-                id="thread-agent-thinking"
-                variant="inline"
-                value={thinkingLevel}
-                options={thinkingSelectOptions.some((option) => option.value === thinkingLevel)
-                  ? thinkingSelectOptions
-                  : [{ value: thinkingLevel, label: 'Default' }, ...thinkingSelectOptions]}
-                onChange={handleThinkingLevelChange}
+                aria-label="Start in"
+                value={location}
+                options={locationOptions}
+                onChange={(value) => {
+                  setLocation(value as ThreadLocation)
+                  setError('')
+                }}
                 disabled={submitting}
-                style={{ maxWidth: '90px' }}
+                rootClassName="w-[8.5rem]"
+                className="w-full !max-w-none"
+                menuClassName="min-w-[11rem]"
               />
-            </label>
-            <div className={classNames('flex h-[26px] min-w-0 items-center', inlineDividerClass)}>
               <Select
-                id="thread-working-directory"
+                id="thread-base-branch"
                 variant="inline"
-                aria-label="Working directory"
-                value={workdirValue}
-                options={workdirOptions}
-                onChange={handleWorkdirChange}
-                disabled={submitting || !project.isGitRepo}
-                leadingIcon={location === 'worktree' ? <GitBranch size={11} /> : <Folder size={11} />}
-                style={{ maxWidth: '10rem' }}
+                aria-label="Base branch"
+                value={baseBranch}
+                options={branchOptions}
+                onChange={(branch) => {
+                  if (branch) setBaseBranch(branch)
+                  setError('')
+                }}
+                disabled={submitting || branchesLoading || !worktreeAvailable}
+                leadingIcon={<GitBranch size={11} />}
+                rootClassName="w-[9rem] sm:w-[12rem]"
+                className="w-full !max-w-none"
+                searchable
+                searchPlaceholder="Search branches…"
               />
             </div>
           </div>
