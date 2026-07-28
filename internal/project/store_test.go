@@ -2880,6 +2880,9 @@ func TestStoreRollbackThreadCreationRecoversAfterPartialArtifactCleanup(t *testi
 	if _, err := store.SetThreadBookmarked(item.ID, child.ID, true); !errors.Is(err, ErrThreadRollbackPending) {
 		t.Fatalf("pending rollback accepted bookmark mutation: %v", err)
 	}
+	if _, err := store.SetThreadTitleLocked(item.ID, child.ID, true); !errors.Is(err, ErrThreadRollbackPending) {
+		t.Fatalf("pending rollback accepted title lock mutation: %v", err)
+	}
 	if _, err := store.UpdateThreadLimits(item.ID, child.ID, nil, nil); !errors.Is(err, ErrThreadRollbackPending) {
 		t.Fatalf("pending rollback accepted limit mutation: %v", err)
 	}
@@ -3173,6 +3176,62 @@ func TestStorePinsGitWorktreeToFullBaseRevision(t *testing.T) {
 	}
 	if _, err := store.AddThreadWithOptions(item.ID, "Revision without worktree", AddThreadOptions{BaseRevision: baseRevision}); err == nil {
 		t.Fatal("expected a base revision without a worktree to be rejected")
+	}
+}
+
+func TestStoreTitleLockPreventsRenames(t *testing.T) {
+	dataFile := filepath.Join(t.TempDir(), "projects.json")
+	store, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := store.AddThread(item.ID, "Keep this title")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	locked, err := store.SetThreadTitleLocked(item.ID, thread.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !locked.TitleLocked {
+		t.Fatalf("thread was not title locked: %#v", locked)
+	}
+	if _, err := store.UpdateThreadTitle(item.ID, thread.ID, "Manual replacement", false); !errors.Is(err, ErrThreadTitleLocked) {
+		t.Fatalf("manual rename error = %v, want %v", err, ErrThreadTitleLocked)
+	}
+	generated, err := store.UpdateThreadTitle(item.ID, thread.ID, "Generated replacement", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generated.Title != "Keep this title" || !generated.TitleLocked {
+		t.Fatalf("generated rename changed locked thread: %#v", generated)
+	}
+
+	reloaded, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, persisted, err := reloaded.GetThread(item.ID, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !persisted.TitleLocked || persisted.Title != "Keep this title" {
+		t.Fatalf("title lock was not persisted: %#v", persisted)
+	}
+	if _, err := reloaded.SetThreadTitleLocked(item.ID, thread.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	renamed, err := reloaded.UpdateThreadTitle(item.ID, thread.ID, "Unlocked replacement", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renamed.Title != "Unlocked replacement" || renamed.TitleLocked {
+		t.Fatalf("unlocked thread was not renamed: %#v", renamed)
 	}
 }
 

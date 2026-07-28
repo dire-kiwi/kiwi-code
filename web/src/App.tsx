@@ -150,6 +150,7 @@ function sameThreads(current: readonly Thread[], next: readonly Thread[]) {
       && candidate.branch === thread.branch
       && candidate.worktreePath === thread.worktreePath
       && candidate.autoNamed === thread.autoNamed
+      && candidate.titleLocked === thread.titleLocked
       && candidate.closedAt === thread.closedAt
       && candidate.archivedAt === thread.archivedAt
       && candidate.bookmarked === thread.bookmarked

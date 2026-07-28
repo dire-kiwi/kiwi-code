@@ -105,6 +105,7 @@ export const ThreadSchema = Schema.Struct({
   branch: Schema.optional(Schema.String),
   worktreePath: Schema.optional(Schema.String),
   autoNamed: Schema.optional(Schema.Boolean),
+  titleLocked: Schema.optional(Schema.Boolean),
   closedAt: Schema.optional(Schema.String),
   archivedAt: Schema.optional(Schema.String),
   bookmarked: Schema.optional(Schema.Boolean),
