@@ -3,7 +3,6 @@ import { Navigate, Route, Routes, useMatch, useNavigate } from 'react-router-dom
 import { piActivityKey } from '@/pi-activity-reconciliation.mjs'
 import { WorkspaceLoadingState } from './WorkspaceLoadingState'
 import { ProjectSidebar } from '@/features/project-sidebar/ProjectSidebar'
-import { ProjectThreadFinder } from '@/features/thread-finder/ProjectThreadFinder'
 import { CleanupScreen } from '@/features/screens/CleanupScreen'
 import { EmptyWorkspace } from '@/features/screens/EmptyWorkspace'
 import { NewThreadScreen } from '@/features/new-thread/NewThreadScreen'
@@ -54,9 +53,6 @@ import {
 import { threadActivityAcknowledged } from '@/store/thunks/agentActivity'
 import { activeProfileSelected, selectActiveProfileId } from '@/store/slices/preferences'
 import {
-  projectFinderClosed,
-  projectFinderOpened,
-  selectProjectFinderOpen,
   sidebarClosed,
   sidebarDismissed,
   sidebarOpened,
@@ -161,7 +157,6 @@ export default function App() {
   const projects = useAppSelector(selectProjects)
   const projectsHydrated = useAppSelector(selectProjectsHydrated)
   const activeProfileId = useAppSelector(selectActiveProfileId)
-  const projectFinderOpen = useAppSelector(selectProjectFinderOpen)
   const threadIndex = useAppSelector(selectThreadIndex)
   const deletingId = useAppSelector(selectDeletingProjectId)
   const deletingThreadId = useAppSelector(selectDeletingThreadId)
@@ -180,18 +175,6 @@ export default function App() {
   ) => {
     void dispatch(threadActivityAcknowledged({ projectId, threadId, retryFailed }))
   }, [dispatch])
-
-  useEffect(() => {
-    function handleProjectFinderShortcut(event: KeyboardEvent) {
-      if (!event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'f') return
-      event.preventDefault()
-      event.stopPropagation()
-      dispatch(projectFinderOpened())
-    }
-
-    window.addEventListener('keydown', handleProjectFinderShortcut, true)
-    return () => window.removeEventListener('keydown', handleProjectFinderShortcut, true)
-  }, [])
 
   const selectedProject = useMemo(
     () => workspaceProjectId ? threadIndex.projectById.get(workspaceProjectId) ?? null : null,
@@ -339,18 +322,6 @@ export default function App() {
       ? activeTool
       : defaultWorkspaceTool
     navigate(workspacePath(projectId, threadId, tool))
-    dispatch(sidebarDismissed())
-  }
-
-  function handleFinderProjectSelected(project: Project) {
-    const thread = project.threads.find((item) => !item.parentThreadId && !item.archivedAt)
-      ?? project.threads.find((item) => !item.parentThreadId)
-      ?? project.threads[0]
-    if (thread) {
-      handleThreadSelected(project.id, thread.id)
-      return
-    }
-    navigate(newThreadPath(project.id))
     dispatch(sidebarDismissed())
   }
 
@@ -646,17 +617,6 @@ export default function App() {
         )}
       </div>
 
-      {projectFinderOpen && (
-        <ProjectThreadFinder
-          profiles={profiles}
-          projects={projects}
-          currentProjectId={selectedProject?.id ?? null}
-          currentThreadId={selectedThread?.id ?? null}
-          onClose={() => dispatch(projectFinderClosed())}
-          onSelectProject={handleFinderProjectSelected}
-          onSelectThread={(project, thread) => handleThreadSelected(project.id, thread.id)}
-        />
-      )}
     </div>
   )
 }

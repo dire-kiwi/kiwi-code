@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CornerDownRight, Folder, Inbox, LoaderCircle, Plus, Search } from 'lucide-react'
+import { CornerDownRight, Folder, Inbox, LoaderCircle, Plus } from 'lucide-react'
 import { useMatch } from 'react-router-dom'
 import { WORKSPACE_ROUTE } from '@/app/routes'
 import { usageDescription } from '@/lib/formatUsage'
@@ -13,7 +13,6 @@ import {
   selectDeletingThreadId,
 } from '@/store/slices/projects'
 import { sidebarViewChanged } from '@/store/slices/sidebar'
-import { projectFinderOpened } from '@/store/slices/ui'
 import type { Project, Thread } from '@/types'
 import { Button, IconButton, SelectionButton } from '@/ui/buttons'
 import { useThreadUsage } from '@/wire/serverData'
@@ -50,7 +49,6 @@ export function SidebarActivityView({
   const selectedThreadId = useMatch(WORKSPACE_ROUTE)?.params.threadId ?? null
   const deletingThreadId = useAppSelector(selectDeletingThreadId)
   const archivingThreadId = useAppSelector(selectArchivingThreadId)
-  const onOpenFinder = () => dispatch(projectFinderOpened())
   const onShowAllThreads = () => dispatch(sidebarViewChanged('tree'))
   const [now, setNow] = useState(() => Date.now())
   const [projectPickerOpen, setProjectPickerOpen] = useState(false)
@@ -185,17 +183,7 @@ export function SidebarActivityView({
 
   return (
     <div>
-      <div className="flex items-center gap-1">
-        <Button
-          type="button"
-          onClick={onOpenFinder}
-          aria-label="Find projects and threads (Ctrl+F)"
-          className="flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md border border-ghost-border/55 bg-ghost-black/30 px-2 text-left text-[10px] text-ghost-faint transition hover:border-ghost-border hover:text-ghost-muted"
-        >
-          <Search size={12} aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate">Search threads…</span>
-          <kbd className="font-mono text-[8px] text-ghost-faint">Ctrl F</kbd>
-        </Button>
+      <div className="flex justify-end">
         <div className="relative" data-new-thread-picker>
           <IconButton
             type="button"
