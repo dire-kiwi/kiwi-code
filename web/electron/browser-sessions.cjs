@@ -30,23 +30,7 @@ const SUPPORTED_OPERATIONS = new Set([
   'tabs.list', 'tabs.new', 'tabs.select', 'tabs.close',
   'navigate.goto', 'navigate.back', 'navigate.forward', 'navigate.reload',
   'snapshot', 'click', 'fill', 'key', 'wait', 'evaluate', 'screenshot', 'cdp', 'preview',
-  'recording.start', 'recording.stop', 'recording.status', 'recording.delete',
 ])
-const PASSIVE_RECORDING_ACTIVITY_OPERATIONS = new Set([
-  'session.status', 'session.stop', 'preview',
-  'recording.start', 'recording.stop', 'recording.status', 'recording.delete',
-])
-const EMPTY_RECORDING_MANAGER = Object.freeze({
-  snapshot: () => ({ recording: null, recordings: [] }),
-  touch: () => ({ recording: null, recordings: [] }),
-  isRecordingTarget: () => false,
-  stopIfActive: async () => null,
-  cancelTarget: async () => {},
-  start: async () => { throw new BrowserProviderError('recording_failed', 'Browser recording is unavailable.', 503, false) },
-  stop: async () => { throw new BrowserProviderError('recording_not_active', 'This browser session is not recording.', 409, false) },
-  delete: async () => { throw new BrowserProviderError('recording_not_found', 'Browser recording not found.', 404, false) },
-  open: async () => { throw new BrowserProviderError('recording_not_found', 'Browser recording not found.', 404, false) },
-})
 const ALLOWED_CDP_DOMAINS = new Set([
   'Accessibility', 'Audits', 'CSS', 'DOM', 'DOMDebugger', 'DOMSnapshot',
   'Emulation', 'Fetch', 'FileSystem', 'IO', 'Input', 'LayerTree', 'Log',
@@ -277,7 +261,7 @@ async function waitForDocumentReady(tab, timeoutMs, expectedLoaderId) {
 }
 
 class BrowserSession {
-  constructor({ key, projectId, threadId, partition, WebContentsView, hostWindow, appView, protectedOrigins, recordingManager, onChanged, onPopup, onWorkspaceShortcut, onFrontendReload = () => {}, isViewActive }) {
+  constructor({ key, projectId, threadId, partition, WebContentsView, hostWindow, appView, protectedOrigins, onChanged, onPopup, onWorkspaceShortcut, onFrontendReload = () => {}, isViewActive }) {
     this.key = key
     this.projectId = projectId
     this.threadId = threadId
@@ -286,7 +270,6 @@ class BrowserSession {
     this.hostWindow = hostWindow
     this.appView = appView
     this.protectedOrigins = protectedOrigins
-    this.recordingManager = recordingManager ?? EMPTY_RECORDING_MANAGER
     this.onChanged = onChanged
     this.onPopup = onPopup
     this.onWorkspaceShortcut = onWorkspaceShortcut
@@ -449,7 +432,6 @@ class BrowserSession {
       view.webContents.on(eventName, () => this.onChanged(this))
     }
     view.webContents.on('destroyed', () => {
-      void this.recordingManager.cancelTarget(this.projectId, this.threadId, id)
       this.tabs.delete(id)
       if (this.currentTargetId === id) this.currentTargetId = this.tabs.keys().next().value || null
       this.refs.clear()
@@ -491,12 +473,6 @@ class BrowserSession {
     for (const cancel of [...this.waiters]) cancel()
     this.waiters.clear()
     this.stopPromise = (async () => {
-      try {
-        await this.recordingManager.stopIfActive(this.projectId, this.threadId)
-      } catch {
-        const active = this.recordingManager.snapshot(this.projectId, this.threadId).recording
-        if (active) await this.recordingManager.cancelTarget(this.projectId, this.threadId, active.targetId)
-      }
       for (const tab of [...this.tabs.values()]) this.destroyTab(tab)
       this.currentTargetId = null
       this.refs.clear()
@@ -507,7 +483,7 @@ class BrowserSession {
   renderTabInBackground(tab) {
     const children = this.hostWindow.contentView.children
     if (!children.includes(tab.view)) {
-      // A hidden guest must never receive focus: previews, recordings, and
+      // A hidden guest must never receive focus: previews and
       // agent actions can run while the user is typing in the trusted renderer
       // or another guest.
       const appIndex = children.indexOf(this.appView)
@@ -608,17 +584,16 @@ class BrowserSession {
         currentTargetId: this.currentTargetId,
         owned: true,
         presentation: 'native',
-        capabilities: { nativeView: true, interactiveStream: false, preview: true, recording: true },
+        capabilities: { nativeView: true, interactiveStream: false, preview: true },
       },
       backend: 'electron',
       presentation: 'native',
-      capabilities: { nativeView: true, interactiveStream: false, preview: true, recording: true },
+      capabilities: { nativeView: true, interactiveStream: false, preview: true },
       running: true,
       pages,
       pageList: pages,
       currentTargetId: this.currentTargetId,
       ...(currentPage ? { current: currentPage, currentPage } : {}),
-      ...this.recordingManager.snapshot(this.projectId, this.threadId),
     }
   }
 
@@ -633,9 +608,6 @@ class BrowserSession {
     } else if (operation === 'tabs.close') {
       const tab = params.targetId || params.id ? this.matchingTab(params.targetId ?? params.id) : this.selectedTab()
       const id = tab.id
-      if (this.recordingManager.isRecordingTarget(this.projectId, this.threadId, id)) {
-        throw new BrowserProviderError('recording_active', 'Stop the browser recording before closing its tab.', 409)
-      }
       this.destroyTab(tab)
       this.onChanged(this)
       message = `Closed tab ${id}.`
@@ -989,41 +961,15 @@ class BrowserSession {
     if (operation === 'screenshot') return this.capture(params, false)
     if (operation === 'preview') return this.capture(params, true)
     if (operation === 'cdp') return this.cdp(params)
-    if (operation === 'recording.start') {
-      const tab = params.targetId ? this.matchingTab(params.targetId) : this.selectedTab()
-      const releaseSourceView = this.renderTabInBackground(tab)
-      try {
-        return await this.recordingManager.start({
-          projectId: this.projectId,
-          threadId: this.threadId,
-          targetId: tab.id,
-          title: params.title,
-          sourceWebContents: tab.view.webContents,
-          capturePage: () => this.captureTabPage(tab),
-          releaseSourceView,
-          idleTimeoutMs: params.idleTimeoutMs,
-        })
-      } catch (error) {
-        releaseSourceView()
-        throw error
-      }
-    }
-    if (operation === 'recording.stop') {
-      return this.recordingManager.stop(this.projectId, this.threadId, params.recordingId)
-    }
-    if (operation === 'recording.delete') {
-      return this.recordingManager.delete(this.projectId, this.threadId, params.recordingId)
-    }
     throw new BrowserProviderError('unsupported_operation', 'Unsupported browser operation.')
   }
 }
 
 class BrowserWorkspaceManager {
-  constructor({ WebContentsView, hostWindow, appView, desktopOrigin, apiOrigin, recordingManager, onState, onWorkspaceShortcut = () => {}, onFrontendReload = () => {} }) {
+  constructor({ WebContentsView, hostWindow, appView, desktopOrigin, apiOrigin, onState, onWorkspaceShortcut = () => {}, onFrontendReload = () => {} }) {
     this.WebContentsView = WebContentsView
     this.hostWindow = hostWindow
     this.appView = appView
-    this.recordingManager = recordingManager ?? EMPTY_RECORDING_MANAGER
     this.onState = onState
     this.onWorkspaceShortcut = onWorkspaceShortcut
     this.onFrontendReload = onFrontendReload
@@ -1069,7 +1015,6 @@ class BrowserWorkspaceManager {
       hostWindow: this.hostWindow,
       appView: this.appView,
       protectedOrigins: this.protectedOrigins,
-      recordingManager: this.recordingManager,
       onChanged: () => this.sessionChanged(key),
       onPopup: (_session, url) => {
         void this.serialized(action.projectId, action.threadId, async () => {
@@ -1098,21 +1043,16 @@ class BrowserWorkspaceManager {
         currentTargetId: null,
         owned: true,
         presentation: 'native',
-        capabilities: { nativeView: true, interactiveStream: false, preview: true, recording: true },
+        capabilities: { nativeView: true, interactiveStream: false, preview: true },
       },
       backend: 'electron',
       presentation: 'native',
-      capabilities: { nativeView: true, interactiveStream: false, preview: true, recording: true },
+      capabilities: { nativeView: true, interactiveStream: false, preview: true },
       running: false,
       pages: [],
       pageList: [],
       currentTargetId: null,
-      ...this.recordingManager.snapshot(projectId, threadId),
     }
-  }
-
-  openRecording(projectId, threadId, recordingId, rangeHeader) {
-    return this.recordingManager.open(projectId, threadId, recordingId, rangeHeader)
   }
 
   async perform(action) {
@@ -1137,12 +1077,6 @@ class BrowserWorkspaceManager {
     }
     return this.serialized(action.projectId, action.threadId, async () => {
       let browserSession = this.sessions.get(key)
-      if (action.operation === 'recording.status') {
-        return this.recordingManager.touch(action.projectId, action.threadId)
-      }
-      if (!PASSIVE_RECORDING_ACTIVITY_OPERATIONS.has(action.operation)) {
-        this.recordingManager.touch(action.projectId, action.threadId)
-      }
       if (action.operation === 'session.disconnect') {
         if (!browserSession) {
           return { ...this.noSessionStatus(action.projectId, action.threadId), message: 'No Electron browser connection was active.' }
@@ -1161,12 +1095,6 @@ class BrowserWorkspaceManager {
           stopped: Boolean(browserSession),
           message: browserSession ? 'Stopped Electron browser session.' : 'No Electron browser session was running.',
         }
-      }
-      if (action.operation === 'recording.stop') {
-        return this.recordingManager.stop(action.projectId, action.threadId, action.params.recordingId)
-      }
-      if (action.operation === 'recording.delete') {
-        return this.recordingManager.delete(action.projectId, action.threadId, action.params.recordingId)
       }
       if (!browserSession && action.operation === 'preview') {
         throw new BrowserProviderError('frame_unavailable', '', 404, false)
@@ -1225,12 +1153,6 @@ class BrowserWorkspaceManager {
     )
     if (previous && previous !== next) {
       this.hostWindow.contentView.removeChildView(previous)
-      const previousTab = [...(browserSession?.tabs.values() || [])].find((candidate) => candidate.view === previous)
-      if (previousTab && this.recordingManager.isRecordingTarget(browserSession.projectId, browserSession.threadId, previousTab.id)) {
-        const appIndex = this.hostWindow.contentView.children.indexOf(this.appView)
-        this.hostWindow.contentView.addChildView(previous, appIndex < 0 ? 0 : appIndex)
-        previous.setBounds(DEFAULT_VIEWPORT)
-      }
     }
     this.attachedView = next
     if (next) {
@@ -1251,13 +1173,6 @@ class BrowserWorkspaceManager {
     )
     if (previous) {
       this.hostWindow.contentView.removeChildView(previous)
-      const session = this.activeKey ? this.sessions.get(this.activeKey) : undefined
-      const tab = [...(session?.tabs.values() || [])].find((candidate) => candidate.view === previous)
-      if (tab && this.recordingManager.isRecordingTarget(session.projectId, session.threadId, tab.id)) {
-        const appIndex = this.hostWindow.contentView.children.indexOf(this.appView)
-        this.hostWindow.contentView.addChildView(previous, appIndex < 0 ? 0 : appIndex)
-        previous.setBounds(DEFAULT_VIEWPORT)
-      }
     }
     this.attachedView = null
     if (restoreAppFocus && !this.appView.webContents.isDestroyed()) this.appView.webContents.focus()

@@ -6,7 +6,6 @@ import { pathToFileURL } from "node:url";
 
 const implementationToolNames = [
   "browser_session",
-  "browser_recording",
   "browser_tabs",
   "browser_navigate",
   "browser_snapshot",
@@ -520,47 +519,6 @@ function tool(name) {
   assert.ok(found, `missing ${name}`);
   return found;
 }
-
-responses.push(Response.json({ result: { recording: null, recordings: [] } }));
-const recordingStatus = await tool("browser_recording").execute(
-  "recording-status", { action: "status" }, undefined, undefined, {},
-);
-assert.match(recordingStatus.content[0].text, /No browser recording is active/);
-assert.deepEqual(JSON.parse(requests.at(-1).init.body), { operation: "recording.status", params: {} });
-
-const recordingId = `rec-${"a".repeat(32)}`;
-responses.push(Response.json({ result: {
-  id: recordingId, state: "recording", targetId: "page-one", title: "Demonstrate example navigation",
-  startedAt: "2026-07-21T12:00:00.000Z", mimeType: "video/webm;codecs=vp9",
-  idleTimeoutMs: 300_000, idleDeadlineAt: "2026-07-21T12:05:00.000Z",
-} }));
-const recordingStart = await tool("browser_recording").execute(
-  "recording-start", { action: "start", title: "Demonstrate example navigation" }, undefined, undefined, {},
-);
-assert.match(recordingStart.content[0].text, /Idle timeout: 300 seconds/);
-assert.deepEqual(JSON.parse(requests.at(-1).init.body), {
-  operation: "recording.start",
-  params: { title: "Demonstrate example navigation", idleTimeoutMs: 300_000 },
-});
-await assert.rejects(
-  tool("browser_recording").execute("recording-stop-missing", { action: "stop" }, undefined, undefined, {}),
-  /recordingId is required/,
-);
-await assert.rejects(
-  tool("browser_recording").execute("recording-start-title", { action: "start", title: "Demo" }, undefined, undefined, {}),
-  /2–12 word title/,
-);
-responses.push(Response.json({ result: {
-  id: recordingId, state: "completed", targetId: "page-one", title: "Demonstrate example navigation",
-  startedAt: "2026-07-21T12:00:00.000Z", finishedAt: "2026-07-21T12:00:05.000Z",
-  durationMs: 5_000, bytes: 1_024, mimeType: "video/webm;codecs=vp9", filename: `${recordingId}.webm`,
-} }));
-await tool("browser_recording").execute(
-  "recording-stop", { action: "stop", recordingId }, undefined, undefined, {},
-);
-assert.deepEqual(JSON.parse(requests.at(-1).init.body), {
-  operation: "recording.stop", params: { recordingId },
-});
 
 const controller = new AbortController();
 responses.push(

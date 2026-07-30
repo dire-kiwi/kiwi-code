@@ -84,8 +84,3 @@ export function inputModifiers(
 }
 
 /** Returns the normalised title, or '' when it fails the 2-12 word rule. */
-export function validRecordingTitle(value: string) {
-  const title = value.replace(/\s+/g, ' ').trim()
-  const words = title.split(' ').filter(Boolean)
-  return title.length >= 3 && title.length <= 80 && words.length >= 2 && words.length <= 12 ? title : ''
-}

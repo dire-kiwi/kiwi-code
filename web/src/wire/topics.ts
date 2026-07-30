@@ -2,7 +2,6 @@ import { Schema } from 'effect'
 import {
   AgentSkillStatusSchema,
   AppSettingsSchema,
-  BrowserRecordingSchema,
   BrowserStatusResultSchema,
   CleanupOverviewSchema,
   CodingAgentConfigSchema,
@@ -125,13 +124,6 @@ export const BrowserStatusTopic = parameterizedTopic(
   BrowserStatusResultSchema,
   ({ projectId, threadId }) => JSON.stringify([projectId, threadId]),
 )
-/** @deprecated Recordings are included in BrowserStatusTopic. */
-export const BrowserRecordingsTopic = parameterizedTopic(
-  'browser.recordings',
-  BrowserParamsSchema,
-  MutableArray(BrowserRecordingSchema),
-  ({ projectId, threadId }) => JSON.stringify([projectId, threadId]),
-)
 
 export const allTopics = [
   ProjectsTopic,
@@ -146,7 +138,6 @@ export const allTopics = [
   SessionClosuresTopic,
   GitBranchesTopic,
   BrowserStatusTopic,
-  BrowserRecordingsTopic,
   TmuxSessionsTopic,
   AgentSkillsTopic,
 ] as const

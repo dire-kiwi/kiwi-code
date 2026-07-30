@@ -11,7 +11,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -234,7 +233,6 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/browser/actions", server.browserAction)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/frame", server.browserFrame)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/stream", server.browserStream)
-	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/recordings/{recordingId}", server.browserRecording)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/pi/activity", server.updatePiActivity)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/codex/activity", server.updateCodexActivity)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/claude/activity", server.updateClaudeActivity)
@@ -287,9 +285,8 @@ func configuredBrowserProvider(projects *project.Store, options Options) (browse
 	switch backend {
 	case browsercontrol.BackendHeadless:
 		return browserhost.New(browserhost.Options{
-			ChromeBinary:        options.BrowserChromeBinary,
-			ProtectedOrigins:    append([]string(nil), options.BrowserProtectedOrigins...),
-			RecordingsDirectory: filepath.Join(projects.DataDirectory(), "browser-recordings", "headless"),
+			ChromeBinary:     options.BrowserChromeBinary,
+			ProtectedOrigins: append([]string(nil), options.BrowserProtectedOrigins...),
 		}), nil
 	case browsercontrol.BackendElectron:
 		return browsercontrol.New(browsercontrol.ConfigPaths(projects.DataDirectory())...), nil

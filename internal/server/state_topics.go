@@ -11,21 +11,20 @@ import (
 )
 
 const (
-	stateTopicProjects          = "projects"
-	stateTopicProfiles          = "profiles"
-	stateTopicAgentActivity     = "agentActivity"
-	stateTopicThreadUsage       = "threadUsage"
-	stateTopicThreadStatus      = "thread.status"
-	stateTopicSettings          = "settings"
-	stateTopicCodingAgents      = "codingAgents"
-	stateTopicSandboxConfig     = "sandboxConfig"
-	stateTopicCleanup           = "cleanup"
-	stateTopicSessionClosures   = "sessionClosures"
-	stateTopicGitBranches       = "git.branches"
-	stateTopicBrowserStatus     = "browser.status"
-	stateTopicBrowserRecordings = "browser.recordings"
-	stateTopicTmuxSessions      = "tmuxSessions"
-	stateTopicAgentSkills       = "agentSkills"
+	stateTopicProjects        = "projects"
+	stateTopicProfiles        = "profiles"
+	stateTopicAgentActivity   = "agentActivity"
+	stateTopicThreadUsage     = "threadUsage"
+	stateTopicThreadStatus    = "thread.status"
+	stateTopicSettings        = "settings"
+	stateTopicCodingAgents    = "codingAgents"
+	stateTopicSandboxConfig   = "sandboxConfig"
+	stateTopicCleanup         = "cleanup"
+	stateTopicSessionClosures = "sessionClosures"
+	stateTopicGitBranches     = "git.branches"
+	stateTopicBrowserStatus   = "browser.status"
+	stateTopicTmuxSessions    = "tmuxSessions"
+	stateTopicAgentSkills     = "agentSkills"
 )
 
 type stateTopicDefinition struct {
@@ -147,9 +146,6 @@ func (s *Server) stateTopicRegistry(protectedOrigins []string) map[string]stateT
 		stateTopicGitBranches:     project(stateTopicGitBranches, s.openGitBranchesTopic),
 		stateTopicBrowserStatus: thread(stateTopicBrowserStatus, func(ctx context.Context, projectID, threadID string, channel *stateChannel) error {
 			return s.openBrowserStatusTopic(ctx, projectID, threadID, protectedOrigins, channel)
-		}),
-		stateTopicBrowserRecordings: thread(stateTopicBrowserRecordings, func(ctx context.Context, projectID, threadID string, channel *stateChannel) error {
-			return s.openBrowserRecordingsTopic(ctx, projectID, threadID, protectedOrigins, channel)
 		}),
 		stateTopicTmuxSessions: empty(stateTopicTmuxSessions, s.openTmuxSessionsTopic),
 		stateTopicAgentSkills:  empty(stateTopicAgentSkills, s.openAgentSkillsTopic),
