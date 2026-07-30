@@ -15,13 +15,6 @@ import { apiWebSocketUrl } from '@/apiUrl'
 import { piThinkingLevelIds } from '@/codingAgents'
 import { classNames } from '@/lib/classNames'
 import { formatDuration } from '@/lib/formatDuration'
-import {
-  formatNativeActivityAge,
-  formatNativeActivityClock,
-  nativeConnectionDescription,
-  nativeResponseDescription,
-  NATIVE_AGENT_RESPONSE_STALE_AFTER_MS,
-} from '@/lib/nativeAgentDiagnostics'
 import { imageFilesFromClipboard, piNativePromptImagePolicy } from '@/lib/promptImages'
 import {
   readPiNativeDraft,
@@ -42,14 +35,10 @@ import {
 import type { AgentContextStatus, ConnectionStatus } from '@/types'
 import { useSubscription } from '@/wire/react'
 import { SettingsTopic } from '@/wire/topics'
-import { piNativeStyles } from './piNativeStyles'
-import {
-  PiNativeActivityPanel,
-  type PiStatusTone,
-} from './PiNativeActivityPanel'
+import { PiActivityMonitor } from './PiActivityMonitor'
 import { PiNativeComposer } from './PiNativeComposer'
 import { PiNativeTimelineEntry } from './PiNativeTimeline'
-import { PiSessionUsage } from './PiSessionUsage'
+import { derivePiActivity } from './piActivity'
 import {
   buildComposerSuggestions,
   modelIdentifier,
@@ -62,12 +51,9 @@ import {
   isPiWorkEvent,
   piRpcEventLabel,
 } from './piEvents'
-import {
-  formatCount,
-  formatSessionStats,
-  nativeContextStatus,
-  piLatestCacheHitRate,
-} from './piFormatting'
+import { formatSessionStats, nativeContextStatus, piLatestCacheHitRate } from './piFormatting'
+import { piNativeStyles } from './piNativeStyles'
+import { runPiSlashCommand } from './piSlashCommands'
 import {
   assistantRunDiagnostic,
   buildTimeline,
@@ -766,105 +752,27 @@ export function PiNativePane({
     }
   }
 
-  function runNativeSlashCommand(message: string): boolean {
-    if (readOnlyRef.current) return true
-    const match = message.match(/^\/(compact|reload|restart|new|model|thinking|session)(?:\s+([\s\S]*))?$/)
-    if (!match) return false
-
-    const commandName = match[1]
-    const argument = (match[2] ?? '').trim()
-    if (draftImages.length > 0) {
-      setError(`Remove image attachments before running /${commandName}.`)
-      return true
-    }
-    if (isStreaming && commandName !== 'session') {
-      setError(`Wait for Pi to finish before running /${commandName}.`)
-      return true
-    }
-
-    if (commandName === 'compact') {
-      if (!sendSocketCommand({
-        type: 'compact',
-        ...(argument ? { customInstructions: argument } : {}),
-      })) return true
-      clearSubmittedDraft()
-      setNotice('Compacting conversation context…')
-      return true
-    }
-
-    if (commandName === 'reload' || commandName === 'restart') {
-      if (argument) {
-        setError(`Use /${commandName} without arguments.`)
-        return true
-      }
-      const modelSeparator = selectedModel.indexOf('/')
-      const provider = modelSeparator > 0 ? selectedModel.slice(0, modelSeparator) : ''
-      const modelId = modelSeparator > 0 ? selectedModel.slice(modelSeparator + 1) : ''
-      if (!sendSocketCommand({
-        type: commandName,
-        ...(provider && modelId ? { provider, modelId } : {}),
-        ...(piThinkingLevelIds.some((level) => level === selectedThinking)
-          ? { level: selectedThinking }
-          : {}),
-      })) return true
-      clearSubmittedDraft()
-      setNotice(commandName === 'reload'
-        ? 'Restarting Pi to reload extensions…'
-        : 'Restarting Pi Native…')
-      return true
-    }
-
-    if (commandName === 'new') {
-      if (argument) {
-        setError('Use /new without arguments.')
-        return true
-      }
-      if (!sendSocketCommand({ type: 'new_session' })) return true
-      clearSubmittedDraft()
-      setNotice('Starting a new Pi session…')
-      return true
-    }
-
-    if (commandName === 'model') {
-      const separator = argument.indexOf('/')
-      const provider = separator > 0 ? argument.slice(0, separator) : ''
-      const modelId = separator > 0 ? argument.slice(separator + 1) : ''
-      if (!provider || !modelId) {
-        setError('Use /model <provider/model>.')
-        return true
-      }
-      if (!sendSocketCommand({ type: 'set_model', provider, modelId })) return true
-      clearSubmittedDraft()
-      setNotice(`Switching Pi to ${provider}/${modelId}…`)
-      return true
-    }
-
-    if (commandName === 'thinking') {
-      if (!piThinkingLevelIds.some((level) => level === argument)) {
-        setError(`Use /thinking <${piThinkingLevelIds.join('|')}>.`)
-        return true
-      }
-      if (!sendSocketCommand({ type: 'set_thinking_level', level: argument })) return true
-      clearSubmittedDraft()
-      setNotice(`Setting Pi thinking to ${argument}…`)
-      return true
-    }
-
-    if (argument) {
-      setError('Use /session without arguments.')
-      return true
-    }
-    if (!sendSocketCommand({ type: 'get_session_stats' })) return true
-    sessionStatsNoticePendingRef.current = true
-    clearSubmittedDraft()
-    setNotice('Loading Pi session totals…')
-    return true
+  function handleSlashCommand(message: string): boolean {
+    return runPiSlashCommand(message, {
+      readOnly: readOnlyRef.current,
+      isStreaming,
+      hasImageAttachments: draftImages.length > 0,
+      selectedModel,
+      selectedThinking,
+      send: sendSocketCommand,
+      setError,
+      setNotice,
+      clearSubmittedDraft,
+      markSessionStatsPending: () => {
+        sessionStatsNoticePendingRef.current = true
+      },
+    })
   }
 
   function submitDraft(queueMode?: 'steer' | 'followUp') {
     if (readOnlyRef.current) return
     const message = expandedDraft.trim()
-    if ((!message && draftImages.length === 0) || (message && runNativeSlashCommand(message))) return
+    if ((!message && draftImages.length === 0) || (message && handleSlashCommand(message))) return
     void sendPrompt(queueMode)
   }
 
@@ -1028,94 +936,37 @@ export function PiNativePane({
   const hasDraftContent = draft.trim().length > 0 || draftImages.length > 0
   const canSend = !readOnly && connectionStatus === 'open' && hasDraftContent && !isUploadingImages
   const primaryActionIsStop = isStreaming && !hasDraftContent && !isUploadingImages
-  const runElapsed = runStartedAt === null ? 0 : Math.max(0, clockNow - runStartedAt)
-  const responseAge = lastPiResponseAt === null ? null : Math.max(0, clockNow - lastPiResponseAt)
-  const workEventAge = latestWorkEvent === null ? null : Math.max(0, clockNow - latestWorkEvent.at)
-  const rpcResponsive = connectionStatus === 'open'
-    && responseAge !== null
-    && responseAge <= NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
-  const responseOverdue = connectionStatus === 'open' && (
-    responseAge !== null
-      ? responseAge > NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
-      : connectedAt !== null && clockNow - connectedAt > NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
-  )
-  const probePending = lastProbeSentAt !== null
-    && clockNow - lastProbeSentAt <= NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
-  const rpcTone: PiStatusTone = rpcResponsive ? 'healthy' : responseOverdue ? 'warning' : 'idle'
-  const monitorTone: PiStatusTone = connectionStatus === 'error' || connectionStatus === 'closed'
-    ? 'error'
-    : connectionStatus !== 'open' || responseOverdue
-      ? 'warning'
-      : 'healthy'
-  const activityToggleLabel = isStreaming
-    ? `${runPhase} · ${formatDuration(runElapsed)}`
-    : connectionStatus === 'open' && rpcResponsive
-      ? 'Activity - Idle'
-      : 'Activity · check status'
-
-  async function copyActivityDiagnostics() {
-    const lines = [
-      'Pi Native activity diagnostics',
-      `Captured: ${new Date().toISOString()}`,
-      `Transport: ${connectionStatus}`,
-      `Agent: ${isStreaming ? `${runPhase} for ${formatDuration(runElapsed)}` : 'idle'}`,
-      `Pi RPC: ${nativeResponseDescription('Pi', responseAge, connectedAt, clockNow)}`,
-      `Last probe latency: ${lastProbeLatency === null ? 'unknown' : `${lastProbeLatency}ms`}`,
-      `Last RPC event: ${latestRpcEvent ? `${latestRpcEvent.label} (${formatNativeActivityAge(clockNow - latestRpcEvent.at)})` : 'none'}`,
-      `Last work event: ${latestWorkEvent ? `${latestWorkEvent.label} (${formatNativeActivityAge(clockNow - latestWorkEvent.at)})` : 'none'}`,
-      `Run events observed: ${runEventCount}`,
-      '',
-      'Recent lifecycle events:',
-      ...activityLog.map((entry) => `${new Date(entry.at).toISOString()}  ${entry.event}${entry.repeats > 1 ? ` ×${entry.repeats}` : ''}  ${entry.summary}`),
-    ]
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
-      await navigator.clipboard.writeText(lines.join('\n'))
-      setNotice('Copied Pi activity diagnostics.')
-    } catch {
-      setError('Could not copy Pi activity diagnostics.')
-    }
-  }
-
+  const activity = derivePiActivity({
+    clockNow,
+    connectedAt,
+    connectionStatus,
+    isStreaming,
+    lastPiResponseAt,
+    lastProbeSentAt,
+    latestWorkEvent,
+    runPhase,
+    runStartedAt,
+  })
+  const { activityToggleLabel, monitorTone } = activity
   const activityPanel = activityExpanded ? (
-    <PiNativeActivityPanel
-      probePending={probePending}
-      probeDisabled={connectionStatus !== 'open' || probePending}
-      metrics={[
-        {
-          label: 'Transport',
-          tone: connectionStatus === 'open' ? 'healthy' : monitorTone,
-          value: nativeConnectionDescription(connectionStatus),
-        },
-        {
-          label: 'Pi RPC',
-          tone: rpcTone,
-          value: nativeResponseDescription('Pi', responseAge, connectedAt, clockNow),
-          detail: lastProbeLatency !== null ? `${lastProbeLatency}ms round trip` : undefined,
-        },
-        {
-          label: 'Agent',
-          tone: isStreaming ? 'working' : 'idle',
-          value: isStreaming ? `${runPhase} · ${formatDuration(runElapsed)}` : 'Idle',
-          detail: isStreaming ? `${formatCount(runEventCount)} work events observed` : undefined,
-        },
-        {
-          label: 'Last work event',
-          tone: workEventAge !== null && workEventAge < NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
-            ? 'working'
-            : 'idle',
-          value: latestWorkEvent ? <code>{latestWorkEvent.label}</code> : 'No agent events observed yet',
-          detail: latestWorkEvent ? formatNativeActivityAge(workEventAge ?? 0) : undefined,
-        },
-      ]}
-      sessionUsage={<PiSessionUsage stats={sessionStats} latestCacheHitRate={latestCacheHitRate} />}
-      activityLog={activityLog.map((entry) => ({
-        ...entry,
-        clock: formatNativeActivityClock(entry.at),
-      }))}
+    <PiActivityMonitor
+      view={activity}
+      connectionStatus={connectionStatus}
+      isStreaming={isStreaming}
+      runPhase={runPhase}
+      runEventCount={runEventCount}
+      connectedAt={connectedAt}
+      lastProbeLatency={lastProbeLatency}
+      latestRpcEvent={latestRpcEvent}
+      latestWorkEvent={latestWorkEvent}
+      clockNow={clockNow}
+      activityLog={activityLog}
+      sessionStats={sessionStats}
+      latestCacheHitRate={latestCacheHitRate}
       onInspect={inspectNow}
-      onCopy={() => void copyActivityDiagnostics()}
       onHide={() => setActivityExpanded(false)}
+      onNotice={setNotice}
+      onError={setError}
     />
   ) : null
   const composerModelOptions = availableModels.flatMap((model) => {
