@@ -56,12 +56,12 @@ func TestProviderPreviewWithoutSessionIsUnavailable(t *testing.T) {
 func TestMinimalEnvironmentDoesNotForwardSecrets(t *testing.T) {
 	t.Setenv("KIWI_CODE_AGENT_TOKEN", "secret-token")
 	t.Setenv("PATH", "/bin")
-	environment := minimalEnvironment("/chrome", `[]`, "/tmp/recordings")
+	environment := minimalEnvironment("/chrome", `[]`)
 	joined := strings.Join(environment, "\n")
 	if strings.Contains(joined, "secret-token") || strings.Contains(joined, "KIWI_CODE_AGENT_TOKEN") {
 		t.Fatalf("minimal environment exposed a secret: %s", joined)
 	}
-	for _, expected := range []string{"KIWI_CODE_CHROME_BIN=/chrome", "KIWI_CODE_PROTECTED_ORIGINS=[]", "KIWI_CODE_BROWSER_RECORDINGS_DIR=/tmp/recordings"} {
+	for _, expected := range []string{"KIWI_CODE_CHROME_BIN=/chrome", "KIWI_CODE_PROTECTED_ORIGINS=[]"} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("minimal environment missing %q: %s", expected, joined)
 		}

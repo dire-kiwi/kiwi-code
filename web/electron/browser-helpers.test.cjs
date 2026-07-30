@@ -174,12 +174,11 @@ test('no-session status and preview preserve the provider compatibility contract
     status: {
       endpoint: '', reachable: false, product: '', protocolVersion: '', pages: 0,
       currentTargetId: null, owned: true, presentation: 'native',
-      capabilities: { nativeView: true, interactiveStream: false, preview: true, recording: true },
+      capabilities: { nativeView: true, interactiveStream: false, preview: true },
     },
     backend: 'electron', presentation: 'native',
-    capabilities: { nativeView: true, interactiveStream: false, preview: true, recording: true },
+    capabilities: { nativeView: true, interactiveStream: false, preview: true },
     running: false, pages: [], pageList: [], currentTargetId: null,
-    recording: null, recordings: [],
   })
   await assert.rejects(
     manager.perform({ projectId: 'p', threadId: 't', operation: 'preview', params: { format: 'jpeg', quality: 70 } }),

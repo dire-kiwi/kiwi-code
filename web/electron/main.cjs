@@ -3,10 +3,6 @@
 const path = require('node:path')
 const { app, BaseWindow, WebContentsView, ipcMain, shell } = require('electron')
 const { BrowserProviderServer } = require('./browser-provider.cjs')
-const {
-  BROWSER_RECORDER_EVENT_CHANNEL,
-  BrowserRecordingManager,
-} = require('./browser-recordings.cjs')
 const { BrowserWorkspaceManager } = require('./browser-sessions.cjs')
 const {
   BrowserProviderError,
@@ -55,7 +51,6 @@ const browserIpcChannelSets = [browserIpcChannels, legacyBrowserIpcChannels]
 let primaryWindow = null
 let trustedView = null
 let workspace = null
-let recordingManager = null
 let provider = null
 let cleanupPromise = Promise.resolve()
 let quitAfterCleanup = false
@@ -136,11 +131,6 @@ function registerIpc() {
     'Desktop browser is unavailable.',
     handler,
   )
-  ipcMain.handle(BROWSER_RECORDER_EVENT_CHANNEL, (event, payload) => {
-    const current = recordingManager
-    if (!current) throw new BrowserProviderError('recording_failed', 'Browser recording is unavailable.', 503, false)
-    return current.handleRendererEvent(event, payload)
-  })
 
   for (const channels of browserIpcChannelSets) {
     ipcMain.handle(channels.show, browserInvoke((current, payload) => current.show(validateSessionPayload(payload, true))))
@@ -192,8 +182,6 @@ async function createWindow() {
   primaryWindow = window
   trustedView = appView
 
-  const currentRecordingManager = new BrowserRecordingManager({ app, BaseWindow, WebContentsView })
-  await currentRecordingManager.initialize()
   let currentWorkspace = null
   const requestFrontendReload = () => reloadFrontend(appView, [currentWorkspace])
   currentWorkspace = new BrowserWorkspaceManager({
@@ -202,7 +190,6 @@ async function createWindow() {
     appView,
     desktopOrigin,
     apiOrigin,
-    recordingManager: currentRecordingManager,
     onState: (state) => {
       if (!appView.webContents.isDestroyed()) {
         for (const channels of browserIpcChannelSets) appView.webContents.send(channels.state, state)
@@ -216,7 +203,6 @@ async function createWindow() {
     onFrontendReload: requestFrontendReload,
   })
   workspace = currentWorkspace
-  recordingManager = currentRecordingManager
   currentWorkspace.resize()
   window.on('resize', () => currentWorkspace.resize())
 
@@ -243,7 +229,6 @@ async function createWindow() {
   provider = currentProvider
   try {
     await currentProvider.start()
-    currentRecordingManager.setRecorderPageURL(currentProvider.recorderPageURL())
   } catch (error) {
     console.error('Could not start Electron browser provider:', error)
     if (!window.isDestroyed()) window.close()
@@ -262,17 +247,13 @@ async function createWindow() {
     cleanupStarted = true
     if (trustedView === appView) trustedView = null
     cleanupPromise = Promise.all([
-      (async () => {
-        await currentWorkspace.dispose()
-        await currentRecordingManager.dispose()
-      })(),
+      currentWorkspace.dispose(),
       currentProvider.stop(),
     ]).catch((error) => {
       console.error('Could not clean up desktop workspaces:', error)
     }).finally(() => {
       if (!appView.webContents.isDestroyed()) appView.webContents.close({ waitForBeforeUnload: false })
       if (workspace === currentWorkspace) workspace = null
-      if (recordingManager === currentRecordingManager) recordingManager = null
       if (provider === currentProvider) provider = null
     })
   }
@@ -316,14 +297,10 @@ if (!hasSingleInstanceLock) {
     quitAfterCleanup = true
     const activeProvider = provider
     const activeWorkspace = workspace
-    const activeRecordingManager = recordingManager
     void Promise.all([
       cleanupPromise,
       activeProvider?.stop(),
-      (async () => {
-        await activeWorkspace?.dispose()
-        await activeRecordingManager?.dispose()
-      })(),
+      activeWorkspace?.dispose(),
     ]).finally(() => app.quit())
   })
 

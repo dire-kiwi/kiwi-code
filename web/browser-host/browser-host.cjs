@@ -6,7 +6,6 @@ const path = require('node:path')
 const readline = require('node:readline')
 const { randomBytes } = require('node:crypto')
 const puppeteer = require('puppeteer-core')
-const { HeadlessRecordingManager } = require('./browser-recordings.cjs')
 
 const MAX_TABS = 32
 const MAX_WAIT_MS = 60_000
@@ -259,14 +258,14 @@ class Session {
       try { const history = await tab.cdp.send('Page.getNavigationHistory'); canGoBack = history.currentIndex > 0; canGoForward = history.currentIndex + 1 < history.entries.length } catch {}
       current = { ...selected, canGoBack, canGoForward, loading: tab.loading }
     }
-    return { ...this.manager.statusResult(true, pages, this.currentTargetId, current), ...this.manager.recordings.snapshot(this.projectId, this.threadId) }
+    return this.manager.statusResult(true, pages, this.currentTargetId, current)
   }
   async stop() { if (this.stopped) return; this.stopped = true; this.refs.clear(); this.tabs.clear(); this.currentTargetId = null; await this.context.close().catch(() => {}) }
   async tabsOperation(operation, params) {
     let message = 'Listed browser tabs.'
     if (operation === 'tabs.new') { const tab = await this.createTab(params.url === undefined ? 'about:blank' : requireString(params.url, 'url', 16384)); message = `Opened and selected tab ${tab.id}.` }
     else if (operation === 'tabs.select') { const tab = this.matching(params.targetId ?? params.id); this.currentTargetId = tab.id; this.refs.clear(); message = `Selected tab ${tab.id}.` }
-    else if (operation === 'tabs.close') { const tab = params.targetId || params.id ? this.matching(params.targetId ?? params.id) : this.selected(); const id = tab.id; if (this.manager.recordings.isTarget(this.projectId, this.threadId, id)) throw new ProviderError('recording_active'); await tab.page.close({ runBeforeUnload: false }); message = `Closed tab ${id}.` }
+    else if (operation === 'tabs.close') { const tab = params.targetId || params.id ? this.matching(params.targetId ?? params.id) : this.selected(); const id = tab.id; await tab.page.close({ runBeforeUnload: false }); message = `Closed tab ${id}.` }
     return { message, pages: (await this.status()).pages, currentTargetId: this.currentTargetId }
   }
   async navigate(operation, params) {
@@ -429,7 +428,7 @@ class Session {
 }
 
 class Manager {
-  constructor() { this.browser = null; this.browserStartup = null; this.closing = false; this.rootCDP = null; this.profile = null; this.sessions = new Map(); this.queues = new Map(); this.protectedOrigins = new Set(); this.recordings = new HeadlessRecordingManager(process.env.KIWI_CODE_BROWSER_RECORDINGS_DIR || '', (code) => new ProviderError(code)); try { for (const origin of JSON.parse(process.env.KIWI_CODE_PROTECTED_ORIGINS || '[]')) this.protectedOrigins.add(new URL(origin).origin) } catch {} }
+  constructor() { this.browser = null; this.browserStartup = null; this.closing = false; this.rootCDP = null; this.profile = null; this.sessions = new Map(); this.queues = new Map(); this.protectedOrigins = new Set(); try { for (const origin of JSON.parse(process.env.KIWI_CODE_PROTECTED_ORIGINS || '[]')) this.protectedOrigins.add(new URL(origin).origin) } catch {} }
   key(projectId, threadId) { return `${projectId}\0${threadId}` }
   async ensureBrowser() {
     if (this.closing) throw new ProviderError('session_not_found')
@@ -453,46 +452,35 @@ class Manager {
     }
   }
   statusResult(running, pages = [], currentTargetId = null, current) {
-    return { message: running ? 'Headless Chrome browser session is running.' : 'Headless Chrome browser session is not running.', status: { endpoint: running ? 'kiwi-code://headless' : '', reachable: true, product: 'Headless Chrome', protocolVersion: '1.3', pages: pages.length, currentTargetId, owned: true, presentation: 'stream', capabilities: { nativeView: false, interactiveStream: true, preview: true, recording: true } }, backend: 'headless-chrome', presentation: 'stream', capabilities: { nativeView: false, interactiveStream: true, preview: true, recording: true }, running, pages, pageList: pages, currentTargetId, ...(current ? { current, currentPage: current } : {}) }
+    return { message: running ? 'Headless Chrome browser session is running.' : 'Headless Chrome browser session is not running.', status: { endpoint: running ? 'kiwi-code://headless' : '', reachable: true, product: 'Headless Chrome', protocolVersion: '1.3', pages: pages.length, currentTargetId, owned: true, presentation: 'stream', capabilities: { nativeView: false, interactiveStream: true, preview: true } }, backend: 'headless-chrome', presentation: 'stream', capabilities: { nativeView: false, interactiveStream: true, preview: true }, running, pages, pageList: pages, currentTargetId, ...(current ? { current, currentPage: current } : {}) }
   }
   async createSession(action, key) { const context = await this.browser.createBrowserContext(); if (context.id) await this.rootCDP?.send('Browser.setDownloadBehavior', { behavior: 'deny', browserContextId: context.id }).catch(() => {}); const session = new Session(this, key, action.projectId, action.threadId, context); this.sessions.set(key, session); return session }
   async serialized(key, operation) { const previous = this.queues.get(key) || Promise.resolve(); const current = previous.catch(() => {}).then(operation); this.queues.set(key, current); try { return await current } finally { if (this.queues.get(key) === current) this.queues.delete(key) } }
   async perform(action) {
     if (!record(action) || typeof action.projectId !== 'string' || typeof action.threadId !== 'string' || typeof action.operation !== 'string' || (action.params !== undefined && !record(action.params))) throw new ProviderError('invalid_params')
     if (Array.isArray(action.protectedOrigins)) for (const origin of action.protectedOrigins) { try { this.protectedOrigins.add(new URL(origin).origin) } catch {} }
-    await this.recordings.initialize()
     const key = this.key(action.projectId, action.threadId), params = action.params || {}
-    if (action.operation === 'recording.status') { await this.recordings.prune(); return this.recordings.touch(action.projectId, action.threadId) }
-    if (action.operation === 'recording.stop') return this.recordings.stop(action.projectId, action.threadId, params.recordingId)
-    if (action.operation === 'recording.delete') return this.recordings.delete(action.projectId, action.threadId, params.recordingId)
-    if (action.operation === 'session.status' && !this.sessions.has(key)) return { ...this.statusResult(false), ...this.recordings.snapshot(action.projectId, action.threadId) }
+    if (action.operation === 'session.status' && !this.sessions.has(key)) return this.statusResult(false)
     await this.ensureBrowser()
     if (action.operation === 'preview') { const current = this.sessions.get(key); if (!current) throw new ProviderError('frame_unavailable'); return current.capture(params, true) }
     if (action.operation === 'session.stop') {
-      const active = this.recordings.activeFor(action.projectId, action.threadId)
-      if (active) await this.recordings.stop(action.projectId, action.threadId, active.id)
       const current = this.sessions.get(key); if (current) await current.stop()
     }
     return this.serialized(key, async () => {
       let session = this.sessions.get(key)
-      if (action.operation === 'session.status') return session ? session.status() : { ...this.statusResult(false), ...this.recordings.snapshot(action.projectId, action.threadId) }
-      if (action.operation === 'session.disconnect') return session ? { ...(await session.status()), message: 'Released the browser control connection; the session remains running.' } : { ...this.statusResult(false), ...this.recordings.snapshot(action.projectId, action.threadId), message: 'No headless browser connection was active.' }
-      if (action.operation === 'session.stop') { if (session) { await session.stop(); this.sessions.delete(key) } return { ...this.statusResult(false), ...this.recordings.snapshot(action.projectId, action.threadId), stopped: Boolean(session), message: session ? 'Stopped headless Chrome browser session.' : 'No headless Chrome browser session was running.' } }
+      if (action.operation === 'session.status') return session ? session.status() : this.statusResult(false)
+      if (action.operation === 'session.disconnect') return session ? { ...(await session.status()), message: 'Released the browser control connection; the session remains running.' } : { ...this.statusResult(false), message: 'No headless browser connection was active.' }
+      if (action.operation === 'session.stop') { if (session) { await session.stop(); this.sessions.delete(key) } return { ...this.statusResult(false), stopped: Boolean(session), message: session ? 'Stopped headless Chrome browser session.' : 'No headless Chrome browser session was running.' } }
       const created = !session; if (!session) session = await this.createSession(action, key)
       try {
         if (action.operation === 'session.start') { if (!session.tabs.size) await session.createTab(params.url ?? 'about:blank'); return session.status() }
         if (created && action.operation !== 'tabs.new') await session.createTab('about:blank')
-        if (action.operation === 'recording.start') {
-          const tab = params.targetId ? session.matching(params.targetId) : session.selected()
-          return this.recordings.start({ browser: this.browser, projectId: action.projectId, threadId: action.threadId, targetId: tab.id, title: params.title, sourcePage: tab.page, capturePage: () => session.capturePage(tab, { type: 'jpeg', quality: 80, encoding: 'base64', optimizeForSpeed: true }), idleTimeoutMs: params.idleTimeoutMs })
-        }
         const result = await session.perform(action.operation, params)
-        this.recordings.touch(action.projectId, action.threadId)
         return result
       } catch (error) { if (created && !session.tabs.size) { await session.stop(); this.sessions.delete(key) } throw error }
     })
   }
-  async close() { this.closing = true; await this.browserStartup?.catch(() => {}); await this.recordings.dispose().catch(() => {}); for (const session of this.sessions.values()) await session.stop().catch(() => {}); this.sessions.clear(); await this.rootCDP?.detach().catch(() => {}); this.rootCDP = null; await this.browser?.close().catch(() => {}); this.browser = null; if (this.profile) await fs.promises.rm(this.profile, { recursive: true, force: true }).catch(() => {}); this.profile = null }
+  async close() { this.closing = true; await this.browserStartup?.catch(() => {}); for (const session of this.sessions.values()) await session.stop().catch(() => {}); this.sessions.clear(); await this.rootCDP?.detach().catch(() => {}); this.rootCDP = null; await this.browser?.close().catch(() => {}); this.browser = null; if (this.profile) await fs.promises.rm(this.profile, { recursive: true, force: true }).catch(() => {}); this.profile = null }
 }
 
 const manager = new Manager()

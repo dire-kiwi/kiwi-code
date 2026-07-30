@@ -13,7 +13,6 @@ vi.mock('@/api', () => ({
 
 vi.mock('./ThreadUsageLimits', () => ({ ThreadUsageLimits: () => null }))
 vi.mock('./ThreadPlansPanel', () => ({ ThreadPlansPanel: () => null }))
-vi.mock('./ThreadRecordingsPanel', () => ({ ThreadRecordingsPanel: () => null }))
 vi.mock('./WorkflowRunsPanel', () => ({ WorkflowRunsPanel: () => null }))
 
 const thread: Thread = {

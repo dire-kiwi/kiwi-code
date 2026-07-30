@@ -2,17 +2,14 @@ import type { FormEvent, RefObject } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
-  Circle,
   Globe2,
   LoaderCircle,
   RefreshCw,
   RotateCw,
-  Square,
   X,
 } from 'lucide-react'
-import { formatRecordingDuration } from '@/lib/browserRecording'
 import type { BrowserActionOperation } from '@/types'
-import type { BrowserCurrentPage, BrowserRecording } from '@/wire/domain'
+import type { BrowserCurrentPage } from '@/wire/domain'
 import { IconButton } from '@/ui/buttons'
 import { StatusBadge, type StatusBadgeTone } from '@/ui/feedback'
 import { BaseInput } from '@/ui/inputs'
@@ -34,10 +31,6 @@ export type BrowserToolbarProps = {
   onAddressBlur: () => void
   onSubmitAddress: (event: FormEvent<HTMLFormElement>) => void
 
-  activeRecording: BrowserRecording | null
-  recordingElapsedMs: number
-  recordingSupported: boolean
-  onStartRecording: () => void
 
   backendTone: StatusBadgeTone
   backendLabel: string
@@ -61,10 +54,6 @@ export function BrowserToolbar({
   onAddressChange,
   onAddressBlur,
   onSubmitAddress,
-  activeRecording,
-  recordingElapsedMs,
-  recordingSupported,
-  onStartRecording,
   backendTone,
   backendLabel,
   viewModeLabel,
@@ -148,47 +137,6 @@ export function BrowserToolbar({
           />
         )}
       </form>
-
-      {activeRecording ? (
-        <div className="flex shrink-0 items-center gap-1" aria-label="Browser recording controls">
-          <StatusBadge tone="error">
-            <span className="flex items-center gap-1 font-mono" title={activeRecording.title}>
-              <Circle size={8} fill="currentColor" className={activeRecording.state === 'recording' ? 'animate-pulse' : ''} />
-              {activeRecording.state === 'finalizing' ? 'Saving…' : formatRecordingDuration(recordingElapsedMs)}
-            </span>
-          </StatusBadge>
-          <IconButton
-            type="button"
-            size="md"
-            variant="danger"
-            shrink
-            disabled={busy || activeRecording.state === 'finalizing'}
-            onClick={() => runAction('recording.stop', { recordingId: activeRecording.id })}
-            aria-label="Stop browser recording"
-            title={`Stop and save “${activeRecording.title}”`}
-          >
-            {busyOperation === 'recording.stop'
-              ? <LoaderCircle size={13} className="animate-spin" />
-              : <Square size={11} fill="currentColor" />}
-          </IconButton>
-        </div>
-      ) : recordingSupported && (
-        <IconButton
-          type="button"
-          size="md"
-          variant="subtle"
-          shrink
-          disabled={busy || !currentPage || providerUnavailable}
-          onClick={onStartRecording}
-          aria-label="Record browser tab"
-          title="Record this tab"
-          className="text-ghost-bright-red"
-        >
-          {busyOperation === 'recording.start'
-            ? <LoaderCircle size={13} className="animate-spin" />
-            : <Circle size={12} fill="currentColor" />}
-        </IconButton>
-      )}
 
       <div className="hidden shrink-0 items-center gap-1 lg:flex" aria-label="Browser backend status">
         <StatusBadge tone={backendTone}>{backendLabel}</StatusBadge>

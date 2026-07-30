@@ -328,25 +328,8 @@ export const BrowserCapabilitiesSchema = Schema.Struct({
   nativeView: Schema.optional(Schema.Boolean),
   interactiveStream: Schema.optional(Schema.Boolean),
   preview: Schema.optional(Schema.Boolean),
-  recording: Schema.optional(Schema.Boolean),
 })
 export type BrowserCapabilities = Schema.Schema.Type<typeof BrowserCapabilitiesSchema>
-
-export const BrowserRecordingSchema = Schema.Struct({
-  id: Schema.String,
-  state: Schema.Literal('starting', 'recording', 'finalizing', 'completed'),
-  targetId: Schema.String,
-  title: Schema.String,
-  startedAt: Schema.String,
-  finishedAt: Schema.optional(Schema.String),
-  durationMs: Schema.optional(Schema.Number),
-  bytes: Schema.optional(Schema.Number),
-  mimeType: Schema.optional(Schema.String),
-  filename: Schema.optional(Schema.String),
-  idleTimeoutMs: Schema.optional(Schema.Number),
-  idleDeadlineAt: Schema.optional(Schema.String),
-})
-export type BrowserRecording = Schema.Schema.Type<typeof BrowserRecordingSchema>
 
 export const BrowserStatusResultSchema = Schema.Struct({
   backend: Schema.String,
@@ -357,8 +340,6 @@ export const BrowserStatusResultSchema = Schema.Struct({
   pages: MutableArray(BrowserPageSchema),
   currentTargetId: Schema.NullOr(Schema.String),
   current: Schema.optional(BrowserCurrentPageSchema),
-  recording: Schema.NullOr(BrowserRecordingSchema),
-  recordings: MutableArray(BrowserRecordingSchema),
   error: Schema.optional(Schema.String),
 })
 export type BrowserStatusResult = Schema.Schema.Type<typeof BrowserStatusResultSchema>
