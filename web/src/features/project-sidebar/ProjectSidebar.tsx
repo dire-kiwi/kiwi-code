@@ -4,14 +4,10 @@ import {
   Archive,
   Bookmark,
   ChevronDown,
-  ChevronRight,
   ChevronUp,
-  Clock3,
-  CornerDownRight,
   Folder,
   FolderOpen,
   GitBranch,
-  GitFork,
   Globe2,
   GripVertical,
   ListTree,
@@ -45,11 +41,9 @@ import {
 } from '@/store/slices/projects'
 import {
   bookmarksOnlyChanged,
-  childThreadsCollapseToggled,
   moreThreadsToggled,
   projectCollapseToggled,
   selectBookmarksOnly,
-  selectCollapsedChildThreadIds,
   selectCollapsedProjectIds,
   selectExpandedMoreProjectIds,
   selectSidebarView,
@@ -124,7 +118,6 @@ export function ProjectSidebar({
   const sidebarWidth = useAppSelector(selectSidebarWidth)
   const collapsedProjectIds = useAppSelector(selectCollapsedProjectIds)
   const expandedMoreProjectIds = useAppSelector(selectExpandedMoreProjectIds)
-  const collapsedChildThreadIds = useAppSelector(selectCollapsedChildThreadIds)
   const bookmarksOnly = useAppSelector(selectBookmarksOnly)
   // Only for the default-visible-roots calculation below; the tree itself comes
   // from the memoised index.
@@ -168,12 +161,9 @@ export function ProjectSidebar({
     const selected = tree?.byId.get(selectedThreadId)
     if (!project || !tree || !selected) return
 
-    const ancestors = tree.ancestors(selected.id)
-    const root = ancestors.at(-1) ?? selected
     dispatch(threadRevealed({
       projectId: project.id,
-      ancestorIds: ancestors.map((ancestor) => ancestor.id),
-      expandArchived: Boolean(root?.archivedAt),
+      expandArchived: Boolean(selected.archivedAt),
     }))
   }, [dispatch, selectedThreadId, threadIndex])
 
@@ -203,42 +193,25 @@ export function ProjectSidebar({
     visibleThreadIds?: ReadonlySet<string>,
   ) {
     const archived = Boolean(thread.archivedAt)
-    const closed = Boolean(thread.closedAt)
-    const isChild = Boolean(thread.parentThreadId)
-    const canReorder = !bookmarksOnly && !isChild && !archived && activeThreadCount > 1 && !savingOrder
+    const canReorder = !bookmarksOnly && !archived && activeThreadCount > 1 && !savingOrder
     const selected = thread.id === selectedThreadId
-    const tree = threadIndex.tree(project.id)
-    const children = (tree?.children(thread.id) ?? []).filter((candidate) =>
-      (!visibleThreadIds || visibleThreadIds.has(candidate.id))
-        && (!candidate.closedAt || bookmarksOnly),
-    )
-    const hasChildren = children.length > 0
-    const childrenExpanded = bookmarksOnly ? hasChildren : !collapsedChildThreadIds.has(thread.id)
     const usage = usageByThread.get(`${project.id}\0${thread.id}`)
-    const hasDescendantUsageScope = (tree?.descendants(thread.id).length ?? 0) > 0
-    const displayedUsage = usage && (hasDescendantUsageScope ? usage.total : usage.own)
-    const usageScope = hasDescendantUsageScope
-      ? 'Total usage including all descendant threads'
-      : 'Usage for this thread'
+    const displayedUsage = usage?.own
+    const usageScope = 'Usage for this thread'
     const usageTitle = displayedUsage
       ? `\n${usageScope}: ${usageDescription(displayedUsage)}${usage?.limitReached ? ' — limit reached' : ''}`
       : ''
-    const { activity: piActivity, childActivity } = threadIndex.threadActivity(project.id, thread.id)
+    const { activity: piActivity } = threadIndex.threadActivity(project.id, thread.id)
     const locationTitle = thread.worktree && thread.branch
       ? `${thread.branch}\n${thread.cwd}`
       : thread.cwd
     const activityTitle = piActivity
-      ? `\n${childActivity ? 'Child coding agent' : 'Coding agent'} is ${piActivity.state === 'working' ? 'working' : 'finished'}`
+      ? `\nCoding agent is ${piActivity.state === 'working' ? 'working' : 'finished'}`
       : ''
     const archivedTitle = thread.archivedAt
       ? `\nArchived ${new Date(thread.archivedAt).toLocaleString()}`
       : ''
-    const closedTitle = thread.closedAt
-      ? `\nCompleted ${new Date(thread.closedAt).toLocaleString()}`
-      : ''
-    const selectionPadding = isChild
-      ? hasChildren ? 'pl-8' : 'pl-3'
-      : hasChildren ? 'pl-12' : 'pl-8'
+    const selectionPadding = 'pl-8'
     const menuOpen = threadMenuId === thread.id
     // While the actions menu is open the row must stay fully opaque: any opacity below 1 turns the
     // row into a stacking context, which traps the menu behind the rows rendered after it.
@@ -249,18 +222,17 @@ export function ProjectSidebar({
         data-thread-row
         data-project-id={project.id}
         data-thread-id={thread.id}
-        data-parent-thread-id={thread.parentThreadId}
-        onDragOver={bookmarksOnly || isChild || archived ? undefined : (event) => handleThreadDragOver(event, project.id, thread.id)}
-        onDrop={bookmarksOnly || isChild || archived ? undefined : (event) => handleThreadDrop(event, project, thread.id)}
-        className={`${menuOpen ? 'relative z-40' : ''} ${!menuOpen && (archived || closed) ? 'opacity-75' : ''} ${
+        onDragOver={bookmarksOnly || archived ? undefined : (event) => handleThreadDragOver(event, project.id, thread.id)}
+        onDrop={bookmarksOnly || archived ? undefined : (event) => handleThreadDrop(event, project, thread.id)}
+        className={`${menuOpen ? 'relative z-40' : ''} ${!menuOpen && archived ? 'opacity-75' : ''} ${
           !menuOpen && bookmarksOnly && !thread.bookmarked ? 'opacity-65' : ''
         } ${draggedItem?.kind === 'thread' && draggedItem.id === thread.id ? 'opacity-45' : ''}`}
       >
         <div className="group/thread relative transition-opacity">
-          {!bookmarksOnly && !isChild && !archived && dropTarget?.kind === 'thread' && dropTarget.projectId === project.id && dropTarget.id === thread.id && dropTarget.position === 'before' && (
+          {!bookmarksOnly && !archived && dropTarget?.kind === 'thread' && dropTarget.projectId === project.id && dropTarget.id === thread.id && dropTarget.position === 'before' && (
             <span className="pointer-events-none absolute inset-x-2 top-0 z-20 h-0.5 rounded-full bg-ghost-green shadow-[0_0_7px_rgba(181,189,104,0.8)]" />
           )}
-          {!bookmarksOnly && !isChild && !archived && (
+          {!bookmarksOnly && !archived && (
             <button
               type="button"
               draggable={canReorder}
@@ -278,49 +250,27 @@ export function ProjectSidebar({
               <GripVertical size={11} />
             </button>
           )}
-          {hasChildren && !bookmarksOnly && (
-            <button
-              type="button"
-              onClick={() => dispatch(childThreadsCollapseToggled(thread.id))}
-              aria-expanded={childrenExpanded}
-              aria-controls={`thread-${thread.id}-children`}
-              aria-label={`${childrenExpanded ? 'Collapse' : 'Expand'} ${children.length} child ${children.length === 1 ? 'thread' : 'threads'} for ${thread.title}`}
-              title={`${childrenExpanded ? 'Hide' : 'Show'} ${children.length} child ${children.length === 1 ? 'thread' : 'threads'}`}
-              className={`absolute top-1/2 z-10 grid size-5 -translate-y-1/2 place-items-center rounded text-ghost-faint transition hover:bg-ghost-raised hover:text-ghost-white ${isChild ? 'left-1.5' : 'left-6'}`}
-            >
-              <ChevronRight size={11} className={`transition-transform ${childrenExpanded ? 'rotate-90' : ''}`} />
-            </button>
-          )}
           <SelectionButton
             type="button"
             selected={selected}
             selectionVariant="navigation"
             onClick={() => onSelectThread(project.id, thread.id)}
             aria-current={selected ? 'page' : undefined}
-            title={`${locationTitle}${archivedTitle}${closedTitle}${activityTitle}${usageTitle}`}
+            title={`${locationTitle}${archivedTitle}${activityTitle}${usageTitle}`}
             className={`${selectionPadding} pr-12`}
           >
-            {isChild && <CornerDownRight size={11} className="shrink-0 text-ghost-cyan" aria-hidden="true" />}
             {thread.worktree && <GitBranch size={11} className="shrink-0 text-ghost-green" />}
             {archived && !thread.worktree && <Archive size={11} className="shrink-0 text-ghost-faint" />}
-            {closed && <Clock3 size={11} className="shrink-0 text-ghost-faint" aria-hidden="true" />}
             <span className="min-w-0 flex-1 truncate">{thread.title}</span>
-            {thread.closedAt && <span className="sr-only">Completed {new Date(thread.closedAt).toLocaleString()}</span>}
-            {hasChildren && (
-              <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-ghost-border/65 px-1 py-0.5 font-mono text-[9px] leading-none text-ghost-faint" aria-label={`${children.length} child ${children.length === 1 ? 'thread' : 'threads'}`}>
-                <GitFork size={8} aria-hidden="true" />
-                {children.length}
-              </span>
-            )}
             {piActivity?.state === 'working' ? (
               <>
                 <LoaderCircle size={11} className="shrink-0 animate-spin text-ghost-green" aria-hidden="true" />
-                <span className="sr-only">{childActivity ? 'Child coding agent' : 'Coding agent'} is working</span>
+                <span className="sr-only">Coding agent is working</span>
               </>
             ) : piActivity?.state === 'finished' ? (
               <>
                 <span className="size-1.5 shrink-0 rounded-full bg-ghost-green shadow-[0_0_6px_rgba(181,189,104,0.7)]" aria-hidden="true" />
-                <span className="sr-only">{childActivity ? 'Child coding agent' : 'Coding agent'} finished</span>
+                <span className="sr-only">Coding agent finished</span>
               </>
             ) : null}
             {displayedUsage && (
@@ -368,15 +318,10 @@ export function ProjectSidebar({
                 : 'opacity-0 transition group-hover/thread:opacity-100 group-focus-within/thread:opacity-100'}
             />
           </div>
-          {!bookmarksOnly && !isChild && !archived && dropTarget?.kind === 'thread' && dropTarget.projectId === project.id && dropTarget.id === thread.id && dropTarget.position === 'after' && (
+          {!bookmarksOnly && !archived && dropTarget?.kind === 'thread' && dropTarget.projectId === project.id && dropTarget.id === thread.id && dropTarget.position === 'after' && (
             <span className="pointer-events-none absolute inset-x-2 bottom-0 z-20 h-0.5 rounded-full bg-ghost-green shadow-[0_0_7px_rgba(181,189,104,0.8)]" />
           )}
         </div>
-        {hasChildren && childrenExpanded && (
-          <ul id={`thread-${thread.id}-children`} className="ml-5 space-y-0.5 border-l border-ghost-border/55 pl-1">
-            {children.map((child) => renderThreadRow(project, child, activeThreadCount, visibleThreadIds))}
-          </ul>
-        )}
       </li>
     )
   }

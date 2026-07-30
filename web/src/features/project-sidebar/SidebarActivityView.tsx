@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Bookmark, CornerDownRight, Folder, Inbox, LoaderCircle, Plus, Search } from 'lucide-react'
+import { Bookmark, Folder, Inbox, LoaderCircle, Plus, Search } from 'lucide-react'
 import { useMatch } from 'react-router-dom'
 import { WORKSPACE_ROUTE } from '@/app/routes'
 import { usageDescription } from '@/lib/formatUsage'
@@ -97,13 +97,10 @@ export function SidebarActivityView({
     if (!found) return null
     const { project, thread } = found
     const selected = thread.id === selectedThreadId
-    const parent = thread.parentThreadId
-      ? threadIndex.tree(project.id)?.byId.get(thread.parentThreadId)
-      : undefined
     const usage = usageByKey.get(key)
     const stateDescription = sectionStateDescriptions[kind]
     const title = [
-      `${project.name}${parent ? ` · ${parent.title}` : ''}`,
+      project.name,
       thread.cwd,
       stateDescription,
       usage ? `Usage: ${usageDescription(usage.own)}${usage.limitReached ? ' — limit reached' : ''}` : '',
@@ -126,9 +123,6 @@ export function SidebarActivityView({
             title={title}
             className="pl-2 pr-8"
           >
-            {thread.parentThreadId && (
-              <CornerDownRight size={11} className="shrink-0 text-ghost-cyan" aria-hidden="true" />
-            )}
             {kind === 'working' && (
               <LoaderCircle size={11} className="shrink-0 animate-spin text-ghost-green" aria-hidden="true" />
             )}

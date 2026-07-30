@@ -24,14 +24,8 @@ var claudePluginHookScript []byte
 //go:embed claude-plugin/servers/kiwi-code-browser.mjs
 var claudePluginBrowserServer []byte
 
-//go:embed claude-plugin/servers/kiwi-code-plans.mjs
-var claudePluginPlansServer []byte
-
 //go:embed claude-plugin/skills/kiwi-code-in-app-browser/SKILL.md
 var claudePluginBrowserSkill []byte
-
-//go:embed claude-plugin/skills/kiwi-code-planner/SKILL.md
-var claudePluginPlannerSkill []byte
 
 //go:embed claude-plugin/LICENSE
 var claudePluginBrowserLicense []byte
@@ -46,6 +40,9 @@ type claudePluginFile struct {
 
 func materializeClaudePlugin(dataDirectory string) (string, error) {
 	root := filepath.Join(dataDirectory, "claude-plugin")
+	if err := removeObsoletePluginOrchestration(root); err != nil {
+		return "", err
+	}
 	files, err := claudePluginFiles()
 	if err != nil {
 		return "", err
@@ -58,6 +55,18 @@ func materializeClaudePlugin(dataDirectory string) (string, error) {
 	return root, nil
 }
 
+func removeObsoletePluginOrchestration(root string) error {
+	for _, path := range []string{
+		filepath.Join(root, "servers", "kiwi-code-plans.mjs"),
+		filepath.Join(root, "skills", "kiwi-code-planner"),
+	} {
+		if err := os.RemoveAll(path); err != nil {
+			return fmt.Errorf("remove obsolete plugin orchestration %q: %w", filepath.Base(path), err)
+		}
+	}
+	return nil
+}
+
 func claudePluginFiles() ([]claudePluginFile, error) {
 	files := []claudePluginFile{
 		{path: filepath.Join(".claude-plugin", "plugin.json"), contents: claudePluginManifest},
@@ -65,9 +74,7 @@ func claudePluginFiles() ([]claudePluginFile, error) {
 		{path: filepath.Join("hooks", "hooks.json"), contents: claudePluginHooks},
 		{path: filepath.Join("scripts", "kiwi-code-hook.mjs"), contents: claudePluginHookScript},
 		{path: filepath.Join("servers", "kiwi-code-browser.mjs"), contents: claudePluginBrowserServer},
-		{path: filepath.Join("servers", "kiwi-code-plans.mjs"), contents: claudePluginPlansServer},
 		{path: filepath.Join("skills", "kiwi-code-in-app-browser", "SKILL.md"), contents: claudePluginBrowserSkill},
-		{path: filepath.Join("skills", "kiwi-code-planner", "SKILL.md"), contents: claudePluginPlannerSkill},
 		{path: "LICENSE", contents: claudePluginBrowserLicense},
 		{path: filepath.Join("skills", agentSkillName, "SKILL.md"), contents: claudePluginProcessSkill},
 	}

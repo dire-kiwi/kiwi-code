@@ -8,15 +8,6 @@
         "KIWI_CODE_THREAD_ENDPOINT": "${KIWI_CODE_THREAD_ENDPOINT}",
         "KIWI_CODE_AGENT_TOKEN_FILE": "${CLAUDE_PLUGIN_ROOT}/../agent-token"
       }
-    },
-    "plans": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/servers/kiwi-code-plans.mjs"],
-      "env": {
-        "KIWI_CODE_THREAD_ENDPOINT": "${KIWI_CODE_THREAD_ENDPOINT}",
-        "KIWI_CODE_AGENT_TOKEN_FILE": "${CLAUDE_PLUGIN_ROOT}/../agent-token"
-      }
     }
   }
 }

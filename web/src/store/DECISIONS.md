@@ -72,7 +72,7 @@ runs seeded the same four keys, reloaded, and dumped what survived.
 | `kiwi-code.sidebar.web-servers-collapsed` = `true` | preserved | preserved |
 | `kiwi-code.sidebar.collapsed-projects` = `["…"]` | reset to `[]` | reset to `[]` |
 | `kiwi-code:coding-agent:…` and both presentations | written unprompted | absent |
-| `kiwi-code.sidebar.collapsed-child-threads`, `kiwi-code-active-profile` | written unprompted | absent |
+| `kiwi-code-active-profile` | written unprompted | absent |
 
 Two things worth reading off that table.
 

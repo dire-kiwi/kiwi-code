@@ -165,41 +165,6 @@ func TestAgentActivityRecordsPromptRecencyWithoutAdvancingOnHeartbeats(t *testin
 	}
 }
 
-func TestWorkingActivityReopensACompletedChildThread(t *testing.T) {
-	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	item, err := store.Add("Demo", t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	parent := item.Threads[0]
-	child, err := store.AddThreadWithOptions(item.ID, "Completed child", project.AddThreadOptions{ParentThreadID: parent.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.CloseChildThread(item.ID, parent.ID, child.ID, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	handler, err := newIsolatedServerHandler(t, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	activityPath := "/api/projects/" + item.ID + "/threads/" + child.ID + "/pi/activity"
-	updatePiActivityForTest(t, handler, activityPath, `{"state":"finished"}`, http.StatusOK)
-	if _, persisted, err := store.GetThread(item.ID, child.ID); err != nil || persisted.ClosedAt == nil {
-		t.Fatalf("finished activity reopened child: child=%#v error=%v", persisted, err)
-	}
-
-	updatePiActivityForTest(t, handler, activityPath, `{"state":"working"}`, http.StatusOK)
-	if _, reopened, err := store.GetThread(item.ID, child.ID); err != nil || reopened.ClosedAt != nil {
-		t.Fatalf("working activity did not reopen child: child=%#v error=%v", reopened, err)
-	} else if reopened.LastPromptAt != nil {
-		t.Fatalf("managed child prompt changed user-thread recency: %#v", reopened)
-	}
-}
-
 func TestAgentActivityAggregatesPiAndClaude(t *testing.T) {
 	tracker := newPiActivityTracker()
 	now := time.Now()

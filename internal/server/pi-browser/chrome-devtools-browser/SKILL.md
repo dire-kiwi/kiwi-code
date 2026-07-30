@@ -3,7 +3,6 @@ name: kiwi-code-in-app-browser
 description: Controls and records Kiwi Code's in-app browser by dynamically loading browser_* tools with browser_tool_search. Invoke this skill BEFORE the first browser_* tool call in a task, and never load or call browser_* tools without it. Triggers whenever a task requires opening a URL or web page, browsing or checking a website, interacting with or verifying a running web app or dev server in the browser, inspecting rendered pages, filling forms, clicking UI, taking screenshots of a page, evaluating JavaScript in a page, managing tabs, recording the page, or sending raw CDP commands.
 license: MIT
 compatibility: Requires a Kiwi Code-managed Pi session and a configured Kiwi Code in-app browser provider (server-managed headless Chrome or Electron).
-context: fork
 allowed-tools: browser_tool_search browser_session browser_recording browser_tabs browser_navigate browser_snapshot browser_click browser_fill browser_key browser_wait browser_evaluate browser_screenshot browser_cdp
 ---
 

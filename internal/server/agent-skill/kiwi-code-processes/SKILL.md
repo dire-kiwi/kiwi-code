@@ -2,7 +2,6 @@
 name: kiwi-code-processes
 description: Starts, inspects, interacts with, and stops long-running development processes in Kiwi Code process shells. Use for dev servers, file watchers, test loops, builds, or any command that must keep running while the agent continues working.
 compatibility: Requires Node.js 20+ and a Kiwi Code agent session with KIWI_CODE_THREAD_ENDPOINT set.
-context: fork
 metadata:
   author: kiwi-code
   version: "1.1"

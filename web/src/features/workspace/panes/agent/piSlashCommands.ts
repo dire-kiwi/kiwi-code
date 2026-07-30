@@ -5,7 +5,6 @@
 import { piThinkingLevelIds } from '@/codingAgents'
 
 export type PiSlashCommandContext = {
-  readOnly: boolean
   isStreaming: boolean
   hasImageAttachments: boolean
   selectedModel: string
@@ -27,7 +26,6 @@ const COMMAND = /^\/(compact|reload|restart|new|model|thinking|session)(?:\s+([\
 export function runPiSlashCommand(message: string, context: PiSlashCommandContext): boolean {
   // A read-only pane swallows the command rather than falling through to a
   // prompt it is equally not allowed to send.
-  if (context.readOnly) return true
   const match = message.match(COMMAND)
   if (!match) return false
 

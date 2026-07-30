@@ -27,7 +27,6 @@ describe('storage contract', () => {
       'kiwi-code.sidebar.view',
       'kiwi-code.sidebar.width',
       'kiwi-code.sidebar.collapsed-projects',
-      'kiwi-code.sidebar.collapsed-child-threads',
       'kiwi-code.sidebar.web-servers-collapsed',
     ]))
   })
@@ -40,7 +39,7 @@ describe('storage contract', () => {
 
     store.dispatch(threadWorkspaceMounted({
       key: threadKey,
-      routing: { readOnlySubagent: false, initialCodingAgent: 'claude', initialPresentation: 'native' },
+      routing: { initialCodingAgent: 'claude', initialPresentation: 'native' },
     }))
     store.dispatch(threadPiPresentationChanged({ key: threadKey, presentation: 'terminal' }))
     store.dispatch(newThreadPreferencesRemembered({
@@ -69,7 +68,6 @@ describe('storage contract', () => {
       'kiwi-code.sidebar.view': 'tree',
       'kiwi-code.sidebar.width': '320',
       'kiwi-code.sidebar.collapsed-projects': '["a","b"]',
-      'kiwi-code.sidebar.collapsed-child-threads': '["thread-1"]',
       'kiwi-code.sidebar.web-servers-collapsed': 'true',
     }
     const storage = memoryStorage(stored)

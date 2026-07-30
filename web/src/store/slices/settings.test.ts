@@ -19,8 +19,6 @@ const reduce = settingsSlice.reducer
 // Only the fields each assertion reads are populated; nothing here exercises the
 // rest of AppSettings.
 const settingsFixture = {
-  disableWorkflows: false,
-  workflowKeywordTriggerEnabled: true,
   theme: { fontFamily: 'JetBrains Mono', fontSize: 13 },
 } as unknown as AppSettings
 
@@ -69,12 +67,10 @@ describe('settings slice', () => {
     // provider and the agent panes kept a stale snapshot until the server echoed.
     const saved = {
       ...settingsFixture,
-      workflowKeywordTriggerEnabled: false,
       theme: { fontFamily: 'Fira Code', fontSize: 15 },
     } as unknown as AppSettings
     const next = reduce(reduce(undefined, settingsReceived(settingsFixture)), settingsReceived(saved))
 
-    expect(selectSettings(settingsRoot(next))?.workflowKeywordTriggerEnabled).toBe(false)
     expect(selectTheme(settingsRoot(next))).toEqual({ fontFamily: 'Fira Code', fontSize: 15 })
   })
 })

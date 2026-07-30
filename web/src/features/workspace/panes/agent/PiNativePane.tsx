@@ -19,10 +19,8 @@ import { imageFilesFromClipboard, piNativePromptImagePolicy } from '@/lib/prompt
 import {
   readPiNativeDraft,
   readPiNativePastes,
-  readPiNativeWorkflowDismissed,
   writePiNativeDraft,
   writePiNativePastes,
-  writePiNativeWorkflowDismissed,
 } from '@/lib/promptDrafts'
 import { useImageAttachments } from '@/lib/useImageAttachments'
 import { useNativeActivityLog } from '@/lib/useNativeActivityLog'
@@ -33,8 +31,6 @@ import {
   prunePromptPastes,
 } from '@/prompt-pastes.mjs'
 import type { AgentContextStatus, ConnectionStatus } from '@/types'
-import { useAppSelector } from '@/store/hooks'
-import { selectSettings } from '@/store/slices/settings'
 import { NativeAgentActivityMonitor, type NativeAgentDescriptor } from './NativeAgentActivityMonitor'
 import { PiNativeComposer } from './PiNativeComposer'
 import { PiSessionUsage } from './PiSessionUsage'
@@ -80,7 +76,6 @@ type PiNativePaneProps = {
   initialPrompt?: string
   initialImagePaths?: string[]
   onInitialPromptSent?: () => void
-  readOnly: boolean
   active: boolean
   onStatusChange: (status: ConnectionStatus) => void
   onContextStatusChange: (status: AgentContextStatus | null) => void
@@ -92,9 +87,6 @@ const PI_AGENT: NativeAgentDescriptor = {
   responseSubject: 'Pi',
 }
 
-const WORKFLOW_DISMISS_MARKER = '\u2063kiwi-code-no-ultracode\u2063'
-const ULTRACODE_KEYWORD_PATTERN = /\bultracode\b/i
-
 export function PiNativePane({
   projectId,
   threadId,
@@ -104,12 +96,10 @@ export function PiNativePane({
   initialPrompt,
   initialImagePaths,
   onInitialPromptSent,
-  readOnly,
   active,
   onStatusChange,
   onContextStatusChange,
 }: PiNativePaneProps) {
-  const settings = useAppSelector(selectSettings)
   const [messages, setMessages] = useState<PiAgentMessage[]>([])
   const [liveAssistant, setLiveAssistant] = useState<PiAgentMessage | null>(null)
   const [toolStates, setToolStates] = useState<Map<string, PiToolState>>(() => new Map())
@@ -129,13 +119,6 @@ export function PiNativePane({
   } = useImageAttachments()
   const [isUploadingImages, setIsUploadingImages] = useState(false)
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false)
-  const [workflowKeywordDismissed, setWorkflowKeywordDismissed] = useState(() => (
-    readPiNativeWorkflowDismissed(projectId, threadId)
-    && ULTRACODE_KEYWORD_PATTERN.test(expandPromptPastes(
-      readPiNativeDraft(projectId, threadId),
-      readPiNativePastes(projectId, threadId),
-    ))
-  ))
   const [selectedSlashIndex, setSelectedSlashIndex] = useState(0)
   const [isStreaming, setIsStreaming] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting')
@@ -157,7 +140,6 @@ export function PiNativePane({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
   const activeRef = useRef(active)
-  const readOnlyRef = useRef(readOnly)
   const atBottomRef = useRef(true)
   const isStreamingRef = useRef(false)
   const runPhaseRef = useRef('Idle')
@@ -180,7 +162,6 @@ export function PiNativePane({
   const selectedModelRef = useRef(initialModel ?? '')
 
   activeRef.current = active
-  readOnlyRef.current = readOnly
   isStreamingRef.current = isStreaming
   onStatusChangeRef.current = onStatusChange
   onContextStatusChangeRef.current = onContextStatusChange
@@ -189,15 +170,6 @@ export function PiNativePane({
     if (initialPrompt !== undefined) initialPromptRef.current = initialPrompt
     if (initialImagePaths?.length) initialImagePathsRef.current = [...initialImagePaths]
   }
-
-  useEffect(() => {
-    writePiNativeWorkflowDismissed(projectId, threadId, workflowKeywordDismissed)
-  }, [projectId, threadId, workflowKeywordDismissed])
-
-  // Derived, not mirrored into state: nothing else writes these, so copying them
-  // in an effect only bought a second render of the pane per settings snapshot.
-  const workflowKeywordTriggerEnabled = settings?.workflowKeywordTriggerEnabled ?? false
-  const workflowsEnabled = settings ? !settings.disableWorkflows : false
 
   const updateConnectionStatus = useCallback((status: ConnectionStatus) => {
     setConnectionStatus(status)
@@ -260,7 +232,7 @@ export function PiNativePane({
         socket.send(JSON.stringify({ type: 'get_available_models' }))
         const prompt = initialPromptRef.current.trim()
         const imagePaths = initialImagePathsRef.current
-        if (!readOnlyRef.current && (prompt || imagePaths.length > 0) && !initialPromptSentRef.current) {
+        if ((prompt || imagePaths.length > 0) && !initialPromptSentRef.current) {
           promptSentAtRef.current = receivedAt
           beginRun('Sending prompt', receivedAt)
           appendActivity(
@@ -278,7 +250,7 @@ export function PiNativePane({
           initialPromptSentRef.current = true
           onInitialPromptSentRef.current?.()
         }
-        if (activeRef.current && !readOnlyRef.current) textareaRef.current?.focus()
+        if (activeRef.current) textareaRef.current?.focus()
         break
       }
       case 'pi_native_restarting':
@@ -298,7 +270,7 @@ export function PiNativePane({
         markProbeSent(receivedAt)
         socket.send(JSON.stringify({ type: 'get_commands' }))
         socket.send(JSON.stringify({ type: 'get_available_models' }))
-        if (activeRef.current && !readOnlyRef.current) textareaRef.current?.focus()
+        if (activeRef.current) textareaRef.current?.focus()
         break
       case 'pi_native_error':
         setError(typeof event.message === 'string' ? event.message : 'The native Pi session reported an error.')
@@ -593,22 +565,12 @@ export function PiNativePane({
     writePiNativePastes(projectId, threadId, draftPastes)
   }, [draft, draftPastes, projectId, threadId])
 
-  useEffect(() => {
-    if (!readOnly) return
-    imageUploadControllerRef.current?.abort()
-    setDraft('')
-    setDraftPastes([])
-    clearDraftImages()
-    setSlashMenuDismissed(true)
-    setSelectedSlashIndex(0)
-  }, [clearDraftImages, readOnly])
-
   const nativeSocketUrl = useMemo(() => {
     const params = new URLSearchParams()
-    if (!readOnlyRef.current && initialModelRef.current) {
+    if (initialModelRef.current) {
       params.set('model', initialModelRef.current)
     }
-    if (!readOnlyRef.current && initialThinkingRef.current) {
+    if (initialThinkingRef.current) {
       params.set('thinking', initialThinkingRef.current)
     }
     const url = apiWebSocketUrl(
@@ -651,7 +613,7 @@ export function PiNativePane({
     () => buildComposerSuggestions(draft, piCommands, availableModels),
     [availableModels, draft, piCommands],
   )
-  const visibleComposerSuggestions = readOnly || slashMenuDismissed ? [] : composerSuggestions
+  const visibleComposerSuggestions = slashMenuDismissed ? [] : composerSuggestions
 
   useEffect(() => {
     setSelectedSlashIndex((current) => Math.min(current, Math.max(0, composerSuggestions.length - 1)))
@@ -681,10 +643,10 @@ export function PiNativePane({
   }, [draft])
 
   useEffect(() => {
-    if (!active || readOnly) return
+    if (!active) return
     const frame = window.requestAnimationFrame(() => textareaRef.current?.focus())
     return () => window.cancelAnimationFrame(frame)
-  }, [active, readOnly])
+  }, [active])
 
   function clearSubmittedDraft() {
     setDraft('')
@@ -692,13 +654,11 @@ export function PiNativePane({
     clearDraftImages()
     setError('')
     setSlashMenuDismissed(false)
-    setWorkflowKeywordDismissed(false)
     setSelectedSlashIndex(0)
     atBottomRef.current = true
   }
 
   async function sendPrompt(queueMode?: 'steer' | 'followUp') {
-    if (readOnlyRef.current) return
     const message = expandedDraft.trim()
     const images = [...draftImages]
     if ((!message && images.length === 0) || promptSubmissionRef.current) return
@@ -717,14 +677,12 @@ export function PiNativePane({
       const uploads = await Promise.all(images.map((image) =>
         uploadPiImage(projectId, image.file, uploadController.signal),
       ))
-      if (uploadController.signal.aborted || readOnlyRef.current) return
+      if (uploadController.signal.aborted) return
 
       const wasStreaming = isStreamingRef.current
       if (!sendSocketCommand({
         type: 'prompt',
-        message: workflowsEnabled && workflowKeywordTriggerEnabled && workflowKeywordDismissed && ULTRACODE_KEYWORD_PATTERN.test(message)
-          ? WORKFLOW_DISMISS_MARKER + message
-          : message,
+        message,
         ...(uploads.length > 0 ? { images: uploads.map(({ path }) => ({ path })) } : {}),
         ...(queueMode ? { streamingBehavior: queueMode } : {}),
       })) return
@@ -758,7 +716,6 @@ export function PiNativePane({
 
   function handleSlashCommand(message: string): boolean {
     return runPiSlashCommand(message, {
-      readOnly: readOnlyRef.current,
       isStreaming,
       hasImageAttachments: draftImages.length > 0,
       selectedModel,
@@ -774,24 +731,22 @@ export function PiNativePane({
   }
 
   function submitDraft(queueMode?: 'steer' | 'followUp') {
-    if (readOnlyRef.current) return
     const message = expandedDraft.trim()
     if ((!message && draftImages.length === 0) || (message && handleSlashCommand(message))) return
     void sendPrompt(queueMode)
   }
 
   function addDraftImages(files: File[]) {
-    if (readOnlyRef.current || files.length === 0 || isUploadingImages) return
+    if (files.length === 0 || isUploadingImages) return
     setError(addDraftImageFiles(files, piNativePromptImagePolicy))
   }
 
   function handleImageInput(event: ChangeEvent<HTMLInputElement>) {
-    if (!readOnlyRef.current) addDraftImages(Array.from(event.target.files ?? []))
+    addDraftImages(Array.from(event.target.files ?? []))
     event.target.value = ''
   }
 
   function handleComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    if (readOnlyRef.current) return
     addDraftImages(imageFilesFromClipboard(event.clipboardData))
     const pastedText = event.clipboardData.getData('text/plain')
     if (!pastedText) return
@@ -818,16 +773,11 @@ export function PiNativePane({
     const nextPastes = prunePromptPastes(value, draftPastes)
     setDraft(value)
     setDraftPastes(nextPastes)
-    if (!ULTRACODE_KEYWORD_PATTERN.test(expandPromptPastes(value, nextPastes))) {
-      if (workflowKeywordDismissed) setNotice('')
-      setWorkflowKeywordDismissed(false)
-    }
     setSlashMenuDismissed(false)
     setSelectedSlashIndex(0)
   }
 
   function handleComposerDrop(event: DragEvent<HTMLTextAreaElement>) {
-    if (readOnlyRef.current) return
     const files = Array.from(event.dataTransfer.files)
     if (files.length === 0) return
     event.preventDefault()
@@ -835,13 +785,12 @@ export function PiNativePane({
   }
 
   function removeDraftImage(id: number) {
-    if (readOnlyRef.current || isUploadingImages) return
+    if (isUploadingImages) return
     removeDraftImageAttachment(id)
     setError('')
   }
 
   function abortRun() {
-    if (readOnlyRef.current) return
     if (sendSocketCommand({ type: 'abort' })) {
       updateRunPhase('Stopping', 'abort', 'Stop requested.', Date.now())
     }
@@ -853,7 +802,6 @@ export function PiNativePane({
   }
 
   function selectModel(identifier: string) {
-    if (readOnlyRef.current) return
     const separator = identifier.indexOf('/')
     if (separator <= 0) return
     const provider = identifier.slice(0, separator)
@@ -865,14 +813,13 @@ export function PiNativePane({
   }
 
   function selectThinking(level: string) {
-    if (readOnlyRef.current || !piThinkingLevelIds.some((candidate) => candidate === level)) return
+    if (!piThinkingLevelIds.some((candidate) => candidate === level)) return
     if (!sendSocketCommand({ type: 'set_thinking_level', level })) return
     setSelectedThinking(level)
     setNotice(`Setting Pi thinking to ${level}…`)
   }
 
   function applyComposerSuggestion(suggestion: ComposerSuggestion) {
-    if (readOnlyRef.current) return
     setDraft(suggestion.completion)
     setDraftPastes([])
     setSelectedSlashIndex(0)
@@ -886,13 +833,7 @@ export function PiNativePane({
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (readOnlyRef.current || event.nativeEvent.isComposing) return
-    if (event.altKey && event.key.toLowerCase() === 'w' && workflowsEnabled && workflowKeywordTriggerEnabled && ULTRACODE_KEYWORD_PATTERN.test(expandedDraft)) {
-      event.preventDefault()
-      setWorkflowKeywordDismissed(true)
-      setNotice('Ultracode keyword trigger dismissed for this prompt.')
-      return
-    }
+    if (event.nativeEvent.isComposing) return
     if (visibleComposerSuggestions.length > 0) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault()
@@ -938,7 +879,7 @@ export function PiNativePane({
   }
 
   const hasDraftContent = draft.trim().length > 0 || draftImages.length > 0
-  const canSend = !readOnly && connectionStatus === 'open' && hasDraftContent && !isUploadingImages
+  const canSend = connectionStatus === 'open' && hasDraftContent && !isUploadingImages
   const primaryActionIsStop = isStreaming && !hasDraftContent && !isUploadingImages
   const activity = deriveAgentActivity({
     clockNow,
@@ -977,19 +918,13 @@ export function PiNativePane({
     const identifier = modelIdentifier(model)
     return identifier ? [{ value: identifier, label: model.name || identifier }] : []
   })
-  const composerHint = readOnly
-    ? 'Read-only · managed by parent thread'
-    : isUploadingImages
-      ? `Uploading ${draftImages.length} image${draftImages.length === 1 ? '' : 's'}…`
-      : connectionStatus !== 'open'
-        ? 'Connecting to Pi…'
-        : workflowsEnabled && workflowKeywordTriggerEnabled && ULTRACODE_KEYWORD_PATTERN.test(expandedDraft)
-          ? workflowKeywordDismissed
-            ? 'Ultracode keyword trigger dismissed for this prompt'
-            : 'Ultracode workflow trigger · Option/Alt+W to dismiss'
-          : isStreaming
-            ? 'Enter to queue · ⌘Enter to steer'
-            : 'Enter to send · Shift+Enter for newline'
+  const composerHint = isUploadingImages
+    ? `Uploading ${draftImages.length} image${draftImages.length === 1 ? '' : 's'}…`
+    : connectionStatus !== 'open'
+      ? 'Connecting to Pi…'
+      : isStreaming
+        ? 'Enter to queue · ⌘Enter to steer'
+        : 'Enter to send · Shift+Enter for newline'
 
   return (
     <section
@@ -1006,13 +941,9 @@ export function PiNativePane({
           {timeline.length === 0 ? (
             <div className={piNativeStyles.empty} data-testid="pi-native-empty">
               <span className={piNativeStyles.emptyGlyph} aria-hidden="true"><Bot size={22} /></span>
-              <h2 className={piNativeStyles.emptyTitle}>
-                {readOnly ? 'Subagent conversation' : 'Start a conversation with Pi'}
-              </h2>
+              <h2 className={piNativeStyles.emptyTitle}>Start a conversation with Pi</h2>
               <p className={piNativeStyles.emptyCopy}>
-                {readOnly
-                  ? 'This delegated run is controlled by its parent thread. Pi’s turns and tool activity will appear here.'
-                  : 'Send a prompt below. Pi’s turns and tool activity will appear here.'}
+                Send a prompt below. Pi’s turns and tool activity will appear here.
               </p>
             </div>
           ) : (
@@ -1038,7 +969,6 @@ export function PiNativePane({
       )}
 
       <PiNativeComposer
-        readOnly={readOnly}
         monitorTone={monitorTone}
         activityExpanded={activityExpanded}
         activityToggleLabel={activityToggleLabel}
@@ -1065,11 +995,11 @@ export function PiNativePane({
         onKeyDown={handleComposerKeyDown}
         model={selectedModel}
         modelOptions={composerModelOptions}
-        modelDisabled={readOnly || connectionStatus !== 'open' || isStreaming || isUploadingImages}
+        modelDisabled={connectionStatus !== 'open' || isStreaming || isUploadingImages}
         onModelChange={selectModel}
         thinking={selectedThinking}
         thinkingOptions={piThinkingLevelIds.map((level) => ({ value: level, label: level }))}
-        thinkingDisabled={readOnly || connectionStatus !== 'open' || isStreaming || isUploadingImages}
+        thinkingDisabled={connectionStatus !== 'open' || isStreaming || isUploadingImages}
         onThinkingChange={selectThinking}
         onImageInput={handleImageInput}
         hint={composerHint}

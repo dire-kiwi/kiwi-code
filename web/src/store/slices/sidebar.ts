@@ -18,7 +18,6 @@ export type SidebarState = {
   view: SidebarViewMode
   width: number
   collapsedProjectIds: string[]
-  collapsedChildThreadIds: string[]
   webServersCollapsed: boolean
   // Ephemeral: the same "which rows are open" concern as the fields above, but
   // deliberately not persisted, matching the behaviour before the migration.
@@ -30,7 +29,6 @@ export const initialSidebarState: SidebarState = {
   view: 'activity',
   width: defaultSidebarWidth,
   collapsedProjectIds: [],
-  collapsedChildThreadIds: [],
   webServersCollapsed: false,
   expandedMoreProjectIds: [],
   bookmarksOnly: false,
@@ -66,10 +64,6 @@ export const sidebarPersistence: PersistedFields<SidebarState> = {
     key: 'kiwi-code.sidebar.collapsed-projects',
     codec: storedIdListCodec,
   },
-  collapsedChildThreadIds: {
-    key: 'kiwi-code.sidebar.collapsed-child-threads',
-    codec: storedIdListCodec,
-  },
   webServersCollapsed: {
     key: 'kiwi-code.sidebar.web-servers-collapsed',
     codec: booleanStoredState,
@@ -103,9 +97,6 @@ export const sidebarSlice = createSlice({
     projectCollapseToggled(state, action: PayloadAction<string>) {
       toggleId(state.collapsedProjectIds, action.payload)
     },
-    childThreadsCollapseToggled(state, action: PayloadAction<string>) {
-      toggleId(state.collapsedChildThreadIds, action.payload)
-    },
     webServersCollapseToggled(state) {
       state.webServersCollapsed = !state.webServersCollapsed
     },
@@ -115,22 +106,11 @@ export const sidebarSlice = createSlice({
     bookmarksOnlyChanged(state, action: PayloadAction<boolean>) {
       state.bookmarksOnly = action.payload
     },
-    // Selecting a nested thread expands whatever hides it. This fires on every
-    // selection change, so each field is only reassigned when it truly changed;
-    // an unconditional filter would hand the memoised Set selectors a fresh
-    // array every time and re-render the whole sidebar.
     threadRevealed(state, action: PayloadAction<{
       projectId: string
-      ancestorIds: string[]
       expandArchived: boolean
     }>) {
-      const { projectId, ancestorIds, expandArchived } = action.payload
-      if (ancestorIds.length > 0) {
-        const threads = state.collapsedChildThreadIds.filter((id) => !ancestorIds.includes(id))
-        if (threads.length !== state.collapsedChildThreadIds.length) {
-          state.collapsedChildThreadIds = threads
-        }
-      }
+      const { projectId, expandArchived } = action.payload
       if (expandArchived && !state.expandedMoreProjectIds.includes(projectId)) {
         state.expandedMoreProjectIds.push(projectId)
       }
@@ -144,7 +124,6 @@ export const sidebarSlice = createSlice({
 
 export const {
   bookmarksOnlyChanged,
-  childThreadsCollapseToggled,
   moreThreadsToggled,
   projectCollapseToggled,
   sidebarViewChanged,
@@ -164,10 +143,6 @@ export const selectBookmarksOnly = (state: RootState) => state.sidebar.bookmarks
 // array's identity stable, so these rebuild only on a real membership change.
 export const selectCollapsedProjectIds = createSelector(
   [(state: RootState) => state.sidebar.collapsedProjectIds],
-  (ids): ReadonlySet<string> => new Set(ids),
-)
-export const selectCollapsedChildThreadIds = createSelector(
-  [(state: RootState) => state.sidebar.collapsedChildThreadIds],
   (ids): ReadonlySet<string> => new Set(ids),
 )
 export const selectExpandedMoreProjectIds = createSelector(

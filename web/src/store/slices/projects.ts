@@ -60,22 +60,15 @@ function sameThreads(current: readonly Thread[], next: readonly Thread[]) {
       && candidate.cwd === thread.cwd
       && candidate.createdAt === thread.createdAt
       && candidate.lastPromptAt === thread.lastPromptAt
-      && candidate.parentThreadId === thread.parentThreadId
-      && candidate.agentModel === thread.agentModel
-      && candidate.agentThinkingLevel === thread.agentThinkingLevel
-      && candidate.workflowRunId === thread.workflowRunId
-      && candidate.workflowAgentId === thread.workflowAgentId
       && candidate.worktree === thread.worktree
       && candidate.branch === thread.branch
       && candidate.worktreePath === thread.worktreePath
       && candidate.autoNamed === thread.autoNamed
       && candidate.titleLocked === thread.titleLocked
-      && candidate.closedAt === thread.closedAt
       && candidate.archivedAt === thread.archivedAt
       && candidate.bookmarked === thread.bookmarked
       && candidate.tokenLimit === thread.tokenLimit
       && candidate.costLimitUsd === thread.costLimitUsd
-      && candidate.nestedDepth === thread.nestedDepth
       && candidate.rollbackPending === thread.rollbackPending
       && candidate.rollbackCleanupReady === thread.rollbackCleanupReady
   })
@@ -98,7 +91,6 @@ export function sameProjects(current: readonly Project[], next: readonly Project
       && candidate.host === project.host
       && candidate.isGitRepo === project.isGitRepo
       && candidate.createdAt === project.createdAt
-      && candidate.subAgentNestingDepthOverride === project.subAgentNestingDepthOverride
       && candidate.worktreeBranchPrefix === project.worktreeBranchPrefix
       && candidate.figmaMCPEnabled === project.figmaMCPEnabled
       && JSON.stringify(candidate.environment) === JSON.stringify(project.environment)
@@ -249,12 +241,12 @@ export const threadBookmarked = createAsyncThunk<
 
 export const threadRemoved = createAsyncThunk<
   { projectId: string; threadIds: string[] },
-  { projectId: string; threadId: string; descendantIds: string[] },
+  { projectId: string; threadId: string },
   ThunkConfig
->('projects/threadRemoved', async ({ projectId, threadId, descendantIds }, { rejectWithValue }) => {
+>('projects/threadRemoved', async ({ projectId, threadId }, { rejectWithValue }) => {
   try {
     await deleteThread(projectId, threadId)
-    return { projectId, threadIds: [threadId, ...descendantIds] }
+    return { projectId, threadIds: [threadId] }
   } catch (reason) {
     return rejectWithValue(errorMessage(reason, 'Could not delete that thread.'))
   }

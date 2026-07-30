@@ -1,12 +1,8 @@
 package server
 
 import (
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -71,59 +67,6 @@ func TestInactiveSessionsForThreadUsesVisitsPromptsAndStatusChanges(t *testing.T
 // session for its whole lifetime, which pins tmux's own session_attached,
 // session_activity, and session_last_attached. None of them may keep an
 // otherwise untouched thread alive.
-func TestCleanupClosesSessionsWithAttachedControlClient(t *testing.T) {
-	store, err := project.NewStore(filepath.Join(t.TempDir(), "data", "projects.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	item, err := store.Add("Demo", t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	thread := item.Threads[0]
-	handler, err := newIsolatedServerHandler(t, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	application := handler.(*Server)
-	if _, _, _, err := application.terminal.ensureTmuxSession(item, thread, "terminal"); err != nil {
-		t.Fatal(err)
-	}
-	toolsSession := tmuxSessionName(item.ID, thread.ID, "process")
-	if _, err := application.terminal.createTmuxSession(toolsSession, thread.Cwd, "process", "/bin/sleep", []string{"120"}); err != nil {
-		t.Fatal(err)
-	}
-	stopWatching := application.terminal.watchThreadTmux(item.ID, thread.ID)
-	defer stopWatching()
-
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		attached, attachErr := application.terminal.tmuxCommand(
-			"list-sessions", "-F", "#{session_name}\t#{?session_attached,1,0}",
-		).CombinedOutput()
-		if attachErr != nil {
-			t.Fatal(attachErr)
-		}
-		if strings.Contains(string(attached), toolsSession+"\t1") {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("control client never attached: %s", attached)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	closedAt := time.Now().UTC().Add(25 * time.Hour)
-	if err := application.runCleanupCycle(closedAt); err != nil {
-		t.Fatal(err)
-	}
-	for sessionName := range threadTmuxSessionNameSet(item, thread.ID) {
-		if exists, err := application.terminal.tmuxExactSessionExists(sessionName); err != nil || exists {
-			t.Fatalf("attached-but-inactive session %q exists=%t err=%v", sessionName, exists, err)
-		}
-	}
-}
-
 func TestAgentStateTransitionKeepsSessionsAlive(t *testing.T) {
 	store, err := project.NewStore(filepath.Join(t.TempDir(), "data", "projects.json"))
 	if err != nil {
@@ -165,111 +108,5 @@ func TestAgentStateTransitionKeepsSessionsAlive(t *testing.T) {
 	terminalSession := tmuxSessionName(item.ID, thread.ID, "terminal")
 	if exists, err := application.terminal.tmuxExactSessionExists(terminalSession); err != nil || !exists {
 		t.Fatalf("session closed despite a recent state change: exists=%t err=%v", exists, err)
-	}
-}
-
-func TestCleanupCycleClosesAndLogsInactiveTmuxSessions(t *testing.T) {
-	store, err := project.NewStore(filepath.Join(t.TempDir(), "data", "projects.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	item, err := store.Add("Demo", t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	thread := item.Threads[0]
-	handler, err := newIsolatedServerHandler(t, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	application := handler.(*Server)
-	if _, _, _, err := application.terminal.ensureTmuxSession(item, thread, "terminal"); err != nil {
-		t.Fatal(err)
-	}
-	toolsSession := tmuxSessionName(item.ID, thread.ID, "process")
-	if _, err := application.terminal.createTmuxSession(toolsSession, thread.Cwd, "process", "/bin/sleep", []string{"120"}); err != nil {
-		t.Fatal(err)
-	}
-
-	touchedAt := time.Now().UTC().Add(25 * time.Hour)
-	if err := application.terminal.markThreadTmuxSessionsUsed(item, thread, touchedAt); err != nil {
-		t.Fatal(err)
-	}
-	if err := application.runCleanupCycle(touchedAt); err != nil {
-		t.Fatal(err)
-	}
-	for sessionName := range threadTmuxSessionNameSet(item, thread.ID) {
-		if exists, err := application.terminal.tmuxExactSessionExists(sessionName); err != nil || !exists {
-			t.Fatalf("recently used session %q exists=%t err=%v", sessionName, exists, err)
-		}
-	}
-
-	closedAt := touchedAt.Add(25 * time.Hour)
-	if err := application.runCleanupCycle(closedAt); err != nil {
-		t.Fatal(err)
-	}
-	for sessionName := range threadTmuxSessionNameSet(item, thread.ID) {
-		if exists, err := application.terminal.tmuxExactSessionExists(sessionName); err != nil || exists {
-			t.Fatalf("inactive session %q exists=%t err=%v", sessionName, exists, err)
-		}
-	}
-
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/session-closures", nil))
-	if response.Code != http.StatusOK {
-		t.Fatalf("session closure log status = %d, body = %s", response.Code, response.Body.String())
-	}
-	var overview sessionClosureOverview
-	if err := json.NewDecoder(response.Body).Decode(&overview); err != nil {
-		t.Fatal(err)
-	}
-	if overview.InactivityHours != 24 || len(overview.Events) != 1 {
-		t.Fatalf("session closure overview = %#v", overview)
-	}
-	event := overview.Events[0]
-	if event.ProjectName != item.Name || event.ThreadTitle != thread.Title || len(event.SessionNames) != 2 || event.Reason != "inactivity" {
-		t.Fatalf("session closure event = %#v", event)
-	}
-	if !event.ClosedAt.Equal(closedAt) {
-		t.Fatalf("closed at = %v, want %v", event.ClosedAt, closedAt)
-	}
-	if _, _, created, err := application.terminal.ensureTmuxSession(item, thread, "terminal"); err != nil || !created {
-		t.Fatalf("recreate session after inactivity cleanup: created=%t err=%v", created, err)
-	}
-}
-
-func TestSessionClosureLogPersistsEvents(t *testing.T) {
-	directory := t.TempDir()
-	log, err := newSessionClosureLog(directory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	base := time.Unix(1700000000, 0).UTC()
-	for index, title := range []string{"First", "Second"} {
-		event := sessionClosureEvent{
-			ID:             title,
-			ProjectID:      "project",
-			ProjectName:    "Demo",
-			ThreadID:       title,
-			ThreadTitle:    title,
-			SessionNames:   []string{"session-" + title},
-			LastActivityAt: base.Add(time.Duration(index) * time.Hour),
-			ClosedAt:       base.Add(time.Duration(index+1) * time.Hour),
-			Reason:         "inactivity",
-		}
-		if err := log.append(event); err != nil {
-			t.Fatal(err)
-		}
-	}
-	reloaded, err := newSessionClosureLog(directory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	events, err := reloaded.list()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(events) != 2 || events[0].ThreadTitle != "First" || events[1].ThreadTitle != "Second" {
-		t.Fatalf("persisted events = %#v", events)
 	}
 }

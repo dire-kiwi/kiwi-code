@@ -86,7 +86,6 @@ type terminalHandler struct {
 	agentExitMarkerMu     sync.Mutex
 	agentExitDirectory    string
 	threadStatusChanged   func(projectID, threadID string)
-	workflowChanged       func(projectID, threadID string)
 	budgetReached         func(projectID, threadID string) (bool, string, error)
 	upgrader              websocket.Upgrader
 }
@@ -316,10 +315,6 @@ func (h *terminalHandler) startCodingAgent(w http.ResponseWriter, r *http.Reques
 	}
 	if thread.RollbackPending {
 		writeError(w, http.StatusConflict, "The thread is being rolled back.")
-		return
-	}
-	if thread.ParentThreadID != "" {
-		writeError(w, http.StatusForbidden, "Subagent coding agents are managed by their parent thread.")
 		return
 	}
 	if project.EnvironmentSetupBlocksAgent(thread) {
@@ -600,10 +595,6 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if tool == "pi" && project.EnvironmentSetupBlocksAgent(thread) {
 		writeError(w, http.StatusConflict, "Wait for the environment setup to finish before starting a coding agent.")
-		return
-	}
-	if tool == "pi" && thread.ParentThreadID != "" {
-		writeError(w, http.StatusForbidden, "Subagents use the read-only Pi Native conversation.")
 		return
 	}
 	codingAgent := codingAgentPi
@@ -3483,18 +3474,12 @@ func (h *terminalHandler) commandForTmuxTarget(
 	if isTerminalCodingAgent(tool) && threadEndpoint != "" {
 		environment = append(environment, kiwiCodeThreadEnvironment(threadEndpoint, item.ID, thread.ID)...)
 	}
-	// Kiwi Code child and workflow execution is deliberately Pi Native. Do not
-	// pass relationship metadata to other coding harnesses. Their managed browser
-	// and plan MCP servers receive only the capability-file location they need.
 	if tool == codingAgentPi && figmaMCPURL != "" && notice == "" {
 		environment = append(environment, figmaMCPEnvironmentName+"="+figmaMCPURL)
 	}
 	if tool == codingAgentPi && threadEndpoint != "" {
 		if h.agentToken != "" {
 			environment = append(environment, "KIWI_CODE_AGENT_TOKEN="+h.agentToken)
-		}
-		if thread.ParentThreadID != "" {
-			environment = append(environment, "KIWI_CODE_PARENT_THREAD_ID="+thread.ParentThreadID)
 		}
 	}
 	if tool == codingAgentCodex && notice == "" {

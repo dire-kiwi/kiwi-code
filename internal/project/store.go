@@ -23,14 +23,8 @@ import (
 var ErrNotFound = errors.New("project not found")
 var ErrThreadNotFound = errors.New("thread not found")
 var ErrThreadNotArchived = errors.New("thread is not archived for deletion")
-var ErrThreadHasChildren = errors.New("thread has child threads")
-var ErrThreadHasOpenDescendants = errors.New("thread has open child threads")
-var ErrThreadClosed = errors.New("thread is closed")
-var ErrThreadTreeChanged = errors.New("thread tree changed")
-var ErrChildThreadDepthLimit = errors.New("sub-agent nesting depth limit reached")
 var ErrThreadRollbackPending = errors.New("thread creation rollback is pending")
 var ErrThreadTitleLocked = errors.New("thread title is locked")
-var ErrChildCreationRequestExists = errors.New("child creation request already exists")
 var ErrProfileNotFound = errors.New("profile not found")
 var ErrInvalidOrder = errors.New("invalid order")
 
@@ -39,9 +33,6 @@ const (
 	defaultArchivedThreadRetentionDays   = 30
 	defaultOrphanedWorktreeRetentionDays = 30
 	maxCleanupRetentionDays              = 3650
-	DefaultSubAgentNestingDepth          = 1
-	MaxSubAgentNestingDepth              = 4
-	DefaultWorkflowSizeGuideline         = "unrestricted"
 	DefaultWorktreeBranchPrefix          = "kiwi-code/"
 	MaxCodingAgents                      = 16
 	maxCodingAgentIDLength               = 64
@@ -63,13 +54,6 @@ type Thread struct {
 	CreatedAt              time.Time  `json:"createdAt"`
 	EnvironmentSetupStatus string     `json:"environmentSetupStatus,omitempty"`
 	LastPromptAt           *time.Time `json:"lastPromptAt,omitempty"`
-	ParentThreadID         string     `json:"parentThreadId,omitempty"`
-	AgentModel             string     `json:"agentModel,omitempty"`
-	AgentThinkingLevel     string     `json:"agentThinkingLevel,omitempty"`
-	WorkflowRunID          string     `json:"workflowRunId,omitempty"`
-	WorkflowAgentID        string     `json:"workflowAgentId,omitempty"`
-	SkillForkRequestID     string     `json:"skillForkRequestId,omitempty"`
-	NestedDepth            *int       `json:"nestedDepth,omitempty"`
 	Worktree               bool       `json:"worktree,omitempty"`
 	Branch                 string     `json:"branch,omitempty"`
 	WorktreePath           string     `json:"worktreePath,omitempty"`
@@ -77,7 +61,6 @@ type Thread struct {
 	RollbackCleanupReady   bool       `json:"rollbackCleanupReady,omitempty"`
 	AutoNamed              bool       `json:"autoNamed,omitempty"`
 	TitleLocked            bool       `json:"titleLocked,omitempty"`
-	ClosedAt               *time.Time `json:"closedAt,omitempty"`
 	ArchivedAt             *time.Time `json:"archivedAt,omitempty"`
 	Bookmarked             bool       `json:"bookmarked,omitempty"`
 	TokenLimit             *int64     `json:"tokenLimit,omitempty"`
@@ -85,23 +68,17 @@ type Thread struct {
 }
 
 type Project struct {
-	ID                           string           `json:"id"`
-	Name                         string           `json:"name"`
-	Path                         string           `json:"path"`
-	ProfileID                    string           `json:"profileId"`
-	Host                         string           `json:"host"`
-	IsGitRepo                    bool             `json:"isGitRepo"`
-	CreatedAt                    time.Time        `json:"createdAt"`
-	Threads                      []Thread         `json:"threads"`
-	SubAgentNestingDepthOverride *int             `json:"subAgentNestingDepthOverride,omitempty"`
-	WorktreeBranchPrefix         string           `json:"worktreeBranchPrefix"`
-	Environment                  LocalEnvironment `json:"environment"`
-	FigmaMCPEnabled              bool             `json:"figmaMCPEnabled"`
-}
-
-type SubAgentNestingContext struct {
-	CurrentDepth int
-	MaxDepth     int
+	ID                   string           `json:"id"`
+	Name                 string           `json:"name"`
+	Path                 string           `json:"path"`
+	ProfileID            string           `json:"profileId"`
+	Host                 string           `json:"host"`
+	IsGitRepo            bool             `json:"isGitRepo"`
+	CreatedAt            time.Time        `json:"createdAt"`
+	Threads              []Thread         `json:"threads"`
+	WorktreeBranchPrefix string           `json:"worktreeBranchPrefix"`
+	Environment          LocalEnvironment `json:"environment"`
+	FigmaMCPEnabled      bool             `json:"figmaMCPEnabled"`
 }
 
 type ThemeColors struct {
@@ -201,11 +178,6 @@ type Settings struct {
 	UsingDefault                  bool                 `json:"usingDefault"`
 	ArchivedThreadRetentionDays   int                  `json:"archivedThreadRetentionDays"`
 	OrphanedWorktreeRetentionDays int                  `json:"orphanedWorktreeRetentionDays"`
-	SubAgentNestingDepth          int                  `json:"subAgentNestingDepth"`
-	MaxSubAgentNestingDepth       int                  `json:"maxSubAgentNestingDepth"`
-	DisableWorkflows              bool                 `json:"disableWorkflows"`
-	WorkflowKeywordTrigger        bool                 `json:"workflowKeywordTriggerEnabled"`
-	WorkflowSizeGuideline         string               `json:"workflowSizeGuideline"`
 	CodingAgents                  []CodingAgentSetting `json:"codingAgents"`
 	Theme                         Theme                `json:"theme"`
 	DefaultTheme                  Theme                `json:"defaultTheme"`
@@ -216,10 +188,6 @@ type SettingsUpdate struct {
 	WorktreeBasePath              *string
 	ArchivedThreadRetentionDays   *int
 	OrphanedWorktreeRetentionDays *int
-	SubAgentNestingDepth          *int
-	DisableWorkflows              *bool
-	WorkflowKeywordTrigger        *bool
-	WorkflowSizeGuideline         *string
 	CodingAgents                  *[]CodingAgentSetting
 	Theme                         *Theme
 }
@@ -228,22 +196,16 @@ type persistedSettings struct {
 	WorktreeBasePath              string                `json:"worktreeBasePath,omitempty"`
 	ArchivedThreadRetentionDays   *int                  `json:"archivedThreadRetentionDays,omitempty"`
 	OrphanedWorktreeRetentionDays *int                  `json:"orphanedWorktreeRetentionDays,omitempty"`
-	SubAgentNestingDepth          *int                  `json:"subAgentNestingDepth,omitempty"`
-	DisableWorkflows              *bool                 `json:"disableWorkflows,omitempty"`
-	WorkflowKeywordTrigger        *bool                 `json:"workflowKeywordTriggerEnabled,omitempty"`
-	WorkflowSizeGuideline         *string               `json:"workflowSizeGuideline,omitempty"`
 	CodingAgents                  *[]CodingAgentSetting `json:"codingAgents,omitempty"`
 	LegacyClaudeCodeProfiles      *[]ClaudeCodeProfile  `json:"claudeCodeProfiles,omitempty"`
 	Theme                         *Theme                `json:"theme,omitempty"`
 }
 
 type ProjectUpdate struct {
-	ProfileID                          *string
-	SubAgentNestingDepthOverride       *int
-	UpdateSubAgentNestingDepthOverride bool
-	WorktreeBranchPrefix               *string
-	Environment                        *LocalEnvironment
-	FigmaMCPEnabled                    *bool
+	ProfileID            *string
+	WorktreeBranchPrefix *string
+	Environment          *LocalEnvironment
+	FigmaMCPEnabled      *bool
 }
 
 type AddThreadOptions struct {
@@ -251,42 +213,7 @@ type AddThreadOptions struct {
 	DeferEnvironmentSetup bool
 	BaseBranch            string
 	BaseRevision          string
-	ParentThreadID        string
-	AgentModel            string
-	AgentThinkingLevel    string
-	WorkflowRunID         string
-	WorkflowAgentID       string
-	SkillForkRequestID    string
-	NestedDepth           *int
 	CreationPending       bool
-}
-
-func validWorkflowIdentity(value string) bool {
-	if value == "" || len(value) > 128 || value == "." || value == ".." {
-		return false
-	}
-	for _, character := range value {
-		if (character >= 'a' && character <= 'z') ||
-			(character >= 'A' && character <= 'Z') ||
-			(character >= '0' && character <= '9') ||
-			character == '-' || character == '_' {
-			continue
-		}
-		return false
-	}
-	return true
-}
-
-func validSkillForkRequestID(value string) bool {
-	if value == "" || len(value) > 200 || !utf8.ValidString(value) {
-		return false
-	}
-	for _, character := range value {
-		if character < 0x20 || character == 0x7f {
-			return false
-		}
-	}
-	return true
 }
 
 type Store struct {
@@ -299,10 +226,6 @@ type Store struct {
 	worktreeBasePath              string
 	archivedThreadRetentionDays   int
 	orphanedWorktreeRetentionDays int
-	subAgentNestingDepth          int
-	disableWorkflows              bool
-	workflowKeywordTrigger        bool
-	workflowSizeGuideline         string
 	codingAgents                  []CodingAgentSetting
 	theme                         Theme
 	usingDefaultTheme             bool
@@ -398,9 +321,6 @@ func NewStore(filePath string) (*Store, error) {
 		defaultWorktreeBasePath:       filepath.Join(dataDirectory, "worktrees"),
 		archivedThreadRetentionDays:   defaultArchivedThreadRetentionDays,
 		orphanedWorktreeRetentionDays: defaultOrphanedWorktreeRetentionDays,
-		subAgentNestingDepth:          DefaultSubAgentNestingDepth,
-		workflowKeywordTrigger:        true,
-		workflowSizeGuideline:         DefaultWorkflowSizeGuideline,
 		codingAgents:                  defaultCodingAgentSettings(),
 		theme:                         DefaultTheme(),
 		usingDefaultTheme:             true,
@@ -527,14 +447,6 @@ func cloneThread(source Thread) Thread {
 		lastPromptAt := *source.LastPromptAt
 		thread.LastPromptAt = &lastPromptAt
 	}
-	if source.NestedDepth != nil {
-		depth := *source.NestedDepth
-		thread.NestedDepth = &depth
-	}
-	if source.ClosedAt != nil {
-		closedAt := *source.ClosedAt
-		thread.ClosedAt = &closedAt
-	}
 	if source.ArchivedAt != nil {
 		archivedAt := *source.ArchivedAt
 		thread.ArchivedAt = &archivedAt
@@ -555,10 +467,6 @@ func cloneProject(source Project) Project {
 	item.Threads = make([]Thread, len(source.Threads))
 	for index, thread := range source.Threads {
 		item.Threads[index] = cloneThread(thread)
-	}
-	if source.SubAgentNestingDepthOverride != nil {
-		depth := *source.SubAgentNestingDepthOverride
-		item.SubAgentNestingDepthOverride = &depth
 	}
 	item.Environment = cloneLocalEnvironment(source.Environment)
 	return item
@@ -696,11 +604,6 @@ func readProjectsFile(path string) ([]Project, error) {
 			return nil, fmt.Errorf("decode projects: duplicate project ID %q", item.ID)
 		}
 		seenProjects[item.ID] = struct{}{}
-		if item.SubAgentNestingDepthOverride != nil {
-			if err := validateSubAgentNestingDepth(*item.SubAgentNestingDepthOverride); err != nil {
-				return nil, fmt.Errorf("decode projects: sub-agent nesting depth for project %q %w", item.ID, err)
-			}
-		}
 		if item.WorktreeBranchPrefix != "" {
 			if _, err := normalizeWorktreeBranchPrefix(item.WorktreeBranchPrefix); err != nil {
 				return nil, fmt.Errorf("decode projects: worktree branch prefix for project %q: %w", item.ID, err)
@@ -712,8 +615,6 @@ func readProjectsFile(path string) ([]Project, error) {
 			}
 		}
 		seenThreads := make(map[string]struct{}, len(item.Threads))
-		threadsByID := make(map[string]Thread, len(item.Threads))
-		seenSkillForkRequests := make(map[string]string)
 		for _, thread := range item.Threads {
 			if thread.ID == "" {
 				return nil, fmt.Errorf("decode projects: thread ID is required in project %q", item.ID)
@@ -725,25 +626,6 @@ func readProjectsFile(path string) ([]Project, error) {
 			}
 			if thread.EnvironmentSetupStatus != "" && !thread.Worktree {
 				return nil, fmt.Errorf("decode projects: thread %q has environment setup state without a worktree", thread.ID)
-			}
-			if thread.NestedDepth != nil {
-				if err := validateSubAgentNestingDepth(*thread.NestedDepth); err != nil {
-					return nil, fmt.Errorf("decode projects: nested depth for thread %q %w", thread.ID, err)
-				}
-			}
-			if (thread.WorkflowRunID == "") != (thread.WorkflowAgentID == "") ||
-				(thread.WorkflowRunID != "" && (!validWorkflowIdentity(thread.WorkflowRunID) || !validWorkflowIdentity(thread.WorkflowAgentID))) {
-				return nil, fmt.Errorf("decode projects: thread %q has an invalid workflow identity", thread.ID)
-			}
-			if thread.SkillForkRequestID != "" {
-				if !validSkillForkRequestID(thread.SkillForkRequestID) || thread.ParentThreadID == "" || thread.WorkflowRunID != "" {
-					return nil, fmt.Errorf("decode projects: thread %q has an invalid skill fork request ID", thread.ID)
-				}
-				requestKey := thread.ParentThreadID + "\x00" + thread.SkillForkRequestID
-				if existing, duplicate := seenSkillForkRequests[requestKey]; duplicate {
-					return nil, fmt.Errorf("decode projects: threads %q and %q have the same skill fork request ID", existing, thread.ID)
-				}
-				seenSkillForkRequests[requestKey] = thread.ID
 			}
 			if thread.RollbackCleanupReady && !thread.RollbackPending {
 				return nil, fmt.Errorf("decode projects: thread %q has rollback cleanup ready without a pending rollback", thread.ID)
@@ -758,30 +640,6 @@ func readProjectsFile(path string) ([]Project, error) {
 				return nil, fmt.Errorf("decode projects: duplicate thread ID %q in project %q", thread.ID, item.ID)
 			}
 			seenThreads[thread.ID] = struct{}{}
-			threadsByID[thread.ID] = thread
-		}
-		for _, thread := range item.Threads {
-			if thread.ParentThreadID == "" {
-				if thread.WorkflowRunID != "" {
-					return nil, fmt.Errorf("decode projects: workflow thread %q has no parent", thread.ID)
-				}
-				continue
-			}
-			if thread.ParentThreadID == thread.ID {
-				return nil, fmt.Errorf("decode projects: thread %q cannot be its own parent in project %q", thread.ID, item.ID)
-			}
-			if _, found := threadsByID[thread.ParentThreadID]; !found {
-				return nil, fmt.Errorf("decode projects: parent thread %q for thread %q does not exist in project %q", thread.ParentThreadID, thread.ID, item.ID)
-			}
-			visited := map[string]struct{}{thread.ID: {}}
-			parentID := thread.ParentThreadID
-			for parentID != "" {
-				if _, cycle := visited[parentID]; cycle {
-					return nil, fmt.Errorf("decode projects: child thread cycle includes %q in project %q", thread.ID, item.ID)
-				}
-				visited[parentID] = struct{}{}
-				parentID = threadsByID[parentID].ParentThreadID
-			}
 		}
 	}
 	return cloneProjects(projects), nil
@@ -891,122 +749,6 @@ func (s *Store) UpdateThreadTitle(projectID, threadID, title string, autoGenerat
 				return cloneThread(*thread), nil
 			}
 			return Thread{}, ErrThreadNotFound
-		}
-		return Thread{}, ErrNotFound
-	})
-}
-
-func (s *Store) CloseChildThread(projectID, parentThreadID, threadID string, closedAt time.Time) (Thread, error) {
-	closedAt = closedAt.UTC()
-	if closedAt.IsZero() {
-		closedAt = time.Now().UTC()
-	}
-	return withProjectMutationResult(s, func() (Thread, error) {
-		for projectIndex := range s.projects {
-			if s.projects[projectIndex].ID != projectID {
-				continue
-			}
-			for threadIndex := range s.projects[projectIndex].Threads {
-				thread := &s.projects[projectIndex].Threads[threadIndex]
-				if thread.ID != threadID || thread.ParentThreadID != parentThreadID {
-					continue
-				}
-				if thread.RollbackPending {
-					return Thread{}, ErrThreadRollbackPending
-				}
-				if thread.ClosedAt != nil {
-					return cloneThread(*thread), nil
-				}
-				if hasOpenThreadDescendants(s.projects[projectIndex].Threads, threadID) {
-					return Thread{}, ErrThreadHasOpenDescendants
-				}
-
-				previous := *thread
-				thread.ClosedAt = &closedAt
-				return saveProjectMutationResult(s, cloneThread(*thread), func() {
-					*thread = previous
-				})
-			}
-			return Thread{}, ErrThreadNotFound
-		}
-		return Thread{}, ErrNotFound
-	})
-}
-
-func hasOpenThreadDescendants(threads []Thread, threadID string) bool {
-	descendants := map[string]struct{}{threadID: {}}
-	changed := true
-	for changed {
-		changed = false
-		for _, thread := range threads {
-			if _, known := descendants[thread.ID]; known {
-				continue
-			}
-			if _, parentKnown := descendants[thread.ParentThreadID]; !parentKnown {
-				continue
-			}
-			descendants[thread.ID] = struct{}{}
-			changed = true
-		}
-	}
-	delete(descendants, threadID)
-	for _, thread := range threads {
-		if _, descendant := descendants[thread.ID]; descendant && thread.ClosedAt == nil {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *Store) ReopenChildThread(projectID, parentThreadID, threadID string) (Thread, error) {
-	return withProjectMutationResult(s, func() (Thread, error) {
-		for projectIndex := range s.projects {
-			if s.projects[projectIndex].ID != projectID {
-				continue
-			}
-			threads := s.projects[projectIndex].Threads
-			threadIndexes := make(map[string]int, len(threads))
-			for index, thread := range threads {
-				threadIndexes[thread.ID] = index
-			}
-			threadIndex, found := threadIndexes[threadID]
-			if !found || threads[threadIndex].ParentThreadID != parentThreadID {
-				return Thread{}, ErrThreadNotFound
-			}
-			if threads[threadIndex].RollbackPending {
-				return Thread{}, ErrThreadRollbackPending
-			}
-
-			previous := append([]Thread(nil), threads...)
-			changed := false
-			currentID := threadID
-			visited := make(map[string]struct{}, len(threads))
-			for currentID != "" {
-				if _, duplicate := visited[currentID]; duplicate {
-					return Thread{}, ErrThreadTreeChanged
-				}
-				visited[currentID] = struct{}{}
-				index, found := threadIndexes[currentID]
-				if !found {
-					return Thread{}, ErrThreadTreeChanged
-				}
-				if threads[index].RollbackPending {
-					return Thread{}, ErrThreadRollbackPending
-				}
-				if threads[index].ClosedAt != nil {
-					threads[index].ClosedAt = nil
-					changed = true
-				}
-				currentID = threads[index].ParentThreadID
-			}
-			if !changed {
-				return cloneThread(threads[threadIndex]), nil
-			}
-
-			s.projects[projectIndex].Threads = threads
-			return saveProjectMutationResult(s, cloneThread(threads[threadIndex]), func() {
-				s.projects[projectIndex].Threads = previous
-			})
 		}
 		return Thread{}, ErrNotFound
 	})
@@ -1149,9 +891,7 @@ func (s *Store) UpdateSettingsValues(update SettingsUpdate) (Settings, error) {
 
 func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 	if update.WorktreeBasePath == nil && update.ArchivedThreadRetentionDays == nil &&
-		update.OrphanedWorktreeRetentionDays == nil && update.SubAgentNestingDepth == nil &&
-		update.DisableWorkflows == nil && update.WorkflowKeywordTrigger == nil &&
-		update.WorkflowSizeGuideline == nil && update.CodingAgents == nil && update.Theme == nil {
+		update.OrphanedWorktreeRetentionDays == nil && update.CodingAgents == nil && update.Theme == nil {
 		return Settings{}, errors.New("at least one setting is required")
 	}
 
@@ -1185,20 +925,6 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 			return Settings{}, fmt.Errorf("unattached worktree retention: %w", err)
 		}
 	}
-	if update.SubAgentNestingDepth != nil {
-		if err := validateSubAgentNestingDepth(*update.SubAgentNestingDepth); err != nil {
-			return Settings{}, fmt.Errorf("sub-agent nesting depth %w", err)
-		}
-	}
-	var normalizedWorkflowSize *string
-	if update.WorkflowSizeGuideline != nil {
-		value := strings.ToLower(strings.TrimSpace(*update.WorkflowSizeGuideline))
-		if !validWorkflowSizeGuideline(value) {
-			return Settings{}, errors.New("workflow size guideline must be unrestricted, small, medium, or large")
-		}
-		normalizedWorkflowSize = &value
-	}
-
 	var normalizedCodingAgents *[]CodingAgentSetting
 	if update.CodingAgents != nil {
 		agents, err := normalizeCodingAgents(*update.CodingAgents)
@@ -1237,10 +963,6 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 	previousPath := s.worktreeBasePath
 	previousArchivedDays := s.archivedThreadRetentionDays
 	previousOrphanedDays := s.orphanedWorktreeRetentionDays
-	previousSubAgentNestingDepth := s.subAgentNestingDepth
-	previousDisableWorkflows := s.disableWorkflows
-	previousWorkflowKeywordTrigger := s.workflowKeywordTrigger
-	previousWorkflowSizeGuideline := s.workflowSizeGuideline
 	previousCodingAgents := s.codingAgents
 	previousTheme := s.theme
 	previousUsingDefaultTheme := s.usingDefaultTheme
@@ -1257,18 +979,6 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 	if update.OrphanedWorktreeRetentionDays != nil {
 		s.orphanedWorktreeRetentionDays = *update.OrphanedWorktreeRetentionDays
 	}
-	if update.SubAgentNestingDepth != nil {
-		s.subAgentNestingDepth = *update.SubAgentNestingDepth
-	}
-	if update.DisableWorkflows != nil {
-		s.disableWorkflows = *update.DisableWorkflows
-	}
-	if update.WorkflowKeywordTrigger != nil {
-		s.workflowKeywordTrigger = *update.WorkflowKeywordTrigger
-	}
-	if normalizedWorkflowSize != nil {
-		s.workflowSizeGuideline = *normalizedWorkflowSize
-	}
 	if normalizedCodingAgents != nil {
 		s.codingAgents = append([]CodingAgentSetting{}, (*normalizedCodingAgents)...)
 	}
@@ -1280,10 +990,6 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 		s.worktreeBasePath = previousPath
 		s.archivedThreadRetentionDays = previousArchivedDays
 		s.orphanedWorktreeRetentionDays = previousOrphanedDays
-		s.subAgentNestingDepth = previousSubAgentNestingDepth
-		s.disableWorkflows = previousDisableWorkflows
-		s.workflowKeywordTrigger = previousWorkflowKeywordTrigger
-		s.workflowSizeGuideline = previousWorkflowSizeGuideline
 		s.codingAgents = previousCodingAgents
 		s.theme = previousTheme
 		s.usingDefaultTheme = previousUsingDefaultTheme
@@ -1305,22 +1011,6 @@ func validateCleanupRetentionDays(days int) error {
 	return nil
 }
 
-func validateSubAgentNestingDepth(depth int) error {
-	if depth < 0 || depth > MaxSubAgentNestingDepth {
-		return fmt.Errorf("must be between 0 and %d", MaxSubAgentNestingDepth)
-	}
-	return nil
-}
-
-func validWorkflowSizeGuideline(value string) bool {
-	switch value {
-	case "unrestricted", "small", "medium", "large":
-		return true
-	default:
-		return false
-	}
-}
-
 func (s *Store) settingsLocked() Settings {
 	return Settings{
 		WorktreeBasePath:              s.effectiveWorktreeBasePathLocked(),
@@ -1328,11 +1018,6 @@ func (s *Store) settingsLocked() Settings {
 		UsingDefault:                  s.worktreeBasePath == "",
 		ArchivedThreadRetentionDays:   s.archivedThreadRetentionDays,
 		OrphanedWorktreeRetentionDays: s.orphanedWorktreeRetentionDays,
-		SubAgentNestingDepth:          s.subAgentNestingDepth,
-		MaxSubAgentNestingDepth:       MaxSubAgentNestingDepth,
-		DisableWorkflows:              s.disableWorkflows,
-		WorkflowKeywordTrigger:        s.workflowKeywordTrigger,
-		WorkflowSizeGuideline:         s.workflowSizeGuideline,
 		CodingAgents:                  append([]CodingAgentSetting{}, s.codingAgents...),
 		Theme:                         s.theme,
 		DefaultTheme:                  DefaultTheme(),
@@ -1700,8 +1385,8 @@ func (s *Store) UpdateProjectProfile(projectID, profileID string) (Project, erro
 }
 
 func (s *Store) UpdateProject(projectID string, update ProjectUpdate) (result Project, err error) {
-	if update.ProfileID == nil && !update.UpdateSubAgentNestingDepthOverride &&
-		update.WorktreeBranchPrefix == nil && update.Environment == nil && update.FigmaMCPEnabled == nil {
+	if update.ProfileID == nil && update.WorktreeBranchPrefix == nil &&
+		update.Environment == nil && update.FigmaMCPEnabled == nil {
 		return Project{}, errors.New("at least one project setting is required")
 	}
 	var profileID string
@@ -1709,11 +1394,6 @@ func (s *Store) UpdateProject(projectID string, update ProjectUpdate) (result Pr
 		profileID = strings.TrimSpace(*update.ProfileID)
 		if profileID == "" {
 			return Project{}, errors.New("profile is required")
-		}
-	}
-	if update.UpdateSubAgentNestingDepthOverride && update.SubAgentNestingDepthOverride != nil {
-		if err := validateSubAgentNestingDepth(*update.SubAgentNestingDepthOverride); err != nil {
-			return Project{}, fmt.Errorf("sub-agent nesting depth %w", err)
 		}
 	}
 	var branchPrefix string
@@ -1752,13 +1432,6 @@ func (s *Store) UpdateProject(projectID string, update ProjectUpdate) (result Pr
 			s.projects[projectIndex].ProfileID = profileID
 			changed = true
 		}
-		if update.UpdateSubAgentNestingDepthOverride && !equalOptionalInt(
-			s.projects[projectIndex].SubAgentNestingDepthOverride,
-			update.SubAgentNestingDepthOverride,
-		) {
-			s.projects[projectIndex].SubAgentNestingDepthOverride = cloneOptionalInt(update.SubAgentNestingDepthOverride)
-			changed = true
-		}
 		if update.WorktreeBranchPrefix != nil && s.projects[projectIndex].WorktreeBranchPrefix != branchPrefix {
 			s.projects[projectIndex].WorktreeBranchPrefix = branchPrefix
 			changed = true
@@ -1779,18 +1452,6 @@ func (s *Store) UpdateProject(projectID string, update ProjectUpdate) (result Pr
 			s.projects[projectIndex] = previous
 		})
 	})
-}
-
-func cloneOptionalInt(value *int) *int {
-	if value == nil {
-		return nil
-	}
-	cloned := *value
-	return &cloned
-}
-
-func equalOptionalInt(left, right *int) bool {
-	return left == nil && right == nil || left != nil && right != nil && *left == *right
 }
 
 func (s *Store) profileExistsLocked(profileID string) bool {
@@ -1945,37 +1606,11 @@ func (s *Store) AddThreadWithOptions(projectID, title string, options AddThreadO
 	}
 	options.BaseBranch = strings.TrimSpace(options.BaseBranch)
 	options.BaseRevision = strings.ToLower(strings.TrimSpace(options.BaseRevision))
-	options.ParentThreadID = strings.TrimSpace(options.ParentThreadID)
-	options.AgentModel = strings.TrimSpace(options.AgentModel)
-	options.AgentThinkingLevel = strings.TrimSpace(options.AgentThinkingLevel)
-	options.WorkflowRunID = strings.TrimSpace(options.WorkflowRunID)
-	options.WorkflowAgentID = strings.TrimSpace(options.WorkflowAgentID)
-	options.SkillForkRequestID = strings.TrimSpace(options.SkillForkRequestID)
-	if (options.WorkflowRunID == "") != (options.WorkflowAgentID == "") ||
-		(options.WorkflowRunID != "" && (!validWorkflowIdentity(options.WorkflowRunID) || !validWorkflowIdentity(options.WorkflowAgentID))) {
-		return Thread{}, errors.New("workflow run and agent IDs must be valid and supplied together")
-	}
-	if options.WorkflowRunID != "" && options.ParentThreadID == "" {
-		return Thread{}, errors.New("workflow identity requires a parent thread")
-	}
-	if options.SkillForkRequestID != "" {
-		if !validSkillForkRequestID(options.SkillForkRequestID) {
-			return Thread{}, errors.New("skill fork request ID is invalid")
-		}
-		if options.ParentThreadID == "" || options.WorkflowRunID != "" {
-			return Thread{}, errors.New("skill fork request ID requires a non-workflow child thread")
-		}
-	}
 	if !options.Worktree && (options.BaseBranch != "" || options.BaseRevision != "") {
 		return Thread{}, errors.New("a base branch or revision can only be used with a Git worktree")
 	}
 	if options.BaseRevision != "" && !validFullGitObjectID(options.BaseRevision) {
 		return Thread{}, errors.New("base revision must be a full Git object ID")
-	}
-	if options.NestedDepth != nil {
-		if err := validateSubAgentNestingDepth(*options.NestedDepth); err != nil {
-			return Thread{}, err
-		}
 	}
 
 	return withProjectMutationResult(s, func() (Thread, error) {
@@ -1983,71 +1618,16 @@ func (s *Store) AddThreadWithOptions(projectID, title string, options AddThreadO
 			if s.projects[index].ID != projectID {
 				continue
 			}
-			if options.SkillForkRequestID != "" {
-				for _, existing := range s.projects[index].Threads {
-					if existing.ParentThreadID == options.ParentThreadID && existing.SkillForkRequestID == options.SkillForkRequestID {
-						return cloneThread(existing), ErrChildCreationRequestExists
-					}
-				}
-			}
-			limit := s.subAgentNestingDepth
-			if override := s.projects[index].SubAgentNestingDepthOverride; override != nil {
-				limit = *override
-			}
-			if options.NestedDepth != nil && *options.NestedDepth > limit {
-				return Thread{}, errors.New("nested depth cannot exceed the project's sub-agent nesting depth")
-			}
-			if options.ParentThreadID != "" {
-				var parent *Thread
-				for threadIndex := range s.projects[index].Threads {
-					if s.projects[index].Threads[threadIndex].ID == options.ParentThreadID {
-						parent = &s.projects[index].Threads[threadIndex]
-						break
-					}
-				}
-				if parent == nil {
-					return Thread{}, ErrThreadNotFound
-				}
-				if parent.RollbackPending {
-					return Thread{}, ErrThreadRollbackPending
-				}
-				if parent.ClosedAt != nil {
-					return Thread{}, ErrThreadClosed
-				}
-				parentDepth, effectiveLimit, depthErr := effectiveThreadNestingLimit(s.projects[index].Threads, options.ParentThreadID, limit)
-				if depthErr != nil {
-					return Thread{}, depthErr
-				}
-				if parentDepth >= effectiveLimit {
-					return Thread{}, ErrChildThreadDepthLimit
-				}
-				childDepth := parentDepth + 1
-				if options.NestedDepth != nil && childDepth+*options.NestedDepth > effectiveLimit {
-					return Thread{}, errors.New("nested depth exceeds the remaining sub-agent nesting depth for this thread tree")
-				}
-			}
 			id, err := randomID()
 			if err != nil {
 				return Thread{}, fmt.Errorf("create thread id: %w", err)
 			}
-			var nestedDepth *int
-			if options.NestedDepth != nil {
-				depth := *options.NestedDepth
-				nestedDepth = &depth
-			}
 			thread := Thread{
-				ID:                 id,
-				Title:              title,
-				Cwd:                s.projects[index].Path,
-				CreatedAt:          time.Now().UTC(),
-				ParentThreadID:     options.ParentThreadID,
-				AgentModel:         options.AgentModel,
-				AgentThinkingLevel: options.AgentThinkingLevel,
-				WorkflowRunID:      options.WorkflowRunID,
-				WorkflowAgentID:    options.WorkflowAgentID,
-				SkillForkRequestID: options.SkillForkRequestID,
-				NestedDepth:        nestedDepth,
-				RollbackPending:    options.CreationPending,
+				ID:              id,
+				Title:           title,
+				Cwd:             s.projects[index].Path,
+				CreatedAt:       time.Now().UTC(),
+				RollbackPending: options.CreationPending,
 			}
 			if options.Worktree {
 				thread, err = s.createWorktreeThread(s.projects[index], thread, options.BaseBranch, options.BaseRevision, options.DeferEnvironmentSetup)
@@ -2056,21 +1636,7 @@ func (s *Store) AddThreadWithOptions(projectID, title string, options AddThreadO
 				}
 			}
 			previousThreads := s.projects[index].Threads
-			insertAt := 0
-			if options.ParentThreadID != "" {
-				insertAt = len(previousThreads)
-				for threadIndex, candidate := range previousThreads {
-					if candidate.ArchivedAt != nil {
-						insertAt = threadIndex
-						break
-					}
-				}
-			}
-			updatedThreads := make([]Thread, 0, len(previousThreads)+1)
-			updatedThreads = append(updatedThreads, previousThreads[:insertAt]...)
-			updatedThreads = append(updatedThreads, thread)
-			updatedThreads = append(updatedThreads, previousThreads[insertAt:]...)
-			s.projects[index].Threads = updatedThreads
+			s.projects[index].Threads = append([]Thread{thread}, previousThreads...)
 			if saveErr := s.saveAddedThreadLocked(); saveErr != nil {
 				if projectSaveWasPublished(saveErr) {
 					if !thread.RollbackPending {
@@ -2180,11 +1746,6 @@ func (s *Store) BeginThreadCreationRollback(projectID, threadID string) (bool, e
 				if thread.RollbackPending {
 					return true, nil
 				}
-				for _, candidate := range item.Threads {
-					if candidate.ParentThreadID == threadID {
-						return false, ErrThreadHasChildren
-					}
-				}
 				item.Threads[threadIndex].RollbackPending = true
 				item.Threads[threadIndex].RollbackCleanupReady = false
 				if saveErr := s.saveRollbackStateLocked("mark"); saveErr != nil {
@@ -2221,11 +1782,6 @@ func (s *Store) FinalizeThreadCreationRollback(projectID, threadID string) error
 				}
 				if !thread.RollbackPending {
 					return ErrThreadRollbackPending
-				}
-				for _, candidate := range item.Threads {
-					if candidate.ParentThreadID == threadID {
-						return ErrThreadHasChildren
-					}
 				}
 				if !thread.RollbackCleanupReady {
 					item.Threads[threadIndex].RollbackCleanupReady = true
@@ -2317,11 +1873,6 @@ func (s *Store) recoverThreadCreationRollbacksLocked() error {
 				kept = append(kept, thread)
 				continue
 			}
-			for _, candidate := range item.Threads {
-				if candidate.ParentThreadID == thread.ID {
-					return ErrThreadHasChildren
-				}
-			}
 			if thread.Worktree {
 				if err := s.removeRollbackWorktree(item.Path, thread); err != nil {
 					return err
@@ -2342,72 +1893,6 @@ func (s *Store) recoverThreadCreationRollbacksLocked() error {
 		return err
 	}
 	return nil
-}
-
-func (s *Store) SubAgentNestingContext(projectID, threadID string) (SubAgentNestingContext, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, item := range s.projects {
-		if item.ID != projectID {
-			continue
-		}
-		limit := s.subAgentNestingDepth
-		if item.SubAgentNestingDepthOverride != nil {
-			limit = *item.SubAgentNestingDepthOverride
-		}
-		depth, effectiveLimit, err := effectiveThreadNestingLimit(item.Threads, threadID, limit)
-		if err != nil {
-			return SubAgentNestingContext{}, err
-		}
-		return SubAgentNestingContext{CurrentDepth: depth, MaxDepth: effectiveLimit}, nil
-	}
-	return SubAgentNestingContext{}, ErrNotFound
-}
-
-func threadNestingDepth(threads []Thread, threadID string) (int, error) {
-	depth, _, err := effectiveThreadNestingLimit(threads, threadID, MaxSubAgentNestingDepth)
-	return depth, err
-}
-
-func effectiveThreadNestingLimit(threads []Thread, threadID string, projectLimit int) (int, int, error) {
-	byID := make(map[string]Thread, len(threads))
-	for _, thread := range threads {
-		byID[thread.ID] = thread
-	}
-	thread, found := byID[threadID]
-	if !found {
-		return 0, 0, ErrThreadNotFound
-	}
-	chain := make([]Thread, 0, projectLimit+1)
-	visited := make(map[string]struct{}, len(threads))
-	for {
-		if _, duplicate := visited[thread.ID]; duplicate {
-			return 0, 0, ErrThreadTreeChanged
-		}
-		visited[thread.ID] = struct{}{}
-		chain = append(chain, thread)
-		if thread.ParentThreadID == "" {
-			break
-		}
-		parent, found := byID[thread.ParentThreadID]
-		if !found {
-			return 0, 0, ErrThreadTreeChanged
-		}
-		thread = parent
-	}
-
-	depth := len(chain) - 1
-	effectiveLimit := projectLimit
-	for distanceFromThread, ancestor := range chain {
-		if ancestor.NestedDepth == nil {
-			continue
-		}
-		ancestorDepth := depth - distanceFromThread
-		if relativeLimit := ancestorDepth + *ancestor.NestedDepth; relativeLimit < effectiveLimit {
-			effectiveLimit = relativeLimit
-		}
-	}
-	return depth, effectiveLimit, nil
 }
 
 func (s *Store) createWorktreeThread(item Project, thread Thread, baseBranch, baseRevision string, deferEnvironmentSetup bool) (Thread, error) {
@@ -2727,113 +2212,6 @@ func (s *Store) DeleteArchivedThread(projectID, threadID string, archivedBefore 
 	})
 }
 
-func (s *Store) DeleteThreadTree(projectID, threadID string, expectedThreadIDs []string) error {
-	return s.deleteThreadTree(projectID, threadID, expectedThreadIDs, nil)
-}
-
-func (s *Store) DeleteArchivedThreadTree(projectID, threadID string, expectedThreadIDs []string, archivedBefore time.Time) error {
-	archivedBefore = archivedBefore.UTC()
-	return s.deleteThreadTree(projectID, threadID, expectedThreadIDs, func(thread Thread) bool {
-		return thread.ArchivedAt != nil && !thread.ArchivedAt.After(archivedBefore)
-	})
-}
-
-func (s *Store) deleteThreadTree(projectID, threadID string, expectedThreadIDs []string, canDelete func(Thread) bool) error {
-	return s.withProjectMutation(func() error {
-		for projectIndex := range s.projects {
-			item := &s.projects[projectIndex]
-			if item.ID != projectID {
-				continue
-			}
-			var root Thread
-			rootFound := false
-			for _, thread := range item.Threads {
-				if thread.ID == threadID {
-					root = thread
-					rootFound = true
-					break
-				}
-			}
-			if !rootFound {
-				return ErrThreadNotFound
-			}
-			if canDelete != nil && !canDelete(root) {
-				return ErrThreadNotArchived
-			}
-
-			treeIDs := map[string]struct{}{threadID: {}}
-			for changed := true; changed; {
-				changed = false
-				for _, candidate := range item.Threads {
-					if _, included := treeIDs[candidate.ID]; included {
-						continue
-					}
-					if _, parentIncluded := treeIDs[candidate.ParentThreadID]; !parentIncluded {
-						continue
-					}
-					treeIDs[candidate.ID] = struct{}{}
-					changed = true
-				}
-			}
-			expected := make(map[string]struct{}, len(expectedThreadIDs))
-			for _, expectedID := range expectedThreadIDs {
-				if expectedID == "" {
-					return ErrThreadTreeChanged
-				}
-				expected[expectedID] = struct{}{}
-			}
-			if len(expected) != len(expectedThreadIDs) || len(expected) != len(treeIDs) {
-				return ErrThreadTreeChanged
-			}
-			for treeID := range treeIDs {
-				if _, found := expected[treeID]; !found {
-					return ErrThreadTreeChanged
-				}
-			}
-			for _, thread := range item.Threads {
-				if _, deleting := treeIDs[thread.ID]; deleting && thread.RollbackPending {
-					return ErrThreadRollbackPending
-				}
-			}
-
-			now := time.Now().UTC()
-			orphanedChanged := false
-			for _, thread := range item.Threads {
-				if _, deleting := treeIDs[thread.ID]; !deleting || !thread.Worktree {
-					continue
-				}
-				s.rememberOrphanedWorktreeLocked(*item, thread, now)
-				orphanedChanged = true
-			}
-			if orphanedChanged {
-				if err := s.saveOrphanedWorktreesLocked(); err != nil {
-					return fmt.Errorf("record unattached worktrees: %w", err)
-				}
-			}
-
-			previous := append([]Thread(nil), item.Threads...)
-			updated := make([]Thread, 0, len(previous)-len(treeIDs))
-			for _, thread := range previous {
-				if _, deleting := treeIDs[thread.ID]; !deleting {
-					updated = append(updated, thread)
-				}
-			}
-			item.Threads = updated
-			if err := s.saveLocked(); err != nil {
-				if projectSaveWasPublished(err) {
-					s.notifyChangesLocked()
-					return err
-				}
-				item.Threads = previous
-				return err
-			}
-			s.notifyChangesLocked()
-			return nil
-		}
-		return ErrNotFound
-	})
-}
-
 func (s *Store) deleteThread(projectID, threadID string, canDelete func(Thread) bool) error {
 	return s.withProjectMutation(func() error {
 		for projectIndex := range s.projects {
@@ -2846,11 +2224,6 @@ func (s *Store) deleteThread(projectID, threadID string, canDelete func(Thread) 
 				}
 				if thread.RollbackPending {
 					return ErrThreadRollbackPending
-				}
-				for _, candidate := range s.projects[projectIndex].Threads {
-					if candidate.ParentThreadID == threadID {
-						return ErrThreadHasChildren
-					}
 				}
 				if canDelete != nil && !canDelete(thread) {
 					return ErrThreadNotArchived
@@ -3047,25 +2420,6 @@ func (s *Store) loadSettings() error {
 		}
 		s.orphanedWorktreeRetentionDays = *settings.OrphanedWorktreeRetentionDays
 	}
-	if settings.SubAgentNestingDepth != nil {
-		if err := validateSubAgentNestingDepth(*settings.SubAgentNestingDepth); err != nil {
-			return fmt.Errorf("decode sub-agent nesting depth: %w", err)
-		}
-		s.subAgentNestingDepth = *settings.SubAgentNestingDepth
-	}
-	if settings.DisableWorkflows != nil {
-		s.disableWorkflows = *settings.DisableWorkflows
-	}
-	if settings.WorkflowKeywordTrigger != nil {
-		s.workflowKeywordTrigger = *settings.WorkflowKeywordTrigger
-	}
-	if settings.WorkflowSizeGuideline != nil {
-		value := strings.ToLower(strings.TrimSpace(*settings.WorkflowSizeGuideline))
-		if !validWorkflowSizeGuideline(value) {
-			return errors.New("decode workflow size guideline: must be unrestricted, small, medium, or large")
-		}
-		s.workflowSizeGuideline = value
-	}
 	if settings.CodingAgents != nil {
 		agents, err := normalizeCodingAgents(*settings.CodingAgents)
 		if err != nil {
@@ -3246,19 +2600,11 @@ func (s *Store) saveSettingsLocked() error {
 	}
 	archivedDays := s.archivedThreadRetentionDays
 	orphanedDays := s.orphanedWorktreeRetentionDays
-	subAgentNestingDepth := s.subAgentNestingDepth
-	disableWorkflows := s.disableWorkflows
-	workflowKeywordTrigger := s.workflowKeywordTrigger
-	workflowSizeGuideline := s.workflowSizeGuideline
 	codingAgents := append([]CodingAgentSetting{}, s.codingAgents...)
 	settings := persistedSettings{
 		WorktreeBasePath:              s.worktreeBasePath,
 		ArchivedThreadRetentionDays:   &archivedDays,
 		OrphanedWorktreeRetentionDays: &orphanedDays,
-		SubAgentNestingDepth:          &subAgentNestingDepth,
-		DisableWorkflows:              &disableWorkflows,
-		WorkflowKeywordTrigger:        &workflowKeywordTrigger,
-		WorkflowSizeGuideline:         &workflowSizeGuideline,
 		CodingAgents:                  &codingAgents,
 	}
 	if !s.usingDefaultTheme {

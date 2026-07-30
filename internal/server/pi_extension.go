@@ -20,25 +20,16 @@ var piThreadUsageExtension []byte
 //go:embed pi-thread-context.ts
 var piThreadContextExtension []byte
 
-//go:embed pi-child-threads.ts
-var piChildThreadsExtension []byte
-
-//go:embed pi-workflows.ts
-var piWorkflowsExtension []byte
-
-//go:embed pi-skill-forks.ts
-var piSkillForksExtension []byte
-
 //go:embed pi-browser/extension.ts
 var piBrowserExtension []byte
 
 //go:embed pi-browser/chrome-devtools-browser/SKILL.md
 var piBrowserSkill []byte
 
-//go:embed pi-planner/kiwi-code-planner/SKILL.md
-var piPlannerSkill []byte
-
 func materializePiExtensions(dataDirectory string) ([]string, error) {
+	if err := removeObsoletePiOrchestration(dataDirectory); err != nil {
+		return nil, err
+	}
 	titlePath, err := materializePiThreadTitleExtension(dataDirectory)
 	if err != nil {
 		return nil, err
@@ -54,27 +45,27 @@ func materializePiExtensions(dataDirectory string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	childThreadsPath, err := materializePiChildThreadsExtension(dataDirectory)
-	if err != nil {
-		return nil, err
-	}
-	workflowsPath, err := materializePiWorkflowsExtension(dataDirectory)
-	if err != nil {
-		return nil, err
-	}
-	if err := materializePiPlannerSkill(dataDirectory); err != nil {
-		return nil, err
-	}
-	if _, err := materializePiSkillForksExtension(dataDirectory); err != nil {
-		return nil, err
-	}
 	if _, err := materializePiBrowserExtension(dataDirectory); err != nil {
 		return nil, err
 	}
-	// Usage, browser control, and forked skills are imported by the stable
-	// activity extension path so existing Pi terminal sessions can pick them up
-	// with /reload after an application update.
-	return []string{titlePath, activityPath, contextPath, childThreadsPath, workflowsPath}, nil
+	// Usage and browser control are imported by the stable activity extension
+	// path so existing Pi terminal sessions can pick them up with /reload.
+	return []string{titlePath, activityPath, contextPath}, nil
+}
+
+func removeObsoletePiOrchestration(dataDirectory string) error {
+	paths := []string{
+		filepath.Join(dataDirectory, "extensions", "kiwi-code-child-threads.ts"),
+		filepath.Join(dataDirectory, "extensions", "kiwi-code-workflows.ts"),
+		filepath.Join(dataDirectory, "extensions", "kiwi-code-skill-forks.ts"),
+		filepath.Join(dataDirectory, "skills", "kiwi-code-planner"),
+	}
+	for _, path := range paths {
+		if err := os.RemoveAll(path); err != nil {
+			return fmt.Errorf("remove obsolete Pi orchestration %q: %w", filepath.Base(path), err)
+		}
+	}
+	return nil
 }
 
 func materializePiThreadTitleExtension(dataDirectory string) (string, error) {
@@ -93,18 +84,6 @@ func materializePiThreadContextExtension(dataDirectory string) (string, error) {
 	return materializePiExtension(dataDirectory, "kiwi-code-thread-context.ts", piThreadContextExtension)
 }
 
-func materializePiChildThreadsExtension(dataDirectory string) (string, error) {
-	return materializePiExtension(dataDirectory, "kiwi-code-child-threads.ts", piChildThreadsExtension)
-}
-
-func materializePiWorkflowsExtension(dataDirectory string) (string, error) {
-	return materializePiExtension(dataDirectory, "kiwi-code-workflows.ts", piWorkflowsExtension)
-}
-
-func materializePiSkillForksExtension(dataDirectory string) (string, error) {
-	return materializePiExtension(dataDirectory, "kiwi-code-skill-forks.ts", piSkillForksExtension)
-}
-
 func materializePiBrowserExtension(dataDirectory string) (string, error) {
 	if err := materializePiBrowserSkill(dataDirectory); err != nil {
 		return "", err
@@ -114,10 +93,6 @@ func materializePiBrowserExtension(dataDirectory string) (string, error) {
 
 func materializePiBrowserSkill(dataDirectory string) error {
 	return materializePiSkill(dataDirectory, "kiwi-code-in-app-browser", piBrowserSkill)
-}
-
-func materializePiPlannerSkill(dataDirectory string) error {
-	return materializePiSkill(dataDirectory, "kiwi-code-planner", piPlannerSkill)
 }
 
 func materializePiSkill(dataDirectory, name string, contents []byte) error {

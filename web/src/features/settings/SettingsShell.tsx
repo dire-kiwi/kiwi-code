@@ -26,7 +26,6 @@ import {
   type SettingsSectionMeta,
   type SettingsSectionTone,
 } from './registry'
-import { AgentsSection } from '@/features/settings/sections/AgentsSection'
 import { AppearanceSection } from '@/features/settings/sections/AppearanceSection'
 import { ClaudeProfilesSection } from '@/features/settings/sections/ClaudeProfilesSection'
 import { CleanupSection } from '@/features/settings/sections/CleanupSection'
@@ -174,8 +173,6 @@ export function SettingsShell({
         return <ClaudeProfilesSection settings={settings} />
       case 'cleanup':
         return <CleanupSection settings={settings} />
-      case 'agents':
-        return <AgentsSection settings={settings} />
       case 'appearance':
         return <AppearanceSection settings={settings} />
       case 'sandbox':

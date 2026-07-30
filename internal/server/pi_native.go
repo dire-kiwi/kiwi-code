@@ -48,8 +48,6 @@ type piNativeManager struct {
 	agentToken       string
 	processes        map[piNativeProcessKey]*piNativeProcess
 	history          map[piNativeProcessKey]*piNativeProcess
-	reviewClients    map[piNativeProcessKey]int
-	reviewStops      map[piNativeProcessKey]chan struct{}
 	contextWatchOnce sync.Once
 	usageReporter    func(piNativeProcessKey, string, threadUsageTotals)
 	removeThreadHook func(string, string) error
@@ -167,8 +165,6 @@ func newPiNativeManager(
 		agentToken:     agentToken,
 		processes:      make(map[piNativeProcessKey]*piNativeProcess),
 		history:        make(map[piNativeProcessKey]*piNativeProcess),
-		reviewClients:  make(map[piNativeProcessKey]int),
-		reviewStops:    make(map[piNativeProcessKey]chan struct{}),
 	}
 }
 
@@ -265,19 +261,6 @@ func (h *terminalHandler) servePiNative(w http.ResponseWriter, r *http.Request) 
 		closeWithFatal(err.Error())
 		return
 	}
-	if thread.ClosedAt != nil {
-		h.nativePi.addReviewClient(item.ID, thread.ID)
-		defer func() {
-			if !h.nativePi.removeReviewClient(item.ID, thread.ID) {
-				return
-			}
-			_, current, currentErr := h.projects.GetThread(item.ID, thread.ID)
-			if currentErr == nil && current.ClosedAt == nil {
-				return
-			}
-			_ = h.nativePi.stopReviewThreadIfUnused(item.ID, thread.ID)
-		}()
-	}
 	process, err := h.startPiNativeProcess(
 		item,
 		thread,
@@ -313,17 +296,6 @@ func (h *terminalHandler) servePiNative(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 		case payload := <-peer.messages:
-			if thread.ParentThreadID != "" {
-				allowed, policyErr := piNativeChildClientPayloadAllowed(payload)
-				if policyErr != nil {
-					_ = writeStatus("pi_native_error", policyErr.Error())
-					continue
-				}
-				if !allowed {
-					_ = writeStatus("pi_native_error", "Subagent controls are managed by the parent thread.")
-					continue
-				}
-			}
 			command, action, commandErr := normalizePiNativeClientMessage(payload)
 			if commandErr != nil {
 				_ = writeStatus("pi_native_error", commandErr.Error())
@@ -378,14 +350,6 @@ func (h *terminalHandler) servePiNative(w http.ResponseWriter, r *http.Request) 
 					continue
 				}
 			}
-			if command.Type == "prompt" && thread.ParentThreadID != "" && thread.ClosedAt != nil {
-				reopened, reopenErr := h.projects.ReopenChildThread(item.ID, thread.ParentThreadID, thread.ID)
-				if reopenErr != nil {
-					_ = writeStatus("pi_native_error", "Could not reopen the completed child thread.")
-					continue
-				}
-				thread = reopened
-			}
 			if err := process.sendClientCommand(command); err != nil {
 				_ = writeStatus("pi_native_error", "Could not send the message to Pi.")
 			}
@@ -422,11 +386,6 @@ func (h *terminalHandler) startPiNativeProcess(
 	if h.nativePi == nil {
 		return nil, errors.New("native Pi is unavailable")
 	}
-	launchOptions, err := h.withSubAgentNestingPrompt(item.ID, thread, launchOptions)
-	if err != nil {
-		return nil, fmt.Errorf("resolve sub-agent nesting context: %w", err)
-	}
-
 	return withTerminalThreadMutation(h, item, thread, func() (*piNativeProcess, error) {
 		return h.nativePi.getOrStart(item, thread, threadEndpoint, launchOptions)
 	}, func(process *piNativeProcess) {
@@ -449,11 +408,6 @@ func (h *terminalHandler) restartPiNativeProcess(
 	if h.nativePi == nil {
 		return nil, errors.New("native Pi is unavailable")
 	}
-	launchOptions, err := h.withSubAgentNestingPrompt(item.ID, thread, launchOptions)
-	if err != nil {
-		return nil, fmt.Errorf("resolve sub-agent nesting context: %w", err)
-	}
-
 	return withTerminalThreadMutation(h, item, thread, func() (*piNativeProcess, error) {
 		return h.nativePi.restart(expected, item, thread, threadEndpoint, launchOptions)
 	}, func(process *piNativeProcess) {
@@ -478,36 +432,29 @@ func (m *piNativeManager) getOrStart(
 	launchOptions.FigmaMCPURL = m.resolveFigmaMCPURL(item)
 	key := piNativeProcessKey{ProjectID: item.ID, ThreadID: thread.ID}
 
-	for {
-		m.mu.Lock()
-		if stopping := m.reviewStops[key]; stopping != nil {
-			m.mu.Unlock()
-			<-stopping
-			continue
-		}
-		if current := m.processes[key]; current != nil && !channelClosed(current.done) {
-			m.mu.Unlock()
-			return current, nil
-		}
-
-		process, err := m.startProcess(key, thread, threadEndpoint, launchOptions)
-		if err != nil {
-			m.mu.Unlock()
-			return nil, err
-		}
-		m.processes[key] = process
-		delete(m.history, key)
-		process.run(func() {
-			m.mu.Lock()
-			if m.processes[key] == process {
-				delete(m.processes, key)
-				m.history[key] = process
-			}
-			m.mu.Unlock()
-		})
+	m.mu.Lock()
+	if current := m.processes[key]; current != nil && !channelClosed(current.done) {
 		m.mu.Unlock()
-		return process, nil
+		return current, nil
 	}
+
+	process, err := m.startProcess(key, thread, threadEndpoint, launchOptions)
+	if err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
+	m.processes[key] = process
+	delete(m.history, key)
+	process.run(func() {
+		m.mu.Lock()
+		if m.processes[key] == process {
+			delete(m.processes, key)
+			m.history[key] = process
+		}
+		m.mu.Unlock()
+	})
+	m.mu.Unlock()
+	return process, nil
 }
 
 func (m *piNativeManager) restart(
@@ -566,15 +513,11 @@ func piNativeThreadEnvironment(
 	projectID string,
 	threadID string,
 	agentToken string,
-	parentThreadID string,
 	browserThreadEndpoint string,
 ) []string {
 	environment := kiwiCodeThreadEnvironment(threadEndpoint, projectID, threadID)
 	if agentToken != "" {
 		environment = append(environment, "KIWI_CODE_AGENT_TOKEN="+agentToken)
-	}
-	if parentThreadID != "" {
-		environment = append(environment, "KIWI_CODE_PARENT_THREAD_ID="+parentThreadID)
 	}
 	if browserThreadEndpoint != "" {
 		environment = append(environment, "KIWI_CODE_BROWSER_THREAD_ENDPOINT="+browserThreadEndpoint)
@@ -630,7 +573,6 @@ func (m *piNativeManager) startProcess(
 		key.ProjectID,
 		key.ThreadID,
 		m.agentToken,
-		thread.ParentThreadID,
 		launchOptions.BrowserThreadEndpoint,
 	)
 	if launchOptions.FigmaMCPURL != "" {
@@ -659,33 +601,6 @@ func (m *piNativeManager) startProcess(
 	process.readOutput(stdout, process.publishPiEvent)
 	process.readDiagnostics(stderr)
 	return process, nil
-}
-
-func (h *terminalHandler) withSubAgentNestingPrompt(
-	projectID string,
-	thread project.Thread,
-	launchOptions codingAgentLaunchOptions,
-) (codingAgentLaunchOptions, error) {
-	if thread.ParentThreadID == "" {
-		return launchOptions, nil
-	}
-	if h.projects == nil {
-		return codingAgentLaunchOptions{}, errors.New("project store is unavailable")
-	}
-	context, err := h.projects.SubAgentNestingContext(projectID, thread.ID)
-	if err != nil {
-		return codingAgentLaunchOptions{}, err
-	}
-	nestingPrompt := fmt.Sprintf(
-		"You are a sub-agent at nesting depth %d. The effective maximum sub-agent nesting depth for this thread tree is %d after applying project and ancestor limits. Root agents are at depth 0. Delegate further work only through an available context: fork skill or an explicitly activated Kiwi Code workflow, and only while your current depth is below the effective maximum.",
-		context.CurrentDepth,
-		context.MaxDepth,
-	)
-	if launchOptions.AppendSystemPrompt != "" {
-		launchOptions.AppendSystemPrompt += "\n\n"
-	}
-	launchOptions.AppendSystemPrompt += nestingPrompt
-	return launchOptions, nil
 }
 
 func piNativeArguments(
@@ -1424,100 +1339,6 @@ func (p *piNativeProcess) stop() error {
 	return p.nativeProcessCore.stop()
 }
 
-func (m *piNativeManager) childRun(projectID, threadID string, runID uint64) (piNativeRunSnapshot, bool) {
-	if m == nil {
-		return piNativeRunSnapshot{}, false
-	}
-	key := piNativeProcessKey{ProjectID: projectID, ThreadID: threadID}
-	m.mu.Lock()
-	process := m.processes[key]
-	if process == nil {
-		process = m.history[key]
-	}
-	m.mu.Unlock()
-	if process == nil {
-		return piNativeRunSnapshot{}, false
-	}
-	return process.runSnapshot(runID)
-}
-
-func (m *piNativeManager) latestChildRun(projectID, threadID string) (piNativeRunSnapshot, bool) {
-	if m == nil {
-		return piNativeRunSnapshot{}, false
-	}
-	key := piNativeProcessKey{ProjectID: projectID, ThreadID: threadID}
-	m.mu.Lock()
-	process := m.processes[key]
-	if process == nil {
-		process = m.history[key]
-	}
-	m.mu.Unlock()
-	if process == nil {
-		return piNativeRunSnapshot{}, false
-	}
-	return process.latestRunSnapshot()
-}
-
-func (m *piNativeManager) addReviewClient(projectID, threadID string) {
-	if m == nil {
-		return
-	}
-	key := piNativeProcessKey{ProjectID: projectID, ThreadID: threadID}
-	m.mu.Lock()
-	m.reviewClients[key]++
-	m.mu.Unlock()
-}
-
-func (m *piNativeManager) removeReviewClient(projectID, threadID string) bool {
-	if m == nil {
-		return false
-	}
-	key := piNativeProcessKey{ProjectID: projectID, ThreadID: threadID}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	clients := m.reviewClients[key]
-	if clients <= 1 {
-		delete(m.reviewClients, key)
-		return clients == 1
-	}
-	m.reviewClients[key] = clients - 1
-	return false
-}
-
-func (m *piNativeManager) stopReviewThreadIfUnused(projectID, threadID string) error {
-	if m == nil {
-		return nil
-	}
-	key := piNativeProcessKey{ProjectID: projectID, ThreadID: threadID}
-	m.mu.Lock()
-	if m.reviewClients[key] != 0 {
-		m.mu.Unlock()
-		return nil
-	}
-	if stopping := m.reviewStops[key]; stopping != nil {
-		m.mu.Unlock()
-		<-stopping
-		return nil
-	}
-	process := m.processes[key]
-	if process == nil || channelClosed(process.done) {
-		m.mu.Unlock()
-		return nil
-	}
-	stopped := make(chan struct{})
-	m.reviewStops[key] = stopped
-	m.mu.Unlock()
-
-	stopErr := process.stop()
-	m.mu.Lock()
-	if m.reviewStops[key] == stopped {
-		delete(m.reviewStops, key)
-		close(stopped)
-	}
-	m.mu.Unlock()
-	return stopErr
-}
-
 func (m *piNativeManager) stopThread(projectID, threadID string) error {
 	if m == nil {
 		return nil
@@ -1561,7 +1382,6 @@ func (m *piNativeManager) removeThread(projectID, threadID string) error {
 	m.mu.Lock()
 	delete(m.processes, piNativeProcessKey{ProjectID: projectID, ThreadID: threadID})
 	delete(m.history, piNativeProcessKey{ProjectID: projectID, ThreadID: threadID})
-	delete(m.reviewClients, piNativeProcessKey{ProjectID: projectID, ThreadID: threadID})
 	m.mu.Unlock()
 	removeErr := os.RemoveAll(filepath.Join(
 		m.dataDirectory,
@@ -1584,11 +1404,6 @@ func (m *piNativeManager) removeProject(projectID string) error {
 	for key := range m.history {
 		if key.ProjectID == projectID {
 			delete(m.history, key)
-		}
-	}
-	for key := range m.reviewClients {
-		if key.ProjectID == projectID {
-			delete(m.reviewClients, key)
 		}
 	}
 	m.mu.Unlock()
@@ -1762,37 +1577,8 @@ func readPiUploadedImage(path string, remainingBytes int64) ([]byte, error) {
 	return contents, nil
 }
 
-func piNativeBrowserLaunchOptions(thread project.Thread, model, thinking string) (codingAgentLaunchOptions, error) {
-	if thread.ParentThreadID != "" {
-		if strings.TrimSpace(model) != "" || strings.TrimSpace(thinking) != "" {
-			return codingAgentLaunchOptions{}, errors.New("Subagent launch settings are managed by the parent thread.")
-		}
-		options, err := normalizeCodingAgentLaunchOptions(
-			codingAgentPi,
-			thread.AgentModel,
-			thread.AgentThinkingLevel,
-		)
-		if err != nil {
-			return codingAgentLaunchOptions{}, err
-		}
-		return options, nil
-	}
+func piNativeBrowserLaunchOptions(_ project.Thread, model, thinking string) (codingAgentLaunchOptions, error) {
 	return normalizeCodingAgentLaunchOptions(codingAgentPi, model, thinking)
-}
-
-func piNativeChildClientPayloadAllowed(payload []byte) (bool, error) {
-	var message struct {
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal(payload, &message); err != nil {
-		return false, errors.New("Invalid native Pi message.")
-	}
-	switch message.Type {
-	case "refresh", "get_state", "get_commands", "get_available_models", "get_session_stats":
-		return true, nil
-	default:
-		return false, nil
-	}
 }
 
 func piNativeCommandChangesSession(command string) bool {

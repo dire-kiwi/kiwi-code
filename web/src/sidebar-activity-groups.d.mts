@@ -4,8 +4,6 @@ export type ActivityGroupThread = {
   id: string
   createdAt: string
   lastPromptAt?: string
-  parentThreadId?: string
-  closedAt?: string
   archivedAt?: string
   bookmarked?: boolean
 }

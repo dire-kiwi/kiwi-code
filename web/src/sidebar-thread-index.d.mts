@@ -1,6 +1,5 @@
 export type IndexedThread = {
   id: string
-  parentThreadId?: string
   archivedAt?: string
   bookmarked?: boolean
 }
@@ -20,9 +19,6 @@ export type ThreadTreeIndex<Thread extends IndexedThread = IndexedThread> = {
   threads: readonly Thread[]
   byId: Map<string, Thread>
   roots: Thread[]
-  children: (threadId: string) => Thread[]
-  ancestors: (threadId: string) => Thread[]
-  descendants: (threadId: string) => Thread[]
   rootId: (threadId: string) => string | null
   activityDisplayThread: (activity: IndexedActivity, rejectArchived?: boolean) => Thread | null
   orderedTreeIds: (rootIds: readonly string[]) => string[]
@@ -45,7 +41,6 @@ export type SidebarThreadIndex<
   entry: (projectId: string, threadId: string) => { project: Project; thread: Thread } | null
   threadActivity: (projectId: string, threadId: string) => {
     activity: Activity | null
-    childActivity: boolean
   }
   finishedActivities: (projectId: string, threadId: string) => Activity[]
 }

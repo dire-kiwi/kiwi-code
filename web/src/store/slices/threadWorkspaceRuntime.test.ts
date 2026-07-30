@@ -5,7 +5,6 @@ import {
   piPresentationStatusReported,
   processSelected,
   processStarted,
-  selectOrderedWorkflowRuns,
   selectProcessWindows,
   selectSelectedProcessId,
   selectToolStatuses,
@@ -13,12 +12,11 @@ import {
   threadStatusSnapshotReceived,
   threadWorkspaceRuntimeSlice,
   toolStatusReported,
-  workflowRunUpdated,
   workspaceEntered,
   type ThreadWorkspaceRuntimeState,
 } from './threadWorkspaceRuntime'
 import type { RootState } from '@/store/rootReducer'
-import type { ProcessWindow, ThreadStatusSnapshot, WorkflowRun } from '@/types'
+import type { ProcessWindow, ThreadStatusSnapshot } from '@/types'
 
 const reduce = threadWorkspaceRuntimeSlice.reducer
 
@@ -42,8 +40,6 @@ function snapshot(overrides: Partial<ThreadStatusSnapshot> = {}) {
     processes: [],
     shellWindows: [],
     gitBranches: null,
-    workflows: [],
-    plans: [],
     contextStatuses: {},
     errors: {},
     ...overrides,
@@ -150,36 +146,6 @@ describe('threadWorkspaceRuntime slice', () => {
     // A second snapshot that already contains it must not duplicate the row.
     const again = reduce(started, processStarted({ threadKey: openThread, process: process('env-1') }))
     expect(selectProcessWindows(runtimeRoot(again))).toHaveLength(1)
-  })
-
-  it('orders active workflow runs first and memoises the result', () => {
-    const runs = [
-      { id: 'done', state: 'succeeded' },
-      { id: 'live', state: 'running' },
-      { id: 'held', state: 'paused' },
-    ] as WorkflowRun[]
-    const state = reduce(entered(), threadStatusSnapshotReceived({
-      threadKey: openThread,
-      snapshot: snapshot({ workflows: runs as never }),
-    }))
-
-    const ordered = selectOrderedWorkflowRuns(runtimeRoot(state))
-    expect(ordered.map((run) => run.id)).toEqual(['live', 'held', 'done'])
-    // Same state in, same array out: an unmemoised sort would re-render the
-    // panel on every unrelated status push.
-    expect(selectOrderedWorkflowRuns(runtimeRoot(state))).toBe(ordered)
-  })
-
-  it('replaces a single run in place when the panel edits one', () => {
-    const state = reduce(entered(), threadStatusSnapshotReceived({
-      threadKey: openThread,
-      snapshot: snapshot({
-        workflows: [{ id: 'a', state: 'running' }, { id: 'b', state: 'running' }] as never,
-      }),
-    }))
-    const paused = reduce(state, workflowRunUpdated({ threadKey: openThread, run: { id: 'b', state: 'paused' } as WorkflowRun }))
-
-    expect(paused.workflowRuns.map((run) => run.state)).toEqual(['running', 'paused'])
   })
 
   it('starts with nothing resident, so no consumer reads another thread', () => {
