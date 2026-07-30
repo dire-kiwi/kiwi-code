@@ -1,12 +1,4 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type DragEvent,
-  type FormEvent,
-  type KeyboardEvent,
-} from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   Archive,
@@ -16,34 +8,20 @@ import {
   ChevronUp,
   Clock3,
   CornerDownRight,
-  ExternalLink,
   Folder,
-  FolderGit2,
   FolderOpen,
   GitBranch,
   GitFork,
   Globe2,
   GripVertical,
-  History,
   ListTree,
   LoaderCircle,
   PanelLeftClose,
-  PanelsTopLeft,
   Plus,
-  RadioTower,
-  RotateCw,
   Search,
   Settings2,
   Trash2,
-  X,
 } from 'lucide-react'
-import {
-  createProfile,
-  createProject,
-  restartApplication,
-  waitForApplicationRestart,
-} from '@/api'
-import { reloadFrontend } from '@/frontend-reload.mjs'
 import { formatCompactTokens, formatCompactUsd, usageDescription } from '@/lib/formatUsage'
 import { createSidebarThreadIndex } from '@/sidebar-thread-index.mjs'
 import { defaultVisibleRootThreadIds } from '@/sidebar-thread-visibility.mjs'
@@ -59,21 +37,22 @@ import {
   selectExpandedMoreProjectIds,
   selectSidebarView,
   selectSidebarWidth,
-  selectWebServersCollapsed,
   sidebarViewChanged,
   sidebarWidthChanged,
   sidebarWidthKeyboardStep,
   sidebarWidthNudged,
   sidebarWidthReset,
   threadRevealed,
-  webServersCollapseToggled,
 } from '@/store/slices/sidebar'
 import type { PiThreadActivity, ProcessWebServer, Profile, Project, Thread, ThreadUsageSnapshot } from '@/types'
 import { Button, IconButton, SelectionButton } from '@/ui/buttons'
-import { ProjectPathAutocomplete, Select, TextInput } from '@/ui/inputs'
-import { BackendSwitcher } from './BackendSwitcher'
-import { ThreadActionsMenu } from './ThreadActionsMenu'
 import { SidebarActivityView } from './SidebarActivityView'
+import { SidebarAddProjectForm } from './SidebarAddProjectForm'
+import { SidebarFooterNav } from './SidebarFooterNav'
+import { SidebarProfileSwitcher } from './SidebarProfileSwitcher'
+import { SidebarWebServers } from './SidebarWebServers'
+import { ThreadActionsMenu } from './ThreadActionsMenu'
+import { useSidebarReorder } from './useSidebarReorder'
 
 type ProjectSidebarProps = {
   profiles: Profile[]
@@ -112,50 +91,6 @@ type ProjectSidebarProps = {
   onDeleteThread: (project: Project, thread: Thread) => void
 }
 
-const newProfileValue = '__new-profile__'
-
-type DragItem =
-  | { kind: 'project'; id: string }
-  | { kind: 'thread'; projectId: string; id: string }
-
-type DropPosition = 'before' | 'after'
-
-type DropTarget =
-  | { kind: 'project'; id: string; position: DropPosition }
-  | { kind: 'thread'; projectId: string; id: string; position: DropPosition }
-
-function reorderedIds(ids: string[], sourceId: string, targetId: string, position: DropPosition) {
-  if (sourceId === targetId) return ids
-  const withoutSource = ids.filter((id) => id !== sourceId)
-  const targetIndex = withoutSource.indexOf(targetId)
-  if (targetIndex < 0 || withoutSource.length === ids.length) return ids
-  withoutSource.splice(targetIndex + (position === 'after' ? 1 : 0), 0, sourceId)
-  return withoutSource
-}
-
-function verticalDropPosition(event: DragEvent<HTMLElement>): DropPosition {
-  const bounds = event.currentTarget.getBoundingClientRect()
-  return event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after'
-}
-
-function projectDropPosition(event: DragEvent<HTMLLIElement>): DropPosition {
-  const header = event.currentTarget.querySelector<HTMLElement>('[data-project-drag-image]')
-  const bounds = (header ?? event.currentTarget).getBoundingClientRect()
-  return event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after'
-}
-
-function sameOrder(left: string[], right: string[]) {
-  return left.length === right.length && left.every((id, index) => id === right[index])
-}
-
-function webServerAddress(value: string) {
-  try {
-    const url = new URL(value)
-    return `${url.host}${url.pathname === '/' ? '' : url.pathname}`
-  } catch {
-    return value
-  }
-}
 
 export function ProjectSidebar({
   profiles,
@@ -194,15 +129,6 @@ export function ProjectSidebar({
   onDeleteThread,
 }: ProjectSidebarProps) {
   const [showProjectForm, setShowProjectForm] = useState(false)
-  const [name, setName] = useState('')
-  const [path, setPath] = useState('')
-  const [error, setError] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [creatingProfile, setCreatingProfile] = useState(false)
-  const [draggedItem, setDraggedItem] = useState<DragItem | null>(null)
-  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
-  const [savingOrder, setSavingOrder] = useState(false)
-  const [restarting, setRestarting] = useState(false)
   const dispatch = useAppDispatch()
   const viewMode = useAppSelector(selectSidebarView)
   const sidebarWidth = useAppSelector(selectSidebarWidth)
@@ -210,9 +136,7 @@ export function ProjectSidebar({
   const expandedMoreProjectIds = useAppSelector(selectExpandedMoreProjectIds)
   const collapsedChildThreadIds = useAppSelector(selectCollapsedChildThreadIds)
   const bookmarksOnly = useAppSelector(selectBookmarksOnly)
-  const webServersCollapsed = useAppSelector(selectWebServersCollapsed)
   const [threadMenuId, setThreadMenuId] = useState<string | null>(null)
-  const draggedItemRef = useRef<DragItem | null>(null)
   const asideRef = useRef<HTMLElement>(null)
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0]
   const usageByThread = useMemo(() => new Map(
@@ -249,209 +173,26 @@ export function ProjectSidebar({
     }))
   }, [dispatch, selectedThreadId, threadIndex])
 
-  async function handleProfileSelection(profileId: string) {
-    if (profileId !== newProfileValue) {
-      onSelectProfile(profileId)
-      return
-    }
 
-    const name = window.prompt('Name the new profile')?.trim()
-    if (!name) return
-    setCreatingProfile(true)
-    try {
-      const profile = await createProfile(name)
-      onProfileCreated(profile)
-    } catch (reason) {
-      window.alert(reason instanceof Error ? reason.message : 'Could not create that profile.')
-    } finally {
-      setCreatingProfile(false)
-    }
-  }
-
-  async function handleRestart() {
-    if (restarting || !window.confirm('Restart Kiwi Code?\n\nThe application will fully exit before a fresh instance starts. Your tmux sessions and running tools will keep running.')) return
-
-    setRestarting(true)
-    try {
-      const response = await restartApplication()
-      await waitForApplicationRestart(response.instanceId)
-      await reloadFrontend()
-    } catch (reason) {
-      setRestarting(false)
-      window.alert(reason instanceof Error ? reason.message : 'Could not restart Kiwi Code.')
-    }
-  }
-
-  async function handleProjectSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setSubmitting(true)
-    setError('')
-    try {
-      const project = await createProject({ name, path, profileId: activeProfileId })
-      setName('')
-      setPath('')
-      setShowProjectForm(false)
-      onProjectCreated(project)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not add that project.')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  function setActiveDrag(item: DragItem | null) {
-    draggedItemRef.current = item
-    setDraggedItem(item)
-    if (!item) setDropTarget(null)
-  }
-
-  function toggleProject(projectId: string) {
-    dispatch(projectCollapseToggled(projectId))
-  }
-
-  function toggleMoreThreads(projectId: string) {
-    dispatch(moreThreadsToggled(projectId))
-  }
-
-  function toggleChildThreads(threadId: string) {
-    dispatch(childThreadsCollapseToggled(threadId))
-  }
-
-  function startProjectDrag(event: DragEvent<HTMLButtonElement>, projectId: string) {
-    if (savingOrder || projects.length < 2) {
-      event.preventDefault()
-      return
-    }
-    setActiveDrag({ kind: 'project', id: projectId })
-    setDropTarget(null)
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', `project:${projectId}`)
-    const row = event.currentTarget.closest<HTMLElement>('[data-project-drag-image]')
-    if (row) event.dataTransfer.setDragImage(row, 16, 20)
-  }
-
-  function startThreadDrag(event: DragEvent<HTMLButtonElement>, projectId: string, threadId: string) {
-    const project = projects.find((item) => item.id === projectId)
-    const activeThreads = project
-      ? threadIndex.tree(project.id)?.roots.filter((thread) => !thread.archivedAt) ?? []
-      : []
-    if (savingOrder || !project || activeThreads.length < 2 || !activeThreads.some((thread) => thread.id === threadId)) {
-      event.preventDefault()
-      return
-    }
-    setActiveDrag({ kind: 'thread', projectId, id: threadId })
-    setDropTarget(null)
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', `thread:${projectId}:${threadId}`)
-    const row = event.currentTarget.closest<HTMLElement>('[data-thread-row]')
-    if (row) event.dataTransfer.setDragImage(row, 16, 20)
-  }
-
-  function updateDropTarget(next: DropTarget) {
-    setDropTarget((current) => {
-      if (!current || current.kind !== next.kind) return next
-      if (current.id !== next.id || current.position !== next.position) return next
-      if (current.kind === 'thread' && next.kind === 'thread' && current.projectId !== next.projectId) return next
-      return current
-    })
-  }
-
-  function saveProjectOrder(projectIds: string[]) {
-    const currentIds = projects.map((project) => project.id)
-    if (sameOrder(currentIds, projectIds)) return
-    setSavingOrder(true)
-    void onReorderProjects(projectIds).finally(() => setSavingOrder(false))
-  }
-
-  function saveThreadOrder(project: Project, threadIds: string[]) {
-    const currentIds = project.threads.map((thread) => thread.id)
-    if (sameOrder(currentIds, threadIds)) return
-    setSavingOrder(true)
-    void onReorderThreads(project.id, threadIds).finally(() => setSavingOrder(false))
-  }
-
-  function handleProjectDragOver(event: DragEvent<HTMLLIElement>, projectId: string) {
-    const item = draggedItemRef.current
-    if (item?.kind !== 'project' || item.id === projectId) return
-    event.preventDefault()
-    event.stopPropagation()
-    event.dataTransfer.dropEffect = 'move'
-    updateDropTarget({ kind: 'project', id: projectId, position: projectDropPosition(event) })
-  }
-
-  function handleProjectDrop(event: DragEvent<HTMLLIElement>, projectId: string) {
-    const item = draggedItemRef.current
-    if (item?.kind !== 'project' || item.id === projectId) return
-    event.preventDefault()
-    event.stopPropagation()
-    const projectIds = reorderedIds(
-      projects.map((project) => project.id),
-      item.id,
-      projectId,
-      projectDropPosition(event),
-    )
-    setActiveDrag(null)
-    saveProjectOrder(projectIds)
-  }
-
-  function handleThreadDragOver(event: DragEvent<HTMLLIElement>, projectId: string, threadId: string) {
-    const item = draggedItemRef.current
-    if (item?.kind !== 'thread' || item.projectId !== projectId || item.id === threadId) return
-    event.preventDefault()
-    event.stopPropagation()
-    event.dataTransfer.dropEffect = 'move'
-    updateDropTarget({ kind: 'thread', projectId, id: threadId, position: verticalDropPosition(event) })
-  }
-
-  function handleThreadDrop(event: DragEvent<HTMLLIElement>, project: Project, threadId: string) {
-    const item = draggedItemRef.current
-    if (item?.kind !== 'thread' || item.projectId !== project.id || item.id === threadId) return
-    event.preventDefault()
-    event.stopPropagation()
-    const tree = threadIndex.tree(project.id)
-    if (!tree) return
-    const roots = tree.roots
-    const activeThreadIds = roots.filter((thread) => !thread.archivedAt).map((thread) => thread.id)
-    const archivedThreadIds = roots.filter((thread) => thread.archivedAt).map((thread) => thread.id)
-    const threadIds = reorderedIds(
-      activeThreadIds,
-      item.id,
-      threadId,
-      verticalDropPosition(event),
-    )
-    setActiveDrag(null)
-    saveThreadOrder(project, tree.orderedTreeIds([...threadIds, ...archivedThreadIds]))
-  }
-
-  function handleProjectHandleKeyDown(event: KeyboardEvent<HTMLButtonElement>, projectId: string) {
-    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
-    event.preventDefault()
-    if (savingOrder) return
-    const projectIds = projects.map((project) => project.id)
-    const index = projectIds.indexOf(projectId)
-    const targetIndex = index + (event.key === 'ArrowUp' ? -1 : 1)
-    if (index < 0 || targetIndex < 0 || targetIndex >= projectIds.length) return
-    const reordered = [...projectIds]
-    ;[reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]]
-    saveProjectOrder(reordered)
-  }
-
-  function handleThreadHandleKeyDown(event: KeyboardEvent<HTMLButtonElement>, project: Project, threadId: string) {
-    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
-    event.preventDefault()
-    if (savingOrder) return
-    const tree = threadIndex.tree(project.id)
-    if (!tree) return
-    const roots = tree.roots
-    const activeThreadIds = roots.filter((thread) => !thread.archivedAt).map((thread) => thread.id)
-    const archivedThreadIds = roots.filter((thread) => thread.archivedAt).map((thread) => thread.id)
-    const index = activeThreadIds.indexOf(threadId)
-    const targetIndex = index + (event.key === 'ArrowUp' ? -1 : 1)
-    if (index < 0 || targetIndex < 0 || targetIndex >= activeThreadIds.length) return
-    const reordered = [...activeThreadIds]
-    ;[reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]]
-    saveThreadOrder(project, tree.orderedTreeIds([...reordered, ...archivedThreadIds]))
-  }
+  const {
+    draggedItem,
+    dropTarget,
+    savingOrder,
+    clearDrag,
+    startProjectDrag,
+    startThreadDrag,
+    handleProjectDragOver,
+    handleProjectDrop,
+    handleThreadDragOver,
+    handleThreadDrop,
+    handleProjectHandleKeyDown,
+    handleThreadHandleKeyDown,
+  } = useSidebarReorder({
+    projects,
+    treeFor: (projectId) => threadIndex.tree(projectId),
+    onReorderProjects,
+    onReorderThreads,
+  })
 
   function renderThreadRow(
     project: Project,
@@ -526,7 +267,7 @@ export function ProjectSidebar({
               data-project-id={project.id}
               data-thread-id={thread.id}
               onDragStart={(event) => startThreadDrag(event, project.id, thread.id)}
-              onDragEnd={() => setActiveDrag(null)}
+              onDragEnd={() => clearDrag()}
               onKeyDown={(event) => handleThreadHandleKeyDown(event, project, thread.id)}
               className="absolute left-1.5 top-1/2 z-10 grid size-5 -translate-y-1/2 cursor-grab place-items-center rounded text-ghost-faint opacity-0 transition hover:bg-ghost-raised hover:text-ghost-white group-hover/thread:opacity-100 focus:opacity-100 active:cursor-grabbing disabled:pointer-events-none"
               aria-label={`Reorder thread ${thread.title}; drag or use the arrow keys`}
@@ -538,7 +279,7 @@ export function ProjectSidebar({
           {hasChildren && !bookmarksOnly && (
             <button
               type="button"
-              onClick={() => toggleChildThreads(thread.id)}
+              onClick={() => dispatch(childThreadsCollapseToggled(thread.id))}
               aria-expanded={childrenExpanded}
               aria-controls={`thread-${thread.id}-children`}
               aria-label={`${childrenExpanded ? 'Collapse' : 'Expand'} ${children.length} child ${children.length === 1 ? 'thread' : 'threads'} for ${thread.title}`}
@@ -672,7 +413,7 @@ export function ProjectSidebar({
             <Button
               type="button"
               variant="text"
-              onClick={() => toggleMoreThreads(project.id)}
+              onClick={() => dispatch(moreThreadsToggled(project.id))}
               aria-expanded={expanded}
               className="flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-left font-mono text-[10px] text-ghost-faint transition hover:bg-ghost-raised/45 hover:text-ghost-muted"
             >
@@ -784,10 +525,7 @@ export function ProjectSidebar({
               type="button"
               size="sm"
               variant="subtle"
-              onClick={() => {
-                setError('')
-                setShowProjectForm(true)
-              }}
+              onClick={() => setShowProjectForm(true)}
               aria-label="Add a project"
               title="Add project"
             >
@@ -805,59 +543,21 @@ export function ProjectSidebar({
             </IconButton>
             </div>
           </div>
-          <div className="flex min-w-0 items-center gap-1">
-            <label className="inline-flex shrink-0 items-center">
-              <span className="sr-only">Current profile</span>
-              <Select
-                variant="inline"
-                value={activeProfileId}
-                options={[
-                  ...profiles.map((profile) => ({ value: profile.id, label: profile.name })),
-                  { value: newProfileValue, label: '＋ New profile…' },
-                ]}
-                onChange={(profileId) => void handleProfileSelection(profileId)}
-                disabled={creatingProfile}
-                className="min-w-0 max-w-36"
-                aria-label="Current profile"
-              />
-            </label>
-            <span className="shrink-0 text-[9px] text-ghost-faint" aria-hidden="true">·</span>
-            <BackendSwitcher variant="inline" />
-          </div>
+          <SidebarProfileSwitcher
+            profiles={profiles}
+            activeProfileId={activeProfileId}
+            onSelectProfile={onSelectProfile}
+            onProfileCreated={onProfileCreated}
+          />
         </header>
 
         {showProjectForm && (
-          <form onSubmit={handleProjectSubmit} className="relative z-10 mx-2 mt-2 rounded-lg border border-ghost-border/70 bg-ghost-panel p-3">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-[10px] font-semibold text-ghost-bright-white">
-                Add local project{activeProfile ? ` to ${activeProfile.name}` : ''}
-              </p>
-              <Button type="button" onClick={() => setShowProjectForm(false)} aria-label="Cancel" className="text-ghost-dim">
-                <X size={12} />
-              </Button>
-            </div>
-            <TextInput
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              maxLength={80}
-              placeholder="Project name (optional)"
-            />
-            <ProjectPathAutocomplete
-              value={path}
-              disabled={submitting}
-              onChange={setPath}
-            />
-            {error && <p role="alert" className="mt-2 text-[11px] text-ghost-bright-red">{error}</p>}
-            <Button
-              type="submit"
-              variant="primary-static"
-              disabled={submitting || !path.trim()}
-              className="mt-3 flex h-8 w-full items-center justify-center gap-2 rounded-md text-[10px]"
-            >
-              {submitting ? <LoaderCircle size={12} className="animate-spin" /> : <FolderGit2 size={12} />}
-              Add project
-            </Button>
-          </form>
+          <SidebarAddProjectForm
+            activeProfile={activeProfile}
+            activeProfileId={activeProfileId}
+            onProjectCreated={onProjectCreated}
+            onCancel={() => setShowProjectForm(false)}
+          />
         )}
 
         <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-2" aria-label="Projects and threads">
@@ -929,7 +629,7 @@ export function ProjectSidebar({
                       data-reorder-handle="project"
                       data-project-id={project.id}
                       onDragStart={(event) => startProjectDrag(event, project.id)}
-                      onDragEnd={() => setActiveDrag(null)}
+                      onDragEnd={() => clearDrag()}
                       onKeyDown={(event) => handleProjectHandleKeyDown(event, project.id)}
                       className="-ml-1 grid size-5 shrink-0 cursor-grab place-items-center rounded text-ghost-faint opacity-0 transition hover:bg-ghost-raised hover:text-ghost-white group-hover/project:opacity-100 focus:opacity-100 active:cursor-grabbing disabled:cursor-default disabled:opacity-0"
                       aria-label={`Reorder project ${project.name}; drag or use the arrow keys`}
@@ -940,7 +640,7 @@ export function ProjectSidebar({
                     <Button
                       type="button"
                       onClick={() => {
-                        if (!bookmarksOnly) toggleProject(project.id)
+                        if (!bookmarksOnly) dispatch(projectCollapseToggled(project.id))
                       }}
                       disabled={bookmarksOnly}
                       aria-expanded={bookmarksOnly || !collapsedProjectIds.has(project.id)}
@@ -1036,118 +736,19 @@ export function ProjectSidebar({
             </ul>
           )}
 
-          {processWebServers.length > 0 && (
-            <section className="mt-4 border-t border-ghost-border/55 pt-1.5" aria-labelledby="sidebar-web-servers-title">
-              <Button
-                type="button"
-                onClick={() => dispatch(webServersCollapseToggled())}
-                aria-expanded={!webServersCollapsed}
-                aria-controls="sidebar-web-servers-list"
-                className="flex h-6 w-full items-center gap-1.5 rounded-md px-1.5 text-left transition hover:bg-ghost-raised/45"
-              >
-                <RadioTower size={11} className="text-ghost-green" aria-hidden="true" />
-                <h2 id="sidebar-web-servers-title" className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-dim">
-                  Web servers
-                </h2>
-                <span className="rounded-full border border-ghost-border/70 px-1.5 font-mono text-[9px] text-ghost-faint">
-                  {processWebServers.length}
-                </span>
-                <ChevronDown
-                  size={10}
-                  className={`ml-auto text-ghost-faint transition-transform ${webServersCollapsed ? '-rotate-90' : ''}`}
-                  aria-hidden="true"
-                />
-              </Button>
-              {!webServersCollapsed && (
-                <ul id="sidebar-web-servers-list" className="mt-1 space-y-0.5">
-                  {processWebServers.map((webServer) => (
-                    <li key={`${webServer.projectId}:${webServer.threadId}:${webServer.processId}:${webServer.url}`}>
-                      <a
-                        href={webServer.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        onClick={onClose}
-                        title={`${webServer.projectName} / ${webServer.threadTitle} / ${webServer.processName}\n${webServer.url}`}
-                        className="group/server flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1.5 text-ghost-muted transition hover:bg-ghost-raised/45 hover:text-ghost-bright-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ghost-green/45"
-                      >
-                        <span className="grid size-5 shrink-0 place-items-center rounded bg-ghost-green/[0.08] text-ghost-green">
-                          <RadioTower size={11} />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate font-mono text-[10px] text-ghost-white">{webServerAddress(webServer.url)}</span>
-                          <span className="block truncate text-[9px] text-ghost-faint">
-                            {webServer.processName} · {webServer.projectName}
-                          </span>
-                        </span>
-                        <ExternalLink size={9} className="shrink-0 text-ghost-faint transition group-hover/server:text-ghost-green" />
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
+          <SidebarWebServers webServers={processWebServers} onNavigate={onClose} />
         </nav>
 
-        <div className="shrink-0 space-y-0.5 border-t border-ghost-border/70 bg-ghost-panel/25 p-2">
-          <SelectionButton
-            type="button"
-            selected={cleanupSelected}
-            selectionVariant="navigation-compact"
-            onClick={onOpenCleanup}
-            aria-current={cleanupSelected ? 'page' : undefined}
-          >
-            <Clock3 size={13} className={cleanupSelected ? 'text-ghost-green' : 'text-ghost-dim'} />
-            <span>Cleanup</span>
-          </SelectionButton>
-          <SelectionButton
-            type="button"
-            selected={sessionLogSelected}
-            selectionVariant="navigation-compact"
-            onClick={onOpenSessionLog}
-            aria-current={sessionLogSelected ? 'page' : undefined}
-          >
-            <History size={13} className={sessionLogSelected ? 'text-ghost-green' : 'text-ghost-dim'} />
-            <span>Session log</span>
-          </SelectionButton>
-          <SelectionButton
-            type="button"
-            selected={tmuxSelected}
-            selectionVariant="navigation-compact"
-            onClick={onOpenTmux}
-            aria-current={tmuxSelected ? 'page' : undefined}
-          >
-            <PanelsTopLeft size={13} className={tmuxSelected ? 'text-ghost-green' : 'text-ghost-dim'} />
-            <span>tmux</span>
-          </SelectionButton>
-          <div className="flex items-center gap-0.5">
-            <div className="min-w-0 flex-1">
-              <SelectionButton
-                type="button"
-                selected={settingsSelected}
-                selectionVariant="navigation-compact"
-                onClick={onOpenSettings}
-                aria-current={settingsSelected ? 'page' : undefined}
-              >
-                <Settings2 size={13} className={settingsSelected ? 'text-ghost-green' : 'text-ghost-dim'} />
-                <span>Settings</span>
-              </SelectionButton>
-            </div>
-            <Button
-              type="button"
-              variant="subtle"
-              onClick={() => void handleRestart()}
-              disabled={restarting}
-              className="grid size-8 shrink-0 place-items-center rounded-md disabled:cursor-wait disabled:opacity-60"
-              aria-label={restarting ? 'Restarting Kiwi Code' : 'Restart Kiwi Code'}
-              title={restarting ? 'Restarting Kiwi Code…' : 'Restart Kiwi Code'}
-            >
-              {restarting
-                ? <LoaderCircle size={13} className="animate-spin text-ghost-green" />
-                : <RotateCw size={13} className="text-ghost-dim" />}
-            </Button>
-          </div>
-        </div>
+        <SidebarFooterNav
+          cleanupSelected={cleanupSelected}
+          sessionLogSelected={sessionLogSelected}
+          tmuxSelected={tmuxSelected}
+          settingsSelected={settingsSelected}
+          onOpenCleanup={onOpenCleanup}
+          onOpenSessionLog={onOpenSessionLog}
+          onOpenTmux={onOpenTmux}
+          onOpenSettings={onOpenSettings}
+        />
 
         <div
           role="separator"
