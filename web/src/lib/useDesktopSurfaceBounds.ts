@@ -95,7 +95,9 @@ export function useDesktopSurfaceBounds<T>(options: DesktopSurfaceOptions<T>) {
     const observer = new ResizeObserver(schedule)
     if (surfaceRef.current) observer.observe(surfaceRef.current)
     window.addEventListener('resize', schedule)
-    window.addEventListener('scroll', schedule, true)
+    // Passive: schedule() only queues a frame, so the listener must not be
+    // allowed to delay the scroll it is tracking.
+    window.addEventListener('scroll', schedule, { capture: true, passive: true })
     sync()
     return () => {
       disposed = true

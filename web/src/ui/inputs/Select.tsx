@@ -340,7 +340,9 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
     if (!open) return
     updateMenuPosition()
     window.addEventListener('resize', updateMenuPosition)
-    window.addEventListener('scroll', updateMenuPosition, true)
+    // Capture to catch scrolls in any ancestor pane; passive because this only
+    // repositions the menu and must never hold up the scroll it is following.
+    window.addEventListener('scroll', updateMenuPosition, { capture: true, passive: true })
     return () => {
       window.removeEventListener('resize', updateMenuPosition)
       window.removeEventListener('scroll', updateMenuPosition, true)

@@ -136,8 +136,6 @@ export function PiNativePane({
       readPiNativePastes(projectId, threadId),
     ))
   ))
-  const [workflowKeywordTriggerEnabled, setWorkflowKeywordTriggerEnabled] = useState(false)
-  const [workflowsEnabled, setWorkflowsEnabled] = useState(false)
   const [selectedSlashIndex, setSelectedSlashIndex] = useState(0)
   const [isStreaming, setIsStreaming] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting')
@@ -196,11 +194,11 @@ export function PiNativePane({
     writePiNativeWorkflowDismissed(projectId, threadId, workflowKeywordDismissed)
   }, [projectId, threadId, workflowKeywordDismissed])
 
-  useEffect(() => {
-    if (settingsSubscription.state !== 'ready') return
-    setWorkflowKeywordTriggerEnabled(settingsSubscription.data.workflowKeywordTriggerEnabled)
-    setWorkflowsEnabled(!settingsSubscription.data.disableWorkflows)
-  }, [settingsSubscription])
+  // Derived, not mirrored into state: nothing else writes these, so copying them
+  // in an effect only bought a second render of the pane per settings snapshot.
+  const workflowSettings = settingsSubscription.state === 'ready' ? settingsSubscription.data : null
+  const workflowKeywordTriggerEnabled = workflowSettings?.workflowKeywordTriggerEnabled ?? false
+  const workflowsEnabled = workflowSettings ? !workflowSettings.disableWorkflows : false
 
   const updateConnectionStatus = useCallback((status: ConnectionStatus) => {
     setConnectionStatus(status)

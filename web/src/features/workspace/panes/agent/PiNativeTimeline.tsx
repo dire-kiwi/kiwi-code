@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { classNames } from '@/lib/classNames'
 import { formatDuration } from '@/lib/formatDuration'
@@ -46,7 +46,15 @@ export type PiTimelineEntryValue =
     }
   | { kind: 'turn-marker'; key: string; durationMs: number; timestamp: number }
 
-export function PiNativeTimelineEntry({ entry }: { entry: PiTimelineEntryValue }) {
+// Both panes hold composer, clock, and connection state alongside the transcript,
+// so they re-render far more often than the entries change. buildTimeline is
+// memoised upstream, which keeps entry identities stable across those renders and
+// lets this bail out instead of re-rendering the whole transcript.
+export const PiNativeTimelineEntry = memo(function PiNativeTimelineEntry({
+  entry,
+}: {
+  entry: PiTimelineEntryValue
+}) {
   if (entry.kind === 'user') {
     return (
       <NativeAgentMessage
@@ -74,15 +82,21 @@ export function PiNativeTimelineEntry({ entry }: { entry: PiTimelineEntryValue }
     return <div className={piNativeStyles.turnMarker}>Worked for {formatDuration(entry.durationMs)}</div>
   }
   return <PiToolEntry entry={entry} />
-}
+})
 
 function PiToolEntry({ entry }: { entry: Extract<PiTimelineEntryValue, { kind: 'tool' }> }) {
   const [expanded, setExpanded] = useState(false)
-  const content = [entry.args, entry.output]
-    .filter((value) => value !== undefined)
-    .map(formatAgentToolValue)
-    .filter(Boolean)
-    .join('\n\n')
+  // formatAgentToolValue falls back to JSON.stringify, so a tool that returned a
+  // large payload would re-serialise on every render -- including while collapsed,
+  // since `content` also decides whether the header is clickable.
+  const content = useMemo(
+    () => [entry.args, entry.output]
+      .filter((value) => value !== undefined)
+      .map(formatAgentToolValue)
+      .filter(Boolean)
+      .join('\n\n'),
+    [entry.args, entry.output],
+  )
   const label = agentToolLabel(entry.name, entry.args)
   const Icon = agentToolIcon(entry.name)
 

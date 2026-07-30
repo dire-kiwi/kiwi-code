@@ -3,7 +3,7 @@
 // message. Split out because this is the one place in the pane where DOM
 // coordinates are converted to page coordinates, and it was easy to lose among
 // the other four preview modes.
-import type { RefObject } from 'react'
+import { useEffect, useRef, type RefObject } from 'react'
 import { inputModifiers } from './browserHelpers'
 
 /** Canvas pixels for a pointer event, which is what CDP expects. */
@@ -42,6 +42,28 @@ export function BrowserStreamCanvas({
   onCopySelection,
   onWorkspaceShortcut,
 }: BrowserStreamCanvasProps) {
+  // React registers `wheel` on the root container as a passive listener, so
+  // preventDefault() inside an onWheel prop is silently ignored and the host
+  // page scrolls instead of the streamed one. Bind it to the canvas directly.
+  // The handler goes through a ref so the listener is attached once and still
+  // sees the current `controller` and `sendInput`.
+  const wheelRef = useRef<(event: WheelEvent) => void>(() => {})
+  wheelRef.current = (event) => {
+    const canvas = canvasRef.current
+    if (!controller || !canvas) return
+    event.preventDefault()
+    const { x, y } = pagePoint(canvas, event.clientX, event.clientY)
+    sendInput({ type: 'wheel', x, y, deltaX: event.deltaX, deltaY: event.deltaY, modifiers: inputModifiers(event) })
+  }
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const handleWheel = (event: WheelEvent) => wheelRef.current(event)
+    canvas.addEventListener('wheel', handleWheel, { passive: false })
+    return () => canvas.removeEventListener('wheel', handleWheel)
+  }, [canvasRef])
+
   return (
     <canvas
       ref={canvasRef}
@@ -68,12 +90,6 @@ export function BrowserStreamCanvas({
         const { x, y } = pagePoint(event.currentTarget, event.clientX, event.clientY)
         sendInput({ type: 'pointer', event: 'mouseReleased', x, y, button: mouseButton(event.button), buttons: event.buttons, clickCount: event.detail || 1, modifiers: inputModifiers(event) })
         if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
-      }}
-      onWheel={(event) => {
-        if (!controller) return
-        event.preventDefault()
-        const { x, y } = pagePoint(event.currentTarget, event.clientX, event.clientY)
-        sendInput({ type: 'wheel', x, y, deltaX: event.deltaX, deltaY: event.deltaY, modifiers: inputModifiers(event) })
       }}
       onKeyDown={(event) => {
         const command = event.ctrlKey || event.metaKey

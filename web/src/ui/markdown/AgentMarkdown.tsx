@@ -1,9 +1,20 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import katex from 'katex'
-import 'katex/dist/katex.min.css'
+import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
 import './agent-markdown.css'
 
 const codeBlockStyles = 'mb-[17px] mt-[13px] overflow-auto whitespace-pre rounded-[10px] border border-ghost-border/75 bg-[color-mix(in_srgb,var(--theme-color-canvas)_56%,var(--theme-color-panel))] px-[15px] py-[13px] font-mono text-[11px] leading-[1.65] text-ghost-white [&_code]:border-0 [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-[inherit] [&_code]:text-inherit'
+
+// Hoisted so the parser does not rebuild them once per line and once per inline
+// segment; none carries state across calls (`split` and `replace` reset lastIndex).
+const windowsNewlines = /\r\n/g
+const codeFencePattern = /^```\s*([^\s]*)/
+const headingPattern = /^(#{1,4})\s+(.+)$/
+const unorderedItemPattern = /^\s*[-*+]\s+(.+)$/
+const orderedItemPattern = /^\s*\d+[.)]\s+(.+)$/
+const tableDividerPattern = /^\s*:?-{3,}:?\s*$/
+const leadingPipePattern = /^\|/
+const trailingPipePattern = /\|$/
+const inlineSegmentPattern = /(`[^`\n]+`|\\\((?:(?!\\\))[\s\S])*?\\\)|(?<![\\$])\$(?![$\s])(?:\\.|[^$\n])*?(?<![\\\s])\$(?!\$)|\*\*[^*\n]+\*\*|\[[^\]\n]+\]\([^\s)]+\))/g
+const inlineLinkPattern = /^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/
 
 type PendingDisplayMath = {
   closingDelimiter: '\\]' | '$$'
@@ -31,9 +42,12 @@ const tableAlignmentStyles: Record<MarkdownTableAlignment, string> = {
   default: 'text-left',
 }
 
-export function AgentMarkdown({ text }: { text: string }) {
+// Memoised on purpose: the whole parse runs during render, and a native agent
+// pane re-renders on every composer keystroke and every activity-clock tick.
+// Without this, every message in the transcript is re-parsed each time.
+export const AgentMarkdown = memo(function AgentMarkdown({ text }: { text: string }) {
   const blocks: ReactNode[] = []
-  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  const lines = text.replace(windowsNewlines, '\n').split('\n')
   let paragraph: string[] = []
   let code: string[] | null = null
   let codeLanguage = ''
@@ -85,7 +99,7 @@ export function AgentMarkdown({ text }: { text: string }) {
       continue
     }
 
-    const fence = line.match(/^```\s*([^\s]*)/)
+    const fence = line.match(codeFencePattern)
     if (fence) {
       flushParagraph()
       flushList()
@@ -145,7 +159,7 @@ export function AgentMarkdown({ text }: { text: string }) {
       flushList()
       continue
     }
-    const heading = line.match(/^(#{1,4})\s+(.+)$/)
+    const heading = line.match(headingPattern)
     if (heading) {
       flushParagraph()
       flushList()
@@ -158,8 +172,8 @@ export function AgentMarkdown({ text }: { text: string }) {
       else blocks.push(<h4 key={key}>{content}</h4>)
       continue
     }
-    const unordered = line.match(/^\s*[-*+]\s+(.+)$/)
-    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/)
+    const unordered = line.match(unorderedItemPattern)
+    const ordered = line.match(orderedItemPattern)
     if (unordered || ordered) {
       flushParagraph()
       const isOrdered = Boolean(ordered)
@@ -190,7 +204,7 @@ export function AgentMarkdown({ text }: { text: string }) {
   flushParagraph()
   flushList()
   return <div className="agent-markdown">{blocks}</div>
-}
+})
 
 function parseMarkdownTable(lines: string[], startIndex: number): ParsedMarkdownTable | null {
   const header = splitMarkdownTableRow(lines[startIndex])
@@ -219,8 +233,8 @@ function splitMarkdownTableRow(line: string): string[] | null {
   const trimmed = line.trim()
   if (!trimmed.includes('|')) return null
   const cells = trimmed
-    .replace(/^\|/, '')
-    .replace(/\|$/, '')
+    .replace(leadingPipePattern, '')
+    .replace(trailingPipePattern, '')
     .split('|')
     .map((cell) => cell.trim())
   return cells.length > 0 ? cells : null
@@ -232,7 +246,7 @@ function parseMarkdownTableAlignment(line: string, expectedColumns: number): Mar
 
   const alignments: MarkdownTableAlignment[] = []
   for (const column of columns) {
-    if (!/^\s*:?-{3,}:?\s*$/.test(column)) return null
+    if (!tableDividerPattern.test(column)) return null
     if (column.startsWith(':') && column.endsWith(':')) alignments.push('center')
     else if (column.startsWith(':')) alignments.push('left')
     else if (column.endsWith(':')) alignments.push('right')
@@ -312,38 +326,61 @@ function displayMathOpening(line: string): DisplayMathOpening | null {
 }
 
 function renderInlineMarkdown(text: string): ReactNode[] {
-  const parts = text.split(/(`[^`\n]+`|\\\((?:(?!\\\))[\s\S])*?\\\)|(?<![\\$])\$(?![$\s])(?:\\.|[^$\n])*?(?<![\\\s])\$(?!\$)|\*\*[^*\n]+\*\*|\[[^\]\n]+\]\([^\s)]+\))/g)
-  return parts.filter(Boolean).map((part, index) => {
+  const parts = text.split(inlineSegmentPattern)
+  const nodes: ReactNode[] = []
+  // One pass rather than filter-then-map. Keys now carry the split index rather
+  // than the post-filter index, which is still unique among siblings.
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index]
+    if (!part) continue
+    const key = `${part}:${index}`
     if (part.startsWith('`') && part.endsWith('`')) {
-      return <code key={`${part}:${index}`}>{part.slice(1, -1)}</code>
+      nodes.push(<code key={key}>{part.slice(1, -1)}</code>)
+      continue
     }
     if (part.startsWith('\\(') && part.endsWith('\\)')) {
-      return (
-        <MathExpression
-          expression={part.slice(2, -2).trim()}
-          fallback={part}
-          key={`${part}:${index}`}
-        />
-      )
+      nodes.push(<MathExpression expression={part.slice(2, -2).trim()} fallback={part} key={key} />)
+      continue
     }
     if (part.startsWith('$') && part.endsWith('$')) {
-      return (
-        <MathExpression
-          expression={part.slice(1, -1).trim()}
-          fallback={part}
-          key={`${part}:${index}`}
-        />
-      )
+      nodes.push(<MathExpression expression={part.slice(1, -1).trim()} fallback={part} key={key} />)
+      continue
     }
     if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={`${part}:${index}`}>{part.slice(2, -2)}</strong>
+      nodes.push(<strong key={key}>{part.slice(2, -2)}</strong>)
+      continue
     }
-    const link = part.match(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/)
+    const link = part.match(inlineLinkPattern)
     if (link) {
-      return <a href={link[2]} key={`${part}:${index}`} rel="noreferrer" target="_blank">{link[1]}</a>
+      nodes.push(<a href={link[2]} key={key} rel="noreferrer" target="_blank">{link[1]}</a>)
+      continue
     }
-    return <span key={`${part}:${index}`}>{part}</span>
-  })
+    nodes.push(<span key={key}>{part}</span>)
+  }
+  return nodes
+}
+
+type Katex = typeof import('katex').default
+
+// KaTeX is ~270 kB minified plus a 24 kB stylesheet, and most agent messages
+// contain no maths at all, so it is kept out of the entry chunk. The module is
+// cached here: only the first expression of a session shows the source
+// fallback for a frame, exactly as MermaidDiagram below already does.
+let loadedKatex: Katex | null = null
+let katexLoad: Promise<void> | null = null
+
+function loadKatex(): Promise<void> {
+  katexLoad ??= Promise.all([
+    import('katex'),
+    import('katex/dist/katex.min.css'),
+  ])
+    .then(([module]) => {
+      loadedKatex = module.default
+    })
+    .catch(() => {
+      // A null renderer keeps the raw-source fallback rather than breaking the message.
+    })
+  return katexLoad
 }
 
 function MathExpression({
@@ -355,8 +392,21 @@ function MathExpression({
   expression: string
   fallback: string
 }) {
+  const [katex, setKatex] = useState(() => loadedKatex)
+
+  useEffect(() => {
+    if (katex || !expression) return
+    let cancelled = false
+    void loadKatex().then(() => {
+      if (!cancelled) setKatex(loadedKatex)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [expression, katex])
+
   const html = useMemo(() => {
-    if (!expression) return null
+    if (!expression || !katex) return null
     try {
       // KaTeX escapes TeX input, while trust=false disables commands that could emit arbitrary HTML or URLs.
       return katex.renderToString(expression, {
@@ -369,7 +419,7 @@ function MathExpression({
     } catch {
       return null
     }
-  }, [displayMode, expression])
+  }, [displayMode, expression, katex])
   const Tag = displayMode ? 'div' : 'span'
   const className = `agent-markdown-math agent-markdown-math--${displayMode ? 'display' : 'inline'}`
 
