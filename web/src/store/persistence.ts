@@ -4,7 +4,7 @@ import {
   writeStoredState,
   type StorageLike,
   type StoredStateCodec,
-} from '../lib/storedState'
+} from '@/lib/storedState'
 import type { RootState } from './rootReducer'
 
 // Dynamic-key slices need to discover their keys at boot, which plain
