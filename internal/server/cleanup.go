@@ -92,7 +92,7 @@ func (s *Server) runCleanupCycle(now time.Time) error {
 
 func (s *Server) deleteExpiredArchivedThread(ref project.ArchivedThreadRef) error {
 	archivedBefore := ref.ArchivedBefore.UTC()
-	failure := s.deleteThreadTree(ref.ProjectID, ref.ThreadID, &archivedBefore)
+	failure := s.deleteThreadRecord(ref.ProjectID, ref.ThreadID, &archivedBefore)
 	if failure == nil || failure.status == http.StatusNotFound || errors.Is(failure, project.ErrThreadNotArchived) {
 		return nil
 	}

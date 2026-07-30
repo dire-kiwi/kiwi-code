@@ -16,7 +16,6 @@ type ThreadUsageLimitsProps = {
   projectId: string
   thread: Thread
   usage?: ThreadUsageSnapshot
-  showAllThreads: boolean
   onThreadUpdated: (thread: Thread) => void
 }
 
@@ -49,7 +48,6 @@ export function ThreadUsageLimits({
   projectId,
   thread,
   usage,
-  showAllThreads,
   onThreadUpdated,
 }: ThreadUsageLimitsProps) {
   const [editing, setEditing] = useState(false)
@@ -122,9 +120,8 @@ export function ThreadUsageLimits({
 
       {usage ? (
         <>
-          <div className={`mt-2.5 grid gap-1.5 ${showAllThreads ? 'grid-cols-2' : 'grid-cols-1'}`}>
-            <UsageTotal label="Own" usage={usage.own} />
-            {showAllThreads && <UsageTotal label="All threads" usage={usage.total} emphasize />}
+          <div className="mt-2.5 grid grid-cols-1 gap-1.5">
+            <UsageTotal label="This thread" usage={usage.own} />
           </div>
           <p
             className="mt-2 font-mono text-[8px] leading-4 text-ghost-faint"
@@ -146,9 +143,7 @@ export function ThreadUsageLimits({
         <div role="alert" className="mt-2.5 flex gap-2 rounded-lg border border-ghost-bright-red/35 bg-ghost-bright-red/[0.08] px-2.5 py-2 text-ghost-bright-red">
           <AlertTriangle size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
           <p className="text-[9px] leading-4">
-            {usage.limitThreadId && usage.limitThreadId !== thread.id
-              ? 'An ancestor thread usage limit is reached. Increase or remove that limit to allow more agent work.'
-              : 'Usage limit reached. Increase or remove a limit to allow more agent work.'}
+            Usage limit reached. Increase or remove a limit to allow more agent work.
           </p>
         </div>
       )}

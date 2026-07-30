@@ -44,13 +44,15 @@ func TestAgentSkillInstallerInstallsAndUpdatesBundle(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"name: kiwi-code-processes",
-		"context: fork",
 		"scripts/start-process.mjs",
 		"scripts/read-logs.mjs",
 	} {
 		if !strings.Contains(string(contents), expected) {
 			t.Fatalf("SKILL.md does not contain %q", expected)
 		}
+	}
+	if strings.Contains(string(contents), "context: fork") {
+		t.Fatal("process skill still requests a forked context")
 	}
 	for _, name := range []string{"start-process.mjs", "read-logs.mjs"} {
 		if info, err := os.Stat(filepath.Join(status.Path, "scripts", name)); err != nil {

@@ -4,7 +4,6 @@ export type SidebarVisibilityThread = {
   id: string
   createdAt: string
   lastPromptAt?: string
-  parentThreadId?: string
   archivedAt?: string
 }
 

@@ -18,7 +18,6 @@ export type SidebarState = {
   view: SidebarViewMode
   width: number
   collapsedProjectIds: string[]
-  collapsedChildThreadIds: string[]
   // Ephemeral: the same "which rows are open" concern as the fields above, but
   // deliberately not persisted, matching the behaviour before the migration.
   expandedMoreProjectIds: string[]
@@ -28,7 +27,6 @@ export const initialSidebarState: SidebarState = {
   view: 'activity',
   width: defaultSidebarWidth,
   collapsedProjectIds: [],
-  collapsedChildThreadIds: [],
   expandedMoreProjectIds: [],
 }
 
@@ -62,10 +60,6 @@ export const sidebarPersistence: PersistedFields<SidebarState> = {
     key: 'kiwi-code.sidebar.collapsed-projects',
     codec: storedIdListCodec,
   },
-  collapsedChildThreadIds: {
-    key: 'kiwi-code.sidebar.collapsed-child-threads',
-    codec: storedIdListCodec,
-  },
 }
 
 function toggleId(ids: string[], id: string) {
@@ -95,28 +89,14 @@ export const sidebarSlice = createSlice({
     projectCollapseToggled(state, action: PayloadAction<string>) {
       toggleId(state.collapsedProjectIds, action.payload)
     },
-    childThreadsCollapseToggled(state, action: PayloadAction<string>) {
-      toggleId(state.collapsedChildThreadIds, action.payload)
-    },
     moreThreadsToggled(state, action: PayloadAction<string>) {
       toggleId(state.expandedMoreProjectIds, action.payload)
     },
-    // Selecting a nested thread expands whatever hides it. This fires on every
-    // selection change, so each field is only reassigned when it truly changed;
-    // an unconditional filter would hand the memoised Set selectors a fresh
-    // array every time and re-render the whole sidebar.
     threadRevealed(state, action: PayloadAction<{
       projectId: string
-      ancestorIds: string[]
       expandArchived: boolean
     }>) {
-      const { projectId, ancestorIds, expandArchived } = action.payload
-      if (ancestorIds.length > 0) {
-        const threads = state.collapsedChildThreadIds.filter((id) => !ancestorIds.includes(id))
-        if (threads.length !== state.collapsedChildThreadIds.length) {
-          state.collapsedChildThreadIds = threads
-        }
-      }
+      const { projectId, expandArchived } = action.payload
       if (expandArchived && !state.expandedMoreProjectIds.includes(projectId)) {
         state.expandedMoreProjectIds.push(projectId)
       }
@@ -129,7 +109,6 @@ export const sidebarSlice = createSlice({
 })
 
 export const {
-  childThreadsCollapseToggled,
   moreThreadsToggled,
   projectCollapseToggled,
   sidebarViewChanged,
@@ -146,10 +125,6 @@ export const selectSidebarWidth = (state: RootState) => state.sidebar.width
 // array's identity stable, so these rebuild only on a real membership change.
 export const selectCollapsedProjectIds = createSelector(
   [(state: RootState) => state.sidebar.collapsedProjectIds],
-  (ids): ReadonlySet<string> => new Set(ids),
-)
-export const selectCollapsedChildThreadIds = createSelector(
-  [(state: RootState) => state.sidebar.collapsedChildThreadIds],
   (ids): ReadonlySet<string> => new Set(ids),
 )
 export const selectExpandedMoreProjectIds = createSelector(

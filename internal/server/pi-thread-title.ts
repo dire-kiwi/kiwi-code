@@ -49,9 +49,8 @@ export default function (pi: ExtensionAPI) {
 	let controller: AbortController | undefined;
 
 	pi.on("session_start", (_event, ctx) => {
-		// Child threads are named explicitly by the parent that creates them.
-		// Avoid spending a second model call or replacing that orchestration name.
-		handled = Boolean(process.env.KIWI_CODE_PARENT_THREAD_ID) || hasUserMessage(ctx);
+		// Existing conversations do not need another generated title.
+		handled = hasUserMessage(ctx);
 	});
 
 	pi.on("before_agent_start", (event, ctx) => {

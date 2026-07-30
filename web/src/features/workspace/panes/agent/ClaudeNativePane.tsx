@@ -245,7 +245,6 @@ export function ClaudeNativePane({
       if (seenEventsRef.current.has(event.uuid)) return
       seenEventsRef.current.add(event.uuid)
     }
-    // Subagent traffic is summarized by its Task tool result instead.
     if (event.parent_tool_use_id) return
 
     switch (event.type) {
@@ -888,7 +887,6 @@ export function ClaudeNativePane({
 
       <PiNativeComposer
         agentName="Claude"
-        readOnly={false}
         monitorTone={monitorTone}
         activityExpanded={activityExpanded}
         activityToggleLabel={activityToggleLabel}

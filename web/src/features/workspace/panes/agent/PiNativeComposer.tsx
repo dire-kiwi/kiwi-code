@@ -38,7 +38,6 @@ export type PiNativeComposerSuggestion = {
 
 type PiNativeComposerProps = {
   agentName?: string
-  readOnly: boolean
   monitorTone: PiStatusTone
   activityExpanded: boolean
   activityToggleLabel: string
@@ -77,7 +76,6 @@ type PiNativeComposerProps = {
 
 export function PiNativeComposer({
   agentName = 'Pi',
-  readOnly,
   monitorTone,
   activityExpanded,
   activityToggleLabel,
@@ -172,7 +170,6 @@ export function PiNativeComposer({
                   index === selectedSuggestionIndex && piNativeStyles.commandOptionSelected,
                 )}
                 key={suggestion.id}
-                disabled={readOnly}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => onSelectSuggestion(index)}
               >
@@ -200,7 +197,7 @@ export function PiNativeComposer({
                 </span>
                 <button
                   type="button"
-                  disabled={readOnly || isUploadingImages}
+                  disabled={isUploadingImages}
                   aria-label={`Remove ${image.file.name || 'pasted image'}`}
                   onClick={() => onRemoveAttachment(image.id)}
                 >
@@ -216,25 +213,21 @@ export function PiNativeComposer({
           value={draft}
           rows={2}
           aria-label={`Message ${agentName}`}
-          aria-autocomplete={readOnly ? undefined : 'list'}
-          aria-controls={!readOnly && suggestions.length > 0 ? 'pi-native-command-menu' : undefined}
-          aria-expanded={!readOnly && suggestions.length > 0}
-          aria-activedescendant={!readOnly && selectedSuggestion
+          aria-autocomplete="list"
+          aria-controls={suggestions.length > 0 ? 'pi-native-command-menu' : undefined}
+          aria-expanded={suggestions.length > 0}
+          aria-activedescendant={selectedSuggestion
             ? `pi-native-command-${selectedSuggestion.id}`
             : undefined}
           data-testid="pi-native-composer"
-          data-read-only={readOnly || undefined}
           className={piNativeStyles.textarea}
-          placeholder={readOnly
-            ? 'This subagent is managed by its parent thread.'
-            : `Ask ${agentName} to inspect the repo, paste an image, or continue this thread…`}
-          readOnly={readOnly}
+          placeholder={`Ask ${agentName} to inspect the repo, paste an image, or continue this thread…`}
           disabled={isUploadingImages}
-          onChange={readOnly ? undefined : (event) => onDraftChange(event.target.value)}
-          onPaste={readOnly ? undefined : onPaste}
-          onDragOver={readOnly ? undefined : (event) => event.preventDefault()}
-          onDrop={readOnly ? undefined : onDrop}
-          onKeyDown={readOnly ? undefined : onKeyDown}
+          onChange={(event) => onDraftChange(event.target.value)}
+          onPaste={onPaste}
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={onDrop}
+          onKeyDown={onKeyDown}
         />
 
         <div className={piNativeStyles.composerFooter}>
@@ -243,16 +236,16 @@ export function PiNativeComposer({
             className={piNativeStyles.composerSettings}
             model={model}
             modelOptions={modelOptions}
-            modelDisabled={readOnly || modelDisabled}
+            modelDisabled={modelDisabled}
             onModelChange={onModelChange}
             thinking={thinking}
             thinkingOptions={thinkingOptions}
-            thinkingDisabled={readOnly || thinkingDisabled}
+            thinkingDisabled={thinkingDisabled}
             onThinkingChange={onThinkingChange}
           />
           <label
             className={piNativeStyles.attach}
-            title={readOnly ? 'Subagent prompts are managed by the parent thread' : 'Attach images'}
+            title="Attach images"
             aria-label="Attach images"
           >
             <ImagePlus size={13} />
@@ -261,7 +254,7 @@ export function PiNativeComposer({
               aria-label="Attach images"
               accept={PI_IMAGE_ACCEPT}
               multiple
-              disabled={readOnly || isUploadingImages}
+              disabled={isUploadingImages}
               onChange={onImageInput}
             />
           </label>
@@ -278,8 +271,7 @@ export function PiNativeComposer({
                 ? `Stop ${agentName}`
                 : 'Send message'}
             data-testid="pi-native-send"
-            title={readOnly ? 'Subagent controls are managed by the parent thread' : undefined}
-            disabled={readOnly || isUploadingImages || (!primaryActionIsStop && !canSend)}
+            disabled={isUploadingImages || (!primaryActionIsStop && !canSend)}
             onClick={onPrimaryAction}
           >
             {isUploadingImages

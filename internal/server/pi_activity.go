@@ -484,17 +484,6 @@ func (s *Server) updateAgentActivity(w http.ResponseWriter, r *http.Request, age
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if input.State == piActivityWorking && thread.ParentThreadID != "" && thread.ClosedAt != nil {
-		if _, err := s.projects.ReopenChildThread(projectID, thread.ParentThreadID, threadID); err != nil {
-			if errors.Is(err, project.ErrNotFound) || errors.Is(err, project.ErrThreadNotFound) {
-				writeError(w, http.StatusNotFound, "Thread not found.")
-			} else {
-				writeError(w, http.StatusInternalServerError, "Could not reopen the child thread.")
-			}
-			return
-		}
-	}
-
 	var promptedAt *time.Time
 	if input.State == piActivityWorking {
 		promptedAt = promptStartedAt
@@ -504,7 +493,7 @@ func (s *Server) updateAgentActivity(w http.ResponseWriter, r *http.Request, age
 			promptedAt = &now
 		}
 	}
-	if promptedAt != nil && thread.ParentThreadID == "" {
+	if promptedAt != nil {
 		promptTime := promptedAt.UTC()
 		if thread.LastPromptAt == nil || promptTime.After(*thread.LastPromptAt) {
 			if _, err := s.projects.RecordThreadPrompt(projectID, threadID, promptTime); err != nil {

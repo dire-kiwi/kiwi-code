@@ -1,7 +1,7 @@
 {
   "name": "kiwi-code",
   "version": "1.0.0",
-  "description": "Integrates Codex CLI with Kiwi Code activity, thread naming, process shells, retained implementation plans, and the thread-owned in-app browser.",
+  "description": "Integrates Codex CLI with Kiwi Code activity, thread naming, process shells, and the thread-owned in-app browser.",
   "author": {
     "name": "Ivan Meredith"
   },
@@ -10,15 +10,14 @@
     "kiwi-code",
     "coding-agent",
     "browser",
-    "processes",
-    "planning"
+    "processes"
   ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Kiwi Code",
     "shortDescription": "Connect Codex CLI to its Kiwi Code thread",
-    "longDescription": "Kiwi Code gives managed Codex CLI sessions lifecycle and thread-title hooks, persistent process helpers, retained plans, and browser tools that control the same in-app browser shown in the thread workspace.",
+    "longDescription": "Kiwi Code gives managed Codex CLI sessions lifecycle and thread-title hooks, persistent process helpers, and browser tools that control the same in-app browser shown in the thread workspace.",
     "developerName": "Kiwi Code",
     "category": "Developer Tools",
     "capabilities": [
@@ -28,8 +27,7 @@
     ],
     "defaultPrompt": [
       "Inspect this project and continue in Kiwi Code",
-      "Test this app in the Kiwi Code browser",
-      "Create and retain an implementation plan"
+      "Test this app in the Kiwi Code browser"
     ],
     "brandColor": "#9ECE6A",
     "screenshots": []

@@ -51,34 +51,6 @@ func TestStartPiNativeProcessRejectsRollbackPendingThread(t *testing.T) {
 	}
 }
 
-func TestPiNativeArgumentsUseRPCAndPreserveLaunchChoices(t *testing.T) {
-	got := piNativeArguments(
-		"/tmp/sessions",
-		"",
-		[]string{"/tmp/title.ts", "/tmp/activity.ts"},
-		[]string{"/tmp/kiwi-sandbox-config"},
-		"/tmp/figma.ts",
-		codingAgentLaunchOptions{
-			Model: "openai/gpt-5.6", ThinkingLevel: "high", AppendSystemPrompt: "Sub-agent depth context",
-		},
-	)
-	want := []string{
-		"--mode", "rpc",
-		"--session-dir", "/tmp/sessions",
-		"--continue",
-		"--approve",
-		"--extension", "/tmp/title.ts",
-		"--extension", "/tmp/activity.ts",
-		"--skill", "/tmp/kiwi-sandbox-config",
-		"--model", "openai/gpt-5.6",
-		"--thinking", "high",
-		"--append-system-prompt", "Sub-agent depth context",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("piNativeArguments() = %#v, want %#v", got, want)
-	}
-}
-
 func TestPiNativeArgumentsResumeTheSelectedSessionFile(t *testing.T) {
 	got := piNativeArguments(
 		"/tmp/sessions",
@@ -225,68 +197,22 @@ func writePiNativeTestSession(t *testing.T, directory, name, id, cwd string) str
 	return path
 }
 
-func TestPiNativeThreadEnvironmentCanRouteBrowserToolsToTheInvokingThread(t *testing.T) {
+func TestPiNativeThreadEnvironmentRoutesBrowserToolsToTheCurrentThread(t *testing.T) {
 	environment := piNativeThreadEnvironment(
-		"http://127.0.0.1:43210/api/projects/project/threads/child",
+		"http://127.0.0.1:43210/api/projects/project/threads/thread",
 		"project",
-		"child",
+		"thread",
 		"token",
-		"parent",
-		"http://127.0.0.1:43210/api/projects/project/threads/parent",
+		"http://127.0.0.1:43210/api/projects/project/threads/thread",
 	)
 	joined := strings.Join(environment, "\n")
 	for _, want := range []string{
-		"KIWI_CODE_THREAD_ENDPOINT=http://127.0.0.1:43210/api/projects/project/threads/child",
-		"KIWI_CODE_PARENT_THREAD_ID=parent",
-		"KIWI_CODE_BROWSER_THREAD_ENDPOINT=http://127.0.0.1:43210/api/projects/project/threads/parent",
+		"KIWI_CODE_THREAD_ENDPOINT=http://127.0.0.1:43210/api/projects/project/threads/thread",
+		"KIWI_CODE_BROWSER_THREAD_ENDPOINT=http://127.0.0.1:43210/api/projects/project/threads/thread",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("Pi environment does not contain %q: %#v", want, environment)
 		}
-	}
-}
-
-func TestSubAgentNestingContextIsAppendedToPiSystemPrompt(t *testing.T) {
-	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	item, err := store.Add("Demo", t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	maxDepth := 3
-	if _, err := store.UpdateProject(item.ID, project.ProjectUpdate{
-		SubAgentNestingDepthOverride:       &maxDepth,
-		UpdateSubAgentNestingDepthOverride: true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	child, err := store.AddThreadWithOptions(item.ID, "Child", project.AddThreadOptions{
-		ParentThreadID: item.Threads[0].ID,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	handler := &terminalHandler{projects: store}
-	options, err := handler.withSubAgentNestingPrompt(item.ID, child, codingAgentLaunchOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "You are a sub-agent at nesting depth 1. The effective maximum sub-agent nesting depth for this thread tree is 3 after applying project and ancestor limits. " +
-		"Root agents are at depth 0. Delegate further work only through an available context: fork skill or an explicitly activated Kiwi Code workflow, and only while your current depth is below the effective maximum."
-	if options.AppendSystemPrompt != want {
-		t.Fatalf("sub-agent system prompt = %q, want %q", options.AppendSystemPrompt, want)
-	}
-
-	rootOptions := codingAgentLaunchOptions{AppendSystemPrompt: "Root instruction."}
-	gotRootOptions, err := handler.withSubAgentNestingPrompt(item.ID, item.Threads[0], rootOptions)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotRootOptions != rootOptions {
-		t.Fatalf("root launch options = %#v, want %#v", gotRootOptions, rootOptions)
 	}
 }
 
@@ -470,73 +396,6 @@ func TestPiNativeDisplayHistoryRejectsBrokenLeafPath(t *testing.T) {
 	}
 }
 
-func TestPiNativeBrowserLaunchOptionsKeepChildrenParentManaged(t *testing.T) {
-	child := project.Thread{ParentThreadID: "parent-a"}
-	options, err := piNativeBrowserLaunchOptions(child, "", "")
-	if err != nil || options != (codingAgentLaunchOptions{}) {
-		t.Fatalf("empty child launch options = %#v, %v", options, err)
-	}
-	if _, err := piNativeBrowserLaunchOptions(child, "openai/gpt-5.6", "high"); err == nil {
-		t.Fatal("child browser launch accepted model and thinking settings")
-	}
-
-	configuredChild := project.Thread{
-		ParentThreadID:     "parent-a",
-		AgentModel:         "openai/gpt-5.6",
-		AgentThinkingLevel: "high",
-	}
-	options, err = piNativeBrowserLaunchOptions(configuredChild, "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if options.Model != configuredChild.AgentModel || options.ThinkingLevel != configuredChild.AgentThinkingLevel {
-		t.Fatalf("configured child launch options = %#v", options)
-	}
-
-	root := project.Thread{}
-	options, err = piNativeBrowserLaunchOptions(root, "openai/gpt-5.6", "high")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if options.Model != "openai/gpt-5.6" || options.ThinkingLevel != "high" {
-		t.Fatalf("root launch options = %#v", options)
-	}
-}
-
-func TestPiNativeChildClientPayloadsAreReadOnlyBeforeNormalization(t *testing.T) {
-	for _, payload := range []string{
-		`{"type":"refresh"}`,
-		`{"type":"get_state"}`,
-		`{"type":"get_commands"}`,
-		`{"type":"get_available_models"}`,
-		`{"type":"get_session_stats"}`,
-	} {
-		allowed, err := piNativeChildClientPayloadAllowed([]byte(payload))
-		if err != nil || !allowed {
-			t.Fatalf("child payload %s was blocked: allowed=%t error=%v", payload, allowed, err)
-		}
-	}
-
-	for _, payload := range []string{
-		`{"type":"restart"}`,
-		`{"type":"prompt","message":"blocked before image loading","images":[{"path":"/does/not/exist"}]}`,
-		`{"type":"abort"}`,
-		`{"type":"compact"}`,
-		`{"type":"new_session"}`,
-		`{"type":"set_model"}`,
-		`{"type":"set_thinking_level"}`,
-	} {
-		allowed, err := piNativeChildClientPayloadAllowed([]byte(payload))
-		if err != nil || allowed {
-			t.Fatalf("child payload %s was allowed: allowed=%t error=%v", payload, allowed, err)
-		}
-	}
-
-	if _, err := piNativeChildClientPayloadAllowed([]byte(`{"type":`)); err == nil {
-		t.Fatal("malformed child payload did not return an error")
-	}
-}
-
 func TestNormalizePiNativeClientPromptImages(t *testing.T) {
 	imageContents := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0}
 	image, err := os.CreateTemp("", piImageTempPrefix+"*.png")
@@ -716,21 +575,6 @@ func TestPiNativeCommandChangesSession(t *testing.T) {
 	}
 }
 
-func TestPiNativeManagerTracksTheLastReviewClient(t *testing.T) {
-	manager := newPiNativeManager(t.TempDir(), nil, nil, nil, "", "")
-	manager.addReviewClient("project", "thread")
-	manager.addReviewClient("project", "thread")
-	if manager.removeReviewClient("project", "thread") {
-		t.Fatal("first review client was reported as the last")
-	}
-	if !manager.removeReviewClient("project", "thread") {
-		t.Fatal("last review client was not reported")
-	}
-	if manager.removeReviewClient("project", "thread") {
-		t.Fatal("missing review client was reported as the last")
-	}
-}
-
 func TestPiNativeManagerStreamsRPCEventsAndStopsTheThread(t *testing.T) {
 	directory := t.TempDir()
 	fakePi := filepath.Join(directory, "fake-pi")
@@ -817,10 +661,6 @@ done
 	if !found || run.State != "finished" || run.Output != "Done" || run.FinishedAt == nil {
 		t.Fatalf("tracked native Pi run = %#v, found=%t", run, found)
 	}
-	if persistedRun, found := manager.childRun(item.ID, thread.ID, run.ID); !found || persistedRun.Output != "Done" {
-		t.Fatalf("manager child run = %#v, found=%t", persistedRun, found)
-	}
-
 	if err := process.sendClientCommand(piNativeRPCCommand{Type: "compact"}); err != nil {
 		t.Fatal(err)
 	}
@@ -878,21 +718,11 @@ done
 	if current, err := manager.getOrStart(item, thread, "http://127.0.0.1:1", codingAgentLaunchOptions{}); err != nil || current != process {
 		t.Fatalf("getOrStart after restart = %p, %v; want %p", current, err, process)
 	}
-	manager.addReviewClient(item.ID, thread.ID)
-	if err := manager.stopReviewThreadIfUnused(item.ID, thread.ID); err != nil {
-		t.Fatal(err)
-	}
-	if channelClosed(process.done) {
-		t.Fatal("review process stopped while a review client remained")
-	}
-	if !manager.removeReviewClient(item.ID, thread.ID) {
-		t.Fatal("review client was not reported as the last")
-	}
-	if err := manager.stopReviewThreadIfUnused(item.ID, thread.ID); err != nil {
+	if err := manager.stopThread(item.ID, thread.ID); err != nil {
 		t.Fatal(err)
 	}
 	if !channelClosed(process.done) {
-		t.Fatal("unused review process remained running")
+		t.Fatal("native Pi process remained running")
 	}
 	process, err = manager.getOrStart(item, thread, "http://127.0.0.1:1", codingAgentLaunchOptions{})
 	if err != nil {

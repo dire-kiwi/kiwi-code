@@ -3,7 +3,6 @@ name: kiwi-code-in-app-browser
 description: Controls Kiwi Code's in-app browser with the browser_* MCP tools. Invoke this skill BEFORE the first browser_* tool call in a task, and never call browser_navigate, browser_snapshot, browser_click, browser_fill, browser_key, browser_wait, browser_screenshot, browser_evaluate, browser_cdp, browser_tabs, or browser_session without it. Triggers whenever a task requires opening a URL or web page, browsing or checking a website, interacting with or verifying a running web app or dev server in the browser, inspecting rendered pages, filling forms, clicking UI, taking screenshots of a page, evaluating JavaScript in a page, managing tabs, or sending raw CDP commands.
 compatibility: Requires a Kiwi Code-managed Claude Code session and a configured Kiwi Code in-app browser provider (server-managed headless Chrome or Electron).
 license: MIT
-context: fork
 metadata:
   author: kiwi-code
   version: "1.0"
@@ -11,7 +10,7 @@ metadata:
 
 # Kiwi Code in-app browser control
 
-This skill is the entry point for all browser work. Every `browser_*` tool call belongs inside this forked context; if a task in the parent conversation needs the browser, invoke this skill instead of calling the tools directly.
+This skill is the entry point for all browser work. Load this skill before using any `browser_*` tool, then perform the browser work in the current conversation.
 
 Use the `browser_*` MCP tools bundled with the Kiwi Code Claude Code plugin to operate Kiwi Code's thread-owned browser surface. The implementation may be a server-managed headless Chrome context projected into the Browser workspace or the Electron native guest. Browser state is shared with Pi and Pi Native sessions in that thread.
 

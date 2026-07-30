@@ -8,15 +8,6 @@
         "KIWI_CODE_THREAD_ENDPOINT",
         "KIWI_CODE_AGENT_TOKEN_FILE"
       ]
-    },
-    "kiwi-code-plans": {
-      "command": "node",
-      "args": ["./servers/kiwi-code-plans.mjs"],
-      "cwd": ".",
-      "env_vars": [
-        "KIWI_CODE_THREAD_ENDPOINT",
-        "KIWI_CODE_AGENT_TOKEN_FILE"
-      ]
     }
   }
 }

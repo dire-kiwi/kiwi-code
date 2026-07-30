@@ -205,8 +205,8 @@ func (h *terminalHandler) runTmuxSessionWatch(watch *tmuxSessionWatch) {
 		if !exists {
 			reconnectDelay = tmuxControlReconnectDelay
 			// A missing process session is authoritative too. Publish once
-			// before sleeping so a lifecycle-owned workflow watch can settle a
-			// runner that vanished before control mode finished attaching.
+			// before sleeping so the UI can settle a process that vanished before
+			// control mode finished attaching.
 			if watch.sessionName == tmuxSessionName(watch.projectID, watch.threadID, "process") {
 				h.publishTmuxSessionChanged(watch)
 			}
@@ -369,17 +369,10 @@ func (h *terminalHandler) publishThreadStatusChanged(projectID, threadID string)
 	}
 }
 
-// publishTmuxSessionChanged queues process-lifecycle reconciliation without
-// blocking the control client, then invalidates thread.status. Snapshot reads
-// stay side-effect free; a workflow state transition publishes a follow-up
-// invalidation after runner and child-agent cleanup.
+// publishTmuxSessionChanged invalidates thread status after a tmux event.
 func (h *terminalHandler) publishTmuxSessionChanged(watch *tmuxSessionWatch) {
 	if watch == nil {
 		return
-	}
-	if watch.sessionName == tmuxSessionName(watch.projectID, watch.threadID, "process") &&
-		h.workflowChanged != nil {
-		h.workflowChanged(watch.projectID, watch.threadID)
 	}
 	h.publishThreadStatusChanged(watch.projectID, watch.threadID)
 }

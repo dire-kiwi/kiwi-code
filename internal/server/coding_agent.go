@@ -93,8 +93,7 @@ var codexThinkingLevels = []codingAgentChoice{
 	{ID: "xhigh", Label: "Extra high"},
 }
 
-// Claude's ultracode effort is passed through to Claude Code itself. It is
-// independent from the Pi-only Kiwi Code workflow integration.
+// Claude's ultracode effort is passed through to Claude Code itself.
 var claudeThinkingLevels = append(codingAgentThinkingLevels("Use Claude default", false), codingAgentChoice{ID: "ultracode", Label: "Ultracode (Claude built-in)"})
 var claudeGPTThinkingLevels = append(codingAgentThinkingLevels("Use model default", false), codingAgentChoice{ID: "ultracode", Label: "Ultracode (Claude built-in)"})
 

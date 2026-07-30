@@ -12,8 +12,6 @@ vi.mock('@/api', () => ({
 }))
 
 vi.mock('./ThreadUsageLimits', () => ({ ThreadUsageLimits: () => null }))
-vi.mock('./ThreadPlansPanel', () => ({ ThreadPlansPanel: () => null }))
-vi.mock('./WorkflowRunsPanel', () => ({ WorkflowRunsPanel: () => null }))
 
 const thread: Thread = {
   id: 'thread-1',
@@ -34,13 +32,9 @@ function sidebar(currentThread: Thread, onThreadUpdated = vi.fn()) {
       <ThreadProjectSidebar
         project={{ ...project, threads: [currentThread] }}
         thread={currentThread}
-        workflowsError=""
-        plans={[]}
-        plansError=""
         expanded
         onExpandedChange={() => {}}
         onThreadUpdated={onThreadUpdated}
-        onSelectThread={() => {}}
       />
     </MemoryRouter>
   )

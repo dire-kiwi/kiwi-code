@@ -64,7 +64,7 @@ import {
   type AgentModelPreferences,
   type ThreadLocation,
 } from '@/store/slices/newThreadPreferences'
-import { selectSettings, selectSettingsStatus } from '@/store/slices/settings'
+import { selectSettings } from '@/store/slices/settings'
 import { useSubscription } from '@/wire/react'
 import { CodingAgentsTopic, GitBranchesTopic } from '@/wire/topics'
 import { GhostButton, PrimaryButton } from '@/ui/buttons'
@@ -131,8 +131,6 @@ export function NewThreadScreen({
   const [model, setModel] = useState(initialAgentModel?.model ?? '')
   const [thinkingLevel, setThinkingLevel] = useState(initialAgentModel?.thinkingLevel ?? '')
   const settings = useAppSelector(selectSettings)
-  const settingsLoading = useAppSelector(selectSettingsStatus) === 'loading'
-  const [nestedDepth, setNestedDepth] = useState<number | 'inherit'>('inherit')
   const [initialPrompt, setInitialPrompt] = useState(() => readNewThreadDraft(project.id))
   const [initialPromptPastes, setInitialPromptPastes] = useState(() => (
     readNewThreadPastes(project.id)
@@ -268,7 +266,6 @@ export function NewThreadScreen({
       const thread = await createThread(project.id, {
         worktree: creatingWorktree,
         baseBranch: creatingWorktree ? baseBranch : undefined,
-        nestedDepth: nestedDepth === 'inherit' ? undefined : nestedDepth,
       })
       dispatch(newThreadPreferencesRemembered({
         projectId: project.id,
@@ -354,18 +351,6 @@ export function NewThreadScreen({
     event.preventDefault()
     addInitialPromptImages(images)
   }
-
-  const effectiveNestingDepth = project.subAgentNestingDepthOverride ?? settings?.subAgentNestingDepth ?? null
-  const nestedDepthOptions = effectiveNestingDepth === null
-    ? []
-    : Array.from({ length: effectiveNestingDepth + 1 }, (_, index) => index)
-
-  useEffect(() => {
-    if (effectiveNestingDepth === null) return
-    setNestedDepth((current) => current === 'inherit' || current <= effectiveNestingDepth
-      ? current
-      : effectiveNestingDepth)
-  }, [effectiveNestingDepth])
 
   const configuredAgentOptions = settings?.codingAgents.map((agent) => ({
     value: codingAgentSelectionForSetting(agent),
@@ -678,36 +663,6 @@ export function NewThreadScreen({
                 disabled={submitting}
                 onChange={handleImageInput}
                 className="sr-only"
-              />
-            </label>
-            <label
-              title="Controls how deeply child agents from this thread may delegate. It can reduce, but not exceed, the project limit."
-              className={classNames(inlineSettingClass, inlineDividerClass)}
-            >
-              <span>Depth</span>
-              <Select
-                id="thread-sub-agent-depth"
-                variant="inline"
-                value={nestedDepth === 'inherit' ? nestedDepth : String(nestedDepth)}
-                options={[
-                  {
-                    value: 'inherit',
-                    label: effectiveNestingDepth === null
-                      ? 'Use project setting'
-                      : `Use project limit (${effectiveNestingDepth})`,
-                  },
-                  ...nestedDepthOptions.map((depth) => ({
-                    value: String(depth),
-                    label: depth === 0
-                      ? 'Disabled'
-                      : `${depth} ${depth === 1 ? 'child level' : 'child levels'}`,
-                  })),
-                ]}
-                onChange={(value) => {
-                  setNestedDepth(value === 'inherit' ? 'inherit' : Number(value))
-                  setError('')
-                }}
-                disabled={submitting || (settingsLoading && effectiveNestingDepth === null)}
               />
             </label>
             <span className="ml-auto pl-3 font-mono text-[8px] text-ghost-faint">⌘Enter to create</span>

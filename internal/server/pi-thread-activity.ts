@@ -1,7 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import threadUsageExtension from "./kiwi-code-thread-usage.ts";
 import browserExtension from "./kiwi-code-browser.ts";
-import skillForksExtension from "./kiwi-code-skill-forks.ts";
 
 type ActivityState = "working" | "finished" | "idle";
 
@@ -11,7 +10,6 @@ const requestTimeoutMs = 4_000;
 export default function (pi: ExtensionAPI) {
 	threadUsageExtension(pi);
 	browserExtension(pi);
-	skillForksExtension(pi);
 	const threadEndpoint = process.env.KIWI_CODE_THREAD_ENDPOINT;
 	if (!threadEndpoint) return;
 

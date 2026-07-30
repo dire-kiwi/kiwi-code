@@ -96,21 +96,14 @@ export const ThreadSchema = Schema.Struct({
   createdAt: Schema.String,
   environmentSetupStatus: Schema.optional(Schema.Literal('pending', 'running', 'succeeded', 'failed')),
   lastPromptAt: Schema.optional(Schema.String),
-  parentThreadId: Schema.optional(Schema.String),
-  agentModel: Schema.optional(Schema.String),
-  agentThinkingLevel: Schema.optional(Schema.String),
-  workflowRunId: Schema.optional(Schema.String),
-  workflowAgentId: Schema.optional(Schema.String),
   worktree: Schema.optional(Schema.Boolean),
   branch: Schema.optional(Schema.String),
   worktreePath: Schema.optional(Schema.String),
   autoNamed: Schema.optional(Schema.Boolean),
   titleLocked: Schema.optional(Schema.Boolean),
-  closedAt: Schema.optional(Schema.String),
   archivedAt: Schema.optional(Schema.String),
   tokenLimit: Schema.optional(Schema.Number),
   costLimitUsd: Schema.optional(Schema.Number),
-  nestedDepth: Schema.optional(Schema.Number),
   rollbackPending: Schema.optional(Schema.Boolean),
   rollbackCleanupReady: Schema.optional(Schema.Boolean),
 })
@@ -125,7 +118,6 @@ export const ProjectSchema = Schema.Struct({
   isGitRepo: Schema.Boolean,
   createdAt: Schema.String,
   threads: MutableArray(ThreadSchema),
-  subAgentNestingDepthOverride: Schema.optional(Schema.NullOr(Schema.Number)),
   worktreeBranchPrefix: Schema.String,
   environment: LocalEnvironmentSchema,
   figmaMCPEnabled: Schema.Boolean,
@@ -146,7 +138,6 @@ export const ThreadUsageSnapshotSchema = Schema.Struct({
   projectId: Schema.String,
   threadId: Schema.String,
   own: ThreadUsageTotalsSchema,
-  children: ThreadUsageTotalsSchema,
   total: ThreadUsageTotalsSchema,
   tokenLimit: Schema.optional(Schema.Number),
   costLimitUsd: Schema.optional(Schema.Number),
@@ -211,11 +202,6 @@ export const AppSettingsSchema = Schema.Struct({
   usingDefault: Schema.Boolean,
   archivedThreadRetentionDays: Schema.Number,
   orphanedWorktreeRetentionDays: Schema.Number,
-  subAgentNestingDepth: Schema.Number,
-  maxSubAgentNestingDepth: Schema.Number,
-  disableWorkflows: Schema.Boolean,
-  workflowKeywordTriggerEnabled: Schema.Boolean,
-  workflowSizeGuideline: Schema.Literal('unrestricted', 'small', 'medium', 'large'),
   codingAgents: MutableArray(CodingAgentSettingSchema),
   theme: ThemeSettingsSchema,
   defaultTheme: ThemeSettingsSchema,
@@ -431,75 +417,10 @@ export const ProcessWindowSchema = Schema.Struct({
 })
 export type ProcessWindow = Schema.Schema.Type<typeof ProcessWindowSchema>
 
-export const WorkflowPhaseSchema = Schema.Struct({
-  title: Schema.String,
-  detail: Schema.optional(Schema.String),
-  model: Schema.optional(Schema.String),
-})
-export type WorkflowPhase = Schema.Schema.Type<typeof WorkflowPhaseSchema>
-
-export const WorkflowAgentSchema = Schema.Struct({
-  id: Schema.String,
-  label: Schema.String,
-  phase: Schema.optional(Schema.String),
-  state: Schema.Literal('starting', 'working', 'paused', 'finished', 'failed'),
-  threadId: Schema.optional(Schema.String),
-  childRunId: Schema.optional(Schema.Number),
-  startedAt: Schema.String,
-  finishedAt: Schema.optional(Schema.String),
-  error: Schema.optional(Schema.String),
-  value: Schema.optional(Schema.Unknown),
-  valueOmitted: Schema.optional(Schema.Boolean),
-})
-export type WorkflowAgent = Schema.Schema.Type<typeof WorkflowAgentSchema>
-
-export const WorkflowLogEntrySchema = Schema.Struct({
-  message: Schema.String,
-  createdAt: Schema.String,
-})
-export type WorkflowLogEntry = Schema.Schema.Type<typeof WorkflowLogEntrySchema>
-
-export const ThreadPlanSchema = Schema.Struct({
-  id: Schema.String,
-  projectId: Schema.String,
-  threadId: Schema.String,
-  sourceThreadId: Schema.String,
-  title: Schema.String,
-  createdAt: Schema.String,
-  sizeBytes: Schema.Number,
-})
-export type ThreadPlan = Schema.Schema.Type<typeof ThreadPlanSchema>
-
-export const WorkflowRunSchema = Schema.Struct({
-  id: Schema.String,
-  projectId: Schema.String,
-  threadId: Schema.String,
-  state: Schema.Literal('queued', 'running', 'paused', 'finished', 'failed', 'stopped'),
-  attempt: Schema.Number,
-  name: Schema.String,
-  description: Schema.optional(Schema.String),
-  whenToUse: Schema.optional(Schema.String),
-  phases: Schema.optional(MutableArray(WorkflowPhaseSchema)),
-  currentPhase: Schema.optional(Schema.String),
-  scriptPath: Schema.String,
-  processId: Schema.optional(Schema.String),
-  createdAt: Schema.String,
-  startedAt: Schema.optional(Schema.String),
-  finishedAt: Schema.optional(Schema.String),
-  updatedAt: Schema.String,
-  error: Schema.optional(Schema.String),
-  result: Schema.optional(Schema.Unknown),
-  logs: Schema.optional(MutableArray(WorkflowLogEntrySchema)),
-  agents: MutableArray(WorkflowAgentSchema),
-})
-export type WorkflowRun = Schema.Schema.Type<typeof WorkflowRunSchema>
-
 export const ThreadStatusErrorsSchema = Schema.Struct({
   gitBranches: Schema.optional(Schema.String),
   processes: Schema.optional(Schema.String),
   shellWindows: Schema.optional(Schema.String),
-  workflows: Schema.optional(Schema.String),
-  plans: Schema.optional(Schema.String),
 })
 export type ThreadStatusErrors = Schema.Schema.Type<typeof ThreadStatusErrorsSchema>
 
@@ -512,15 +433,6 @@ export const ThreadStatusSnapshotSchema = Schema.Struct({
   }),
   processes: MutableArray(ProcessWindowSchema),
   shellWindows: MutableArray(TmuxWindowSchema),
-  workflows: MutableArray(WorkflowRunSchema),
-  plans: MutableArray(ThreadPlanSchema),
   errors: ThreadStatusErrorsSchema,
 })
 export type ThreadStatusSnapshot = Schema.Schema.Type<typeof ThreadStatusSnapshotSchema>
-
-export const SavedWorkflowSchema = Schema.Struct({
-  name: Schema.String,
-  scope: Schema.Literal('project', 'personal'),
-  path: Schema.String,
-})
-export type SavedWorkflow = Schema.Schema.Type<typeof SavedWorkflowSchema>

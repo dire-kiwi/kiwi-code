@@ -2,9 +2,11 @@ package server
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,6 +58,19 @@ func loadOrCreateAgentToken(dataDirectory string) (string, error) {
 		return token, nil
 	}
 	return "", errors.New("could not load the agent token created by another process")
+}
+
+func (s *Server) requireAgentCapability(w http.ResponseWriter, r *http.Request) bool {
+	expected := ""
+	if s.terminal != nil {
+		expected = s.terminal.agentToken
+	}
+	provided := r.Header.Get(agentTokenHeader)
+	if expected == "" || len(provided) != len(expected) || subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
+		writeError(w, http.StatusForbidden, "This endpoint is only available to Kiwi Code-managed agents.")
+		return false
+	}
+	return true
 }
 
 func validAgentToken(token string) bool {

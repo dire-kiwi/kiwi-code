@@ -102,7 +102,7 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 		}},
 		stateTopicThreadUsage: []threadUsageSnapshot{{
 			ProjectID: "project-1", ThreadID: "thread-1",
-			Own: usageTotals, Children: threadUsageTotals{}, Total: usageTotals,
+			Own: usageTotals, Total: usageTotals,
 			LimitReached: false,
 		}},
 		stateTopicThreadStatus: threadStatusSnapshot{
@@ -123,31 +123,6 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 			ShellWindows: []tmuxWindow{{
 				Index: 0, Name: "shell", Active: true,
 			}},
-			Workflows: []workflowRunSnapshot{{
-				ID: "workflow-1", ProjectID: "project-1", ThreadID: "thread-1",
-				State: "running", Attempt: 1, Name: "Fixture workflow",
-				Description: "Exercises the workflow snapshot schema.",
-				WhenToUse:   "During protocol compatibility tests.",
-				Phases: []workflowPhase{{
-					Title: "Implement", Detail: "Build the fixture.", Model: "openai/gpt-5",
-				}},
-				CurrentPhase: "Implement", ScriptPath: "/workspace/workflow.mjs",
-				ProcessID: "process-1", CreatedAt: startedAt, StartedAt: &startedAt,
-				UpdatedAt: fixtureTime, Result: json.RawMessage(`{"progress":0.5}`),
-				Logs: []workflowLogEntry{{
-					Message: "Workflow started.", CreatedAt: startedAt,
-				}},
-				Agents: []workflowAgentSnapshot{{
-					ID: "agent-1", Label: "Implementer", Phase: "Implement",
-					State: "working", ThreadID: "child-thread-1", ChildRunID: 7,
-					StartedAt: startedAt, Value: json.RawMessage(`{"status":"working"}`),
-				}},
-			}},
-			Plans: []threadPlanSnapshot{{
-				ID: "plan-1", ProjectID: "project-1", ThreadID: "thread-1",
-				SourceThreadID: "thread-1", Title: "Fixture plan",
-				CreatedAt: fixtureTime, SizeBytes: 2048,
-			}},
 			Errors: threadStatusErrors{
 				GitBranches: "Fixture error shape.",
 			},
@@ -158,10 +133,6 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 			UsingDefault:                  true,
 			ArchivedThreadRetentionDays:   30,
 			OrphanedWorktreeRetentionDays: 30,
-			SubAgentNestingDepth:          project.DefaultSubAgentNestingDepth,
-			MaxSubAgentNestingDepth:       project.MaxSubAgentNestingDepth,
-			WorkflowKeywordTrigger:        true,
-			WorkflowSizeGuideline:         project.DefaultWorkflowSizeGuideline,
 			CodingAgents: []project.CodingAgentSetting{{
 				ID: project.CodingAgentKindPiNative, Name: "Pi Native",
 				Kind: project.CodingAgentKindPiNative, IsDefault: true,
