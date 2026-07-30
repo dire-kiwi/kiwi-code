@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -20,6 +21,13 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  // Kept in step with the `paths` entry in tsconfig.app.json and the alias in
+  // vitest.config.ts -- all three resolve `@/` independently.
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
   server: {
     host: '0.0.0.0',
     port: 5173,

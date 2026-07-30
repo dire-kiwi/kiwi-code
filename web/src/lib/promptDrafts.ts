@@ -1,4 +1,4 @@
-import type { PromptPaste } from '../prompt-pastes.mjs'
+import type { PromptPaste } from '@/prompt-pastes.mjs'
 
 // Keep text drafts while React unmounts a workspace or form during navigation.
 // This is deliberately in-memory: a draft should survive switching views, but

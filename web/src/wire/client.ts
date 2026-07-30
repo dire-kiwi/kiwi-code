@@ -1,5 +1,5 @@
 import { Either, ParseResult, Schema } from 'effect'
-import { apiWebSocketUrl } from '../apiUrl'
+import { apiWebSocketUrl } from '@/apiUrl'
 import {
   protocolVersion,
   ServerMessageSchema,

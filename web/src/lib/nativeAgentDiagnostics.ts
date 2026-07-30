@@ -1,4 +1,4 @@
-import type { ConnectionStatus } from '../types'
+import type { ConnectionStatus } from '@/types'
 import { formatDuration } from './formatDuration'
 
 export const NATIVE_AGENT_RESPONSE_STALE_AFTER_MS = 12_000

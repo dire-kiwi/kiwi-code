@@ -1,4 +1,4 @@
-import { browserRecordingDownloadUrl } from '../api'
+import { browserRecordingDownloadUrl } from '@/api'
 
 type RecordingIdentity = {
   id: string

@@ -3,10 +3,11 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useState,
+  useRef,
   useSyncExternalStore,
   type ReactNode,
 } from 'react'
+import { registerStateSocketClient } from '@/store/socketAccess'
 import {
   StateSocketClient,
   type StateConnectionSnapshot,
@@ -29,7 +30,11 @@ export function StateSocketProvider({
   const client = useMemo(() => suppliedClient ?? new StateSocketClient(), [suppliedClient])
   useEffect(() => {
     client.start()
+    // Late-bound so the store can be built before the socket exists; see the
+    // ordering note in main.tsx and the comment in store/socketAccess.ts.
+    registerStateSocketClient(client)
     return () => {
+      registerStateSocketClient(null)
       if (!suppliedClient) client.stop()
     }
   }, [client, suppliedClient])
@@ -74,11 +79,13 @@ export function useSubscription<Tag extends string, Params, Snapshot>(
 export function useLastReadySubscriptionData<Snapshot>(
   subscription: SubscriptionResult<Snapshot>,
 ): Snapshot | null {
-  const [lastReady, setLastReady] = useState<Snapshot | null>(null)
-  useEffect(() => {
-    if (subscription.state === 'ready') setLastReady(subscription.data)
-  }, [subscription])
-  return subscription.state === 'ready' ? subscription.data : lastReady
+  // A ref rather than state: the retained snapshot is only ever read while the
+  // subscription is *not* ready, so storing it in state committed a second
+  // render for every snapshot the socket pushed -- and App is one of the callers,
+  // which made that a second render of the whole tree.
+  const lastReady = useRef<Snapshot | null>(null)
+  if (subscription.state === 'ready') lastReady.current = subscription.data
+  return subscription.state === 'ready' ? subscription.data : lastReady.current
 }
 
 export function useConnectionStatus(): StateConnectionSnapshot {

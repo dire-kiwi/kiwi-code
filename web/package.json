@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@fontsource-variable/jetbrains-mono": "latest",
+    "@reduxjs/toolkit": "^2.12.0",
     "@xterm/addon-canvas": "latest",
     "@xterm/addon-fit": "latest",
     "@xterm/addon-web-links": "latest",
@@ -36,6 +37,7 @@
     "puppeteer-core": "^24.40.0",
     "react": "latest",
     "react-dom": "latest",
+    "react-redux": "^9.3.0",
     "react-router-dom": "latest"
   },
   "devDependencies": {

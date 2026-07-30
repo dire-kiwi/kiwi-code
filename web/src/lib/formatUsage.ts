@@ -1,4 +1,4 @@
-import type { ThreadUsageTotals } from '../types'
+import type { ThreadUsageTotals } from '@/types'
 
 const compactNumber = new Intl.NumberFormat('en-US', {
   notation: 'compact',
