@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	agentSkillName         = "kiwi-code-processes"
-	embeddedAgentSkillRoot = "agent-skill"
+	agentSkillName                 = "kiwi-code-processes"
+	embeddedAgentSkillRoot         = "agent-skill"
+	retiredProcessUpdateHelperName = "update-process.mjs"
 )
 
 var bundledAgentSkillNames = [...]string{"kiwi-code-processes", "kiwi-code-threads", "kiwi-code-mermaid"}
@@ -116,6 +117,13 @@ func (i *agentSkillInstaller) skillStatus(name string) (agentSkillItemStatus, er
 	if err != nil {
 		return agentSkillItemStatus{}, fmt.Errorf("inspect bundled agent skill %q: %w", name, err)
 	}
+	if name == agentSkillName {
+		if _, err := os.Lstat(filepath.Join(target, "scripts", retiredProcessUpdateHelperName)); err == nil {
+			upToDate = false
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return agentSkillItemStatus{}, fmt.Errorf("inspect retired process helper: %w", err)
+		}
+	}
 	status.UpToDate = status.Installed && upToDate
 	return status, nil
 }
@@ -186,7 +194,20 @@ func (i *agentSkillInstaller) installSkill(name string) error {
 	if err != nil {
 		return fmt.Errorf("install agent skill %q: %w", name, err)
 	}
+	if name == agentSkillName {
+		if err := removeRetiredProcessUpdateHelper(target); err != nil {
+			return fmt.Errorf("remove retired process helper: %w", err)
+		}
+	}
 	return nil
+}
+
+func removeRetiredProcessUpdateHelper(skillRoot string) error {
+	err := os.Remove(filepath.Join(skillRoot, "scripts", retiredProcessUpdateHelperName))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 func ensureSkillDirectory(path string) error {

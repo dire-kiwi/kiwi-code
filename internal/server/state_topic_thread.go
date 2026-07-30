@@ -61,7 +61,7 @@ func (s *Server) openThreadStatusTopic(ctx context.Context, projectID, threadID 
 			return stateTopicFailure("Could not load the thread.")
 		}
 		if s.terminal != nil {
-			s.terminal.yieldToInteractiveTerminalSetup(ctx, processProjectionInteractiveYieldLimit)
+			s.terminal.yieldToInteractiveTerminalSetup(ctx, interactiveTerminalSetupYieldLimit)
 		}
 		branches, gitError := readThreadGitStatus(ctx, thread)
 		if ctx.Err() != nil {

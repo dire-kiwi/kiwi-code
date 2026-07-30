@@ -10,7 +10,6 @@ import {
   sidebarWidthNudged,
   sidebarWidthReset,
   threadRevealed,
-  webServersCollapseToggled,
   type SidebarState,
 } from './sidebar'
 import type { RootState } from '@/store/rootReducer'
@@ -42,12 +41,6 @@ describe('sidebar slice', () => {
 
     const threads = reduce(undefined, childThreadsCollapseToggled('thread-1'))
     expect(threads.collapsedChildThreadIds).toEqual(['thread-1'])
-  })
-
-  it('toggles the web servers section', () => {
-    const collapsed = reduce(undefined, webServersCollapseToggled())
-    expect(collapsed.webServersCollapsed).toBe(true)
-    expect(reduce(collapsed, webServersCollapseToggled()).webServersCollapsed).toBe(false)
   })
 
   it('reveals a selected thread by expanding whatever hides it', () => {

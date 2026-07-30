@@ -276,7 +276,7 @@ func (h *terminalHandler) runTmuxControlClient(watch *tmuxSessionWatch) bool {
 	// subscription adds pane_current_command changes, which have no dedicated
 	// control notification. tmux evaluates subscriptions internally and emits
 	// only changes (at most once per second).
-	_, _ = io.WriteString(stdin, "refresh-client -B 'kiwi-code-status:%*:#{pane_current_command}|#{window_name}|#{window_active}|#{@kiwi-code-process-id}|#{@kiwi-code-web-servers}'\n")
+	_, _ = io.WriteString(stdin, "refresh-client -B 'kiwi-code-status:%*:#{pane_current_command}|#{window_name}|#{window_active}|#{@kiwi-code-process-id}'\n")
 
 	done := make(chan struct{})
 	go func() {

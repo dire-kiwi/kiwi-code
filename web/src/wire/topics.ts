@@ -8,7 +8,6 @@ import {
   CodingAgentConfigSchema,
   GitBranchStateSchema,
   PiThreadActivitySchema,
-  ProcessWebServerSchema,
   ProfileSchema,
   ProjectSchema,
   SandboxConfigStateSchema,
@@ -64,7 +63,6 @@ export const ProjectsTopic = globalTopic('projects', MutableArray(ProjectSchema)
 export const ProfilesTopic = globalTopic('profiles', MutableArray(ProfileSchema))
 export const AgentActivityTopic = globalTopic('agentActivity', MutableArray(PiThreadActivitySchema))
 export const ThreadUsageTopic = globalTopic('threadUsage', MutableArray(ThreadUsageSnapshotSchema))
-export const ProcessWebServersTopic = globalTopic('processWebServers', MutableArray(ProcessWebServerSchema))
 export const SettingsTopic = globalTopic('settings', AppSettingsSchema)
 export const CleanupTopic = globalTopic('cleanup', CleanupOverviewSchema)
 export const SessionClosuresTopic = globalTopic('sessionClosures', SessionClosureOverviewSchema)
@@ -140,7 +138,6 @@ export const allTopics = [
   ProfilesTopic,
   AgentActivityTopic,
   ThreadUsageTopic,
-  ProcessWebServersTopic,
   ThreadStatusTopic,
   SettingsTopic,
   CodingAgentsTopic,

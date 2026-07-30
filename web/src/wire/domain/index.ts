@@ -447,20 +447,8 @@ export const ProcessWindowSchema = Schema.Struct({
   index: Schema.Number,
   name: Schema.String,
   currentCommand: Schema.String,
-  webServers: StringArray,
 })
 export type ProcessWindow = Schema.Schema.Type<typeof ProcessWindowSchema>
-
-export const ProcessWebServerSchema = Schema.Struct({
-  projectId: Schema.String,
-  projectName: Schema.String,
-  threadId: Schema.String,
-  threadTitle: Schema.String,
-  processId: Schema.String,
-  processName: Schema.String,
-  url: Schema.String,
-})
-export type ProcessWebServer = Schema.Schema.Type<typeof ProcessWebServerSchema>
 
 export const WorkflowPhaseSchema = Schema.Struct({
   title: Schema.String,

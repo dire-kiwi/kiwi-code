@@ -28,7 +28,6 @@ import { formatCompactTokens, formatCompactUsd, usageDescription } from '@/lib/f
 import { defaultVisibleRootThreadIds } from '@/sidebar-thread-visibility.mjs'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import {
-  selectActiveProjectIds,
   selectActiveProjects,
   selectActiveThreadIndex,
 } from '@/store/selectors/workspace'
@@ -58,13 +57,12 @@ import {
 } from '@/store/slices/sidebar'
 import { projectFinderOpened, selectSidebarOpen, sidebarClosed } from '@/store/slices/ui'
 import type { Profile, Project, Thread } from '@/types'
-import { useProcessWebServers, useThreadUsage } from '@/wire/serverData'
+import { useThreadUsage } from '@/wire/serverData'
 import { Button, IconButton, SelectionButton } from '@/ui/buttons'
 import { SidebarActivityView } from './SidebarActivityView'
 import { SidebarAddProjectForm } from './SidebarAddProjectForm'
 import { SidebarFooterNav } from './SidebarFooterNav'
 import { SidebarProfileSwitcher } from './SidebarProfileSwitcher'
-import { SidebarWebServers } from './SidebarWebServers'
 import { ThreadActionsMenu } from './ThreadActionsMenu'
 import { useSidebarNavigation } from './useSidebarNavigation'
 import { useSidebarReorder } from './useSidebarReorder'
@@ -102,17 +100,10 @@ export function ProjectSidebar({
   const profiles = useAppSelector(selectProfiles)
   const projects = useAppSelector(selectActiveProjects)
   const threadIndex = useAppSelector(selectActiveThreadIndex)
-  const activeProjectIds = useAppSelector(selectActiveProjectIds)
   const deletingProjectId = useAppSelector(selectDeletingProjectId)
   const deletingThreadId = useAppSelector(selectDeletingThreadId)
   const archivingThreadId = useAppSelector(selectArchivingThreadId)
   const usageSnapshots = useThreadUsage()
-  const allWebServers = useProcessWebServers()
-  // Only servers belonging to a project the current profile can see.
-  const processWebServers = useMemo(
-    () => allWebServers.filter((server) => activeProjectIds.has(server.projectId)),
-    [activeProjectIds, allWebServers],
-  )
   const isOpen = useAppSelector(selectSidebarOpen)
   const viewMode = useAppSelector(selectSidebarView)
   const sidebarWidth = useAppSelector(selectSidebarWidth)
@@ -643,11 +634,6 @@ export function ProjectSidebar({
               ))}
             </ul>
           )}
-
-          <SidebarWebServers
-            webServers={processWebServers}
-            onNavigate={() => dispatch(sidebarClosed())}
-          />
         </nav>
 
         <SidebarFooterNav />
