@@ -108,7 +108,6 @@ export const ThreadSchema = Schema.Struct({
   titleLocked: Schema.optional(Schema.Boolean),
   closedAt: Schema.optional(Schema.String),
   archivedAt: Schema.optional(Schema.String),
-  bookmarked: Schema.optional(Schema.Boolean),
   tokenLimit: Schema.optional(Schema.Number),
   costLimitUsd: Schema.optional(Schema.Number),
   nestedDepth: Schema.optional(Schema.Number),

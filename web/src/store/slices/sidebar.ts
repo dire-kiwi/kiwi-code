@@ -22,7 +22,6 @@ export type SidebarState = {
   // Ephemeral: the same "which rows are open" concern as the fields above, but
   // deliberately not persisted, matching the behaviour before the migration.
   expandedMoreProjectIds: string[]
-  bookmarksOnly: boolean
 }
 
 export const initialSidebarState: SidebarState = {
@@ -31,7 +30,6 @@ export const initialSidebarState: SidebarState = {
   collapsedProjectIds: [],
   collapsedChildThreadIds: [],
   expandedMoreProjectIds: [],
-  bookmarksOnly: false,
 }
 
 const sidebarViewCodec = guardedStoredStateCodec(
@@ -103,9 +101,6 @@ export const sidebarSlice = createSlice({
     moreThreadsToggled(state, action: PayloadAction<string>) {
       toggleId(state.expandedMoreProjectIds, action.payload)
     },
-    bookmarksOnlyChanged(state, action: PayloadAction<boolean>) {
-      state.bookmarksOnly = action.payload
-    },
     // Selecting a nested thread expands whatever hides it. This fires on every
     // selection change, so each field is only reassigned when it truly changed;
     // an unconditional filter would hand the memoised Set selectors a fresh
@@ -134,7 +129,6 @@ export const sidebarSlice = createSlice({
 })
 
 export const {
-  bookmarksOnlyChanged,
   childThreadsCollapseToggled,
   moreThreadsToggled,
   projectCollapseToggled,
@@ -147,7 +141,6 @@ export const {
 
 export const selectSidebarView = (state: RootState) => state.sidebar.view
 export const selectSidebarWidth = (state: RootState) => state.sidebar.width
-export const selectBookmarksOnly = (state: RootState) => state.sidebar.bookmarksOnly
 
 // Call sites test membership, so hand them a Set. Reducers keep the source
 // array's identity stable, so these rebuild only on a real membership change.
