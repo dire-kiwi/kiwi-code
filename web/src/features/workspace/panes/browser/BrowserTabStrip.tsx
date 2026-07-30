@@ -1,4 +1,4 @@
-import { Circle, Globe2, Plus, X } from 'lucide-react'
+import { Globe2, Plus, X } from 'lucide-react'
 import { Button, IconButton } from '@/ui/buttons'
 import type { BrowserPage } from '@/wire/domain'
 import { pageLabel } from './browserHelpers'
@@ -6,12 +6,9 @@ import { pageLabel } from './browserHelpers'
 export type BrowserTabStripProps = {
   pages: BrowserPage[]
   selectedTargetId: string | undefined
-  /** The tab being recorded, which must not be closed out from under the recorder. */
-  recordingTargetId: string | undefined
   busy: boolean
   statusLoading: boolean
   providerUnavailable: boolean
-  sessionRunning: boolean
   onSelectTab: (targetId: string) => void
   onCloseTab: (targetId: string) => void
   onNewTab: () => void
@@ -20,11 +17,9 @@ export type BrowserTabStripProps = {
 export function BrowserTabStrip({
   pages,
   selectedTargetId,
-  recordingTargetId,
   busy,
   statusLoading,
   providerUnavailable,
-  sessionRunning,
   onSelectTab,
   onCloseTab,
   onNewTab,
@@ -38,7 +33,6 @@ export function BrowserTabStrip({
       >
         {pages.map((page) => {
           const selected = page.id === selectedTargetId
-          const recorded = page.id === recordingTargetId
           const label = pageLabel(page)
           return (
             <div
@@ -61,19 +55,17 @@ export function BrowserTabStrip({
                 className="flex h-full min-w-0 flex-1 items-center gap-2 pl-2.5 text-left disabled:cursor-wait"
                 title={page.url || label}
               >
-                {recorded
-                  ? <Circle size={10} fill="currentColor" className="shrink-0 animate-pulse text-ghost-bright-red" />
-                  : <Globe2 size={11} className={selected ? 'shrink-0 text-ghost-green' : 'shrink-0'} />}
+                <Globe2 size={11} className={selected ? 'shrink-0 text-ghost-green' : 'shrink-0'} />
                 <span className="truncate text-[10px] font-medium">{label}</span>
               </Button>
               <IconButton
                 type="button"
                 size="xs"
                 variant="subtle"
-                disabled={busy || providerUnavailable || recorded}
+                disabled={busy || providerUnavailable}
                 onClick={() => onCloseTab(page.id)}
-                aria-label={recorded ? `Stop recording before closing tab ${label}` : `Close tab ${label}`}
-                title={recorded ? 'Stop recording before closing this tab' : `Close ${label}`}
+                aria-label={`Close tab ${label}`}
+                title={`Close ${label}`}
                 className="mr-0.5 opacity-70 group-hover:opacity-100 focus:opacity-100 disabled:cursor-wait"
               >
                 <X size={10} />

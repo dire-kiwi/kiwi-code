@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  bookmarksOnlyChanged,
   initialSidebarState,
   moreThreadsToggled,
   projectCollapseToggled,
@@ -29,8 +28,7 @@ describe('sidebar slice', () => {
     expect(revealed.expandedMoreProjectIds).toEqual(['project'])
   })
 
-  it('updates simple preferences', () => {
-    expect(reduce(undefined, bookmarksOnlyChanged(true)).bookmarksOnly).toBe(true)
+  it('updates the sidebar width', () => {
     expect(reduce(undefined, sidebarWidthChanged(320)).width).toBe(320)
   })
 })

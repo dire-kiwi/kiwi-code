@@ -44,10 +44,6 @@ func (p browserActionTestProvider) Action(ctx context.Context, request browserco
 	return p.action(ctx, request)
 }
 
-func (browserActionTestProvider) OpenRecordingRange(context.Context, string, string, string, string) (browsercontrol.Recording, error) {
-	return browsercontrol.Recording{}, browsercontrol.ErrRecordingNotFound
-}
-
 func (browserActionTestProvider) Close(context.Context) error {
 	return nil
 }
@@ -162,7 +158,6 @@ func TestBrowserOperationAllowlist(t *testing.T) {
 		"tabs.list", "tabs.new", "tabs.select", "tabs.close",
 		"navigate.goto", "navigate.back", "navigate.forward", "navigate.reload",
 		"snapshot", "click", "fill", "key", "wait", "evaluate", "screenshot", "cdp", "preview",
-		"recording.start", "recording.stop", "recording.status", "recording.delete",
 	}
 	got := make([]string, 0, len(allowedBrowserOperations))
 	for operation := range allowedBrowserOperations {
@@ -172,13 +167,6 @@ func TestBrowserOperationAllowlist(t *testing.T) {
 	sort.Strings(want)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("browser operation allowlist = %v, want %v", got, want)
-	}
-}
-
-func TestRecordingFilenameUsesPurposeTitleWithoutPathContent(t *testing.T) {
-	got := recordingFilename(" Demonstrate Checkout / Login Flow ", "rec-0123456789abcdef")
-	if got != "demonstrate-checkout-login-flow-456789abcdef.webm" {
-		t.Fatalf("recordingFilename() = %q", got)
 	}
 }
 

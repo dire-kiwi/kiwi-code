@@ -37,7 +37,7 @@ function publicEntry({ projectId, threadId, at }) {
 
 /**
  * Groups every thread across all projects into the activity view's sections,
- * in priority order: working, needs review, pinned, recent. A thread appears
+ * in priority order: working, needs review, recent. A thread appears
  * in the first section that claims it. Entries within a section keep each
  * recency order. Recent holds active threads and is
  * capped at recentLimit; the overflow is reported as hiddenRecentCount.
@@ -87,17 +87,11 @@ export function activityViewGroups(
   const working = collectActivityEntries('working')
   const needsReview = collectActivityEntries('finished')
 
-  const pinned = []
   const remaining = []
   for (const [key, { projectId, thread, order: threadOrder }] of threadsByKey) {
     if (included.has(key) || thread.archivedAt) continue
-    if (thread.bookmarked) {
-      pinned.push({ projectId, threadId: thread.id, at: threadRecency(thread), order: threadOrder })
-    } else {
-      remaining.push({ projectId, threadId: thread.id, at: threadRecency(thread), order: threadOrder })
-    }
+    remaining.push({ projectId, threadId: thread.id, at: threadRecency(thread), order: threadOrder })
   }
-  const orderedPinned = orderEntries(pinned)
   remaining.sort(byNewestFirst)
   const boundedLimit = Number.isInteger(recentLimit) && recentLimit > 0 ? recentLimit : 0
   const recent = remaining.slice(0, boundedLimit)
@@ -105,7 +99,6 @@ export function activityViewGroups(
   return {
     working: working.map(publicEntry),
     needsReview: needsReview.map(publicEntry),
-    pinned: orderedPinned.map(publicEntry),
     recent: recent.map(publicEntry),
     hiddenRecentCount: remaining.length - recent.length,
   }

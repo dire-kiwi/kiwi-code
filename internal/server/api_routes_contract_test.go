@@ -20,8 +20,8 @@ import (
 
 const (
 	apiRouteGoldenFile      = "testdata/api_routes.txt"
-	expectedAPIRouteCount   = 66
-	expectedTotalRouteCount = 67
+	expectedAPIRouteCount   = 64
+	expectedTotalRouteCount = 65
 )
 
 type websocketRouteContract struct {

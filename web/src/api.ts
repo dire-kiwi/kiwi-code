@@ -237,10 +237,6 @@ export function setThreadArchived(projectId: string, threadId: string, archived:
   return jsonRequest<Thread>(threadPath(projectId, threadId), 'PATCH', { archived })
 }
 
-export function setThreadBookmarked(projectId: string, threadId: string, bookmarked: boolean) {
-  return jsonRequest<Thread>(threadPath(projectId, threadId), 'PATCH', { bookmarked })
-}
-
 export function deleteThread(projectId: string, threadId: string) {
   return request<void>(threadPath(projectId, threadId), { method: 'DELETE' })
 }
@@ -277,14 +273,6 @@ export function performBrowserAction<Result = unknown>(
 
 export function browserStreamUrl(projectId: string, threadId: string) {
   return apiWebSocketUrl(`${browserPath(projectId, threadId)}/stream`).toString()
-}
-
-export function browserRecordingDownloadUrl(projectId: string, threadId: string, recordingId: string) {
-  return apiUrl(`${browserPath(projectId, threadId)}/recordings/${encodeURIComponent(recordingId)}`)
-}
-
-export function browserRecordingPlaybackUrl(projectId: string, threadId: string, recordingId: string) {
-  return `${browserRecordingDownloadUrl(projectId, threadId, recordingId)}?disposition=inline`
 }
 
 export async function getBrowserFrame(

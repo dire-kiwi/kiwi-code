@@ -5,7 +5,6 @@ export type SidebarVisibilityThread = {
   createdAt: string
   lastPromptAt?: string
   archivedAt?: string
-  bookmarked?: boolean
 }
 
 export type SidebarVisibilityActivity = {
@@ -21,10 +20,5 @@ export function defaultVisibleRootThreadIds(
   activities: readonly SidebarVisibilityActivity[],
   projectId: string,
   limit?: number,
-  tree?: ThreadTreeIndex<SidebarVisibilityThread>,
-): string[]
-
-export function bookmarkedThreadPathIds(
-  threads: readonly SidebarVisibilityThread[],
   tree?: ThreadTreeIndex<SidebarVisibilityThread>,
 ): string[]

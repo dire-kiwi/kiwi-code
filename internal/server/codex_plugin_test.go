@@ -149,13 +149,23 @@ func TestMaterializeCodexPlugin(t *testing.T) {
 	}
 	for _, script := range []string{
 		"common.mjs", "interrupt-process.mjs", "list-processes.mjs", "read-logs.mjs",
-		"send-input.mjs", "start-process.mjs", "stop-process.mjs", "update-process.mjs",
+		"send-input.mjs", "start-process.mjs", "stop-process.mjs",
 	} {
 		if _, err := os.Stat(filepath.Join(
 			installation.PluginRoot, "skills", "kiwi-code-processes", "scripts", script,
 		)); err != nil {
 			t.Fatalf("materialized Codex process helper %q: %v", script, err)
 		}
+	}
+	retiredHelper := filepath.Join(installation.PluginRoot, "skills", agentSkillName, "scripts", retiredProcessUpdateHelperName)
+	if err := os.WriteFile(retiredHelper, []byte("legacy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := materializeCodexPlugin(dataDirectory); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(retiredHelper); !os.IsNotExist(err) {
+		t.Fatalf("retired Codex process helper remains after materialization: %v", err)
 	}
 }
 

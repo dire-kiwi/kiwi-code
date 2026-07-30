@@ -43,7 +43,6 @@ import { threadUpdated } from '@/store/slices/projects'
 import {
   detailsSidebarExpandedChanged,
   selectDetailsSidebarExpanded,
-  selectProjectFinderOpen,
   selectSidebarOpen,
   sidebarOpened,
 } from '@/store/slices/ui'
@@ -129,15 +128,9 @@ export function TerminalWorkspace({
   const dispatch = useAppDispatch()
   const activeTool = workspaceToolFromRoute(useMatch(WORKSPACE_ROUTE)?.params.tool) ?? 'pi'
   const detailsExpanded = useAppSelector(selectDetailsSidebarExpanded)
-  // The sidebar and the finder both float over the pane area, so the embedded
-  // browser surface has to stand down while either is up.
-  //
-  // Read into variables, never `useAppSelector(a) || useAppSelector(b)`: `||`
-  // short-circuits, which would skip the second hook whenever the first is true
-  // and change the hook count between renders.
-  const sidebarOpen = useAppSelector(selectSidebarOpen)
-  const projectFinderOpen = useAppSelector(selectProjectFinderOpen)
-  const nativeViewSuppressed = sidebarOpen || projectFinderOpen
+  // The sidebar floats over the pane area, so the embedded browser surface
+  // has to stand down while it is open.
+  const nativeViewSuppressed = useAppSelector(selectSidebarOpen)
   const usageSnapshots = useThreadUsage()
   const usage = usageSnapshots.find((snapshot) =>
     snapshot.projectId === project.id && snapshot.threadId === thread.id)

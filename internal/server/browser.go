@@ -12,7 +12,6 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -52,10 +51,6 @@ var allowedBrowserOperations = map[string]struct{}{
 	"screenshot":         {},
 	"cdp":                {},
 	"preview":            {},
-	"recording.start":    {},
-	"recording.stop":     {},
-	"recording.status":   {},
-	"recording.delete":   {},
 }
 
 type browserProviderErrorResponse struct {
@@ -64,26 +59,20 @@ type browserProviderErrorResponse struct {
 }
 
 var browserProviderErrorResponses = map[string]browserProviderErrorResponse{
-	"blocked_command":                 {Status: http.StatusForbidden, Message: "That browser command is blocked by the page security boundary."},
-	"blocked_origin":                  {Status: http.StatusForbidden, Message: "Navigation to a protected Kiwi Code origin is blocked."},
-	"element_not_found":               {Status: http.StatusNotFound, Message: "Browser element not found. Take a new snapshot or check the selector."},
-	"invalid_params":                  {Status: http.StatusBadRequest, Message: "Invalid browser action parameters."},
-	"invalid_url":                     {Status: http.StatusBadRequest, Message: "Invalid browser URL."},
-	"navigation_unavailable":          {Status: http.StatusConflict, Message: "Browser history navigation is unavailable."},
-	"operation_failed":                {Status: http.StatusBadGateway, Message: "The browser could not complete the operation."},
-	"operation_timeout":               {Status: http.StatusGatewayTimeout, Message: "The browser operation timed out."},
-	"output_too_large":                {Status: http.StatusRequestEntityTooLarge, Message: "The browser result exceeds the size limit."},
-	"page_not_found":                  {Status: http.StatusNotFound, Message: "Browser page not found. Open or select a tab and try again."},
-	"recording_active":                {Status: http.StatusConflict, Message: "This browser session is already recording. Stop it before trying again."},
-	"recording_failed":                {Status: http.StatusBadGateway, Message: "The browser recording could not be completed."},
-	"recording_limit_reached":         {Status: http.StatusConflict, Message: "The browser recording limit has been reached."},
-	"recording_not_active":            {Status: http.StatusConflict, Message: "This browser session is not recording."},
-	"recording_not_found":             {Status: http.StatusNotFound, Message: "Browser recording not found."},
-	"recording_range_not_satisfiable": {Status: http.StatusRequestedRangeNotSatisfiable, Message: "The requested browser recording range is not available."},
-	"stale_ref":                       {Status: http.StatusConflict, Message: "The browser element reference is stale. Take a new snapshot and try again."},
-	"tab_limit_reached":               {Status: http.StatusConflict, Message: "The browser tab limit has been reached."},
-	"unsupported_operation":           {Status: http.StatusBadRequest, Message: "Unsupported browser operation."},
-	"wait_timeout":                    {Status: http.StatusRequestTimeout, Message: "The browser wait condition timed out."},
+	"blocked_command":        {Status: http.StatusForbidden, Message: "That browser command is blocked by the page security boundary."},
+	"blocked_origin":         {Status: http.StatusForbidden, Message: "Navigation to a protected Kiwi Code origin is blocked."},
+	"element_not_found":      {Status: http.StatusNotFound, Message: "Browser element not found. Take a new snapshot or check the selector."},
+	"invalid_params":         {Status: http.StatusBadRequest, Message: "Invalid browser action parameters."},
+	"invalid_url":            {Status: http.StatusBadRequest, Message: "Invalid browser URL."},
+	"navigation_unavailable": {Status: http.StatusConflict, Message: "Browser history navigation is unavailable."},
+	"operation_failed":       {Status: http.StatusBadGateway, Message: "The browser could not complete the operation."},
+	"operation_timeout":      {Status: http.StatusGatewayTimeout, Message: "The browser operation timed out."},
+	"output_too_large":       {Status: http.StatusRequestEntityTooLarge, Message: "The browser result exceeds the size limit."},
+	"page_not_found":         {Status: http.StatusNotFound, Message: "Browser page not found. Open or select a tab and try again."},
+	"stale_ref":              {Status: http.StatusConflict, Message: "The browser element reference is stale. Take a new snapshot and try again."},
+	"tab_limit_reached":      {Status: http.StatusConflict, Message: "The browser tab limit has been reached."},
+	"unsupported_operation":  {Status: http.StatusBadRequest, Message: "Unsupported browser operation."},
+	"wait_timeout":           {Status: http.StatusRequestTimeout, Message: "The browser wait condition timed out."},
 }
 
 type browserActionInput struct {
@@ -250,80 +239,6 @@ func (s *Server) browserFrame(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.Itoa(len(frame)))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(frame)
-}
-
-func recordingFilename(title, recordingID string) string {
-	slug := strings.ToLower(strings.TrimSpace(title))
-	slug = strings.Map(func(character rune) rune {
-		if character >= 'a' && character <= 'z' || character >= '0' && character <= '9' {
-			return character
-		}
-		if character == ' ' || character == '-' || character == '_' {
-			return '-'
-		}
-		return -1
-	}, slug)
-	for strings.Contains(slug, "--") {
-		slug = strings.ReplaceAll(slug, "--", "-")
-	}
-	slug = strings.Trim(slug, "-")
-	if len(slug) > 60 {
-		slug = strings.Trim(slug[:60], "-")
-	}
-	if slug == "" {
-		slug = "browser-recording"
-	}
-	suffix := recordingID
-	if len(suffix) > 12 {
-		suffix = suffix[len(suffix)-12:]
-	}
-	return slug + "-" + suffix + ".webm"
-}
-
-func (s *Server) browserRecording(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Accept-Ranges", "bytes")
-	w.Header().Set("Cache-Control", "no-store")
-	projectID := r.PathValue("id")
-	threadID := r.PathValue("threadId")
-	if !s.browserThreadExists(w, projectID, threadID) {
-		return
-	}
-	disposition := "attachment"
-	query := r.URL.Query()
-	if len(query) > 0 {
-		values, ok := query["disposition"]
-		if !ok || len(query) != 1 || len(values) != 1 || values[0] != "inline" {
-			writeError(w, http.StatusBadRequest, "Invalid browser recording request.")
-			return
-		}
-		disposition = "inline"
-	}
-	recordingID := r.PathValue("recordingId")
-	recording, err := s.browser.OpenRecordingRange(r.Context(), projectID, threadID, recordingID, r.Header.Get("Range"))
-	if err != nil {
-		var rangeError *browsercontrol.RecordingRangeError
-		if errors.As(err, &rangeError) {
-			w.Header().Set("Content-Range", "bytes */"+strconv.FormatInt(rangeError.Size, 10))
-			writeError(w, http.StatusRequestedRangeNotSatisfiable, "The requested browser recording range is not available.")
-			return
-		}
-		s.writeBrowserProviderError(w, err)
-		return
-	}
-	defer recording.Body.Close()
-	w.Header().Set("Content-Type", recording.MIMEType)
-	w.Header().Set("Content-Length", strconv.FormatInt(recording.Size, 10))
-	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{
-		"filename": recordingFilename(recording.Title, recordingID),
-	}))
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	status := http.StatusOK
-	if recording.Partial {
-		status = http.StatusPartialContent
-		w.Header().Set("Content-Range", "bytes "+strconv.FormatInt(recording.Start, 10)+"-"+strconv.FormatInt(recording.End, 10)+"/"+strconv.FormatInt(recording.TotalSize, 10))
-	}
-	w.WriteHeader(status)
-	_, _ = io.CopyN(w, recording.Body, recording.Size)
 }
 
 func (s *Server) browserStream(w http.ResponseWriter, r *http.Request) {
@@ -535,10 +450,6 @@ func (s *Server) writeBrowserProviderError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "Browser session not found.")
 	case errors.Is(err, browsercontrol.ErrPreviewNotReady):
 		writeError(w, http.StatusNotFound, "Browser preview is not ready.")
-	case errors.Is(err, browsercontrol.ErrRecordingNotFound):
-		writeError(w, http.StatusNotFound, "Browser recording not found.")
-	case errors.Is(err, browsercontrol.ErrRecordingRangeNotSatisfiable):
-		writeError(w, http.StatusRequestedRangeNotSatisfiable, "The requested browser recording range is not available.")
 	case errors.Is(err, browsercontrol.ErrProvider), errors.Is(err, browsercontrol.ErrRequestTooLarge):
 		writeError(w, http.StatusBadGateway, "Browser provider returned an error.")
 	default:

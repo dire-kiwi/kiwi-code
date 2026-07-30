@@ -69,10 +69,10 @@ test('preload falls back when only the other desktop channel generation is regis
     return 'fallback-result'
   })
 
-  assert.equal(await runtime.bridges.get('kiwiCodeDesktopBrowser').setBackendOrigin('http://127.0.0.1:4000'), 'fallback-result')
+  assert.equal(await runtime.bridges.get('kiwiCodeDesktopBrowser').setBounds({ projectId: 'p', threadId: 't' }), 'fallback-result')
   assert.deepEqual(invoked, [
-    'kiwi-code-desktop-browser:set-backend-origin',
-    'dire-mux-desktop-browser:set-backend-origin',
+    'kiwi-code-desktop-browser:set-bounds',
+    'dire-mux-desktop-browser:set-bounds',
   ])
 })
 

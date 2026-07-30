@@ -131,7 +131,6 @@ beforeEach(() => {
     profiles: ready([profile]),
     agentActivity: ready([]),
     threadUsage: ready([]),
-    processWebServers: ready([]),
     settings: ready({}),
   }
 })

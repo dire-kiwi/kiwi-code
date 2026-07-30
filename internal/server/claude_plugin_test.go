@@ -40,24 +40,18 @@ func TestClaudeBrowserMCPServer(t *testing.T) {
 	var mu sync.Mutex
 	requests := make([]browserRequest, 0, 14)
 	png := base64.StdEncoding.EncodeToString([]byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a})
-	recordingID := "rec-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	activeRecording := map[string]any{"id": recordingID, "state": "recording", "targetId": "page-1", "title": "Demonstrate example navigation", "startedAt": "2026-07-21T12:00:00.000Z", "idleTimeoutMs": 120_000, "idleDeadlineAt": "2026-07-21T12:02:00.000Z"}
-	completedRecording := map[string]any{"id": recordingID, "state": "completed", "targetId": "page-1", "title": "Demonstrate example navigation", "startedAt": "2026-07-21T12:00:00.000Z", "finishedAt": "2026-07-21T12:00:10.000Z", "durationMs": 10_000, "bytes": 1024, "mimeType": "video/webm;codecs=vp9", "filename": recordingID + ".webm"}
 	results := map[string]any{
-		"session.status":   map[string]any{"message": "Browser ready.", "status": map[string]any{"endpoint": "in-app", "owned": true, "pages": 1, "reachable": true}},
-		"recording.status": map[string]any{"recording": nil, "recordings": []any{}},
-		"recording.start":  activeRecording,
-		"recording.stop":   completedRecording,
-		"tabs.list":        map[string]any{"message": "One tab.", "pages": []any{map[string]any{"id": "page-1", "title": "Example", "url": "https://example.com/"}}},
-		"navigate.goto":    map[string]any{"action": "goto", "targetId": "page-1", "title": "Example", "url": "https://example.com/"},
-		"snapshot":         map[string]any{"includedNodes": 2, "omittedNodes": 0, "refs": 1, "targetId": "page-1", "title": "Example", "url": "https://example.com/", "text": "heading Example\nbutton Continue [ref=e1]"},
-		"click":            map[string]any{"clicked": "e1", "newTabs": []any{}, "targetId": "page-1", "title": "Example", "url": "https://example.com/"},
-		"fill":             map[string]any{"filled": "e2", "submitted": false, "targetId": "page-1", "textLength": 5, "title": "Example", "url": "https://example.com/"},
-		"key":              map[string]any{"chord": "Enter", "targetId": "page-1", "title": "Example", "url": "https://example.com/"},
-		"wait":             map[string]any{"elapsedMs": 10, "targetId": "page-1", "title": "Example", "url": "https://example.com/"},
-		"evaluate":         map[string]any{"result": "Example", "targetId": "page-1", "title": "Example", "url": "https://example.com/"},
-		"screenshot":       map[string]any{"data": png, "mimeType": "image/png", "targetId": "page-1", "title": "Example", "url": "https://example.com/"},
-		"cdp":              map[string]any{"method": "Network.enable", "result": map[string]any{}, "target": "page", "targetId": "page-1"},
+		"session.status": map[string]any{"message": "Browser ready.", "status": map[string]any{"endpoint": "in-app", "owned": true, "pages": 1, "reachable": true}},
+		"tabs.list":      map[string]any{"message": "One tab.", "pages": []any{map[string]any{"id": "page-1", "title": "Example", "url": "https://example.com/"}}},
+		"navigate.goto":  map[string]any{"action": "goto", "targetId": "page-1", "title": "Example", "url": "https://example.com/"},
+		"snapshot":       map[string]any{"includedNodes": 2, "omittedNodes": 0, "refs": 1, "targetId": "page-1", "title": "Example", "url": "https://example.com/", "text": "heading Example\nbutton Continue [ref=e1]"},
+		"click":          map[string]any{"clicked": "e1", "newTabs": []any{}, "targetId": "page-1", "title": "Example", "url": "https://example.com/"},
+		"fill":           map[string]any{"filled": "e2", "submitted": false, "targetId": "page-1", "textLength": 5, "title": "Example", "url": "https://example.com/"},
+		"key":            map[string]any{"chord": "Enter", "targetId": "page-1", "title": "Example", "url": "https://example.com/"},
+		"wait":           map[string]any{"elapsedMs": 10, "targetId": "page-1", "title": "Example", "url": "https://example.com/"},
+		"evaluate":       map[string]any{"result": "Example", "targetId": "page-1", "title": "Example", "url": "https://example.com/"},
+		"screenshot":     map[string]any{"data": png, "mimeType": "image/png", "targetId": "page-1", "title": "Example", "url": "https://example.com/"},
+		"cdp":            map[string]any{"method": "Network.enable", "result": map[string]any{}, "target": "page", "targetId": "page-1"},
 	}
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/browser/actions" {
@@ -160,8 +154,8 @@ func TestClaudeBrowserMCPServer(t *testing.T) {
 	}
 	listed := roundTrip("tools/list", map[string]any{})
 	listedTools, ok := listed["tools"].([]any)
-	if !ok || len(listedTools) != 12 {
-		t.Fatalf("MCP tools = %#v, want 12", listed["tools"])
+	if !ok || len(listedTools) != 11 {
+		t.Fatalf("MCP tools = %#v, want 11", listed["tools"])
 	}
 	toolNames := make([]string, 0, len(listedTools))
 	for _, value := range listedTools {
@@ -182,9 +176,6 @@ func TestClaudeBrowserMCPServer(t *testing.T) {
 		operation string
 	}{
 		{name: "browser_session", arguments: map[string]any{"action": "status"}, operation: "session.status"},
-		{name: "browser_recording", arguments: map[string]any{"action": "status"}, operation: "recording.status"},
-		{name: "browser_recording", arguments: map[string]any{"action": "start", "targetId": "page-1", "title": "Demonstrate example navigation", "idleTimeoutSeconds": 120}, operation: "recording.start"},
-		{name: "browser_recording", arguments: map[string]any{"action": "stop", "recordingId": recordingID}, operation: "recording.stop"},
 		{name: "browser_tabs", arguments: map[string]any{"action": "list"}, operation: "tabs.list"},
 		{name: "browser_navigate", arguments: map[string]any{"action": "goto", "url": "https://example.com"}, operation: "navigate.goto"},
 		{name: "browser_snapshot", arguments: map[string]any{}, operation: "snapshot"},
@@ -215,12 +206,6 @@ func TestClaudeBrowserMCPServer(t *testing.T) {
 	if invalid["isError"] != true {
 		t.Fatalf("invalid MCP tool result = %#v, want tool error", invalid)
 	}
-	invalidRecording := roundTrip("tools/call", map[string]any{
-		"name": "browser_recording", "arguments": map[string]any{"action": "stop"},
-	})
-	if invalidRecording["isError"] != true {
-		t.Fatalf("invalid recording MCP result = %#v, want tool error", invalidRecording)
-	}
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -239,17 +224,11 @@ func TestClaudeBrowserMCPServer(t *testing.T) {
 	if requestByOperation["navigate.goto"].Params["url"] != "https://example.com" {
 		t.Fatalf("navigate params = %#v", requestByOperation["navigate.goto"].Params)
 	}
-	if requestByOperation["recording.start"].Params["title"] != "Demonstrate example navigation" || requestByOperation["recording.start"].Params["idleTimeoutMs"] != float64(120_000) {
-		t.Fatalf("recording start params = %#v", requestByOperation["recording.start"].Params)
-	}
-	if requestByOperation["recording.stop"].Params["recordingId"] != recordingID {
-		t.Fatalf("recording stop params = %#v", requestByOperation["recording.stop"].Params)
-	}
 	if requestByOperation["cdp"].Params["target"] != "page" {
 		t.Fatalf("CDP params = %#v", requestByOperation["cdp"].Params)
 	}
 	if !slices.Equal(toolNames, []string{
-		"browser_session", "browser_recording", "browser_tabs", "browser_navigate", "browser_snapshot", "browser_click",
+		"browser_session", "browser_tabs", "browser_navigate", "browser_snapshot", "browser_click",
 		"browser_fill", "browser_key", "browser_wait", "browser_evaluate", "browser_screenshot", "browser_cdp",
 	}) {
 		t.Fatalf("browser MCP tool names = %#v", toolNames)

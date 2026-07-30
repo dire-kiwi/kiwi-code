@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"math"
 	"strings"
 	"time"
 
@@ -15,7 +14,6 @@ import (
 const (
 	browserStateReconcileInterval = 5 * time.Second
 	maxBrowserStatePages          = 128
-	maxBrowserStateRecordings     = 512
 	maxBrowserStateIDBytes        = 512
 	maxBrowserStateTitleBytes     = 4 << 10
 	maxBrowserStateURLBytes       = 64 << 10
@@ -26,7 +24,6 @@ type browserStateCapabilities struct {
 	NativeView        *bool `json:"nativeView,omitempty"`
 	InteractiveStream *bool `json:"interactiveStream,omitempty"`
 	Preview           *bool `json:"preview,omitempty"`
-	Recording         *bool `json:"recording,omitempty"`
 }
 
 type browserStatePage struct {
@@ -44,21 +41,6 @@ type browserStateCurrentPage struct {
 	Loading      *bool  `json:"loading,omitempty"`
 }
 
-type browserStateRecording struct {
-	ID             string   `json:"id"`
-	State          string   `json:"state"`
-	TargetID       string   `json:"targetId"`
-	Title          string   `json:"title"`
-	StartedAt      string   `json:"startedAt"`
-	FinishedAt     string   `json:"finishedAt,omitempty"`
-	DurationMS     *float64 `json:"durationMs,omitempty"`
-	Bytes          *float64 `json:"bytes,omitempty"`
-	MIMEType       string   `json:"mimeType,omitempty"`
-	Filename       string   `json:"filename,omitempty"`
-	IdleTimeoutMS  *float64 `json:"idleTimeoutMs,omitempty"`
-	IdleDeadlineAt string   `json:"idleDeadlineAt,omitempty"`
-}
-
 type browserStateSnapshot struct {
 	Backend         string                   `json:"backend"`
 	Presentation    string                   `json:"presentation"`
@@ -68,16 +50,11 @@ type browserStateSnapshot struct {
 	Pages           []browserStatePage       `json:"pages"`
 	CurrentTargetID *string                  `json:"currentTargetId"`
 	Current         *browserStateCurrentPage `json:"current,omitempty"`
-	Recording       *browserStateRecording   `json:"recording"`
-	Recordings      []browserStateRecording  `json:"recordings"`
 	Error           string                   `json:"error,omitempty"`
 }
 
 func emptyBrowserStateSnapshot() browserStateSnapshot {
-	return browserStateSnapshot{
-		Pages:      make([]browserStatePage, 0),
-		Recordings: make([]browserStateRecording, 0),
-	}
+	return browserStateSnapshot{Pages: make([]browserStatePage, 0)}
 }
 
 func (s *Server) openBrowserStatusTopic(
@@ -89,21 +66,6 @@ func (s *Server) openBrowserStatusTopic(
 ) error {
 	return s.openBrowserStateTopic(ctx, projectID, threadID, protectedOrigins, channel, func(snapshot browserStateSnapshot) any {
 		return snapshot
-	})
-}
-
-// browser.recordings remains a protocol-v1 compatibility alias. New clients
-// consume recordings from browser.status, while both views share one status
-// notification source and provider read.
-func (s *Server) openBrowserRecordingsTopic(
-	ctx context.Context,
-	projectID string,
-	threadID string,
-	protectedOrigins []string,
-	channel *stateChannel,
-) error {
-	return s.openBrowserStateTopic(ctx, projectID, threadID, protectedOrigins, channel, func(snapshot browserStateSnapshot) any {
-		return browserStateRecordingList(snapshot)
 	})
 }
 
@@ -165,23 +127,6 @@ func (s *Server) openBrowserStateTopic(
 	}
 }
 
-func browserStateRecordingList(snapshot browserStateSnapshot) []browserStateRecording {
-	result := make([]browserStateRecording, 0, len(snapshot.Recordings)+1)
-	seen := make(map[string]struct{}, len(snapshot.Recordings)+1)
-	if snapshot.Recording != nil {
-		result = append(result, *snapshot.Recording)
-		seen[snapshot.Recording.ID] = struct{}{}
-	}
-	for _, recording := range snapshot.Recordings {
-		if _, exists := seen[recording.ID]; exists {
-			continue
-		}
-		seen[recording.ID] = struct{}{}
-		result = append(result, recording)
-	}
-	return result
-}
-
 func (s *Server) readBrowserStateSnapshot(
 	ctx context.Context,
 	projectID string,
@@ -239,7 +184,6 @@ func normalizeBrowserStateSnapshot(raw json.RawMessage) browserStateSnapshot {
 		NativeView:        browserStateBool(capabilities["nativeView"]),
 		InteractiveStream: browserStateBool(capabilities["interactiveStream"]),
 		Preview:           browserStateBool(capabilities["preview"]),
-		Recording:         browserStateBool(capabilities["recording"]),
 	}
 	snapshot.Reachable = browserStateBool(result["reachable"])
 	if snapshot.Reachable == nil {
@@ -291,25 +235,6 @@ func normalizeBrowserStateSnapshot(raw json.RawMessage) browserStateSnapshot {
 		}
 	}
 
-	if recording, valid := normalizeBrowserStateRecording(result["recording"]); valid {
-		snapshot.Recording = &recording
-	}
-	recordingValues, _ := browserStateArray(result["recordings"])
-	seenRecordings := make(map[string]struct{}, len(recordingValues))
-	for _, value := range recordingValues {
-		if len(snapshot.Recordings) >= maxBrowserStateRecordings {
-			break
-		}
-		recording, valid := normalizeBrowserStateRecording(value)
-		if !valid {
-			continue
-		}
-		if _, exists := seenRecordings[recording.ID]; exists {
-			continue
-		}
-		seenRecordings[recording.ID] = struct{}{}
-		snapshot.Recordings = append(snapshot.Recordings, recording)
-	}
 	return snapshot
 }
 
@@ -343,44 +268,6 @@ func normalizeBrowserStateCurrentPage(raw json.RawMessage) (browserStateCurrentP
 		CanGoBack:    browserStateBool(value["canGoBack"]),
 		CanGoForward: browserStateBool(value["canGoForward"]),
 		Loading:      browserStateBool(value["loading"]),
-	}, true
-}
-
-func normalizeBrowserStateRecording(raw json.RawMessage) (browserStateRecording, bool) {
-	value, ok := browserStateObject(raw)
-	if !ok {
-		return browserStateRecording{}, false
-	}
-	id, idOK := browserStateString(value["id"], maxBrowserStateIDBytes)
-	state, stateOK := browserStateString(value["state"], maxBrowserStateMetadataBytes)
-	targetID, targetOK := browserStateString(value["targetId"], maxBrowserStateIDBytes)
-	title, titleOK := browserStateString(value["title"], maxBrowserStateTitleBytes)
-	startedAt, startedOK := browserStateString(value["startedAt"], maxBrowserStateMetadataBytes)
-	if !idOK || strings.TrimSpace(id) == "" || !stateOK || !targetOK || !titleOK || !startedOK {
-		return browserStateRecording{}, false
-	}
-	switch state {
-	case "starting", "recording", "finalizing", "completed":
-	default:
-		return browserStateRecording{}, false
-	}
-	finishedAt, _ := browserStateString(value["finishedAt"], maxBrowserStateMetadataBytes)
-	mimeType, _ := browserStateString(value["mimeType"], maxBrowserStateMetadataBytes)
-	filename, _ := browserStateString(value["filename"], maxBrowserStateMetadataBytes)
-	idleDeadlineAt, _ := browserStateString(value["idleDeadlineAt"], maxBrowserStateMetadataBytes)
-	return browserStateRecording{
-		ID:             id,
-		State:          state,
-		TargetID:       targetID,
-		Title:          title,
-		StartedAt:      startedAt,
-		FinishedAt:     finishedAt,
-		DurationMS:     browserStateNonNegativeNumber(value["durationMs"]),
-		Bytes:          browserStateNonNegativeNumber(value["bytes"]),
-		MIMEType:       mimeType,
-		Filename:       filename,
-		IdleTimeoutMS:  browserStateNonNegativeNumber(value["idleTimeoutMs"]),
-		IdleDeadlineAt: idleDeadlineAt,
 	}, true
 }
 
@@ -428,17 +315,6 @@ func browserStateBool(raw json.RawMessage) *bool {
 	return &value
 }
 
-func browserStateNonNegativeNumber(raw json.RawMessage) *float64 {
-	if len(raw) == 0 {
-		return nil
-	}
-	var value float64
-	if json.Unmarshal(raw, &value) != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
-		return nil
-	}
-	return &value
-}
-
 func browserStateErrorMessage(err error) string {
 	if code, ok := browsercontrol.OperationErrorCode(err); ok {
 		if response, known := browserProviderErrorResponses[code]; known {
@@ -450,10 +326,6 @@ func browserStateErrorMessage(err error) string {
 		return "Browser session not found."
 	case errors.Is(err, browsercontrol.ErrPreviewNotReady):
 		return "Browser preview is not ready."
-	case errors.Is(err, browsercontrol.ErrRecordingNotFound):
-		return "Browser recording not found."
-	case errors.Is(err, browsercontrol.ErrRecordingRangeNotSatisfiable):
-		return "The requested browser recording range is not available."
 	case errors.Is(err, browsercontrol.ErrProvider), errors.Is(err, browsercontrol.ErrRequestTooLarge):
 		return "Browser provider returned an error."
 	default:

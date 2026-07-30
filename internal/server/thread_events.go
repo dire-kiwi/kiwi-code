@@ -37,16 +37,11 @@ type threadStatusSnapshot struct {
 // outside Kiwi Code are handled by a separate repository reconciliation.
 func (s *Server) notifyThreadStatusChanged(projectID, threadID string) {
 	s.notifyStateChanged(stateTopicThreadStatus, projectID, threadID)
-	// Keep the global sidebar projection cached per thread. The topic still has
-	// one latest-state wakeup, while the durable dirty set prevents a burst from
-	// losing which thread projections need to be refreshed.
-	s.processWebServerCache.markDirty(threadStatusKey{projectID: projectID, threadID: threadID})
-	s.notifyStateChanged(stateTopicProcessWebServers, "", "")
 }
 
 func (s *Server) readThreadStatusSnapshot(ctx context.Context, item project.Project, thread project.Thread) threadStatusSnapshot {
 	if s.terminal != nil {
-		s.terminal.yieldToInteractiveTerminalSetup(ctx, processProjectionInteractiveYieldLimit)
+		s.terminal.yieldToInteractiveTerminalSetup(ctx, interactiveTerminalSetupYieldLimit)
 	}
 	snapshot := threadStatusSnapshot{
 		ContextStatuses: s.contextStatuses.forThread(item.ID, thread.ID),

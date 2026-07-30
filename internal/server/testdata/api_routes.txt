@@ -14,7 +14,6 @@ GET /api/projects/{id}/git/branches
 GET /api/projects/{id}/threads/{threadId}
 GET /api/projects/{id}/threads/{threadId}/browser
 GET /api/projects/{id}/threads/{threadId}/browser/frame
-GET /api/projects/{id}/threads/{threadId}/browser/recordings/{recordingId}
 GET /api/projects/{id}/threads/{threadId}/browser/stream
 GET /api/projects/{id}/threads/{threadId}/budget
 GET /api/projects/{id}/threads/{threadId}/claude/native
@@ -36,7 +35,6 @@ GET /api/tmux/sessions
 GET /api/tmux/terminal
 PATCH /api/projects/{id}
 PATCH /api/projects/{id}/threads/{threadId}
-PATCH /api/projects/{id}/threads/{threadId}/processes/{processId}
 POST /api/profiles
 POST /api/projects
 POST /api/projects/{id}/pi/images

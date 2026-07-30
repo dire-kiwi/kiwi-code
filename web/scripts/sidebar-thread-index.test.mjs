@@ -4,12 +4,11 @@ import { createSidebarThreadIndex, createThreadTreeIndex } from '../src/sidebar-
 
 test('thread index keeps every thread at the top level in source order', () => {
   const threads = [
-    { id: 'a', bookmarked: true },
+    { id: 'a' },
     { id: 'b' },
   ]
   const tree = createThreadTreeIndex(threads)
   assert.deepEqual(tree.roots.map((thread) => thread.id), ['a', 'b'])
-  assert.deepEqual(tree.bookmarkedPathIds(), ['a'])
 })
 
 test('sidebar index keeps activity on its owning thread', () => {

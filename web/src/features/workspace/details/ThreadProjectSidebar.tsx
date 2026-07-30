@@ -21,14 +21,6 @@ import type { Project, Thread, ThreadUsageSnapshot } from '@/types'
 import { Button, GhostButton, IconButton, PrimaryButton } from '@/ui/buttons'
 import { TextInput } from '@/ui/inputs'
 import { ThreadUsageLimits } from './ThreadUsageLimits'
-import { ThreadRecordingsPanel } from './ThreadRecordingsPanel'
-
-type SidebarTab = 'thread' | 'recordings'
-
-const sidebarTabs: ReadonlyArray<{ id: SidebarTab; label: string }> = [
-  { id: 'thread', label: 'Thread' },
-  { id: 'recordings', label: 'Recordings' },
-]
 
 type ThreadProjectSidebarProps = {
   project: Project
@@ -48,8 +40,6 @@ export function ThreadProjectSidebar({
   onThreadUpdated,
 }: ThreadProjectSidebarProps) {
   const inputRef = useRef<HTMLInputElement>(null)
-  const tabRefs = useRef<Partial<Record<SidebarTab, HTMLButtonElement | null>>>({})
-  const [tab, setTab] = useState<SidebarTab>('thread')
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(thread.title)
   const [saving, setSaving] = useState(false)
@@ -67,10 +57,10 @@ export function ThreadProjectSidebar({
   }, [thread.id, thread.titleLocked])
 
   useEffect(() => {
-    if (!editing || !expanded || tab !== 'thread') return
+    if (!editing || !expanded) return
     const frame = requestAnimationFrame(() => inputRef.current?.select())
     return () => cancelAnimationFrame(frame)
-  }, [editing, expanded, tab])
+  }, [editing, expanded])
 
   function beginEditing() {
     if (thread.titleLocked) return
@@ -131,20 +121,6 @@ export function ThreadProjectSidebar({
     }
   }
 
-  function handleTabListKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-    event.preventDefault()
-    const index = sidebarTabs.findIndex((candidate) => candidate.id === tab)
-    const nextIndex = event.key === 'ArrowLeft'
-      ? (index + sidebarTabs.length - 1) % sidebarTabs.length
-      : event.key === 'ArrowRight'
-        ? (index + 1) % sidebarTabs.length
-        : event.key === 'Home' ? 0 : sidebarTabs.length - 1
-    const next = sidebarTabs[nextIndex]!
-    setTab(next.id)
-    tabRefs.current[next.id]?.focus()
-  }
-
   const sectionDivider = <div className="my-5 h-px bg-ghost-border/55" />
 
   return (
@@ -201,45 +177,8 @@ export function ThreadProjectSidebar({
 
         {expanded && (
           <div id="thread-project-details" className="flex min-h-0 w-[19rem] flex-1 flex-col">
-            <div
-              role="tablist"
-              aria-label="Thread detail sections"
-              className="mx-3 mt-3 flex shrink-0 gap-1 rounded-lg bg-ghost-black/40 p-1"
-              onKeyDown={handleTabListKeyDown}
-            >
-              {sidebarTabs.map(({ id, label }) => {
-                const selected = tab === id
-                return (
-                  <button
-                    key={id}
-                    ref={(node) => { tabRefs.current[id] = node }}
-                    type="button"
-                    role="tab"
-                    id={`sidebar-tab-${id}`}
-                    aria-selected={selected}
-                    aria-controls={`sidebar-panel-${id}`}
-                    tabIndex={selected ? 0 : -1}
-                    onClick={() => setTab(id)}
-                    className={`relative flex-1 rounded-md px-2 py-1.5 font-mono text-[9px] font-semibold uppercase tracking-[0.08em] transition ${
-                      selected
-                        ? 'bg-ghost-raised text-ghost-bright-white'
-                        : 'text-ghost-dim hover:text-ghost-bright-white'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                )
-              })}
-            </div>
-
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <div
-                role="tabpanel"
-                id="sidebar-panel-thread"
-                aria-labelledby="sidebar-tab-thread"
-                hidden={tab !== 'thread'}
-                className="px-4 py-4"
-              >
+              <div className="px-4 py-4">
                 <section>
                   <div className="flex items-center justify-between gap-2">
                     <p className="font-mono text-[8px] font-semibold uppercase tracking-[0.16em] text-ghost-faint">
@@ -377,20 +316,6 @@ export function ThreadProjectSidebar({
                   thread={thread}
                   usage={usage}
                   onThreadUpdated={onThreadUpdated}
-                />
-              </div>
-
-              <div
-                role="tabpanel"
-                id="sidebar-panel-recordings"
-                aria-labelledby="sidebar-tab-recordings"
-                hidden={tab !== 'recordings'}
-                className="px-4 py-4"
-              >
-                <ThreadRecordingsPanel
-                  projectId={project.id}
-                  threadId={thread.id}
-                  active={tab === 'recordings'}
                 />
               </div>
 

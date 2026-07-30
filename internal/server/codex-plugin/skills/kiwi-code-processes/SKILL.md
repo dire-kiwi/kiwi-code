@@ -20,7 +20,7 @@ The file locator shown for this skill ends in `/skills/kiwi-code-processes/SKILL
 - Give each process a short descriptive name and run its managed command in the foreground.
 - Keep the returned process ID; later operations use it rather than a tmux index.
 - Read bounded output and avoid tight polling.
-- After a web server is ready, publish every browser-reachable URL. Stop processes no longer needed unless the user asks to keep them.
+- Stop processes no longer needed unless the user asks to keep them.
 
 ## Start and inspect
 
@@ -31,15 +31,6 @@ node "<plugin-root>/skills/kiwi-code-processes/scripts/read-logs.mjs" <id> 200
 ```
 
 The start command prints JSON with the process `id`. The optional log line count defaults to 200.
-
-## Publish web URLs
-
-```bash
-node "<plugin-root>/skills/kiwi-code-processes/scripts/update-process.mjs" <id> http://127.0.0.1:5173
-node "<plugin-root>/skills/kiwi-code-processes/scripts/update-process.mjs" <id> --clear
-```
-
-Pass multiple URLs as additional arguments. Prefer `127.0.0.1` over a wildcard bind address.
 
 ## Input, interrupt, and stop
 

@@ -509,7 +509,7 @@ func TestSeparateStaleStoresMergeDifferentThreadFields(t *testing.T) {
 	if _, err := first.UpdateThreadTitle(item.ID, threadID, "Renamed by first Store", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := second.SetThreadBookmarked(item.ID, threadID, true); err != nil {
+	if _, err := second.SetThreadTitleLocked(item.ID, threadID, true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -517,7 +517,7 @@ func TestSeparateStaleStoresMergeDifferentThreadFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if persisted.Title != "Renamed by first Store" || !persisted.Bookmarked {
+	if persisted.Title != "Renamed by first Store" || !persisted.TitleLocked {
 		t.Fatalf("stale Store mutation lost a different thread field: %#v", persisted)
 	}
 }
@@ -1195,99 +1195,6 @@ func TestStoreAddsNewRootThreadsAtTop(t *testing.T) {
 		if persisted.Threads[index].ID != threadID {
 			t.Fatalf("persisted thread order = %#v, want newest roots first", persisted.Threads)
 		}
-	}
-}
-
-func TestStoreBookmarksThreadsWithoutReordering(t *testing.T) {
-	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
-	store, err := NewStore(dataFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	item, err := store.Add("Demo", t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := store.AddThread(item.ID, "Second")
-	if err != nil {
-		t.Fatal(err)
-	}
-	third, err := store.AddThread(item.ID, "Third")
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantOrder := []string{third.ID, second.ID, item.Threads[0].ID}
-
-	updates, unsubscribe := store.SubscribeChanges()
-	defer unsubscribe()
-	bookmarked, err := store.SetThreadBookmarked(item.ID, second.ID, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bookmarked.Bookmarked {
-		t.Fatalf("bookmarked thread = %#v", bookmarked)
-	}
-	if snapshot := readProjectSnapshot(t, updates); !snapshot[0].Threads[1].Bookmarked {
-		t.Fatalf("bookmark snapshot = %#v", snapshot)
-	}
-	persisted, err := store.Get(item.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for index, threadID := range wantOrder {
-		if persisted.Threads[index].ID != threadID {
-			t.Fatalf("bookmark changed thread order: %#v", persisted.Threads)
-		}
-	}
-
-	if _, err := store.SetThreadBookmarked(item.ID, second.ID, true); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case snapshot := <-updates:
-		t.Fatalf("idempotent bookmark published a snapshot: %#v", snapshot)
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	archived, err := store.SetThreadArchived(item.ID, second.ID, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !archived.Bookmarked {
-		t.Fatalf("archive cleared bookmark: %#v", archived)
-	}
-	restored, err := store.SetThreadArchived(item.ID, second.ID, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !restored.Bookmarked {
-		t.Fatalf("restore cleared bookmark: %#v", restored)
-	}
-
-	reloaded, err := NewStore(dataFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, reloadedThread, err := reloaded.GetThread(item.ID, second.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reloadedThread.Bookmarked {
-		t.Fatalf("bookmark was not persisted: %#v", reloadedThread)
-	}
-	if _, err := reloaded.SetThreadBookmarked(item.ID, second.ID, false); err != nil {
-		t.Fatal(err)
-	}
-	cleared, err := NewStore(dataFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, clearedThread, err := cleared.GetThread(item.ID, second.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if clearedThread.Bookmarked {
-		t.Fatalf("cleared bookmark was persisted as true: %#v", clearedThread)
 	}
 }
 

@@ -52,6 +52,9 @@ func materializeClaudePlugin(dataDirectory string) (string, error) {
 			return "", err
 		}
 	}
+	if err := removeRetiredProcessUpdateHelper(filepath.Join(root, "skills", agentSkillName)); err != nil {
+		return "", fmt.Errorf("remove retired Claude process helper: %w", err)
+	}
 	return root, nil
 }
 

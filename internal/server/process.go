@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"unicode"
@@ -18,16 +17,13 @@ import (
 )
 
 const (
-	maxProcessNameRunes      = 80
-	maxProcessCommand        = 32 << 10
-	maxProcessInput          = 32 << 10
-	maxProcessLogLines       = 5000
-	maxProcessWebServers     = 16
-	maxProcessWebServerBytes = 2048
+	maxProcessNameRunes = 80
+	maxProcessCommand   = 32 << 10
+	maxProcessInput     = 32 << 10
+	maxProcessLogLines  = 5000
 
-	tmuxProcessWebServersOption = "@kiwi-code-web-servers"
-	tmuxProcessActionConfirmed  = "kiwi-code-process-action-confirmed"
-	tmuxProcessActionRejected   = "kiwi-code-process-action-rejected"
+	tmuxProcessActionConfirmed = "kiwi-code-process-action-confirmed"
+	tmuxProcessActionRejected  = "kiwi-code-process-action-rejected"
 )
 
 var (
@@ -36,13 +32,12 @@ var (
 )
 
 type processWindow struct {
-	ID             string   `json:"id"`
-	Index          int      `json:"index"`
-	Name           string   `json:"name"`
-	CurrentCommand string   `json:"currentCommand"`
-	WebServers     []string `json:"webServers"`
-	TmuxID         string   `json:"-"`
-	TmuxServerPID  string   `json:"-"`
+	ID             string `json:"id"`
+	Index          int    `json:"index"`
+	Name           string `json:"name"`
+	CurrentCommand string `json:"currentCommand"`
+	TmuxID         string `json:"-"`
+	TmuxServerPID  string `json:"-"`
 }
 
 func (h *terminalHandler) listProcesses(w http.ResponseWriter, r *http.Request) {
@@ -74,13 +69,7 @@ func (h *terminalHandler) createProcess(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	window, err := h.newProcessWindowForRequest(
-		item,
-		thread,
-		input.Name,
-		input.Command,
-		threadEndpointURL(r, item.ID, thread.ID),
-	)
+	window, err := h.newProcessWindow(item, thread, input.Name, input.Command)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -88,51 +77,6 @@ func (h *terminalHandler) createProcess(w http.ResponseWriter, r *http.Request) 
 	h.wakeThreadTmuxWatchers(item.ID, thread.ID)
 	h.notifyThreadStatusChanged(item.ID, thread.ID)
 	writeJSON(w, http.StatusCreated, window)
-}
-
-func (h *terminalHandler) updateProcess(w http.ResponseWriter, r *http.Request) {
-	item, thread, ok := h.tmuxThread(w, r)
-	if !ok {
-		return
-	}
-	var input struct {
-		WebServers *[]string `json:"webServers"`
-	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxProcessWebServers*maxProcessWebServerBytes+4096))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil || input.WebServers == nil {
-		writeError(w, http.StatusBadRequest, "Invalid process details.")
-		return
-	}
-	webServers, err := normalizeProcessWebServers(*input.WebServers)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	window, target, found, err := h.processForRequest(item, thread, r.PathValue("processId"))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not update the process.")
-		return
-	}
-	if !found {
-		writeError(w, http.StatusNotFound, "Process not found.")
-		return
-	}
-	encoded, err := json.Marshal(webServers)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not update the process.")
-		return
-	}
-	if _, err := h.tmuxProcessCommand(
-		target,
-		"set-option", "-w", "-t", target.ID, tmuxProcessWebServersOption, string(encoded),
-	); err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not update the process.")
-		return
-	}
-	window.WebServers = webServers
-	h.notifyThreadStatusChanged(item.ID, thread.ID)
-	writeJSON(w, http.StatusOK, window)
 }
 
 func (h *terminalHandler) processLogs(w http.ResponseWriter, r *http.Request) {
@@ -280,17 +224,7 @@ func (h *terminalHandler) processForRequest(item project.Project, thread project
 }
 
 func (h *terminalHandler) newProcessWindow(item project.Project, thread project.Thread, rawName, rawCommand string) (result processWindow, err error) {
-	return h.newProcessWindowWithEnvironment(item, thread, rawName, rawCommand, nil, false, "")
-}
-
-func (h *terminalHandler) newProcessWindowForRequest(
-	item project.Project,
-	thread project.Thread,
-	rawName string,
-	rawCommand string,
-	threadEndpoint string,
-) (result processWindow, err error) {
-	return h.newProcessWindowWithEnvironment(item, thread, rawName, rawCommand, nil, false, threadEndpoint)
+	return h.newProcessWindowWithEnvironment(item, thread, rawName, rawCommand, nil, false)
 }
 
 func (h *terminalHandler) newEnvironmentActionProcess(
@@ -299,9 +233,8 @@ func (h *terminalHandler) newEnvironmentActionProcess(
 	rawName string,
 	rawCommand string,
 	variables []project.EnvironmentVariable,
-	threadEndpoint string,
 ) (processWindow, error) {
-	return h.newProcessWindowWithEnvironment(item, thread, rawName, rawCommand, variables, true, threadEndpoint)
+	return h.newProcessWindowWithEnvironment(item, thread, rawName, rawCommand, variables, true)
 }
 
 func (h *terminalHandler) newProcessWindowWithEnvironment(
@@ -311,7 +244,6 @@ func (h *terminalHandler) newProcessWindowWithEnvironment(
 	rawCommand string,
 	variables []project.EnvironmentVariable,
 	uniqueName bool,
-	threadEndpoint string,
 ) (result processWindow, err error) {
 	name, err := normalizeProcessName(rawName)
 	if err != nil {
@@ -419,11 +351,7 @@ func (h *terminalHandler) newProcessWindowWithEnvironment(
 		cleanup()
 		return processWindow{}, err
 	}
-	callbackURL := ""
-	if threadEndpoint != "" {
-		callbackURL = strings.TrimRight(threadEndpoint, "/") + "/processes/" + url.PathEscape(processID)
-	}
-	if err := h.sendTmuxInput(target, h.processCommandWithWebServerCleanup(commandText, callbackURL), true); err != nil {
+	if err := h.sendTmuxInput(target, commandText, true); err != nil {
 		cleanup()
 		return processWindow{}, err
 	}
@@ -438,49 +366,6 @@ func (h *terminalHandler) newProcessWindowWithEnvironment(
 		return processWindow{}, errors.New("created process window was not found")
 	}
 	return window, nil
-}
-
-func (h *terminalHandler) processCommandWithWebServerCleanup(commandText, callbackURL string) string {
-	// The login shell intentionally remains available for final logs and follow-up
-	// input. Clear published links as soon as its foreground command returns,
-	// then best-effort notify the backend so the global sidebar can refresh
-	// without a persistent tmux control client for this process.
-	command := commandText + "\n" +
-		"__kiwi_code_status=$?\n" +
-		shellQuote(h.tmuxPath) + " set-option -w -t \"$TMUX_PANE\" " + tmuxProcessWebServersOption + " '[]'\n"
-	if h.curlPath != "" && callbackURL != "" {
-		command += shellQuote(h.curlPath) +
-			" --connect-timeout 0.2 --max-time 1 -fsS" +
-			" -X PATCH -H 'Content-Type: application/json'" +
-			" --data '{\"webServers\":[]}' " + shellQuote(callbackURL) +
-			" >/dev/null 2>&1 || :\n"
-	}
-	return command + "(exit \"$__kiwi_code_status\")"
-}
-
-func normalizeProcessWebServers(values []string) ([]string, error) {
-	if len(values) > maxProcessWebServers {
-		return nil, fmt.Errorf("a process can publish at most %d web servers", maxProcessWebServers)
-	}
-	result := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" || len(value) > maxProcessWebServerBytes {
-			return nil, errors.New("web server URLs must be non-empty and 2048 bytes or fewer")
-		}
-		parsed, err := url.Parse(value)
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.Hostname() == "" || parsed.User != nil {
-			return nil, fmt.Errorf("invalid web server URL %q; use an http:// or https:// URL without credentials", value)
-		}
-		normalized := parsed.String()
-		if _, exists := seen[normalized]; exists {
-			continue
-		}
-		seen[normalized] = struct{}{}
-		result = append(result, normalized)
-	}
-	return result, nil
 }
 
 func normalizeProcessName(value string) (string, error) {
@@ -513,7 +398,6 @@ func (h *terminalHandler) configureProcessWindow(sessionName string, target tmux
 		{"remain-on-exit", "off"},
 		{"automatic-rename", "off"},
 		{"allow-rename", "off"},
-		{tmuxProcessWebServersOption, "[]"},
 		// Publish the process discriminator last. Readers ignore windows without
 		// it, so they cannot observe a process window before its identity exists.
 		{"@kiwi-code-process-id", processID},
@@ -669,7 +553,7 @@ func (h *terminalHandler) tmuxProcessWindowsContext(ctx context.Context, session
 		ctx,
 		"list-windows",
 		"-t", exactTmuxSessionTarget(sessionName),
-		"-F", "#{window_index}\t#{window_id}\t#{window_name}\t#{@kiwi-code-tool}\t#{@kiwi-code-process-id}\t#{pane_current_command}\t#{@kiwi-code-web-servers}\t#{pid}",
+		"-F", "#{window_index}\t#{window_id}\t#{window_name}\t#{@kiwi-code-tool}\t#{@kiwi-code-process-id}\t#{pane_current_command}\t#{pid}",
 	).CombinedOutput()
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -693,8 +577,8 @@ func parseProcessWindows(output []byte) ([]processWindow, error) {
 	lines := strings.FieldsFunc(string(output), func(r rune) bool { return r == '\n' || r == '\r' })
 	windows := make([]processWindow, 0, len(lines))
 	for _, line := range lines {
-		parts := strings.SplitN(line, "\t", 8)
-		if len(parts) != 8 {
+		parts := strings.SplitN(line, "\t", 7)
+		if len(parts) != 7 {
 			return nil, fmt.Errorf("parse process window: %q", line)
 		}
 		if parts[3] != "process" || parts[4] == "" {
@@ -704,28 +588,17 @@ func parseProcessWindows(output []byte) ([]processWindow, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parse process window index: %w", err)
 		}
-		webServers := []string{}
-		if parts[6] != "" {
-			if err := json.Unmarshal([]byte(parts[6]), &webServers); err != nil {
-				return nil, fmt.Errorf("parse process web servers: %w", err)
-			}
-			webServers, err = normalizeProcessWebServers(webServers)
-			if err != nil {
-				return nil, fmt.Errorf("parse process web servers: %w", err)
-			}
-		}
-		serverPID, err := strconv.Atoi(parts[7])
+		serverPID, err := strconv.Atoi(parts[6])
 		if err != nil || serverPID <= 0 {
-			return nil, fmt.Errorf("parse process tmux server pid: %q", parts[7])
+			return nil, fmt.Errorf("parse process tmux server pid: %q", parts[6])
 		}
 		windows = append(windows, processWindow{
 			ID:             parts[4],
 			Index:          index,
 			Name:           parts[2],
 			CurrentCommand: parts[5],
-			WebServers:     webServers,
 			TmuxID:         parts[1],
-			TmuxServerPID:  parts[7],
+			TmuxServerPID:  parts[6],
 		})
 	}
 	return windows, nil

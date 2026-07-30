@@ -22,10 +22,6 @@ export function createThreadTreeIndex(threads) {
     }
     return ordered
   }
-  const bookmarkedPathIds = () => threads
-    .filter((thread) => thread.bookmarked)
-    .map((thread) => thread.id)
-
   return {
     threads,
     byId,
@@ -33,7 +29,6 @@ export function createThreadTreeIndex(threads) {
     rootId,
     activityDisplayThread,
     orderedTreeIds,
-    bookmarkedPathIds,
   }
 }
 

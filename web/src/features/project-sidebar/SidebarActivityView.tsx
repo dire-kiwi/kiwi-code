@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Bookmark, Folder, Inbox, LoaderCircle, Plus, Search } from 'lucide-react'
+import { Folder, Inbox, LoaderCircle, Plus } from 'lucide-react'
 import { useMatch } from 'react-router-dom'
 import { WORKSPACE_ROUTE } from '@/app/routes'
 import { usageDescription } from '@/lib/formatUsage'
@@ -10,17 +10,15 @@ import { selectActiveProjects, selectActiveThreadIndex } from '@/store/selectors
 import { selectPiActivities } from '@/store/slices/agentActivity'
 import {
   selectArchivingThreadId,
-  selectBookmarkingThreadId,
   selectDeletingThreadId,
 } from '@/store/slices/projects'
 import { sidebarViewChanged } from '@/store/slices/sidebar'
-import { projectFinderOpened } from '@/store/slices/ui'
 import type { Project, Thread } from '@/types'
 import { Button, IconButton, SelectionButton } from '@/ui/buttons'
 import { useThreadUsage } from '@/wire/serverData'
 import { ThreadActionsMenu } from './ThreadActionsMenu'
 
-type SectionKind = 'working' | 'needsReview' | 'pinned' | 'recent'
+type SectionKind = 'working' | 'needsReview' | 'recent'
 
 // Sibling of ProjectSidebar, rendered in its place when the view is switched.
 // It was handed eight of the sidebar's own props; it selects the same state.
@@ -34,7 +32,6 @@ type SidebarActivityViewProps = {
 const sectionStateDescriptions: Record<SectionKind, string> = {
   working: 'Coding agent is working',
   needsReview: 'Coding agent finished — needs review',
-  pinned: 'Bookmarked',
   recent: '',
 }
 
@@ -52,8 +49,6 @@ export function SidebarActivityView({
   const selectedThreadId = useMatch(WORKSPACE_ROUTE)?.params.threadId ?? null
   const deletingThreadId = useAppSelector(selectDeletingThreadId)
   const archivingThreadId = useAppSelector(selectArchivingThreadId)
-  const bookmarkingThreadId = useAppSelector(selectBookmarkingThreadId)
-  const onOpenFinder = () => dispatch(projectFinderOpened())
   const onShowAllThreads = () => dispatch(sidebarViewChanged('tree'))
   const [now, setNow] = useState(() => Date.now())
   const [projectPickerOpen, setProjectPickerOpen] = useState(false)
@@ -88,7 +83,6 @@ export function SidebarActivityView({
 
   const isEmpty = groups.working.length === 0
     && groups.needsReview.length === 0
-    && groups.pinned.length === 0
     && groups.recent.length === 0
 
   function renderEntry(kind: SectionKind, entry: ActivityGroupEntry) {
@@ -132,9 +126,6 @@ export function SidebarActivityView({
                 aria-hidden="true"
               />
             )}
-            {kind === 'pinned' && (
-              <Bookmark size={11} className="shrink-0 text-ghost-green" fill="currentColor" aria-hidden="true" />
-            )}
             <span className="min-w-0 flex-1 truncate">{thread.title}</span>
             {stateDescription && <span className="sr-only">{stateDescription}</span>}
             {showProjectTags && (
@@ -154,7 +145,7 @@ export function SidebarActivityView({
               archived={archived}
               archiving={archivingThreadId === thread.id}
               deleting={deletingThreadId === thread.id}
-              disabled={Boolean(archivingThreadId || deletingThreadId || bookmarkingThreadId)}
+              disabled={Boolean(archivingThreadId || deletingThreadId)}
               open={menuOpen}
               onOpenChange={(open) => setThreadMenuKey(open ? key : null)}
               onArchive={() => onArchiveThread(project, thread, !archived)}
@@ -186,17 +177,7 @@ export function SidebarActivityView({
 
   return (
     <div>
-      <div className="flex items-center gap-1">
-        <Button
-          type="button"
-          onClick={onOpenFinder}
-          aria-label="Find projects and threads (Ctrl+F)"
-          className="flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md border border-ghost-border/55 bg-ghost-black/30 px-2 text-left text-[10px] text-ghost-faint transition hover:border-ghost-border hover:text-ghost-muted"
-        >
-          <Search size={12} aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate">Search threads…</span>
-          <kbd className="font-mono text-[8px] text-ghost-faint">Ctrl F</kbd>
-        </Button>
+      <div className="flex justify-end">
         <div className="relative" data-new-thread-picker>
           <IconButton
             type="button"
@@ -264,7 +245,6 @@ export function SidebarActivityView({
         <>
           {renderSection('working', 'Working', groups.working, true)}
           {renderSection('needsReview', 'Needs review', groups.needsReview, true)}
-          {renderSection('pinned', 'Pinned', groups.pinned, false)}
           {renderSection('recent', 'Recent', groups.recent, false)}
           {groups.hiddenRecentCount > 0 && (
             <Button

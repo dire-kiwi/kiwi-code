@@ -1,7 +1,6 @@
 export type IndexedThread = {
   id: string
   archivedAt?: string
-  bookmarked?: boolean
 }
 
 export type IndexedProject<Thread extends IndexedThread = IndexedThread> = {
@@ -22,7 +21,6 @@ export type ThreadTreeIndex<Thread extends IndexedThread = IndexedThread> = {
   rootId: (threadId: string) => string | null
   activityDisplayThread: (activity: IndexedActivity, rejectArchived?: boolean) => Thread | null
   orderedTreeIds: (rootIds: readonly string[]) => string[]
-  bookmarkedPathIds: () => string[]
 }
 
 export type SidebarThreadIndex<

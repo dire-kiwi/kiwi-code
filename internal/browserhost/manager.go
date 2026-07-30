@@ -32,26 +32,24 @@ const (
 )
 
 type Options struct {
-	ChromeBinary        string
-	ProtectedOrigins    []string
-	RecordingsDirectory string
+	ChromeBinary     string
+	ProtectedOrigins []string
 }
 
 type Provider struct {
 	options Options
 
-	startMu       sync.Mutex
-	writeMu       sync.Mutex
-	mu            sync.Mutex
-	cmd           *exec.Cmd
-	stdin         io.WriteCloser
-	pending       map[int64]chan rpcResponse
-	active        map[string]struct{}
-	done          chan struct{}
-	tempDir       string
-	recordingsDir string
-	nextID        atomic.Int64
-	closed        bool
+	startMu sync.Mutex
+	writeMu sync.Mutex
+	mu      sync.Mutex
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	pending map[int64]chan rpcResponse
+	active  map[string]struct{}
+	done    chan struct{}
+	tempDir string
+	nextID  atomic.Int64
+	closed  bool
 }
 
 type wireRequest struct {
@@ -78,10 +76,9 @@ type rpcResponse struct {
 
 func New(options Options) *Provider {
 	return &Provider{
-		options:       options,
-		pending:       make(map[int64]chan rpcResponse),
-		active:        make(map[string]struct{}),
-		recordingsDir: options.RecordingsDirectory,
+		options: options,
+		pending: make(map[int64]chan rpcResponse),
+		active:  make(map[string]struct{}),
 	}
 }
 
@@ -93,11 +90,7 @@ func (p *Provider) Action(ctx context.Context, request browsercontrol.Request) (
 	p.mu.Unlock()
 	if !started && !active {
 		switch request.Operation {
-		case "session.status":
-			if !p.hasCompletedRecordings() {
-				return noSessionResult(request.Operation), nil
-			}
-		case "session.disconnect", "session.stop":
+		case "session.status", "session.disconnect", "session.stop":
 			return noSessionResult(request.Operation), nil
 		case "preview":
 			return nil, browsercontrol.ErrFrameUnavailable
@@ -167,7 +160,7 @@ func (p *Provider) Action(ctx context.Context, request browsercontrol.Request) (
 			p.mu.Lock()
 			if request.Operation == "session.stop" {
 				delete(p.active, key)
-			} else if request.Operation != "session.status" && request.Operation != "session.disconnect" && request.Operation != "preview" && request.Operation != "stream.input" && request.Operation != "recording.status" && request.Operation != "recording.delete" {
+			} else if request.Operation != "session.status" && request.Operation != "session.disconnect" && request.Operation != "preview" && request.Operation != "stream.input" {
 				p.active[key] = struct{}{}
 			}
 			p.mu.Unlock()
@@ -177,14 +170,6 @@ func (p *Provider) Action(ctx context.Context, request browsercontrol.Request) (
 		p.removePending(id)
 		return nil, fmt.Errorf("%w: request cancelled", browsercontrol.ErrUnavailable)
 	}
-}
-
-func (p *Provider) hasCompletedRecordings() bool {
-	if p.recordingsDir == "" {
-		return false
-	}
-	matches, err := filepath.Glob(filepath.Join(p.recordingsDir, "rec-*.json"))
-	return err == nil && len(matches) > 0
 }
 
 func noSessionResult(operation string) json.RawMessage {
@@ -199,12 +184,11 @@ func noSessionResult(operation string) json.RawMessage {
 		"status": map[string]any{
 			"endpoint": "", "reachable": true, "product": "Headless Chrome", "protocolVersion": "1.3",
 			"pages": 0, "currentTargetId": nil, "owned": true, "presentation": "stream",
-			"capabilities": map[string]bool{"nativeView": false, "interactiveStream": true, "preview": true, "recording": true},
+			"capabilities": map[string]bool{"nativeView": false, "interactiveStream": true, "preview": true},
 		},
 		"backend": "headless-chrome", "presentation": "stream",
-		"capabilities": map[string]bool{"nativeView": false, "interactiveStream": true, "preview": true, "recording": true},
+		"capabilities": map[string]bool{"nativeView": false, "interactiveStream": true, "preview": true},
 		"running":      false, "pages": []any{}, "pageList": []any{}, "currentTargetId": nil,
-		"recording": nil, "recordings": []any{},
 	}
 	if operation == "session.stop" {
 		value["stopped"] = false
@@ -282,20 +266,9 @@ func (p *Provider) ensureStarted() error {
 	}
 
 	origins, _ := json.Marshal(p.options.ProtectedOrigins)
-	if p.recordingsDir == "" {
-		p.recordingsDir = filepath.Join(temporaryDirectory, "recordings")
-	}
-	if err := os.MkdirAll(p.recordingsDir, 0o700); err != nil {
-		_ = os.RemoveAll(temporaryDirectory)
-		return err
-	}
-	if err := os.Chmod(p.recordingsDir, 0o700); err != nil {
-		_ = os.RemoveAll(temporaryDirectory)
-		return err
-	}
 	command := exec.Command(node, script)
 	configureProcess(command)
-	command.Env = minimalEnvironment(p.options.ChromeBinary, string(origins), p.recordingsDir)
+	command.Env = minimalEnvironment(p.options.ChromeBinary, string(origins))
 	stdin, err := command.StdinPipe()
 	if err != nil {
 		_ = os.RemoveAll(temporaryDirectory)
@@ -327,7 +300,7 @@ func (p *Provider) ensureStarted() error {
 	return nil
 }
 
-func minimalEnvironment(chrome, origins, recordingsDirectory string) []string {
+func minimalEnvironment(chrome, origins string) []string {
 	names := []string{"HOME", "LANG", "LC_ALL", "PATH", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "PROGRAMFILES", "PROGRAMFILES(X86)"}
 	environment := make([]string, 0, len(names)+3)
 	for _, name := range names {
@@ -335,10 +308,7 @@ func minimalEnvironment(chrome, origins, recordingsDirectory string) []string {
 			environment = append(environment, name+"="+value)
 		}
 	}
-	environment = append(environment,
-		"KIWI_CODE_PROTECTED_ORIGINS="+origins,
-		"KIWI_CODE_BROWSER_RECORDINGS_DIR="+recordingsDirectory,
-	)
+	environment = append(environment, "KIWI_CODE_PROTECTED_ORIGINS="+origins)
 	if chrome != "" {
 		environment = append(environment, "KIWI_CODE_CHROME_BIN="+chrome)
 	}

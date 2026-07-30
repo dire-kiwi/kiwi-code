@@ -9,10 +9,10 @@ test('threads land in the first activity section that claims them', () => {
   const projects = [{
     id: 'p1',
     threads: [
-      { id: 'working', createdAt: at(1), bookmarked: true },
-      { id: 'finished', createdAt: at(2), bookmarked: true },
-      { id: 'pinned', createdAt: at(3), bookmarked: true },
-      { id: 'recent', createdAt: at(4) },
+      { id: 'working', createdAt: at(1) },
+      { id: 'finished', createdAt: at(2) },
+      { id: 'recent-a', createdAt: at(3) },
+      { id: 'recent-b', createdAt: at(4) },
     ],
   }]
   const activities = [
@@ -22,8 +22,7 @@ test('threads land in the first activity section that claims them', () => {
   const groups = activityViewGroups(projects, activities)
   assert.deepEqual(keys(groups.working), ['p1:working'])
   assert.deepEqual(keys(groups.needsReview), ['p1:finished'])
-  assert.deepEqual(keys(groups.pinned), ['p1:pinned'])
-  assert.deepEqual(keys(groups.recent), ['p1:recent'])
+  assert.deepEqual(keys(groups.recent), ['p1:recent-b', 'p1:recent-a'])
 })
 
 test('sections sort newest first and recent reports overflow', () => {
@@ -42,7 +41,7 @@ test('archived threads and unknown activity are excluded', () => {
     { projectId: 'p1', threadId: 'archived', state: 'working', updatedAt: at(3) },
     { projectId: 'p1', threadId: 'missing', state: 'finished', updatedAt: at(3) },
   ])
-  assert.deepEqual(groups, { working: [], needsReview: [], pinned: [], recent: [], hiddenRecentCount: 0 })
+  assert.deepEqual(groups, { working: [], needsReview: [], recent: [], hiddenRecentCount: 0 })
 })
 
 test('formatRelativeShort compresses elapsed time', () => {

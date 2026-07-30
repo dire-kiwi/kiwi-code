@@ -12,7 +12,6 @@ vi.mock('@/api', () => ({
 }))
 
 vi.mock('./ThreadUsageLimits', () => ({ ThreadUsageLimits: () => null }))
-vi.mock('./ThreadRecordingsPanel', () => ({ ThreadRecordingsPanel: () => null }))
 
 const thread: Thread = {
   id: 'thread-1',

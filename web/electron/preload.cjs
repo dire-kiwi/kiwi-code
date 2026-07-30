@@ -12,7 +12,6 @@ const browserIpcChannels = {
   show: 'kiwi-code-desktop-browser:show',
   hide: 'kiwi-code-desktop-browser:hide',
   setBounds: 'kiwi-code-desktop-browser:set-bounds',
-  setBackendOrigin: 'kiwi-code-desktop-browser:set-backend-origin',
   state: 'kiwi-code-desktop-browser:state',
   workspaceShortcut: 'kiwi-code-desktop-browser:workspace-shortcut',
 }
@@ -20,7 +19,6 @@ const legacyBrowserIpcChannels = {
   show: 'dire-mux-desktop-browser:show',
   hide: 'dire-mux-desktop-browser:hide',
   setBounds: 'dire-mux-desktop-browser:set-bounds',
-  setBackendOrigin: 'dire-mux-desktop-browser:set-backend-origin',
   state: 'dire-mux-desktop-browser:state',
   workspaceShortcut: 'dire-mux-desktop-browser:workspace-shortcut',
 }
@@ -96,9 +94,6 @@ function createBrowserBridge() {
     },
     setBounds(options) {
       return invokeCompatible(browserChannelSets, 'setBounds', options)
-    },
-    setBackendOrigin(origin) {
-      return invokeCompatible(browserChannelSets, 'setBackendOrigin', origin)
     },
     onState(callback) {
       return stateListener(browserChannelSets, callback)

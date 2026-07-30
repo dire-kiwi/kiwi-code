@@ -67,8 +67,6 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 	}
 	falseValue := false
 	trueValue := true
-	duration := float64(60_000)
-	bytesValue := float64(1_024)
 	contextTokens := int64(32_000)
 	contextPercent := float64(25)
 	currentTargetID := "page-fixture"
@@ -107,11 +105,6 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 			Own: usageTotals, Total: usageTotals,
 			LimitReached: false,
 		}},
-		stateTopicProcessWebServers: []sidebarProcessWebServer{{
-			ProjectID: "project-1", ProjectName: "Fixture project",
-			ThreadID: "thread-1", ThreadTitle: "Fixture thread",
-			ProcessID: "process-1", ProcessName: "Vite", URL: "http://127.0.0.1:5173",
-		}},
 		stateTopicThreadStatus: threadStatusSnapshot{
 			GitBranches: &gitBranchState{
 				IsRepository: true, Current: "main",
@@ -125,8 +118,7 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 				},
 			},
 			Processes: []processWindow{{
-				ID: "process-1", Index: 1, Name: "Vite",
-				CurrentCommand: "node", WebServers: []string{"http://127.0.0.1:5173"},
+				ID: "process-1", Index: 1, Name: "Vite", CurrentCommand: "node",
 			}},
 			ShellWindows: []tmuxWindow{{
 				Index: 0, Name: "shell", Active: true,
@@ -201,7 +193,7 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 			Presentation: "stream",
 			Capabilities: browserStateCapabilities{
 				NativeView: &falseValue, InteractiveStream: &trueValue,
-				Preview: &trueValue, Recording: &trueValue,
+				Preview: &trueValue,
 			},
 			Reachable: &trueValue,
 			Running:   &trueValue,
@@ -212,37 +204,6 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 			Current: &browserStateCurrentPage{
 				ID: "page-fixture", Title: "Fixture page", URL: "https://example.test/",
 				CanGoBack: &falseValue, CanGoForward: &trueValue, Loading: &falseValue,
-			},
-			Recording: &browserStateRecording{
-				ID: "rec-active", State: "recording", TargetID: "page-fixture",
-				Title: "Active fixture recording", StartedAt: startedAt.Format(time.RFC3339),
-				IdleTimeoutMS: &duration, IdleDeadlineAt: fixtureTime.Format(time.RFC3339),
-			},
-			Recordings: []browserStateRecording{
-				{
-					ID: "rec-active", State: "recording", TargetID: "page-fixture",
-					Title: "Active fixture recording", StartedAt: startedAt.Format(time.RFC3339),
-					IdleTimeoutMS: &duration, IdleDeadlineAt: fixtureTime.Format(time.RFC3339),
-				},
-				{
-					ID: "rec-complete", State: "completed", TargetID: "page-fixture",
-					Title: "Completed fixture recording", StartedAt: startedAt.Add(-time.Minute).Format(time.RFC3339),
-					FinishedAt: fixtureTime.Format(time.RFC3339), DurationMS: &duration, Bytes: &bytesValue,
-					MIMEType: "video/webm", Filename: "fixture.webm",
-				},
-			},
-		},
-		stateTopicBrowserRecordings: []browserStateRecording{
-			{
-				ID: "rec-active", State: "recording", TargetID: "page-fixture",
-				Title: "Active fixture recording", StartedAt: startedAt.Format(time.RFC3339),
-				IdleTimeoutMS: &duration, IdleDeadlineAt: fixtureTime.Format(time.RFC3339),
-			},
-			{
-				ID: "rec-complete", State: "completed", TargetID: "page-fixture",
-				Title: "Completed fixture recording", StartedAt: startedAt.Add(-time.Minute).Format(time.RFC3339),
-				FinishedAt: fixtureTime.Format(time.RFC3339), DurationMS: &duration, Bytes: &bytesValue,
-				MIMEType: "video/webm", Filename: "fixture.webm",
 			},
 		},
 		stateTopicTmuxSessions: []tmuxBrowserSession{{

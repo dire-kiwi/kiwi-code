@@ -63,7 +63,6 @@ type terminalHandler struct {
 	cliProxyAPIErr        error
 	cliProxyAPIHTTPClient *http.Client
 	envPath               string
-	curlPath              string
 	sessionMu             sync.Mutex
 	terminalStops         *terminalStopManager
 	terminalMutations     *terminalMutationManager
@@ -226,7 +225,6 @@ func newTerminalHandlerUnreconciledWithOriginPolicy(projects *project.Store, pol
 func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy originPolicy, tmuxSocket string) *terminalHandler {
 	tmuxPath, _ := exec.LookPath("tmux")
 	envPath, _ := exec.LookPath("env")
-	curlPath, _ := exec.LookPath("curl")
 	extensionPaths, extensionErr := materializePiExtensions(projects.DataDirectory())
 	kiwiSandboxPiPath, _, kiwiSandboxErr := materializeKiwiSandbox(projects.DataDirectory())
 	var piSkillPaths []string
@@ -289,7 +287,6 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 		cliProxyAPIKey:       cliProxyAPIKey,
 		cliProxyAPIErr:       cliProxyAPIErr,
 		envPath:              envPath,
-		curlPath:             curlPath,
 		terminalStops:        newTerminalStopManager(projects.DataDirectory()),
 		terminalMutations:    newTerminalMutationManager(projects.DataDirectory()),
 		agentExitDirectory: filepath.Join(

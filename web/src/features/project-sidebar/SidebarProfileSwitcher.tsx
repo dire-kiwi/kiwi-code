@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { createProfile } from '@/api'
 import type { Profile } from '@/types'
 import { Select } from '@/ui/inputs'
-import { BackendSwitcher } from './BackendSwitcher'
 
 // A sentinel option rather than a separate button: the picker is the only place
 // a profile is chosen, so creating one belongs in the same list.
@@ -43,24 +42,20 @@ export function SidebarProfileSwitcher({
   }
 
   return (
-    <div className="flex min-w-0 items-center gap-1">
-      <label className="inline-flex shrink-0 items-center">
-        <span className="sr-only">Current profile</span>
-        <Select
-          variant="inline"
-          value={activeProfileId}
-          options={[
-            ...profiles.map((profile) => ({ value: profile.id, label: profile.name })),
-            { value: newProfileValue, label: '＋ New profile…' },
-          ]}
-          onChange={(profileId) => void handleSelection(profileId)}
-          disabled={creating}
-          className="min-w-0 max-w-36"
-          aria-label="Current profile"
-        />
-      </label>
-      <span className="shrink-0 text-[9px] text-ghost-faint" aria-hidden="true">·</span>
-      <BackendSwitcher variant="inline" />
-    </div>
+    <label className="inline-flex min-w-0 shrink-0 items-center">
+      <span className="sr-only">Current profile</span>
+      <Select
+        variant="inline"
+        value={activeProfileId}
+        options={[
+          ...profiles.map((profile) => ({ value: profile.id, label: profile.name })),
+          { value: newProfileValue, label: '＋ New profile…' },
+        ]}
+        onChange={(profileId) => void handleSelection(profileId)}
+        disabled={creating}
+        className="min-w-0 max-w-36"
+        aria-label="Current profile"
+      />
+    </label>
   )
 }

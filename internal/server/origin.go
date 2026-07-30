@@ -32,13 +32,6 @@ type Options struct {
 	// unrelated cross-origin sites.
 	AllowedOriginPort int
 
-	// AllowRemoteOrigins permits Kiwi Code frontends served by another HTTP(S)
-	// origin to call this backend and open its WebSockets. The browser backend
-	// picker relies on this in both production and development. Kiwi Code has no
-	// authentication and this option is intended only for trusted LAN/Tailscale
-	// environments.
-	AllowRemoteOrigins bool
-
 	// TmuxSocketName overrides the persistent tmux server name. Leave this
 	// empty only in production. Development, tests, and validation runs must
 	// provide an isolated name so they cannot access the user's sessions.
@@ -63,18 +56,14 @@ type Options struct {
 }
 
 type originPolicy struct {
-	allowedPort       int
-	allowRemoteOrigin bool
+	allowedPort int
 }
 
 func newOriginPolicy(options Options) (originPolicy, error) {
 	if options.AllowedOriginPort < 0 || options.AllowedOriginPort > 65535 {
 		return originPolicy{}, fmt.Errorf("allowed origin port must be 0 or between 1 and 65535")
 	}
-	return originPolicy{
-		allowedPort:       options.AllowedOriginPort,
-		allowRemoteOrigin: options.AllowRemoteOrigins,
-	}, nil
+	return originPolicy{allowedPort: options.AllowedOriginPort}, nil
 }
 
 func configuredTmuxSocketName(options Options) (string, error) {
@@ -118,9 +107,6 @@ func (p originPolicy) allows(r *http.Request) bool {
 	if strings.EqualFold(parsed.Host, r.Host) {
 		return true
 	}
-	if p.allowRemoteOrigin {
-		return true
-	}
 	if p.allowedPort == 0 || effectiveOriginPort(parsed) != p.allowedPort {
 		return false
 	}
@@ -149,7 +135,7 @@ func effectiveOriginPort(origin *url.URL) int {
 func withOriginPolicy(next http.Handler, policy originPolicy) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := strings.TrimSpace(r.Header.Get("Origin"))
-		if (policy.allowedPort == 0 && !policy.allowRemoteOrigin) || !strings.HasPrefix(r.URL.Path, "/api/") || origin == "" || !policy.allows(r) {
+		if policy.allowedPort == 0 || !strings.HasPrefix(r.URL.Path, "/api/") || origin == "" || !policy.allows(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
