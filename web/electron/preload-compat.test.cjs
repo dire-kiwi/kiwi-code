@@ -54,10 +54,8 @@ test('preload prefers the legacy IPC handlers in a pre-rename Electron process',
   assert.deepEqual([...runtime.bridges.keys()].sort(), [
     'direMuxDesktopApp',
     'direMuxDesktopBrowser',
-    'direMuxDesktopCodeServer',
     'kiwiCodeDesktopApp',
     'kiwiCodeDesktopBrowser',
-    'kiwiCodeDesktopCodeServer',
   ])
   assert.equal(await runtime.bridges.get('kiwiCodeDesktopBrowser').hide({ projectId: 'p', threadId: 't' }), 'legacy-result')
   assert.deepEqual(invoked, ['dire-mux-desktop-browser:hide'])

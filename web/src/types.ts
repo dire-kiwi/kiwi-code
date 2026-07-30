@@ -68,7 +68,7 @@ export type DirectorySuggestion = {
 
 export type TerminalTool = 'terminal' | 'nvim' | 'lazygit' | 'pi' | 'process'
 
-export type WorkspaceTool = TerminalTool | 'browser' | 'code'
+export type WorkspaceTool = TerminalTool | 'browser'
 
 export type BrowserActionOperation =
   | 'session.start'

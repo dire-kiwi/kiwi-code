@@ -1,17 +1,13 @@
 'use strict'
 
 const path = require('node:path')
-const { app, BaseWindow, WebContentsView, ipcMain, session: electronSession, shell } = require('electron')
+const { app, BaseWindow, WebContentsView, ipcMain, shell } = require('electron')
 const { BrowserProviderServer } = require('./browser-provider.cjs')
 const {
   BROWSER_RECORDER_EVENT_CHANNEL,
   BrowserRecordingManager,
 } = require('./browser-recordings.cjs')
 const { BrowserWorkspaceManager } = require('./browser-sessions.cjs')
-const {
-  CODE_SERVER_PARTITION,
-  CodeServerWorkspaceManager,
-} = require('./code-server-manager.cjs')
 const {
   BrowserProviderError,
   isRecord,
@@ -58,29 +54,10 @@ const legacyBrowserIpcChannels = {
   workspaceShortcut: 'dire-mux-desktop-browser:workspace-shortcut',
 }
 const browserIpcChannelSets = [browserIpcChannels, legacyBrowserIpcChannels]
-const codeServerIpcChannels = {
-  show: 'kiwi-code-desktop-code-server:show',
-  hide: 'kiwi-code-desktop-code-server:hide',
-  setBounds: 'kiwi-code-desktop-code-server:set-bounds',
-  close: 'kiwi-code-desktop-code-server:close',
-  state: 'kiwi-code-desktop-code-server:state',
-  workspaceShortcut: 'kiwi-code-desktop-code-server:workspace-shortcut',
-}
-const legacyCodeServerIpcChannels = {
-  show: 'dire-mux-desktop-code-server:show',
-  hide: 'dire-mux-desktop-code-server:hide',
-  setBounds: 'dire-mux-desktop-code-server:set-bounds',
-  close: 'dire-mux-desktop-code-server:close',
-  state: 'dire-mux-desktop-code-server:state',
-  workspaceShortcut: 'dire-mux-desktop-code-server:workspace-shortcut',
-}
-const codeServerIpcChannelSets = [codeServerIpcChannels, legacyCodeServerIpcChannels]
-
 let primaryWindow = null
 let trustedView = null
 let workspace = null
 let recordingManager = null
-let codeServerWorkspace = null
 let provider = null
 let cleanupPromise = Promise.resolve()
 let quitAfterCleanup = false
@@ -104,9 +81,9 @@ function openExternal(url) {
   }
 }
 
-function validateSessionPayload(value, requireBounds, requireWorkspacePath = false) {
+function validateSessionPayload(value, requireBounds) {
   if (!isRecord(value)) throw new BrowserProviderError('invalid_request', 'Desktop view options must be an object.')
-  const allowed = new Set(['projectId', 'threadId', ...(requireBounds ? ['bounds'] : []), ...(requireWorkspacePath ? ['workspacePath'] : [])])
+  const allowed = new Set(['projectId', 'threadId', ...(requireBounds ? ['bounds'] : [])])
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) throw new BrowserProviderError('invalid_request', `Unknown desktop view field ${key}.`)
   }
@@ -121,12 +98,6 @@ function validateSessionPayload(value, requireBounds, requireWorkspacePath = fal
     }
   }
   if (requireBounds && value.bounds === undefined) throw new BrowserProviderError('invalid_bounds', 'bounds are required.')
-  if (
-    requireWorkspacePath &&
-    (typeof value.workspacePath !== 'string' || value.workspacePath.length < 1 || value.workspacePath.length > 32_768)
-  ) {
-    throw new BrowserProviderError('invalid_request', 'workspacePath must be a nonempty string.')
-  }
   return value
 }
 
@@ -181,11 +152,7 @@ function registerIpc() {
       }
       const currentView = trustedView
       const currentBrowserWorkspace = workspace
-      const currentCodeWorkspace = codeServerWorkspace
-      setImmediate(() => reloadFrontend(
-        currentView,
-        [currentBrowserWorkspace, currentCodeWorkspace],
-      ))
+      setImmediate(() => reloadFrontend(currentView, [currentBrowserWorkspace]))
       return { reloading: true }
     })
   }
@@ -194,12 +161,6 @@ function registerIpc() {
     'Desktop browser is unavailable.',
     handler,
   )
-  const codeServerInvoke = (handler) => trustedInvoke(
-    () => codeServerWorkspace,
-    'Desktop Code workspace is unavailable.',
-    handler,
-  )
-
   ipcMain.handle(BROWSER_RECORDER_EVENT_CHANNEL, (event, payload) => {
     const current = recordingManager
     if (!current) throw new BrowserProviderError('recording_failed', 'Browser recording is unavailable.', 503, false)
@@ -207,27 +168,12 @@ function registerIpc() {
   })
 
   for (const channels of browserIpcChannelSets) {
-    ipcMain.handle(channels.show, browserInvoke((current, payload) => {
-      codeServerWorkspace?.detachActiveView()
-      return current.show(validateSessionPayload(payload, true))
-    }))
+    ipcMain.handle(channels.show, browserInvoke((current, payload) => current.show(validateSessionPayload(payload, true))))
     ipcMain.handle(channels.hide, browserInvoke((current, payload) => current.hide(validateSessionPayload(payload, false))))
     ipcMain.handle(channels.setBounds, browserInvoke((current, payload) => current.setBounds(validateSessionPayload(payload, true))))
-    ipcMain.handle(channels.setBackendOrigin, browserInvoke((current, payload) => {
-      const origin = validateBackendOrigin(payload)
-      codeServerWorkspace?.addProtectedOrigin(origin)
-      codeServerWorkspace?.detachActiveView()
-      return current.setRendererBackendOrigin(origin)
-    }))
-  }
-  for (const channels of codeServerIpcChannelSets) {
-    ipcMain.handle(channels.show, codeServerInvoke((current, payload) => {
-      workspace?.detachActiveView()
-      return current.show(validateSessionPayload(payload, true, true))
-    }))
-    ipcMain.handle(channels.hide, codeServerInvoke((current, payload) => current.hide(validateSessionPayload(payload, false))))
-    ipcMain.handle(channels.setBounds, codeServerInvoke((current, payload) => current.setBounds(validateSessionPayload(payload, true))))
-    ipcMain.handle(channels.close, codeServerInvoke((current, payload) => current.close(validateSessionPayload(payload, false))))
+    ipcMain.handle(channels.setBackendOrigin, browserInvoke((current, payload) => (
+      current.setRendererBackendOrigin(validateBackendOrigin(payload))
+    )))
   }
 }
 
@@ -277,11 +223,7 @@ async function createWindow() {
   const currentRecordingManager = new BrowserRecordingManager({ app, BaseWindow, WebContentsView })
   await currentRecordingManager.initialize()
   let currentWorkspace = null
-  let currentCodeServerWorkspace = null
-  const requestFrontendReload = () => reloadFrontend(
-    appView,
-    [currentWorkspace, currentCodeServerWorkspace],
-  )
+  const requestFrontendReload = () => reloadFrontend(appView, [currentWorkspace])
   currentWorkspace = new BrowserWorkspaceManager({
     WebContentsView,
     hostWindow: window,
@@ -301,37 +243,10 @@ async function createWindow() {
     },
     onFrontendReload: requestFrontendReload,
   })
-  currentCodeServerWorkspace = new CodeServerWorkspaceManager({
-    app,
-    WebContentsView,
-    hostWindow: window,
-    appView,
-    electronSession: electronSession.fromPartition(CODE_SERVER_PARTITION),
-    protectedOrigins: [desktopOrigin, apiOrigin],
-    openExternal,
-    onBeforeAttach: () => currentWorkspace.detachActiveView(),
-    onServiceOrigin: (origin) => currentWorkspace.addProtectedOrigin(origin),
-    onState: (state) => {
-      if (!appView.webContents.isDestroyed()) {
-        for (const channels of codeServerIpcChannelSets) appView.webContents.send(channels.state, state)
-      }
-    },
-    onWorkspaceShortcut: (index) => {
-      if (!appView.webContents.isDestroyed()) {
-        for (const channels of codeServerIpcChannelSets) appView.webContents.send(channels.workspaceShortcut, index)
-      }
-    },
-    onFrontendReload: requestFrontendReload,
-  })
   workspace = currentWorkspace
   recordingManager = currentRecordingManager
-  codeServerWorkspace = currentCodeServerWorkspace
   currentWorkspace.resize()
-  currentCodeServerWorkspace.resize()
-  window.on('resize', () => {
-    currentWorkspace.resize()
-    currentCodeServerWorkspace.resize()
-  })
+  window.on('resize', () => currentWorkspace.resize())
 
   appView.webContents.setWindowOpenHandler(({ url }) => {
     openExternal(url)
@@ -345,15 +260,9 @@ async function createWindow() {
   appView.webContents.on('will-navigate', handleTrustedNavigation)
   appView.webContents.on('will-redirect', handleTrustedNavigation)
   appView.webContents.on('did-start-navigation', (details) => {
-    if (details.isMainFrame && !details.isSameDocument) {
-      currentWorkspace.detachActiveView()
-      currentCodeServerWorkspace.detachActiveView()
-    }
+    if (details.isMainFrame && !details.isSameDocument) currentWorkspace.detachActiveView()
   })
-  appView.webContents.on('render-process-gone', () => {
-    currentWorkspace.detachActiveView()
-    currentCodeServerWorkspace.detachActiveView()
-  })
+  appView.webContents.on('render-process-gone', () => currentWorkspace.detachActiveView())
   appView.webContents.on('before-input-event', (event, input) => {
     interceptFrontendReloadShortcut(event, input, requestFrontendReload)
   })
@@ -361,9 +270,8 @@ async function createWindow() {
   const currentProvider = new BrowserProviderServer({ app, workspace: currentWorkspace })
   provider = currentProvider
   try {
-    const providerConfig = await currentProvider.start()
+    await currentProvider.start()
     currentRecordingManager.setRecorderPageURL(currentProvider.recorderPageURL())
-    currentCodeServerWorkspace.addProtectedOrigin(`http://127.0.0.1:${providerConfig.port}`)
   } catch (error) {
     console.error('Could not start Electron browser provider:', error)
     if (!window.isDestroyed()) window.close()
@@ -386,7 +294,6 @@ async function createWindow() {
         await currentWorkspace.dispose()
         await currentRecordingManager.dispose()
       })(),
-      currentCodeServerWorkspace.dispose(),
       currentProvider.stop(),
     ]).catch((error) => {
       console.error('Could not clean up desktop workspaces:', error)
@@ -394,7 +301,6 @@ async function createWindow() {
       if (!appView.webContents.isDestroyed()) appView.webContents.close({ waitForBeforeUnload: false })
       if (workspace === currentWorkspace) workspace = null
       if (recordingManager === currentRecordingManager) recordingManager = null
-      if (codeServerWorkspace === currentCodeServerWorkspace) codeServerWorkspace = null
       if (provider === currentProvider) provider = null
     })
   }
@@ -439,7 +345,6 @@ if (!hasSingleInstanceLock) {
     const activeProvider = provider
     const activeWorkspace = workspace
     const activeRecordingManager = recordingManager
-    const activeCodeServerWorkspace = codeServerWorkspace
     void Promise.all([
       cleanupPromise,
       activeProvider?.stop(),
@@ -447,7 +352,6 @@ if (!hasSingleInstanceLock) {
         await activeWorkspace?.dispose()
         await activeRecordingManager?.dispose()
       })(),
-      activeCodeServerWorkspace?.dispose(),
     ]).finally(() => app.quit())
   })
 
