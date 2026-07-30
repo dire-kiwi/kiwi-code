@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { classNames } from '../../lib/classNames'
 import { formatDuration } from '../../lib/formatDuration'
-import { AgentMarkdown } from '../molecules/AgentMarkdown'
+import { AgentMarkdown } from '@/ui/markdown'
 import {
   agentToolIcon,
   agentToolLabel,

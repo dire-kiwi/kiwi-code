@@ -8,11 +8,9 @@ import {
 import { MAX_SUB_AGENT_NESTING_DEPTH } from '../../../../lib/validation'
 import { useAsyncFeedback } from '../../../../lib/useAsyncFeedback'
 import type { Profile, Project } from '../../../../types'
-import { Select } from '../../../atoms/Select'
-import { StatusBadge } from '../../../atoms/StatusBadge'
-import { Surface } from '../../../atoms/Surface'
-import { ActionFeedback } from '../../../molecules/ActionFeedback'
-import { SectionHeader } from '../../../molecules/SectionHeader'
+import { Select } from '@/ui/inputs'
+import { ActionFeedback, StatusBadge } from '@/ui/feedback'
+import { SectionHeader, Surface } from '@/ui/layout'
 
 type ProjectGeneralSectionProps = {
   project: Project

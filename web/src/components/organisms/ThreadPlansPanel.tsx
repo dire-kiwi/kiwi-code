@@ -2,7 +2,7 @@ import { CircleAlert, Download, FileText } from 'lucide-react'
 import { threadPlanDownloadUrl } from '../../api'
 import { formatWhen } from '../../lib/formatWhen'
 import type { ThreadPlan } from '../../types'
-import { Button } from '../atoms/Button'
+import { Button } from '@/ui/buttons'
 
 const byteFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 })
 

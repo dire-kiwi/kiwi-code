@@ -16,9 +16,9 @@ import {
   X,
 } from 'lucide-react'
 import type { Profile, Project, Thread } from '../../types'
-import { BaseInput } from '../atoms/Input'
-import { IconButton } from '../atoms/IconButton'
-import { Surface } from '../atoms/Surface'
+import { BaseInput } from '@/ui/inputs'
+import { IconButton } from '@/ui/buttons'
+import { Surface } from '@/ui/layout'
 
 type ProjectResult = {
   id: string

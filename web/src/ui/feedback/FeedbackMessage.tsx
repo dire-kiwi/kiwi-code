@@ -1,5 +1,5 @@
 import type { ComponentPropsWithoutRef } from 'react'
-import { classNames } from '../../lib/classNames'
+import { classNames } from '@/lib/classNames'
 
 export type FeedbackTone = 'error' | 'success'
 export type FeedbackSize = 'sm' | 'md' | 'status'

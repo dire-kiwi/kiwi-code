@@ -1,6 +1,5 @@
 import { FolderPlus, SquareTerminal } from 'lucide-react'
-import { PrimaryButton } from '../atoms/Button'
-import { OpenSidebarButton } from '../molecules/OpenSidebarButton'
+import { OpenSidebarButton, PrimaryButton } from '@/ui/buttons'
 
 type EmptyWorkspaceProps = {
   loadError: string

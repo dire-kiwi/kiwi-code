@@ -15,9 +15,8 @@ import {
 import { pauseWorkflow, resumeWorkflow, saveWorkflow, stopWorkflow } from '../../api'
 import { formatDuration } from '../../lib/formatDuration'
 import type { SavedWorkflow, Thread, WorkflowRun } from '../../types'
-import { Button, GhostButton, PrimaryButton } from '../atoms/Button'
-import { TextInput } from '../atoms/Input'
-import { Select } from '../atoms/Select'
+import { Button, GhostButton, PrimaryButton } from '@/ui/buttons'
+import { Select, TextInput } from '@/ui/inputs'
 
 const workflowNamePattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/
 

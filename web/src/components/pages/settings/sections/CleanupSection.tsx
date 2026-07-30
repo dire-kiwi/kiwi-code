@@ -4,12 +4,10 @@ import { updateSettings } from '../../../../api'
 import { useAsyncFeedback } from '../../../../lib/useAsyncFeedback'
 import { MAX_CLEANUP_RETENTION_DAYS } from '../../../../lib/validation'
 import type { AppSettings } from '../../../../types'
-import { PrimaryButton } from '../../../atoms/Button'
-import { TextInput } from '../../../atoms/Input'
-import { Surface } from '../../../atoms/Surface'
-import { ActionFeedback } from '../../../molecules/ActionFeedback'
-import { InfoCallout } from '../../../molecules/InfoCallout'
-import { SectionHeader } from '../../../molecules/SectionHeader'
+import { PrimaryButton } from '@/ui/buttons'
+import { TextInput } from '@/ui/inputs'
+import { SectionHeader, Surface } from '@/ui/layout'
+import { ActionFeedback, InfoCallout } from '@/ui/feedback'
 
 type CleanupSectionProps = {
   settings: AppSettings

@@ -12,16 +12,10 @@ import {
 import { updateSettings } from '../../../../api'
 import { useAsyncFeedback } from '../../../../lib/useAsyncFeedback'
 import type { AppSettings, CodingAgentSetting } from '../../../../types'
-import { GhostButton, PrimaryButton } from '../../../atoms/Button'
-import { TextInput } from '../../../atoms/Input'
-import { Select } from '../../../atoms/Select'
-import { StatusBadge } from '../../../atoms/StatusBadge'
-import { Surface } from '../../../atoms/Surface'
-import { ActionFeedback } from '../../../molecules/ActionFeedback'
-import { FeedbackMessage } from '../../../molecules/FeedbackMessage'
-import { InfoCallout } from '../../../molecules/InfoCallout'
-import { DirectoryPathAutocomplete } from '../../../molecules/ProjectPathAutocomplete'
-import { SectionHeader } from '../../../molecules/SectionHeader'
+import { GhostButton, PrimaryButton } from '@/ui/buttons'
+import { DirectoryPathAutocomplete, Select, TextInput } from '@/ui/inputs'
+import { ActionFeedback, FeedbackMessage, InfoCallout, StatusBadge } from '@/ui/feedback'
+import { SectionHeader, Surface } from '@/ui/layout'
 
 type ClaudeProfilesSectionProps = {
   settings: AppSettings

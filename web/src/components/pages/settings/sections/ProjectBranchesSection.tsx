@@ -3,12 +3,10 @@ import { Folder, FolderGit2, LoaderCircle, Save } from 'lucide-react'
 import { updateProjectWorktreeBranchPrefix } from '../../../../api'
 import { useAsyncFeedback } from '../../../../lib/useAsyncFeedback'
 import type { Project } from '../../../../types'
-import { PrimaryButton } from '../../../atoms/Button'
-import { TextInput } from '../../../atoms/Input'
-import { Surface } from '../../../atoms/Surface'
-import { ActionFeedback } from '../../../molecules/ActionFeedback'
-import { InfoCallout } from '../../../molecules/InfoCallout'
-import { SectionHeader } from '../../../molecules/SectionHeader'
+import { PrimaryButton } from '@/ui/buttons'
+import { TextInput } from '@/ui/inputs'
+import { SectionHeader, Surface } from '@/ui/layout'
+import { ActionFeedback, InfoCallout } from '@/ui/feedback'
 
 type ProjectBranchesSectionProps = {
   project: Project

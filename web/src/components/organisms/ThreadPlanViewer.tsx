@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { CircleAlert, Download, FileText, LoaderCircle, X } from 'lucide-react'
 import { getThreadPlanMarkdown, threadPlanDownloadUrl } from '../../api'
 import type { ThreadPlan } from '../../types'
-import { AgentMarkdown } from '../molecules/AgentMarkdown'
+import { AgentMarkdown } from '@/ui/markdown'
 import './thread-plan-viewer.css'
 
 type ThreadPlanViewerProps = {

@@ -3,13 +3,10 @@ import { FolderGit2, LoaderCircle, RotateCcw, Save } from 'lucide-react'
 import { updateSettings } from '../../../../api'
 import { useAsyncFeedback } from '../../../../lib/useAsyncFeedback'
 import type { AppSettings } from '../../../../types'
-import { GhostButton, PrimaryButton } from '../../../atoms/Button'
-import { TextInput } from '../../../atoms/Input'
-import { StatusBadge } from '../../../atoms/StatusBadge'
-import { Surface } from '../../../atoms/Surface'
-import { ActionFeedback } from '../../../molecules/ActionFeedback'
-import { InfoCallout } from '../../../molecules/InfoCallout'
-import { SectionHeader } from '../../../molecules/SectionHeader'
+import { GhostButton, PrimaryButton } from '@/ui/buttons'
+import { TextInput } from '@/ui/inputs'
+import { ActionFeedback, InfoCallout, StatusBadge } from '@/ui/feedback'
+import { SectionHeader, Surface } from '@/ui/layout'
 
 type WorktreesSectionProps = {
   settings: AppSettings

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { classNames } from '../../lib/classNames'
+import { classNames } from '@/lib/classNames'
 
 export type StatusBadgeTone = 'neutral' | 'success' | 'warning' | 'error' | 'info'
 

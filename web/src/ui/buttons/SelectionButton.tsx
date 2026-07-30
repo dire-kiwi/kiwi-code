@@ -1,5 +1,5 @@
 import { forwardRef } from 'react'
-import { classNames } from '../../lib/classNames'
+import { classNames } from '@/lib/classNames'
 import { Button, type ButtonProps } from './Button'
 
 export type SelectionButtonVariant =

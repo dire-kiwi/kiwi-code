@@ -50,10 +50,9 @@ import type {
 } from '../../wire/domain'
 import { useSubscription } from '../../wire/react'
 import { BrowserStatusTopic } from '../../wire/topics'
-import { Button } from '../atoms/Button'
-import { IconButton } from '../atoms/IconButton'
-import { BaseInput } from '../atoms/Input'
-import { StatusBadge, type StatusBadgeTone } from '../atoms/StatusBadge'
+import { Button, IconButton } from '@/ui/buttons'
+import { BaseInput } from '@/ui/inputs'
+import { StatusBadge, type StatusBadgeTone } from '@/ui/feedback'
 
 const framePollIntervalMs = 5_000
 

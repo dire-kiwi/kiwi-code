@@ -1,6 +1,6 @@
 import { Menu } from 'lucide-react'
-import { classNames } from '../../lib/classNames'
-import { IconButton, type IconButtonProps } from '../atoms/IconButton'
+import { classNames } from '@/lib/classNames'
+import { IconButton, type IconButtonProps } from './IconButton'
 
 type OpenSidebarButtonProps = Omit<
   IconButtonProps,

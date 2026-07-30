@@ -17,13 +17,11 @@ import {
 } from 'lucide-react'
 import { createGitBranch, switchGitBranch } from '../../api'
 import type { AgentContextStatus, GitBranchState } from '../../types'
-import { Button, GhostButton, PrimaryButton } from '../atoms/Button'
-import { IconButton } from '../atoms/IconButton'
-import { TextInput } from '../atoms/Input'
-import { SelectionButton } from '../atoms/SelectionButton'
-import { Surface } from '../atoms/Surface'
+import { Button, GhostButton, IconButton, PrimaryButton, SelectionButton } from '@/ui/buttons'
+import { TextInput } from '@/ui/inputs'
+import { Surface } from '@/ui/layout'
 import { ContextStatus } from '../molecules/ContextStatus'
-import { FeedbackMessage } from '../molecules/FeedbackMessage'
+import { FeedbackMessage } from '@/ui/feedback'
 
 type GitBranchBarProps = {
   projectId: string

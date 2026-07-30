@@ -1,6 +1,6 @@
 import { ArrowLeft } from 'lucide-react'
-import { IconButton } from '../atoms/IconButton'
-import { OpenSidebarButton } from './OpenSidebarButton'
+import { IconButton } from '@/ui/buttons/IconButton'
+import { OpenSidebarButton } from '@/ui/buttons/OpenSidebarButton'
 
 type ScreenHeaderProps = {
   title: string

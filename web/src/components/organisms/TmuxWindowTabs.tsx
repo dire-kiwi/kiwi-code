@@ -2,9 +2,7 @@ import { useState } from 'react'
 import { Plus, RefreshCw } from 'lucide-react'
 import { createShellWindow, selectShellWindow } from '../../api'
 import type { TmuxWindow } from '../../types'
-import { Button } from '../atoms/Button'
-import { IconButton } from '../atoms/IconButton'
-import { SelectionButton } from '../atoms/SelectionButton'
+import { Button, IconButton, SelectionButton } from '@/ui/buttons'
 
 type TmuxWindowTabsProps = {
   projectId: string

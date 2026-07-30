@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { Archive, ArchiveRestore, EllipsisVertical, LoaderCircle, Trash2 } from 'lucide-react'
-import { Button } from '../atoms/Button'
-import { IconButton } from '../atoms/IconButton'
+import { Button, IconButton } from '@/ui/buttons'
 
 type ThreadActionsMenuProps = {
   threadTitle: string

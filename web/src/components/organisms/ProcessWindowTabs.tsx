@@ -1,7 +1,6 @@
 import { Activity, RefreshCw } from 'lucide-react'
 import type { ProcessWindow } from '../../types'
-import { Button } from '../atoms/Button'
-import { SelectionButton } from '../atoms/SelectionButton'
+import { Button, SelectionButton } from '@/ui/buttons'
 
 type ProcessWindowTabsProps = {
   windows: ProcessWindow[]

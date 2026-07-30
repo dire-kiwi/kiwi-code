@@ -1,5 +1,5 @@
 import { Check } from 'lucide-react'
-import type { AsyncFeedback } from '../../lib/useAsyncFeedback'
+import type { AsyncFeedback } from '@/lib/useAsyncFeedback'
 import { FeedbackMessage } from './FeedbackMessage'
 
 type ActionFeedbackProps = {

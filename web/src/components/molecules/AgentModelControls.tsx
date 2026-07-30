@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { BrainCircuit, Cpu } from 'lucide-react'
-import { Select } from '../atoms/Select'
+import { Select } from '@/ui/inputs'
 
 export type AgentModelOption = {
   value: string

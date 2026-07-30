@@ -15,15 +15,9 @@ import type {
 } from '../../types'
 import { useLastReadySubscriptionData, useSubscription } from '../../wire/react'
 import { CleanupTopic } from '../../wire/topics'
-import { GhostButton } from '../atoms/Button'
-import { StatusBadge } from '../atoms/StatusBadge'
-import { Surface } from '../atoms/Surface'
-import { LoadErrorPanel, LoadingPanel } from '../molecules/AsyncStatePanel'
-import { InfoCallout } from '../molecules/InfoCallout'
-import { PageIntro } from '../molecules/PageIntro'
-import { ScreenHeader } from '../molecules/ScreenHeader'
-import { SectionHeader } from '../molecules/SectionHeader'
-import { FormScreenTemplate } from '../templates/FormScreenTemplate'
+import { GhostButton } from '@/ui/buttons'
+import { InfoCallout, LoadErrorPanel, LoadingPanel, StatusBadge } from '@/ui/feedback'
+import { FormScreenTemplate, PageIntro, ScreenHeader, SectionHeader, Surface } from '@/ui/layout'
 
 type CleanupScreenProps = {
   onOpenSidebar: () => void

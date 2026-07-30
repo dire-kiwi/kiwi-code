@@ -16,8 +16,8 @@ import {
 } from '../../terminalKeyBridge.mjs'
 import { toTerminalTheme, useTheme } from '../../theme'
 import type { CodingAgent, ConnectionStatus, TerminalTool } from '../../types'
-import { Button } from '../atoms/Button'
-import { Surface } from '../atoms/Surface'
+import { Button } from '@/ui/buttons'
+import { Surface } from '@/ui/layout'
 
 type TerminalSessionProps = {
   projectId: string

@@ -3,14 +3,10 @@ import { LoaderCircle, Network, Save, Workflow } from 'lucide-react'
 import { updateSettings } from '../../../../api'
 import { useAsyncFeedback } from '../../../../lib/useAsyncFeedback'
 import type { AppSettings } from '../../../../types'
-import { PrimaryButton } from '../../../atoms/Button'
-import { TextInput } from '../../../atoms/Input'
-import { Select } from '../../../atoms/Select'
-import { StatusBadge } from '../../../atoms/StatusBadge'
-import { Surface } from '../../../atoms/Surface'
-import { ActionFeedback } from '../../../molecules/ActionFeedback'
-import { InfoCallout } from '../../../molecules/InfoCallout'
-import { SectionHeader } from '../../../molecules/SectionHeader'
+import { PrimaryButton } from '@/ui/buttons'
+import { Select, TextInput } from '@/ui/inputs'
+import { ActionFeedback, InfoCallout, StatusBadge } from '@/ui/feedback'
+import { SectionHeader, Surface } from '@/ui/layout'
 
 type AgentsSectionProps = {
   settings: AppSettings

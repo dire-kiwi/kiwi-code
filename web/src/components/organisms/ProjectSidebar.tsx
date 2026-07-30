@@ -69,13 +69,9 @@ import {
   webServersCollapseToggled,
 } from '../../store/slices/sidebar'
 import type { PiThreadActivity, ProcessWebServer, Profile, Project, Thread, ThreadUsageSnapshot } from '../../types'
-import { Button } from '../atoms/Button'
-import { IconButton } from '../atoms/IconButton'
-import { TextInput } from '../atoms/Input'
-import { SelectionButton } from '../atoms/SelectionButton'
-import { Select } from '../atoms/Select'
+import { Button, IconButton, SelectionButton } from '@/ui/buttons'
+import { ProjectPathAutocomplete, Select, TextInput } from '@/ui/inputs'
 import { BackendSwitcher } from '../molecules/BackendSwitcher'
-import { ProjectPathAutocomplete } from '../molecules/ProjectPathAutocomplete'
 import { ThreadActionsMenu } from '../molecules/ThreadActionsMenu'
 import { SidebarActivityView } from './SidebarActivityView'
 

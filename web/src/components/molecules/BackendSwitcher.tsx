@@ -8,9 +8,8 @@ import {
   rememberBackendOrigin,
   selectBackendOrigin,
 } from '../../backends'
-import { Button } from '../atoms/Button'
-import { TextInput } from '../atoms/Input'
-import { Select, type SelectOption } from '../atoms/Select'
+import { Button } from '@/ui/buttons'
+import { Select, type SelectOption, TextInput } from '@/ui/inputs'
 
 const addBackendValue = '__kiwi_code_add_backend__'
 const forgetBackendValue = '__kiwi_code_forget_backend__'

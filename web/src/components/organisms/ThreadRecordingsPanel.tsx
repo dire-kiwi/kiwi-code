@@ -12,8 +12,7 @@ import {
 import type { BrowserRecording, BrowserStatusResult } from '../../wire/domain'
 import { useSubscription } from '../../wire/react'
 import { BrowserStatusTopic } from '../../wire/topics'
-import { Button } from '../atoms/Button'
-import { IconButton } from '../atoms/IconButton'
+import { Button, IconButton } from '@/ui/buttons'
 
 export type ThreadRecordingsPanelProps = {
   projectId: string

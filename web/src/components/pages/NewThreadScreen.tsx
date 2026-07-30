@@ -67,13 +67,10 @@ import {
 } from '../../store/slices/newThreadPreferences'
 import { useSubscription } from '../../wire/react'
 import { CodingAgentsTopic, GitBranchesTopic, SettingsTopic } from '../../wire/topics'
-import { GhostButton, PrimaryButton } from '../atoms/Button'
-import { TextArea } from '../atoms/Input'
-import { Select } from '../atoms/Select'
-import { Surface } from '../atoms/Surface'
-import { FeedbackMessage } from '../molecules/FeedbackMessage'
-import { ScreenHeader } from '../molecules/ScreenHeader'
-import { FormScreenTemplate } from '../templates/FormScreenTemplate'
+import { GhostButton, PrimaryButton } from '@/ui/buttons'
+import { Select, TextArea } from '@/ui/inputs'
+import { FormScreenTemplate, ScreenHeader, Surface } from '@/ui/layout'
+import { FeedbackMessage } from '@/ui/feedback'
 
 type NewThreadScreenProps = {
   project: Project

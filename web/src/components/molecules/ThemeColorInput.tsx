@@ -1,6 +1,6 @@
 import { useId } from 'react'
 import { isHexColor } from '../../lib/validation'
-import { BaseInput } from '../atoms/Input'
+import { BaseInput } from '@/ui/inputs'
 
 export function ThemeColorInput({
   label,

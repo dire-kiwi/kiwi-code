@@ -46,8 +46,8 @@ import {
   threadWorkspaceMounted,
   type ThreadWorkspaceRouting,
 } from '../../store/slices/threadWorkspace'
-import { Select } from '../atoms/Select'
-import { OpenSidebarButton } from '../molecules/OpenSidebarButton'
+import { Select } from '@/ui/inputs'
+import { OpenSidebarButton } from '@/ui/buttons'
 import { GitBranchBar } from '../organisms/GitBranchBar'
 import { ClaudeNativePane } from '../organisms/ClaudeNativePane'
 import { PiNativePane } from '../organisms/PiNativePane'

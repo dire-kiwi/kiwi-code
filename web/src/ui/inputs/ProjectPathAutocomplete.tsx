@@ -6,11 +6,11 @@ import {
   type KeyboardEvent,
 } from 'react'
 import { Folder, LoaderCircle } from 'lucide-react'
-import { listDirectorySuggestions } from '../../api'
-import { classNames } from '../../lib/classNames'
-import type { DirectorySuggestion } from '../../types'
-import { Button } from '../atoms/Button'
-import { TextInput } from '../atoms/Input'
+import { listDirectorySuggestions } from '@/api'
+import { classNames } from '@/lib/classNames'
+import type { DirectorySuggestion } from '@/types'
+import { Button } from '@/ui/buttons/Button'
+import { TextInput } from './Input'
 
 const suggestionDelay = 120
 

@@ -9,9 +9,8 @@ import {
 import type { ConnectionStatus, TmuxBrowserSession, TmuxBrowserWindow } from '../../types'
 import { useSubscription } from '../../wire/react'
 import { TmuxSessionsTopic } from '../../wire/topics'
-import { IconButton } from '../atoms/IconButton'
-import { Surface } from '../atoms/Surface'
-import { ScreenHeader } from '../molecules/ScreenHeader'
+import { IconButton } from '@/ui/buttons'
+import { ScreenHeader, Surface } from '@/ui/layout'
 import { TerminalSession } from '../organisms/TerminalSession'
 
 type TmuxScreenProps = {

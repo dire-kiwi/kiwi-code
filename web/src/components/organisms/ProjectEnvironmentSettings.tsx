@@ -18,12 +18,10 @@ import type {
   PlatformScripts,
   Project,
 } from '../../types'
-import { GhostButton, PrimaryButton } from '../atoms/Button'
-import { TextArea, TextInput } from '../atoms/Input'
-import { Surface } from '../atoms/Surface'
-import { FeedbackMessage } from '../molecules/FeedbackMessage'
-import { InfoCallout } from '../molecules/InfoCallout'
-import { SectionHeader } from '../molecules/SectionHeader'
+import { GhostButton, PrimaryButton } from '@/ui/buttons'
+import { TextArea, TextInput } from '@/ui/inputs'
+import { SectionHeader, Surface } from '@/ui/layout'
+import { FeedbackMessage, InfoCallout } from '@/ui/feedback'
 
 const platforms: Array<{ id: keyof PlatformScripts; label: string }> = [
   { id: 'default', label: 'Default' },

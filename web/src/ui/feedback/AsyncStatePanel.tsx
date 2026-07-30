@@ -1,6 +1,6 @@
 import { LoaderCircle } from 'lucide-react'
-import { PrimaryButton } from '../atoms/Button'
-import { Surface } from '../atoms/Surface'
+import { PrimaryButton } from '@/ui/buttons/Button'
+import { Surface } from '@/ui/layout/Surface'
 
 type LoadingPanelProps = {
   label: string

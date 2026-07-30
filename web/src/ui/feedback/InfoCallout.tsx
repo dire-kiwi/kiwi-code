@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Info } from 'lucide-react'
-import { classNames } from '../../lib/classNames'
+import { classNames } from '@/lib/classNames'
 
 type InfoCalloutProps = {
   children: ReactNode

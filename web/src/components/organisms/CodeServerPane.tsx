@@ -10,7 +10,7 @@ import {
 import { isDefaultBackendActive } from '../../backends'
 import { useDesktopSurfaceBounds } from '../../lib/useDesktopSurfaceBounds'
 import type { ConnectionStatus } from '../../types'
-import { Button } from '../atoms/Button'
+import { Button } from '@/ui/buttons'
 
 export type CodeServerPaneProps = {
   projectId: string

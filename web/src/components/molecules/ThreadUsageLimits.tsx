@@ -9,8 +9,8 @@ import {
   usageDescription,
 } from '../../lib/formatUsage'
 import type { Thread, ThreadUsageSnapshot, ThreadUsageTotals } from '../../types'
-import { Button, GhostButton, PrimaryButton } from '../atoms/Button'
-import { TextInput } from '../atoms/Input'
+import { Button, GhostButton, PrimaryButton } from '@/ui/buttons'
+import { TextInput } from '@/ui/inputs'
 
 type ThreadUsageLimitsProps = {
   projectId: string

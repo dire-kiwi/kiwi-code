@@ -1,4 +1,4 @@
-import { AgentMarkdown } from './AgentMarkdown'
+import { AgentMarkdown } from '@/ui/markdown'
 
 type NativeAgentMessageProps = {
   role: 'user' | 'assistant'

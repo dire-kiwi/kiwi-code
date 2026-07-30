@@ -15,7 +15,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, Search } from 'lucide-react'
-import { classNames } from '../../lib/classNames'
+import { classNames } from '@/lib/classNames'
 
 export type SelectOption = {
   value: string

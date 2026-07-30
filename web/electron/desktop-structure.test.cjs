@@ -17,7 +17,7 @@ const rendererApp = fs.readFileSync(path.join(__dirname, '..', 'src', 'App.tsx')
 const rendererStyles = fs.readFileSync(path.join(__dirname, '..', 'src', 'index.css'), 'utf8')
 const projectSidebar = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'organisms', 'ProjectSidebar.tsx'), 'utf8')
 const threadProjectSidebar = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'organisms', 'ThreadProjectSidebar.tsx'), 'utf8')
-const screenHeader = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'molecules', 'ScreenHeader.tsx'), 'utf8')
+const screenHeader = fs.readFileSync(path.join(__dirname, '..', 'src', 'ui', 'layout', 'ScreenHeader.tsx'), 'utf8')
 const terminalWorkspace = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'pages', 'TerminalWorkspace.tsx'), 'utf8')
 
 test('desktop composes a secure trusted WebContentsView in a BaseWindow', () => {

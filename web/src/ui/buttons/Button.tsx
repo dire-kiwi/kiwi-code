@@ -1,5 +1,5 @@
 import { forwardRef, type ComponentPropsWithoutRef } from 'react'
-import { classNames } from '../../lib/classNames'
+import { classNames } from '@/lib/classNames'
 
 export type BaseButtonProps = ComponentPropsWithoutRef<'button'>
 
