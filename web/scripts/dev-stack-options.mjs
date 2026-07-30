@@ -16,17 +16,10 @@ export function assertDevelopmentPort(port, option) {
   }
 }
 
-export function assertDevelopmentApiTarget(configuredPort, configuredUrl) {
+export function assertDevelopmentApiPort(configuredPort) {
   const port = String(configuredPort ?? '').trim()
   if (/^\d+$/.test(port)) {
     assertDevelopmentPort(Number(port), 'Vite API target')
-  }
-
-  const value = String(configuredUrl ?? '').trim()
-  if (!value) return
-  const url = new URL(value, 'http://kiwi-code.invalid')
-  if (url.port) {
-    assertDevelopmentPort(Number(url.port), 'Vite API target')
   }
 }
 

@@ -85,7 +85,7 @@ test('browser control uses the WebContents debugger and real CDP input', () => {
 
 test('desktop IPC remains compatible across the product rename', () => {
   assert.match(main, /dire-mux-desktop-browser:hide/)
-  assert.match(main, /dire-mux-desktop-browser:set-backend-origin/)
+  assert.match(main, /dire-mux-desktop-browser:set-bounds/)
   assert.match(main, /for \(const channels of browserIpcChannelSets\)/)
   assert.match(preload, /compatibleChannelSets/)
   assert.match(preload, /No handler registered for/)
@@ -130,14 +130,11 @@ test('preload exposes only the narrow native view APIs', () => {
   assert.match(preload, /show\(options\)/)
   assert.match(preload, /hide\(options\)/)
   assert.match(preload, /setBounds\(options\)/)
-  assert.match(preload, /setBackendOrigin\(origin\)/)
-  assert.match(preload, /invokeCompatible\(browserChannelSets, 'setBackendOrigin', origin\)/)
   assert.match(preload, /onState\(callback\)/)
   assert.match(preload, /onWorkspaceShortcut\(callback\)/)
   assert.match(preload, /process\.isMainFrame/)
   assert.doesNotMatch(preload, /exposeInMainWorld\([^\n]+ipcRenderer/)
-  assert.match(main, /validateBackendOrigin/)
-  assert.match(main, /setRendererBackendOrigin/)
+  assert.doesNotMatch(preload + main, /setBackendOrigin|set-backend-origin/)
 })
 
 test('desktop reloads only the trusted frontend while preserving native sessions', () => {

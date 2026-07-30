@@ -33,7 +33,6 @@ interface KiwiCodeDesktopBrowserBridge {
   show(input: KiwiCodeDesktopBrowserIdentity & { bounds: KiwiCodeDesktopBrowserBounds }): KiwiCodeDesktopBrowserResult
   hide(input: KiwiCodeDesktopBrowserIdentity): KiwiCodeDesktopBrowserResult
   setBounds(input: KiwiCodeDesktopBrowserIdentity & { bounds: KiwiCodeDesktopBrowserBounds }): KiwiCodeDesktopBrowserResult
-  setBackendOrigin(origin: string): KiwiCodeDesktopBrowserResult
   onState(callback: (state: KiwiCodeDesktopBrowserState) => void): () => void
   onWorkspaceShortcut(callback: (index: number) => void): () => void
 }

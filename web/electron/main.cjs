@@ -41,7 +41,6 @@ const browserIpcChannels = {
   show: 'kiwi-code-desktop-browser:show',
   hide: 'kiwi-code-desktop-browser:hide',
   setBounds: 'kiwi-code-desktop-browser:set-bounds',
-  setBackendOrigin: 'kiwi-code-desktop-browser:set-backend-origin',
   state: 'kiwi-code-desktop-browser:state',
   workspaceShortcut: 'kiwi-code-desktop-browser:workspace-shortcut',
 }
@@ -49,7 +48,6 @@ const legacyBrowserIpcChannels = {
   show: 'dire-mux-desktop-browser:show',
   hide: 'dire-mux-desktop-browser:hide',
   setBounds: 'dire-mux-desktop-browser:set-bounds',
-  setBackendOrigin: 'dire-mux-desktop-browser:set-backend-origin',
   state: 'dire-mux-desktop-browser:state',
   workspaceShortcut: 'dire-mux-desktop-browser:workspace-shortcut',
 }
@@ -101,29 +99,6 @@ function validateSessionPayload(value, requireBounds) {
   return value
 }
 
-function validateBackendOrigin(value) {
-  if (typeof value !== 'string') {
-    throw new BrowserProviderError('invalid_request', 'Backend origin must be a string.')
-  }
-  let url
-  try {
-    url = new URL(value)
-  } catch {
-    throw new BrowserProviderError('invalid_request', 'Backend origin must be a valid URL.')
-  }
-  if (
-    (url.protocol !== 'http:' && url.protocol !== 'https:') ||
-    url.username ||
-    url.password ||
-    url.pathname !== '/' ||
-    url.search ||
-    url.hash
-  ) {
-    throw new BrowserProviderError('invalid_request', 'Backend origin must be an HTTP or HTTPS origin.')
-  }
-  return url.origin
-}
-
 function registerIpc() {
   const trustedContents = (event) => {
     const contents = trustedView?.webContents
@@ -171,9 +146,6 @@ function registerIpc() {
     ipcMain.handle(channels.show, browserInvoke((current, payload) => current.show(validateSessionPayload(payload, true))))
     ipcMain.handle(channels.hide, browserInvoke((current, payload) => current.hide(validateSessionPayload(payload, false))))
     ipcMain.handle(channels.setBounds, browserInvoke((current, payload) => current.setBounds(validateSessionPayload(payload, true))))
-    ipcMain.handle(channels.setBackendOrigin, browserInvoke((current, payload) => (
-      current.setRendererBackendOrigin(validateBackendOrigin(payload))
-    )))
   }
 }
 

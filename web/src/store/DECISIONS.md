@@ -55,8 +55,6 @@ rendered once, so this is currently unobservable.
   slice is what unblocks it; `sidebarToggled` is already defined and unused.
 - **`ProjectSidebar` still takes all 34 props.** Prop reduction was explicitly
   scoped out to keep the diff about storage ownership.
-- **`backend-config.mjs` untouched** — read at module-eval time before the store
-  exists.
 
 ## Browser validation
 

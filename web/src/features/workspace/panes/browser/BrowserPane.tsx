@@ -15,7 +15,6 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import { browserStreamUrl, getBrowserFrame, performBrowserAction } from '@/api'
-import { isDefaultBackendActive } from '@/backends'
 import { downloadBrowserRecording } from '@/lib/browserRecording'
 import { useDesktopSurfaceBounds } from '@/lib/useDesktopSurfaceBounds'
 import type {
@@ -63,11 +62,7 @@ export function BrowserPane({
   onStatusChange,
   onWorkspaceShortcut,
 }: BrowserPaneProps) {
-  // The native guest provider is paired with the backend that launched this
-  // desktop renderer. Remote backends use their own projected browser preview.
-  const desktopBridge = isDefaultBackendActive()
-    ? window.kiwiCodeDesktopBrowser ?? window.direMuxDesktopBrowser
-    : undefined
+  const desktopBridge = window.kiwiCodeDesktopBrowser ?? window.direMuxDesktopBrowser
   const guestRef = useRef<HTMLDivElement>(null)
   const streamCanvasRef = useRef<HTMLCanvasElement>(null)
   const streamSocketRef = useRef<WebSocket | null>(null)

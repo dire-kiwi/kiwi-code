@@ -1030,7 +1030,6 @@ class BrowserWorkspaceManager {
     this.sessions = new Map()
     this.queues = new Map()
     this.protectedOrigins = new Set([desktopOrigin, apiOrigin].filter(Boolean))
-    this.rendererBackendOrigin = apiOrigin || desktopOrigin
     this.activeKey = null
     this.activeProjectId = null
     this.activeThreadId = null
@@ -1038,19 +1037,6 @@ class BrowserWorkspaceManager {
     this.attachedView = null
     this.disposed = false
     this.disposePromise = null
-  }
-
-  addProtectedOrigin(origin) {
-    if (origin) this.protectedOrigins.add(origin)
-  }
-
-  setRendererBackendOrigin(origin) {
-    this.addProtectedOrigin(origin)
-    if (origin !== this.rendererBackendOrigin) {
-      this.rendererBackendOrigin = origin
-      this.detachActiveView()
-    }
-    return { origin }
   }
 
   key(projectId, threadId) {
