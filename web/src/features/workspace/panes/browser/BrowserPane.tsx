@@ -7,54 +7,41 @@ import {
   type FormEvent,
 } from 'react'
 import {
-  ArrowLeft,
-  ArrowRight,
-  Circle,
-  Download,
   Globe2,
   Image as ImageIcon,
   LoaderCircle,
   Monitor,
-  Play,
-  Plus,
   RefreshCw,
-  RotateCw,
-  Square,
-  Trash2,
   TriangleAlert,
-  X,
 } from 'lucide-react'
-import {
-  browserRecordingPlaybackUrl,
-  browserStreamUrl,
-  getBrowserFrame,
-  performBrowserAction,
-} from '@/api'
+import { browserStreamUrl, getBrowserFrame, performBrowserAction } from '@/api'
 import { isDefaultBackendActive } from '@/backends'
-import {
-  downloadBrowserRecording,
-  formatRecordingBytes,
-  formatRecordingDuration,
-} from '@/lib/browserRecording'
+import { downloadBrowserRecording } from '@/lib/browserRecording'
 import { useDesktopSurfaceBounds } from '@/lib/useDesktopSurfaceBounds'
 import type {
   BrowserActionOperation,
   BrowserActionParams,
   ConnectionStatus,
 } from '@/types'
-import type {
-  BrowserCurrentPage,
-  BrowserPage,
-  BrowserRecording,
-  BrowserStatusResult,
-} from '@/wire/domain'
+import type { BrowserRecording, BrowserStatusResult } from '@/wire/domain'
 import { useSubscription } from '@/wire/react'
 import { BrowserStatusTopic } from '@/wire/topics'
-import { Button, IconButton } from '@/ui/buttons'
-import { BaseInput } from '@/ui/inputs'
-import { StatusBadge, type StatusBadgeTone } from '@/ui/feedback'
-
-const framePollIntervalMs = 5_000
+import { Button } from '@/ui/buttons'
+import type { StatusBadgeTone } from '@/ui/feedback'
+import { BrowserPlaybackOverlay } from './BrowserPlaybackOverlay'
+import { BrowserRecordingsBar } from './BrowserRecordingsBar'
+import { BrowserStreamCanvas } from './BrowserStreamCanvas'
+import { BrowserTabStrip } from './BrowserTabStrip'
+import { BrowserToolbar } from './BrowserToolbar'
+import {
+  connectionStatusFor,
+  currentPageFor,
+  errorMessage,
+  framePollIntervalMs,
+  navigationOperation,
+  navigationURL,
+  validRecordingTitle,
+} from './browserHelpers'
 
 export type BrowserPaneProps = {
   projectId: string
@@ -66,76 +53,6 @@ export type BrowserPaneProps = {
   onWorkspaceShortcut?: (index: number) => void
 }
 
-function currentPageFor(
-  status: BrowserStatusResult | null,
-  pages: BrowserPage[],
-): BrowserCurrentPage | null {
-  if (status?.current?.id) return status.current
-  const page = pages.find((candidate) => candidate.id === status?.currentTargetId) ?? pages[0]
-  return page ? { ...page } : null
-}
-
-function pageLabel(page: BrowserPage) {
-  const title = page.title?.trim()
-  if (title) return title
-  const url = page.url?.trim()
-  if (!url || url === 'about:blank') return 'New tab'
-  try {
-    return new URL(url).hostname || url
-  } catch {
-    return url
-  }
-}
-
-function navigationURL(value: string) {
-  const trimmed = value.trim()
-  if (!trimmed) return ''
-  if (/^https?:\/\//i.test(trimmed)) return trimmed
-  if (/^(localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?(?:\/|$)/i.test(trimmed)) {
-    return `http://${trimmed}`
-  }
-  if (/^[a-z][a-z\d+.-]*:/i.test(trimmed)) return trimmed
-  const looksLikeHost = /^(?:[a-z\d-]+\.)+[a-z\d-]+(?::\d+)?(?:\/|$)/i.test(trimmed)
-    || /^\[[a-f\d:]+\](?::\d+)?(?:\/|$)/i.test(trimmed)
-  if (/\s/.test(trimmed) || !looksLikeHost) {
-    return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`
-  }
-  return `https://${trimmed}`
-}
-
-function connectionStatusFor(
-  status: BrowserStatusResult | null,
-  loading: boolean,
-  error: string,
-): ConnectionStatus {
-  if (error || status?.error) return 'error'
-  if (loading && !status) return 'connecting'
-  if (status?.reachable === false && status.running !== false) return 'error'
-  if (!status || status.running === false) return 'closed'
-  if (
-    status.reachable === true
-    || status.running === true
-    || Boolean(status.current)
-    || Boolean(status.pages?.length)
-  ) {
-    return 'open'
-  }
-  return 'closed'
-}
-
-function errorMessage(reason: unknown, fallback: string) {
-  return reason instanceof Error && reason.message ? reason.message : fallback
-}
-
-function inputModifiers(event: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) {
-  return (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0)
-}
-
-function validRecordingTitle(value: string) {
-  const title = value.replace(/\s+/g, ' ').trim()
-  const words = title.split(' ').filter(Boolean)
-  return title.length >= 3 && title.length <= 80 && words.length >= 2 && words.length <= 12 ? title : ''
-}
 
 export function BrowserPane({
   projectId,
@@ -538,12 +455,7 @@ export function BrowserPane({
     if (!url || busyOperation || statusLoading || providerUnavailable) return
     setAddress(url)
     setAddressDirty(false)
-    const operation: BrowserActionOperation = status?.running !== true
-      ? 'session.start'
-      : currentPage
-        ? 'navigate.goto'
-        : 'tabs.new'
-    void runAction(operation, { url })
+    void runAction(navigationOperation(status?.running === true, Boolean(currentPage)), { url })
   }
 
   function startRecording() {
@@ -594,6 +506,11 @@ export function BrowserPane({
   }
 
   const backendLabel = status?.backend?.trim() || (desktopBridge ? 'Desktop' : 'Browser')
+  const viewModeLabel = usesNativeView
+    ? 'Native view'
+    : usesStream
+      ? streamController ? 'Interactive stream' : 'View-only stream'
+      : 'Preview'
   const backendTone: StatusBadgeTone = providerUnavailable
     ? 'error'
     : connectionStatus === 'open'
@@ -611,227 +528,49 @@ export function BrowserPane({
         active ? 'visible opacity-100' : 'pointer-events-none invisible opacity-0'
       }`}
     >
-      <div className="flex h-9 shrink-0 items-center border-b border-ghost-border/65 bg-ghost-panel/80 px-2">
-        <div
-          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
-          role="toolbar"
-          aria-label="Browser tabs"
-        >
-          {pages.map((page) => {
-            const selected = page.id === (status?.currentTargetId ?? currentPage?.id)
-            const recorded = page.id === activeRecording?.targetId
-            const label = pageLabel(page)
-            return (
-              <div
-                key={page.id}
-                className={`group flex h-7 min-w-[8rem] max-w-[15rem] shrink-0 items-center rounded-md border ${
-                  selected
-                    ? 'border-ghost-border/85 bg-ghost-raised text-ghost-bright-white'
-                    : 'border-transparent text-ghost-dim hover:bg-ghost-raised/55 hover:text-ghost-white'
-                }`}
-              >
-                <Button
-                  type="button"
-                  aria-pressed={selected}
-                  aria-controls="browser-guest-rectangle"
-                  aria-label={`Select tab ${label}`}
-                  disabled={Boolean(busyOperation) || providerUnavailable}
-                  onClick={() => {
-                    if (!selected) void runAction('tabs.select', { targetId: page.id })
-                  }}
-                  className="flex h-full min-w-0 flex-1 items-center gap-2 pl-2.5 text-left disabled:cursor-wait"
-                  title={page.url || label}
-                >
-                  {recorded
-                    ? <Circle size={10} fill="currentColor" className="shrink-0 animate-pulse text-ghost-bright-red" />
-                    : <Globe2 size={11} className={selected ? 'shrink-0 text-ghost-green' : 'shrink-0'} />}
-                  <span className="truncate text-[10px] font-medium">{label}</span>
-                </Button>
-                <IconButton
-                  type="button"
-                  size="xs"
-                  variant="subtle"
-                  disabled={Boolean(busyOperation) || providerUnavailable || recorded}
-                  onClick={() => void runAction('tabs.close', { targetId: page.id })}
-                  aria-label={recorded ? `Stop recording before closing tab ${label}` : `Close tab ${label}`}
-                  title={recorded ? 'Stop recording before closing this tab' : `Close ${label}`}
-                  className="mr-0.5 opacity-70 group-hover:opacity-100 focus:opacity-100 disabled:cursor-wait"
-                >
-                  <X size={10} />
-                </IconButton>
-              </div>
-            )
-          })}
-          <IconButton
-            type="button"
-            size="sm"
-            variant="subtle"
-            shrink
-            disabled={Boolean(busyOperation) || statusLoading || providerUnavailable}
-            onClick={() => void runAction(status?.running === true ? 'tabs.new' : 'session.start')}
-            aria-label="New browser tab"
-            title="New browser tab"
-          >
-            <Plus size={13} />
-          </IconButton>
-        </div>
-      </div>
+      <BrowserTabStrip
+        pages={pages}
+        selectedTargetId={status?.currentTargetId ?? currentPage?.id}
+        recordingTargetId={activeRecording?.targetId}
+        busy={Boolean(busyOperation)}
+        statusLoading={statusLoading}
+        providerUnavailable={providerUnavailable}
+        sessionRunning={status?.running === true}
+        onSelectTab={(targetId) => void runAction('tabs.select', { targetId })}
+        onCloseTab={(targetId) => void runAction('tabs.close', { targetId })}
+        onNewTab={() => void runAction(status?.running === true ? 'tabs.new' : 'session.start')}
+      />
 
-      <div
-        className="flex min-h-12 shrink-0 items-center gap-1.5 border-b border-ghost-border/65 bg-ghost-panel/95 px-2 py-1.5 sm:px-3"
-        role="toolbar"
-        aria-label="Browser navigation"
-      >
-        <div className="flex shrink-0 items-center gap-0.5">
-          <IconButton
-            type="button"
-            size="md"
-            variant="subtle"
-            disabled={Boolean(busyOperation) || !currentPage || currentPage.canGoBack === false}
-            onClick={() => void runAction('navigate.back')}
-            aria-label="Go back"
-            title="Back"
-          >
-            <ArrowLeft size={15} />
-          </IconButton>
-          <IconButton
-            type="button"
-            size="md"
-            variant="subtle"
-            disabled={Boolean(busyOperation) || !currentPage || currentPage.canGoForward === false}
-            onClick={() => void runAction('navigate.forward')}
-            aria-label="Go forward"
-            title="Forward"
-          >
-            <ArrowRight size={15} />
-          </IconButton>
-          <IconButton
-            type="button"
-            size="md"
-            variant="subtle"
-            disabled={Boolean(busyOperation) || !currentPage}
-            onClick={() => void runAction('navigate.reload')}
-            aria-label="Reload page"
-            title="Reload"
-          >
-            <RotateCw size={14} className={busyOperation === 'navigate.reload' ? 'animate-spin' : ''} />
-          </IconButton>
-        </div>
-
-        <form onSubmit={handleNavigate} className="relative min-w-0 flex-1">
-          <Globe2
-            size={13}
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ghost-dim"
-          />
-          <BaseInput
-            ref={addressRef}
-            type="text"
-            inputMode="url"
-            value={address}
-            onChange={(event) => {
-              setAddress(event.target.value)
-              setAddressDirty(true)
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
-              event.preventDefault()
-              event.currentTarget.form?.requestSubmit()
-            }}
-            onBlur={() => {
-              if (currentURL) setAddress(currentURL)
-              setAddressDirty(false)
-            }}
-            disabled={Boolean(busyOperation) || statusLoading || providerUnavailable}
-            aria-label="Browser address"
-            autoCapitalize="none"
-            autoCorrect="off"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="Enter a URL or search"
-            className="h-8 w-full rounded-lg border border-ghost-border/80 bg-ghost-black/45 pl-8 pr-8 font-mono text-[10px] text-ghost-bright-white outline-none transition placeholder:text-ghost-faint focus:border-ghost-green/55 focus:ring-2 focus:ring-ghost-green/10 disabled:cursor-wait disabled:opacity-70"
-          />
-          {(busyOperation === 'navigate.goto' || busyOperation === 'session.start' || currentLoading) && (
-            <LoaderCircle
-              size={12}
-              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-ghost-green"
-            />
-          )}
-        </form>
-
-        {activeRecording ? (
-          <div className="flex shrink-0 items-center gap-1" aria-label="Browser recording controls">
-            <StatusBadge tone="error">
-              <span className="flex items-center gap-1 font-mono" title={activeRecording.title}>
-                <Circle size={8} fill="currentColor" className={activeRecording.state === 'recording' ? 'animate-pulse' : ''} />
-                {activeRecording.state === 'finalizing' ? 'Saving…' : formatRecordingDuration(recordingElapsedMs)}
-              </span>
-            </StatusBadge>
-            <IconButton
-              type="button"
-              size="md"
-              variant="danger"
-              shrink
-              disabled={Boolean(busyOperation) || activeRecording.state === 'finalizing'}
-              onClick={() => void runAction('recording.stop', { recordingId: activeRecording.id })}
-              aria-label="Stop browser recording"
-              title={`Stop and save “${activeRecording.title}”`}
-            >
-              {busyOperation === 'recording.stop'
-                ? <LoaderCircle size={13} className="animate-spin" />
-                : <Square size={11} fill="currentColor" />}
-            </IconButton>
-          </div>
-        ) : status?.capabilities?.recording === true && (
-          <IconButton
-            type="button"
-            size="md"
-            variant="subtle"
-            shrink
-            disabled={Boolean(busyOperation) || !currentPage || providerUnavailable}
-            onClick={startRecording}
-            aria-label="Record browser tab"
-            title="Record this tab"
-            className="text-ghost-bright-red"
-          >
-            {busyOperation === 'recording.start'
-              ? <LoaderCircle size={13} className="animate-spin" />
-              : <Circle size={12} fill="currentColor" />}
-          </IconButton>
-        )}
-
-        <div className="hidden shrink-0 items-center gap-1 lg:flex" aria-label="Browser backend status">
-          <StatusBadge tone={backendTone}>{backendLabel}</StatusBadge>
-          <StatusBadge tone={usesNativeView || streamConnected ? 'info' : 'neutral'}>
-            {usesNativeView ? 'Native view' : usesStream ? (streamController ? 'Interactive stream' : 'View-only stream') : 'Preview'}
-          </StatusBadge>
-        </div>
-        <IconButton
-          type="button"
-          size="md"
-          variant="subtle"
-          shrink
-          onClick={retryAll}
-          disabled={statusLoading || frameLoading}
-          aria-label="Refresh browser status and preview"
-          title="Refresh browser status"
-        >
-          <RefreshCw size={13} className={statusLoading || frameLoading ? 'animate-spin' : ''} />
-        </IconButton>
-        <IconButton
-          type="button"
-          size="md"
-          variant="danger"
-          shrink
-          disabled={Boolean(busyOperation) || noSession || providerUnavailable}
-          onClick={() => {
-            if (window.confirm('Close this thread’s browser session?')) void runAction('session.stop')
-          }}
-          aria-label="Close browser session"
-          title="Close browser session"
-        >
-          <X size={14} />
-        </IconButton>
-      </div>
+      <BrowserToolbar
+        runAction={(operation, params) => void runAction(operation, params)}
+        busyOperation={busyOperation}
+        currentPage={currentPage}
+        currentLoading={currentLoading}
+        statusLoading={statusLoading}
+        frameLoading={frameLoading}
+        providerUnavailable={providerUnavailable}
+        noSession={noSession}
+        addressRef={addressRef}
+        address={address}
+        onAddressChange={(value) => {
+          setAddress(value)
+          setAddressDirty(true)
+        }}
+        onAddressBlur={() => {
+          if (currentURL) setAddress(currentURL)
+          setAddressDirty(false)
+        }}
+        onSubmitAddress={handleNavigate}
+        activeRecording={activeRecording}
+        recordingElapsedMs={recordingElapsedMs}
+        recordingSupported={status?.capabilities?.recording === true}
+        onStartRecording={startRecording}
+        backendTone={backendTone}
+        backendLabel={backendLabel}
+        viewModeLabel={viewModeLabel}
+        viewModeActive={usesNativeView || streamConnected}
+        onRetryAll={retryAll}
+      />
 
       {statusError && !providerUnavailable && (
         <div
@@ -865,48 +604,18 @@ export function BrowserPane({
         </div>
       )}
 
-      {completedRecordings.length > 0 && (
-        <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-ghost-border/65 bg-ghost-panel/75 px-3 py-1.5" aria-label="Completed browser recordings">
-          <span className="shrink-0 text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-faint">Recordings</span>
-          {completedRecordings.map((recording) => (
-            <div
-              key={recording.id}
-              className={`flex max-w-[22rem] shrink-0 items-center gap-1 rounded-md border px-1.5 py-1 ${playbackRecording?.id === recording.id ? 'border-ghost-green/45 bg-ghost-green/10' : 'border-ghost-border/70 bg-ghost-black/25'}`}
-              title={`${recording.title} · ${formatRecordingDuration(recording.durationMs)}${formatRecordingBytes(recording.bytes) ? ` · ${formatRecordingBytes(recording.bytes)}` : ''}`}
-            >
-              <Button
-                type="button"
-                variant="text"
-                onClick={() => playRecording(recording)}
-                className="flex min-w-0 items-center gap-1.5 px-1 text-[9px] text-ghost-white"
-              >
-                <Play size={9} fill="currentColor" className="shrink-0 text-ghost-green" />
-                <span className="max-w-44 truncate">{recording.title}</span>
-                <span className="shrink-0 font-mono text-ghost-faint">{formatRecordingDuration(recording.durationMs)}</span>
-              </Button>
-              <IconButton type="button" size="xs" variant="subtle" onClick={() => downloadRecording(recording)} aria-label={`Download ${recording.title}`} title="Download recording">
-                <Download size={10} />
-              </IconButton>
-              <IconButton
-                type="button"
-                size="xs"
-                variant="subtle"
-                disabled={Boolean(busyOperation)}
-                onClick={() => {
-                  if (!window.confirm(`Delete “${recording.title}”?`)) return
-                  if (playbackRecording?.id === recording.id) closePlayback()
-                  void runAction('recording.delete', { recordingId: recording.id })
-                }}
-                aria-label={`Delete ${recording.title}`}
-                title="Delete recording"
-                className="text-ghost-bright-red"
-              >
-                <Trash2 size={10} />
-              </IconButton>
-            </div>
-          ))}
-        </div>
-      )}
+      <BrowserRecordingsBar
+        recordings={completedRecordings}
+        playingRecordingId={playbackRecording?.id}
+        busy={Boolean(busyOperation)}
+        onPlay={playRecording}
+        onDownload={downloadRecording}
+        onDelete={(recording) => {
+          if (!window.confirm(`Delete “${recording.title}”?`)) return
+          if (playbackRecording?.id === recording.id) closePlayback()
+          void runAction('recording.delete', { recordingId: recording.id })
+        }}
+      />
 
       <div
         ref={guestRef}
@@ -915,132 +624,32 @@ export function BrowserPane({
         aria-label={usesNativeView ? 'Native browser content' : usesStream ? 'Interactive browser stream' : 'Browser preview'}
       >
         {playbackRecording && (
-          <div className="absolute inset-0 z-30 flex flex-col bg-ghost-black" aria-label={`Playback of ${playbackRecording.title}`}>
-            <div className="flex h-10 shrink-0 items-center gap-2 border-b border-ghost-border/70 bg-ghost-panel px-3">
-              <Play size={11} fill="currentColor" className="shrink-0 text-ghost-green" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[10px] font-semibold text-ghost-bright-white">{playbackRecording.title}</p>
-                <p className="text-[8px] text-ghost-faint">{formatRecordingDuration(playbackRecording.durationMs)}{formatRecordingBytes(playbackRecording.bytes) ? ` · ${formatRecordingBytes(playbackRecording.bytes)}` : ''}</p>
-              </div>
-              <IconButton type="button" size="sm" variant="subtle" onClick={() => downloadRecording(playbackRecording)} aria-label={`Download ${playbackRecording.title}`} title="Download recording">
-                <Download size={12} />
-              </IconButton>
-              <IconButton type="button" size="sm" variant="subtle" onClick={closePlayback} aria-label="Close recording playback" title="Close playback">
-                <X size={12} />
-              </IconButton>
-            </div>
-            <div className="relative min-h-0 flex-1">
-              <video
-                key={playbackRecording.id}
-                src={browserRecordingPlaybackUrl(projectId, threadId, playbackRecording.id)}
-                controls
-                autoPlay
-                playsInline
-                preload="metadata"
-                className="h-full w-full bg-black object-contain"
-                aria-label={playbackRecording.title}
-                onLoadStart={() => { setPlaybackLoading(true); setPlaybackError('') }}
-                onCanPlay={() => setPlaybackLoading(false)}
-                onPlaying={() => setPlaybackLoading(false)}
-                onWaiting={() => setPlaybackLoading(true)}
-                onError={() => {
-                  setPlaybackLoading(false)
-                  setPlaybackError('This WebM could not be played inline. Download it to view externally.')
-                }}
-              />
-              {playbackLoading && !playbackError && (
-                <div className="pointer-events-none absolute inset-0 grid place-items-center bg-ghost-black/45" aria-label="Loading browser recording">
-                  <LoaderCircle size={20} className="animate-spin text-ghost-green" />
-                </div>
-              )}
-              {playbackError && (
-                <div role="alert" className="absolute inset-x-4 bottom-4 rounded-lg border border-ghost-bright-red/30 bg-ghost-panel/95 px-3 py-2 text-center text-[10px] text-ghost-bright-red">
-                  {playbackError}
-                </div>
-              )}
-            </div>
-          </div>
+          <BrowserPlaybackOverlay
+            projectId={projectId}
+            threadId={threadId}
+            recording={playbackRecording}
+            loading={playbackLoading}
+            error={playbackError}
+            onLoadingChange={setPlaybackLoading}
+            onError={setPlaybackError}
+            onDownload={downloadRecording}
+            onClose={closePlayback}
+          />
         )}
 
         {usesStream && (
-          <canvas
-            ref={streamCanvasRef}
-            tabIndex={streamController ? 0 : -1}
-            aria-label={streamController ? 'Interactive browser content' : 'Browser stream (controlled by another viewer)'}
-            className={`h-full w-full object-contain outline-none ${streamController ? 'cursor-default focus:ring-2 focus:ring-inset focus:ring-ghost-green/45' : 'cursor-not-allowed'}`}
-            onFocus={() => sendStreamInput({ type: 'focus' })}
-            onBlur={() => sendStreamInput({ type: 'blur' })}
-            onContextMenu={(event) => event.preventDefault()}
-            onPointerDown={(event) => {
-              if (!streamController) return
-              event.currentTarget.focus()
-              event.currentTarget.setPointerCapture(event.pointerId)
-              const rect = event.currentTarget.getBoundingClientRect()
-              const x = (event.clientX - rect.left) * event.currentTarget.width / rect.width
-              const y = (event.clientY - rect.top) * event.currentTarget.height / rect.height
-              const button = event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left'
-              sendStreamInput({ type: 'pointer', event: 'mousePressed', x, y, button, buttons: event.buttons, clickCount: event.detail || 1, modifiers: inputModifiers(event) })
+          <BrowserStreamCanvas
+            canvasRef={streamCanvasRef}
+            controller={streamController}
+            generation={streamGenerationRef.current}
+            sendInput={sendStreamInput}
+            onFocusAddressBar={() => {
+              addressRef.current?.focus()
+              addressRef.current?.select()
             }}
-            onPointerMove={(event) => {
-              if (!streamController || !streamGenerationRef.current) return
-              const rect = event.currentTarget.getBoundingClientRect()
-              const x = (event.clientX - rect.left) * event.currentTarget.width / rect.width
-              const y = (event.clientY - rect.top) * event.currentTarget.height / rect.height
-              sendStreamInput({ type: 'pointer', event: 'mouseMoved', x, y, button: 'none', buttons: event.buttons, clickCount: 0, modifiers: inputModifiers(event) })
-            }}
-            onPointerUp={(event) => {
-              if (!streamController) return
-              const rect = event.currentTarget.getBoundingClientRect()
-              const x = (event.clientX - rect.left) * event.currentTarget.width / rect.width
-              const y = (event.clientY - rect.top) * event.currentTarget.height / rect.height
-              const button = event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left'
-              sendStreamInput({ type: 'pointer', event: 'mouseReleased', x, y, button, buttons: event.buttons, clickCount: event.detail || 1, modifiers: inputModifiers(event) })
-              if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
-            }}
-            onWheel={(event) => {
-              if (!streamController) return
-              event.preventDefault()
-              const rect = event.currentTarget.getBoundingClientRect()
-              const x = (event.clientX - rect.left) * event.currentTarget.width / rect.width
-              const y = (event.clientY - rect.top) * event.currentTarget.height / rect.height
-              sendStreamInput({ type: 'wheel', x, y, deltaX: event.deltaX, deltaY: event.deltaY, modifiers: inputModifiers(event) })
-            }}
-            onKeyDown={(event) => {
-              const command = event.ctrlKey || event.metaKey
-              if (command && event.key.toLowerCase() === 'l') {
-                event.preventDefault()
-                addressRef.current?.focus()
-                addressRef.current?.select()
-                return
-              }
-              if (command && event.key.toLowerCase() === 'r') {
-                event.preventDefault()
-                void runAction('navigate.reload')
-                return
-              }
-              if (command && (event.key.toLowerCase() === 'c' || event.key.toLowerCase() === 'x')) {
-                void copyStreamSelection()
-              }
-              if (command && !event.altKey && !event.shiftKey && /^[1-7]$/.test(event.key)) {
-                event.preventDefault()
-                onWorkspaceShortcut?.(Number(event.key))
-                return
-              }
-              event.preventDefault()
-              const text = event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey ? event.key : undefined
-              sendStreamInput({ type: 'key', event: text ? 'keyDown' : 'rawKeyDown', key: event.key, code: event.code, text, modifiers: inputModifiers(event) })
-            }}
-            onKeyUp={(event) => {
-              event.preventDefault()
-              sendStreamInput({ type: 'key', event: 'keyUp', key: event.key, code: event.code, modifiers: inputModifiers(event) })
-            }}
-            onPaste={(event) => {
-              event.preventDefault()
-              sendStreamInput({ type: 'text', text: event.clipboardData.getData('text/plain') })
-            }}
-            onCompositionEnd={(event) => {
-              if (event.data) sendStreamInput({ type: 'text', text: event.data })
-            }}
+            onReload={() => void runAction('navigate.reload')}
+            onCopySelection={() => void copyStreamSelection()}
+            onWorkspaceShortcut={onWorkspaceShortcut}
           />
         )}
 
