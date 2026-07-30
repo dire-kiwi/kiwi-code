@@ -272,10 +272,6 @@ export function setThreadArchived(projectId: string, threadId: string, archived:
   return jsonRequest<Thread>(threadPath(projectId, threadId), 'PATCH', { archived })
 }
 
-export function setThreadBookmarked(projectId: string, threadId: string, bookmarked: boolean) {
-  return jsonRequest<Thread>(threadPath(projectId, threadId), 'PATCH', { bookmarked })
-}
-
 export function deleteThread(projectId: string, threadId: string) {
   return request<void>(threadPath(projectId, threadId), { method: 'DELETE' })
 }

@@ -8,7 +8,7 @@ import {
 const threads = [
   { id: 'root', title: 'Root' },
   { id: 'child', title: 'Child', parentThreadId: 'root' },
-  { id: 'grandchild', title: 'Grandchild', parentThreadId: 'child', bookmarked: true },
+  { id: 'grandchild', title: 'Grandchild', parentThreadId: 'child' },
 ]
 
 test('thread tree index resolves families once and preserves source order', () => {
@@ -17,7 +17,6 @@ test('thread tree index resolves families once and preserves source order', () =
   assert.deepEqual(index.children('root').map((thread) => thread.id), ['child'])
   assert.deepEqual(index.ancestors('grandchild').map((thread) => thread.id), ['child', 'root'])
   assert.deepEqual(index.descendants('root').map((thread) => thread.id), ['child', 'grandchild'])
-  assert.deepEqual(index.bookmarkedPathIds(), ['root', 'child', 'grandchild'])
   assert.deepEqual(index.orderedTreeIds(['root']), ['root', 'child', 'grandchild'])
 })
 
