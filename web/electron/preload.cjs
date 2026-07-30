@@ -24,23 +24,6 @@ const legacyBrowserIpcChannels = {
   state: 'dire-mux-desktop-browser:state',
   workspaceShortcut: 'dire-mux-desktop-browser:workspace-shortcut',
 }
-const codeServerIpcChannels = {
-  show: 'kiwi-code-desktop-code-server:show',
-  hide: 'kiwi-code-desktop-code-server:hide',
-  setBounds: 'kiwi-code-desktop-code-server:set-bounds',
-  close: 'kiwi-code-desktop-code-server:close',
-  state: 'kiwi-code-desktop-code-server:state',
-  workspaceShortcut: 'kiwi-code-desktop-code-server:workspace-shortcut',
-}
-const legacyCodeServerIpcChannels = {
-  show: 'dire-mux-desktop-code-server:show',
-  hide: 'dire-mux-desktop-code-server:hide',
-  setBounds: 'dire-mux-desktop-code-server:set-bounds',
-  close: 'dire-mux-desktop-code-server:close',
-  state: 'dire-mux-desktop-code-server:state',
-  workspaceShortcut: 'dire-mux-desktop-code-server:workspace-shortcut',
-}
-
 function compatibleChannelSets(current, legacy) {
   const environment = process.env || {}
   const legacyRuntime = !environment.KIWI_CODE_BROWSER_PROVIDER_CONFIG && Boolean(
@@ -50,7 +33,6 @@ function compatibleChannelSets(current, legacy) {
 }
 
 const browserChannelSets = compatibleChannelSets(browserIpcChannels, legacyBrowserIpcChannels)
-const codeServerChannelSets = compatibleChannelSets(codeServerIpcChannels, legacyCodeServerIpcChannels)
 const appChannelSets = compatibleChannelSets(appIpcChannels, legacyAppIpcChannels)
 
 function missingHandler(error) {
@@ -100,7 +82,7 @@ function stateListener(channelSets, callback) {
 
 function shortcutListener(channelSets, callback) {
   return multiplexedListener(channelSets, 'workspaceShortcut', (index) => {
-    if (Number.isInteger(index) && index >= 1 && index <= 7) callback(index)
+    if (Number.isInteger(index) && index >= 1 && index <= 6) callback(index)
   })
 }
 
@@ -136,34 +118,9 @@ function createAppBridge() {
   })
 }
 
-function createCodeServerBridge() {
-  return Object.freeze({
-    show(options) {
-      return invokeCompatible(codeServerChannelSets, 'show', options)
-    },
-    hide(options) {
-      return invokeCompatible(codeServerChannelSets, 'hide', options)
-    },
-    setBounds(options) {
-      return invokeCompatible(codeServerChannelSets, 'setBounds', options)
-    },
-    close(options) {
-      return invokeCompatible(codeServerChannelSets, 'close', options)
-    },
-    onState(callback) {
-      return stateListener(codeServerChannelSets, callback)
-    },
-    onWorkspaceShortcut(callback) {
-      return shortcutListener(codeServerChannelSets, callback)
-    },
-  })
-}
-
 if (process.isMainFrame) {
   contextBridge.exposeInMainWorld('kiwiCodeDesktopApp', createAppBridge())
   contextBridge.exposeInMainWorld('direMuxDesktopApp', createAppBridge())
   contextBridge.exposeInMainWorld('kiwiCodeDesktopBrowser', createBrowserBridge())
   contextBridge.exposeInMainWorld('direMuxDesktopBrowser', createBrowserBridge())
-  contextBridge.exposeInMainWorld('kiwiCodeDesktopCodeServer', createCodeServerBridge())
-  contextBridge.exposeInMainWorld('direMuxDesktopCodeServer', createCodeServerBridge())
 }

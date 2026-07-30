@@ -47,10 +47,9 @@ test('hard reload detaches native views and ignores the frontend cache', () => {
     },
   }
   const browserWorkspace = { detachActiveView: () => calls.push('browser') }
-  const codeWorkspace = { detachActiveView: () => calls.push('code') }
 
-  assert.equal(reloadFrontend(appView, [browserWorkspace, codeWorkspace]), true)
-  assert.deepEqual(calls, ['browser', 'code', 'reload'])
+  assert.equal(reloadFrontend(appView, [browserWorkspace]), true)
+  assert.deepEqual(calls, ['browser', 'reload'])
 })
 
 test('hard reload leaves workspaces alone after the frontend is destroyed', () => {

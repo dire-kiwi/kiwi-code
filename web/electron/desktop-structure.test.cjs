@@ -8,7 +8,6 @@ const test = require('node:test')
 const main = fs.readFileSync(path.join(__dirname, 'main.cjs'), 'utf8')
 const sessions = fs.readFileSync(path.join(__dirname, 'browser-sessions.cjs'), 'utf8')
 const provider = fs.readFileSync(path.join(__dirname, 'browser-provider.cjs'), 'utf8')
-const codeServer = fs.readFileSync(path.join(__dirname, 'code-server-manager.cjs'), 'utf8')
 const recordings = fs.readFileSync(path.join(__dirname, 'browser-recordings.cjs'), 'utf8')
 const recorderPreload = fs.readFileSync(path.join(__dirname, 'browser-recorder-preload.cjs'), 'utf8')
 const recorderRenderer = fs.readFileSync(path.join(__dirname, 'browser-recorder-renderer.js'), 'utf8')
@@ -91,7 +90,6 @@ test('desktop IPC remains compatible across the product rename', () => {
   assert.match(preload, /compatibleChannelSets/)
   assert.match(preload, /No handler registered for/)
   assert.match(preload, /exposeInMainWorld\('direMuxDesktopBrowser'/)
-  assert.match(preload, /exposeInMainWorld\('direMuxDesktopCodeServer'/)
 })
 
 test('provider uses an authenticated dynamic loopback listener and secure atomic config', () => {
@@ -124,23 +122,6 @@ test('browser recording uses a private sandboxed renderer and bounded streamed f
   assert.doesNotMatch(recordings + recorderRenderer, /desktopCapturer/)
 })
 
-test('Code uses a separately sandboxed WebContentsView and private loopback code-server', () => {
-  assert.match(main, /new CodeServerWorkspaceManager\(/)
-  assert.match(codeServer, /new this\.WebContentsView\(/)
-  assert.match(codeServer, /partition: CODE_SERVER_PARTITION/)
-  assert.doesNotMatch(codeServer, /persist:/)
-  assert.match(codeServer, /contextIsolation: true/)
-  assert.match(codeServer, /nodeIntegration: false/)
-  assert.match(codeServer, /disableDialogs: true/)
-  assert.match(codeServer, /sandbox: true/)
-  assert.doesNotMatch(codeServer, /preload:/)
-  assert.match(codeServer, /'--bind-addr', '127\.0\.0\.1:0'/)
-  assert.match(codeServer, /'--auth', 'password'/)
-  assert.match(codeServer, /PASSWORD: password/)
-  assert.match(codeServer, /setPermissionRequestHandler/)
-  assert.match(codeServer, /webRequest\.onBeforeRequest/)
-})
-
 test('preload exposes only the narrow native view APIs', () => {
   assert.match(preload, /exposeInMainWorld\('kiwiCodeDesktopApp'/)
   assert.match(preload, /reloadFrontend\(\)/)
@@ -153,13 +134,10 @@ test('preload exposes only the narrow native view APIs', () => {
   assert.match(preload, /invokeCompatible\(browserChannelSets, 'setBackendOrigin', origin\)/)
   assert.match(preload, /onState\(callback\)/)
   assert.match(preload, /onWorkspaceShortcut\(callback\)/)
-  assert.match(preload, /exposeInMainWorld\('kiwiCodeDesktopCodeServer'/)
-  assert.match(preload, /close\(options\)/)
   assert.match(preload, /process\.isMainFrame/)
   assert.doesNotMatch(preload, /exposeInMainWorld\([^\n]+ipcRenderer/)
   assert.match(main, /validateBackendOrigin/)
   assert.match(main, /setRendererBackendOrigin/)
-  assert.match(main, /codeServerWorkspace\?\.addProtectedOrigin\(origin\)/)
 })
 
 test('desktop reloads only the trusted frontend while preserving native sessions', () => {
@@ -168,6 +146,5 @@ test('desktop reloads only the trusted frontend while preserving native sessions
   assert.match(main, /onFrontendReload: requestFrontendReload/)
   assert.match(main, /setImmediate\(\(\) => reloadFrontend\(/)
   assert.match(sessions, /interceptFrontendReloadShortcut\(event, input, this\.onFrontendReload\)/)
-  assert.match(codeServer, /interceptFrontendReloadShortcut\(event, input, this\.onFrontendReload\)/)
   assert.doesNotMatch(main, /app\.relaunch\(/)
 })

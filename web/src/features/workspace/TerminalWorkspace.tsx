@@ -5,7 +5,6 @@ import {
   Activity,
   Bot,
   Braces,
-  Code2,
   GitBranch,
   Globe2,
   LoaderCircle,
@@ -81,7 +80,6 @@ import { ClaudeNativePane } from '@/features/workspace/panes/agent/ClaudeNativeP
 import { PiNativePane } from '@/features/workspace/panes/agent/PiNativePane'
 import { ProcessWindowTabs } from './ProcessWindowTabs'
 import { BrowserPane } from '@/features/workspace/panes/browser/BrowserPane'
-import { CodeServerPane } from '@/features/workspace/panes/CodeServerPane'
 import { TerminalSession } from '@/features/workspace/panes/TerminalSession'
 import { ThreadPlanViewer } from '@/features/workspace/plans/ThreadPlanViewer'
 import { ThreadProjectSidebar } from '@/features/workspace/details/ThreadProjectSidebar'
@@ -110,7 +108,6 @@ const tools: Array<{
   { id: 'lazygit', label: 'Lazygit', shortcut: '⌘4', icon: GitBranch },
   { id: 'process', label: 'Process', shortcut: '⌘5', icon: Activity },
   { id: 'browser', label: 'Browser', shortcut: '⌘6', icon: Globe2 },
-  { id: 'code', label: 'Code', shortcut: '⌘7', icon: Code2 },
 ]
 
 const statusCopy: Record<ConnectionStatus, string> = {
@@ -138,8 +135,8 @@ export function TerminalWorkspace({
   const dispatch = useAppDispatch()
   const activeTool = workspaceToolFromRoute(useMatch(WORKSPACE_ROUTE)?.params.tool) ?? 'pi'
   const detailsExpanded = useAppSelector(selectDetailsSidebarExpanded)
-  // The sidebar and the finder both float over the pane area, so an embedded
-  // browser or code surface has to stand down while either is up.
+  // The sidebar and the finder both float over the pane area, so the embedded
+  // browser surface has to stand down while either is up.
   //
   // Read into variables, never `useAppSelector(a) || useAppSelector(b)`: `||`
   // short-circuits, which would skip the second hook whenever the first is true
@@ -432,9 +429,7 @@ export function TerminalWorkspace({
     ? 'Empty'
     : activeTool === 'browser'
       ? ({ connecting: 'Checking', open: 'Ready', closed: 'Stopped', error: 'Offline' } as const)[activeStatus]
-      : activeTool === 'code'
-        ? ({ connecting: 'Starting', open: 'Ready', closed: 'Desktop only', error: 'Unavailable' } as const)[activeStatus]
-        : statusCopy[activeStatus]
+      : statusCopy[activeStatus]
   const sessionTools = openedTools.includes(activeTool)
     ? openedTools
     : [...openedTools, activeTool]
@@ -678,24 +673,6 @@ export function TerminalWorkspace({
                       if (tool) activateTool(tool.id)
                     }}
                     onStatusChange={(status) => reportToolStatus('browser', status)}
-                  />
-                )
-              }
-              if (tool === 'code') {
-                return (
-                  <CodeServerPane
-                    key="code"
-                    projectId={project.id}
-                    threadId={thread.id}
-                    threadTitle={thread.title}
-                    workspacePath={thread.cwd}
-                    active={activeTool === 'code'}
-                    suppressed={nativeViewSuppressed || branchOverlayOpen || selectedPlan !== null}
-                    onWorkspaceShortcut={(index) => {
-                      const selectedTool = tools[index - 1]
-                      if (selectedTool) activateTool(selectedTool.id)
-                    }}
-                    onStatusChange={(status) => reportToolStatus('code', status)}
                   />
                 )
               }
