@@ -65,7 +65,6 @@ func main() {
 
 	handler, err := server.NewWithOptions(store, server.Options{
 		AllowedOriginPort:       *allowedOriginPort,
-		AllowRemoteOrigins:      true,
 		TmuxSocketName:          *tmuxSocket,
 		CleanupContext:          applicationContext,
 		BrowserBackend:          *browserBackend,

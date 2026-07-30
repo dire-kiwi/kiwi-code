@@ -162,10 +162,6 @@ test('no-session status and preview preserve the provider compatibility contract
     apiOrigin: 'http://127.0.0.1:4000',
     onState() {},
   })
-  assert.deepEqual(manager.setRendererBackendOrigin('http://remote-host:4000'), {
-    origin: 'http://remote-host:4000',
-  })
-  assert.equal(manager.protectedOrigins.has('http://remote-host:4000'), true)
   assert.deepEqual(manager.show({
     projectId: 'p', threadId: 't', bounds: { x: 0, y: 0, width: 800, height: 600 },
   }), {

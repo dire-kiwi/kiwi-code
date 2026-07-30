@@ -86,34 +86,6 @@ func TestOriginPolicyAllowsOnlyConfiguredSameHostOrigin(t *testing.T) {
 	}
 }
 
-func TestOriginPolicyAllowsRemoteFrontendOriginsWhenEnabled(t *testing.T) {
-	policy, err := newOriginPolicy(Options{AllowRemoteOrigins: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tests := []struct {
-		origin string
-		want   bool
-	}{
-		{origin: "http://tailscale-host:4000", want: true},
-		{origin: "https://mux.example.test", want: true},
-		{origin: "http://127.0.0.1:5173", want: true},
-		{origin: "file://tailscale-host/app", want: false},
-		{origin: "http://user@tailscale-host:4000", want: false},
-		{origin: "http://tailscale-host:4000/app", want: false},
-		{origin: "null", want: false},
-	}
-
-	for _, test := range tests {
-		request := httptest.NewRequest(http.MethodGet, "http://backend-host:4000/api/health", nil)
-		request.Header.Set("Origin", test.origin)
-		if got := policy.allows(request); got != test.want {
-			t.Errorf("allows remote origin %q = %t, want %t", test.origin, got, test.want)
-		}
-	}
-}
-
 func TestOriginPolicyRecognizesDefaultOriginPorts(t *testing.T) {
 	tests := []struct {
 		port   int
@@ -184,37 +156,6 @@ func TestOriginPolicyAddsDevelopmentCORSHeaders(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("preflight called next handler; calls = %d", calls)
-	}
-}
-
-func TestOriginPolicyAddsRemoteFrontendCORSHeaders(t *testing.T) {
-	policy, err := newOriginPolicy(Options{AllowRemoteOrigins: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler := withOriginPolicy(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}), policy)
-
-	request := httptest.NewRequest(http.MethodGet, "http://backend-host:4000/api/health", nil)
-	request.Header.Set("Origin", "http://frontend-host:4000")
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if got := response.Header().Get("Access-Control-Allow-Origin"); got != "http://frontend-host:4000" {
-		t.Fatalf("Access-Control-Allow-Origin = %q", got)
-	}
-
-	preflight := httptest.NewRequest(http.MethodOptions, "http://backend-host:4000/api/projects", nil)
-	preflight.Header.Set("Origin", "http://frontend-host:4000")
-	preflight.Header.Set("Access-Control-Request-Method", http.MethodPost)
-	preflight.Header.Set("Access-Control-Request-Private-Network", "true")
-	preflightResponse := httptest.NewRecorder()
-	handler.ServeHTTP(preflightResponse, preflight)
-	if preflightResponse.Code != http.StatusNoContent {
-		t.Fatalf("preflight status = %d", preflightResponse.Code)
-	}
-	if got := preflightResponse.Header().Get("Access-Control-Allow-Private-Network"); got != "true" {
-		t.Fatalf("Access-Control-Allow-Private-Network = %q", got)
 	}
 }
 

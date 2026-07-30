@@ -6,7 +6,7 @@ export const legacyProductionTmuxSocket: string
 
 export function defaultDevelopmentTmuxSocket(rootDirectory: string): string
 export function assertDevelopmentPort(port: number, option: string): void
-export function assertDevelopmentApiTarget(configuredPort?: string, configuredUrl?: string): void
+export function assertDevelopmentApiPort(configuredPort?: string): void
 export function usage(): string
 
 export type DevelopmentStackOptions = {

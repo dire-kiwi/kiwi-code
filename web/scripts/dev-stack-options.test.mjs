@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  assertDevelopmentApiTarget,
+  assertDevelopmentApiPort,
   assertDevelopmentPort,
   defaultDevelopmentTmuxSocket,
   parseArgs,
@@ -37,13 +37,9 @@ test('assertDevelopmentPort protects the production listener', () => {
   )
 })
 
-test('assertDevelopmentApiTarget cannot point Vite at production', () => {
-  assert.doesNotThrow(() => assertDevelopmentApiTarget('18080', 'http://127.0.0.1:18080'))
-  assert.throws(() => assertDevelopmentApiTarget('4000'), /Vite API target.*production port 4000/)
-  assert.throws(
-    () => assertDevelopmentApiTarget('', 'http://127.0.0.1:4000/api'),
-    /Vite API target.*production port 4000/,
-  )
+test('assertDevelopmentApiPort cannot point Vite at production', () => {
+  assert.doesNotThrow(() => assertDevelopmentApiPort('18080'))
+  assert.throws(() => assertDevelopmentApiPort('4000'), /Vite API target.*production port 4000/)
 })
 
 test('parseArgs accepts custom ports and an isolated tmux socket', () => {
