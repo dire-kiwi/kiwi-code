@@ -200,17 +200,6 @@
         }
       ]
     },
-    "processWebServers": [
-      {
-        "projectId": "project-1",
-        "projectName": "Fixture project",
-        "threadId": "thread-1",
-        "threadTitle": "Fixture thread",
-        "processId": "process-1",
-        "processName": "Vite",
-        "url": "http://127.0.0.1:5173"
-      }
-    ],
     "profiles": [
       {
         "id": "personal",
@@ -447,10 +436,7 @@
           "id": "process-1",
           "index": 1,
           "name": "Vite",
-          "currentCommand": "node",
-          "webServers": [
-            "http://127.0.0.1:5173"
-          ]
+          "currentCommand": "node"
         }
       ],
       "shellWindows": [

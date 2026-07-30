@@ -120,11 +120,21 @@ func TestMaterializeClaudePlugin(t *testing.T) {
 	}
 	for _, name := range []string{
 		"common.mjs", "interrupt-process.mjs", "list-processes.mjs", "read-logs.mjs",
-		"send-input.mjs", "start-process.mjs", "stop-process.mjs", "update-process.mjs",
+		"send-input.mjs", "start-process.mjs", "stop-process.mjs",
 	} {
 		if _, err := os.Stat(filepath.Join(root, "skills", "kiwi-code-processes", "scripts", name)); err != nil {
 			t.Fatalf("materialized Claude process helper %q: %v", name, err)
 		}
+	}
+	retiredHelper := filepath.Join(root, "skills", agentSkillName, "scripts", retiredProcessUpdateHelperName)
+	if err := os.WriteFile(retiredHelper, []byte("legacy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := materializeClaudePlugin(dataDirectory); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(retiredHelper); !os.IsNotExist(err) {
+		t.Fatalf("retired Claude process helper remains after materialization: %v", err)
 	}
 }
 

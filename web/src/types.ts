@@ -30,7 +30,6 @@ export type {
   PiActivityState,
   PiThreadActivity,
   PlatformScripts,
-  ProcessWebServer,
   ProcessWindow,
   Profile,
   Project,

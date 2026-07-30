@@ -627,7 +627,6 @@ func TestStateTmuxSnapshotReadsHonorCancellation(t *testing.T) {
 	}
 	terminal := newTerminalHandlerUnreconciledWithOptions(store, originPolicy{}, socketName)
 	terminal.tmuxPath = tmuxPath
-	application := &Server{projects: store, terminal: terminal}
 
 	tests := []struct {
 		name string
@@ -643,12 +642,6 @@ func TestStateTmuxSnapshotReadsHonorCancellation(t *testing.T) {
 			name: "thread shells",
 			read: func(ctx context.Context) {
 				_, _ = terminal.existingShellWindowsContext(ctx, item, thread)
-			},
-		},
-		{
-			name: "sidebar processes",
-			read: func(ctx context.Context) {
-				_ = application.sidebarProcessWebServersContext(ctx)
 			},
 		},
 		{

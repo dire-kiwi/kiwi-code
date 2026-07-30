@@ -15,7 +15,6 @@ const (
 	stateTopicProfiles          = "profiles"
 	stateTopicAgentActivity     = "agentActivity"
 	stateTopicThreadUsage       = "threadUsage"
-	stateTopicProcessWebServers = "processWebServers"
 	stateTopicThreadStatus      = "thread.status"
 	stateTopicSettings          = "settings"
 	stateTopicCodingAgents      = "codingAgents"
@@ -137,16 +136,15 @@ func (s *Server) stateTopicRegistry(protectedOrigins []string) map[string]stateT
 	}
 
 	registry := map[string]stateTopicHandler{
-		stateTopicProjects:          empty(stateTopicProjects, s.openProjectsTopic),
-		stateTopicProfiles:          empty(stateTopicProfiles, s.openProfilesTopic),
-		stateTopicAgentActivity:     empty(stateTopicAgentActivity, s.openAgentActivityTopic),
-		stateTopicThreadUsage:       empty(stateTopicThreadUsage, s.openThreadUsageTopic),
-		stateTopicProcessWebServers: empty(stateTopicProcessWebServers, s.openProcessWebServersTopic),
-		stateTopicThreadStatus:      thread(stateTopicThreadStatus, s.openThreadStatusTopic),
-		stateTopicSettings:          empty(stateTopicSettings, s.openSettingsTopic),
-		stateTopicCleanup:           empty(stateTopicCleanup, s.openCleanupTopic),
-		stateTopicSessionClosures:   empty(stateTopicSessionClosures, s.openSessionClosuresTopic),
-		stateTopicGitBranches:       project(stateTopicGitBranches, s.openGitBranchesTopic),
+		stateTopicProjects:        empty(stateTopicProjects, s.openProjectsTopic),
+		stateTopicProfiles:        empty(stateTopicProfiles, s.openProfilesTopic),
+		stateTopicAgentActivity:   empty(stateTopicAgentActivity, s.openAgentActivityTopic),
+		stateTopicThreadUsage:     empty(stateTopicThreadUsage, s.openThreadUsageTopic),
+		stateTopicThreadStatus:    thread(stateTopicThreadStatus, s.openThreadStatusTopic),
+		stateTopicSettings:        empty(stateTopicSettings, s.openSettingsTopic),
+		stateTopicCleanup:         empty(stateTopicCleanup, s.openCleanupTopic),
+		stateTopicSessionClosures: empty(stateTopicSessionClosures, s.openSessionClosuresTopic),
+		stateTopicGitBranches:     project(stateTopicGitBranches, s.openGitBranchesTopic),
 		stateTopicBrowserStatus: thread(stateTopicBrowserStatus, func(ctx context.Context, projectID, threadID string, channel *stateChannel) error {
 			return s.openBrowserStatusTopic(ctx, projectID, threadID, protectedOrigins, channel)
 		}),

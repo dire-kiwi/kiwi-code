@@ -24,7 +24,6 @@ describe('store persistence', () => {
         'kiwi-code.sidebar.view': 'tree',
         'kiwi-code.sidebar.width': '320',
         'kiwi-code.sidebar.collapsed-projects': '["project-1"]',
-        'kiwi-code.sidebar.web-servers-collapsed': 'true',
       }),
       persist: false,
     })
@@ -33,7 +32,6 @@ describe('store persistence', () => {
     expect(store.getState().sidebar.view).toBe('tree')
     expect(store.getState().sidebar.width).toBe(320)
     expect(store.getState().sidebar.collapsedProjectIds).toEqual(['project-1'])
-    expect(store.getState().sidebar.webServersCollapsed).toBe(true)
   })
 
   it('falls back for malformed values and clamps an out-of-range width', () => {

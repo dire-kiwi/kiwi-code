@@ -76,7 +76,6 @@ import {
 } from '@/wire/react'
 import {
   AgentActivityTopic,
-  ProcessWebServersTopic,
   ProfilesTopic,
   ProjectsTopic,
   SettingsTopic,
@@ -145,7 +144,6 @@ export default function App() {
   const profileSubscription = useSubscription(ProfilesTopic, undefined)
   const activitySubscription = useSubscription(AgentActivityTopic, undefined)
   const usageSubscription = useSubscription(ThreadUsageTopic, undefined)
-  const processSubscription = useSubscription(ProcessWebServersTopic, undefined)
   const settingsSubscription = useSubscription(SettingsTopic, undefined)
   const stateConnection = useConnectionStatus()
   const reloadForNewInstance = useCallback((current: string, previous?: string) => {
@@ -269,7 +267,6 @@ export default function App() {
     profileSubscription,
     activitySubscription,
     usageSubscription,
-    processSubscription,
     settingsSubscription,
   ].flatMap((subscription) =>
     subscription.state === 'error' ? [subscription.error.message] : [])[0] ?? ''
@@ -279,7 +276,6 @@ export default function App() {
     if (profileSubscription.state === 'error') profileSubscription.retry()
     if (activitySubscription.state === 'error') activitySubscription.retry()
     if (usageSubscription.state === 'error') usageSubscription.retry()
-    if (processSubscription.state === 'error') processSubscription.retry()
     if (settingsSubscription.state === 'error') settingsSubscription.retry()
   }
   const connectionBanner = stateConnectionBanner(stateConnection, stateTopicError)
