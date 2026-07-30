@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { memoryStorage } from '../../lib/memoryStorage'
-import { createAppStore } from '../index'
+import { memoryStorage } from '@/lib/memoryStorage'
+import { createAppStore } from '@/store/index'
 import {
   hydrateThreadWorkspace,
   resolveThreadWorkspace,

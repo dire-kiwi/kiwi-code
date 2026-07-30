@@ -13,12 +13,12 @@ const recordings = fs.readFileSync(path.join(__dirname, 'browser-recordings.cjs'
 const recorderPreload = fs.readFileSync(path.join(__dirname, 'browser-recorder-preload.cjs'), 'utf8')
 const recorderRenderer = fs.readFileSync(path.join(__dirname, 'browser-recorder-renderer.js'), 'utf8')
 const preload = fs.readFileSync(path.join(__dirname, 'preload.cjs'), 'utf8')
-const rendererApp = fs.readFileSync(path.join(__dirname, '..', 'src', 'App.tsx'), 'utf8')
+const rendererApp = fs.readFileSync(path.join(__dirname, '..', 'src', 'app', 'App.tsx'), 'utf8')
 const rendererStyles = fs.readFileSync(path.join(__dirname, '..', 'src', 'index.css'), 'utf8')
-const projectSidebar = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'organisms', 'ProjectSidebar.tsx'), 'utf8')
-const threadProjectSidebar = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'organisms', 'ThreadProjectSidebar.tsx'), 'utf8')
+const projectSidebar = fs.readFileSync(path.join(__dirname, '..', 'src', 'features', 'project-sidebar', 'ProjectSidebar.tsx'), 'utf8')
+const threadProjectSidebar = fs.readFileSync(path.join(__dirname, '..', 'src', 'features', 'workspace', 'details', 'ThreadProjectSidebar.tsx'), 'utf8')
 const screenHeader = fs.readFileSync(path.join(__dirname, '..', 'src', 'ui', 'layout', 'ScreenHeader.tsx'), 'utf8')
-const terminalWorkspace = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'pages', 'TerminalWorkspace.tsx'), 'utf8')
+const terminalWorkspace = fs.readFileSync(path.join(__dirname, '..', 'src', 'features', 'workspace', 'TerminalWorkspace.tsx'), 'utf8')
 
 test('desktop composes a secure trusted WebContentsView in a BaseWindow', () => {
   assert.match(main, /new BaseWindow\(/)

@@ -1,4 +1,4 @@
-import type { CodingAgent } from './wire/domain'
+import type { CodingAgent } from '@/wire/domain'
 
 // Reactive domain types are derived from the Effect schemas that validate
 // state-socket snapshots. Keep this module as the compatibility import surface
@@ -59,7 +59,7 @@ export type {
   WorkflowPhase,
   WorkflowRun,
   WorktreeCleanupOverview,
-} from './wire/domain'
+} from '@/wire/domain'
 
 export type DirectorySuggestion = {
   name: string

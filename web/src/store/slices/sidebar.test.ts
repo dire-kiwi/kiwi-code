@@ -13,7 +13,7 @@ import {
   webServersCollapseToggled,
   type SidebarState,
 } from './sidebar'
-import type { RootState } from '../rootReducer'
+import type { RootState } from '@/store/rootReducer'
 
 const reduce = sidebarSlice.reducer
 

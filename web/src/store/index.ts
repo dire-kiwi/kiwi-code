@@ -1,5 +1,5 @@
 import { configureStore } from '@reduxjs/toolkit'
-import { browserStorage } from '../lib/storedState'
+import { browserStorage } from '@/lib/storedState'
 import {
   createPersistence,
   hydrateFields,
@@ -10,15 +10,15 @@ import { rootReducer, type RootState } from './rootReducer'
 import {
   hydrateNewThreadPreferences,
   newThreadPreferencesWriters,
-} from './slices/newThreadPreferences'
+} from '@/store/slices/newThreadPreferences'
 import {
   initialPreferencesState,
   preferencesPersistence,
   preferencesWriters,
-} from './slices/preferences'
-import { initialSidebarState, sidebarPersistence, sidebarWriters } from './slices/sidebar'
-import { hydrateThreadWorkspace, threadWorkspaceWriters } from './slices/threadWorkspace'
-import { initialUiState } from './slices/ui'
+} from '@/store/slices/preferences'
+import { initialSidebarState, sidebarPersistence, sidebarWriters } from '@/store/slices/sidebar'
+import { hydrateThreadWorkspace, threadWorkspaceWriters } from '@/store/slices/threadWorkspace'
+import { initialUiState } from '@/store/slices/ui'
 
 export type CreateAppStoreOptions = {
   storage?: EnumerableStorage | null

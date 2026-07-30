@@ -1,4 +1,4 @@
-import type { EnumerableStorage } from '../store/persistence'
+import type { EnumerableStorage } from '@/store/persistence'
 
 export type MemoryStorage = EnumerableStorage & {
   values: Map<string, string>

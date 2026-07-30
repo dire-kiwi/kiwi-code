@@ -1,9 +1,9 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
-import { isCodingAgent } from '../../codingAgents'
-import { guardedStoredStateCodec } from '../../lib/storedState'
-import type { CodingAgent, PiPresentation } from '../../types'
-import { scanStoredKeys, type EnumerableStorage, type PersistWriter } from '../persistence'
-import type { RootState } from '../rootReducer'
+import { isCodingAgent } from '@/codingAgents'
+import { guardedStoredStateCodec } from '@/lib/storedState'
+import type { CodingAgent, PiPresentation } from '@/types'
+import { scanStoredKeys, type EnumerableStorage, type PersistWriter } from '@/store/persistence'
+import type { RootState } from '@/store/rootReducer'
 
 export type ThreadWorkspaceEntry = {
   codingAgent?: CodingAgent

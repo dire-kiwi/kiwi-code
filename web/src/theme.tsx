@@ -11,8 +11,8 @@ import {
 import type { ITheme } from '@xterm/xterm'
 import { DEFAULT_THEME } from './defaultTheme.generated'
 import type { ThemeColors, ThemeSettings } from './types'
-import { useSubscription } from './wire/react'
-import { SettingsTopic } from './wire/topics'
+import { useSubscription } from '@/wire/react'
+import { SettingsTopic } from '@/wire/topics'
 
 export { DEFAULT_THEME } from './defaultTheme.generated'
 

@@ -1,9 +1,9 @@
 import { combineReducers } from '@reduxjs/toolkit'
-import { newThreadPreferencesSlice } from './slices/newThreadPreferences'
-import { preferencesSlice } from './slices/preferences'
-import { sidebarSlice } from './slices/sidebar'
-import { threadWorkspaceSlice } from './slices/threadWorkspace'
-import { uiSlice } from './slices/ui'
+import { newThreadPreferencesSlice } from '@/store/slices/newThreadPreferences'
+import { preferencesSlice } from '@/store/slices/preferences'
+import { sidebarSlice } from '@/store/slices/sidebar'
+import { threadWorkspaceSlice } from '@/store/slices/threadWorkspace'
+import { uiSlice } from '@/store/slices/ui'
 
 // RootState lives here rather than in ./index so slices and the persistence
 // layer can import the type without pulling in the singleton store.

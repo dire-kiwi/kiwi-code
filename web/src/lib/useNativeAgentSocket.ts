@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MutableRefObject } from 'react'
-import type { ConnectionStatus } from '../types'
+import type { ConnectionStatus } from '@/types'
 import { NATIVE_AGENT_RESPONSE_STALE_AFTER_MS } from './nativeAgentDiagnostics'
 
 const RECONNECT_STABLE_AFTER_MS = 5_000

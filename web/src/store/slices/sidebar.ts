@@ -1,7 +1,7 @@
 import { createSelector, createSlice, type PayloadAction } from '@reduxjs/toolkit'
-import { booleanStoredState, guardedStoredStateCodec } from '../../lib/storedState'
-import { fieldWriters, type PersistedFields } from '../persistence'
-import type { RootState } from '../rootReducer'
+import { booleanStoredState, guardedStoredStateCodec } from '@/lib/storedState'
+import { fieldWriters, type PersistedFields } from '@/store/persistence'
+import type { RootState } from '@/store/rootReducer'
 
 export type SidebarViewMode = 'activity' | 'tree'
 

@@ -1,5 +1,5 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
-import type { RootState } from '../rootReducer'
+import type { RootState } from '@/store/rootReducer'
 
 // Chrome that is open right now rather than remembered across reloads. It lives
 // in the store, not in App, so a global shortcut can toggle it without being

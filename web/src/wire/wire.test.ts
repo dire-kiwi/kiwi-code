@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
-import fixture from './__fixtures__/protocol.json'
+import fixture from '@/wire/__fixtures__/protocol.json'
 import { decodeStrict } from './client'
 import { protocolVersion, ServerMessageSchema } from './protocol'
 import {

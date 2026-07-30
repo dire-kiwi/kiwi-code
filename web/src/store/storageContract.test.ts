@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
-import { memoryStorage } from '../lib/memoryStorage'
+import { memoryStorage } from '@/lib/memoryStorage'
 import { createAppStore } from './index'
-import { newThreadPreferencesRemembered } from './slices/newThreadPreferences'
-import { preferencesPersistence } from './slices/preferences'
-import { sidebarPersistence } from './slices/sidebar'
+import { newThreadPreferencesRemembered } from '@/store/slices/newThreadPreferences'
+import { preferencesPersistence } from '@/store/slices/preferences'
+import { sidebarPersistence } from '@/store/slices/sidebar'
 import {
   threadPiPresentationChanged,
   threadWorkspaceKey,
   threadWorkspaceMounted,
-} from './slices/threadWorkspace'
+} from '@/store/slices/threadWorkspace'
 
 // Every installed browser holds real values under these keys, and the
 // end-to-end suite seeds `kiwi-code-active-profile` directly. Renaming a key or

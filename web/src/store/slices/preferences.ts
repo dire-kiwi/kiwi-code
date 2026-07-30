@@ -1,7 +1,7 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
-import { guardedStoredStateCodec } from '../../lib/storedState'
-import { fieldWriters, type PersistedFields } from '../persistence'
-import type { RootState } from '../rootReducer'
+import { guardedStoredStateCodec } from '@/lib/storedState'
+import { fieldWriters, type PersistedFields } from '@/store/persistence'
+import type { RootState } from '@/store/rootReducer'
 
 export type PreferencesState = {
   activeProfileId: string

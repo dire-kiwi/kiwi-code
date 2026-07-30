@@ -3,11 +3,11 @@ import {
   codingAgentTargetForSelection,
   isCodingAgent,
   isCodingAgentSelection,
-} from '../../codingAgents'
-import { guardedStoredStateCodec } from '../../lib/storedState'
-import type { CodingAgent, CodingAgentSelection } from '../../types'
-import { scanStoredKeys, type EnumerableStorage, type PersistWriter } from '../persistence'
-import type { RootState } from '../rootReducer'
+} from '@/codingAgents'
+import { guardedStoredStateCodec } from '@/lib/storedState'
+import type { CodingAgent, CodingAgentSelection } from '@/types'
+import { scanStoredKeys, type EnumerableStorage, type PersistWriter } from '@/store/persistence'
+import type { RootState } from '@/store/rootReducer'
 
 export type ThreadLocation = 'project' | 'worktree'
 

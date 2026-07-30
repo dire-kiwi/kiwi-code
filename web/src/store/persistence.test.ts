@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { memoryStorage } from '../lib/memoryStorage'
+import { memoryStorage } from '@/lib/memoryStorage'
 import { createAppStore } from './index'
-import { activeProfileSelected } from './slices/preferences'
+import { activeProfileSelected } from '@/store/slices/preferences'
 import {
   bookmarksOnlyChanged,
   projectCollapseToggled,
   sidebarViewChanged,
   sidebarWidthChanged,
-} from './slices/sidebar'
+} from '@/store/slices/sidebar'
 
 // Longer than the 150ms persistence debounce.
 const afterDebounce = 200
