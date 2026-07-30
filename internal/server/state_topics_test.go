@@ -11,7 +11,6 @@ func TestStateTopicRegistryDecodesEveryCatalogTopic(t *testing.T) {
 		stateTopicProfiles:           `{"tag":"profiles"}`,
 		stateTopicAgentActivity:      `{"tag":"agentActivity"}`,
 		stateTopicThreadUsage:        `{"tag":"threadUsage"}`,
-		stateTopicProcessWebServers:  `{"tag":"processWebServers"}`,
 		stateTopicThreadStatus:       `{"tag":"thread.status","projectId":"project","threadId":"thread"}`,
 		stateTopicSettings:           `{"tag":"settings"}`,
 		stateTopicCodingAgents:       `{"tag":"codingAgents","projectId":"project"}`,

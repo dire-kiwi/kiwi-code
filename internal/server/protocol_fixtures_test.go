@@ -107,11 +107,6 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 			Own: usageTotals, Children: threadUsageTotals{}, Total: usageTotals,
 			LimitReached: false,
 		}},
-		stateTopicProcessWebServers: []sidebarProcessWebServer{{
-			ProjectID: "project-1", ProjectName: "Fixture project",
-			ThreadID: "thread-1", ThreadTitle: "Fixture thread",
-			ProcessID: "process-1", ProcessName: "Vite", URL: "http://127.0.0.1:5173",
-		}},
 		stateTopicThreadStatus: threadStatusSnapshot{
 			GitBranches: &gitBranchState{
 				IsRepository: true, Current: "main",
@@ -125,8 +120,7 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 				},
 			},
 			Processes: []processWindow{{
-				ID: "process-1", Index: 1, Name: "Vite",
-				CurrentCommand: "node", WebServers: []string{"http://127.0.0.1:5173"},
+				ID: "process-1", Index: 1, Name: "Vite", CurrentCommand: "node",
 			}},
 			ShellWindows: []tmuxWindow{{
 				Index: 0, Name: "shell", Active: true,

@@ -45,7 +45,6 @@ GET /api/tmux/sessions
 GET /api/tmux/terminal
 PATCH /api/projects/{id}
 PATCH /api/projects/{id}/threads/{threadId}
-PATCH /api/projects/{id}/threads/{threadId}/processes/{processId}
 POST /api/profiles
 POST /api/projects
 POST /api/projects/{id}/pi/images

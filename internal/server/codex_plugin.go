@@ -156,6 +156,9 @@ func materializeCodexPlugin(dataDirectory string) (codexPluginInstallation, erro
 			return codexPluginInstallation{}, err
 		}
 	}
+	if err := removeRetiredProcessUpdateHelper(filepath.Join(pluginRoot, "skills", agentSkillName)); err != nil {
+		return codexPluginInstallation{}, fmt.Errorf("remove retired Codex process helper: %w", err)
+	}
 	marketplaceName := managedCodexMarketplaceName(dataDirectory)
 	marketplaceContents, err := codexMarketplaceContents(marketplaceName)
 	if err != nil {

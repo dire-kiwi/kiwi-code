@@ -28,7 +28,6 @@ describe('storage contract', () => {
       'kiwi-code.sidebar.width',
       'kiwi-code.sidebar.collapsed-projects',
       'kiwi-code.sidebar.collapsed-child-threads',
-      'kiwi-code.sidebar.web-servers-collapsed',
     ]))
   })
 
@@ -70,7 +69,6 @@ describe('storage contract', () => {
       'kiwi-code.sidebar.width': '320',
       'kiwi-code.sidebar.collapsed-projects': '["a","b"]',
       'kiwi-code.sidebar.collapsed-child-threads': '["thread-1"]',
-      'kiwi-code.sidebar.web-servers-collapsed': 'true',
     }
     const storage = memoryStorage(stored)
     const state = createAppStore({ storage, persist: false }).getState()

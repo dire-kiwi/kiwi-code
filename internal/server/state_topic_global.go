@@ -8,7 +8,6 @@ import (
 const (
 	stateProjectReconcileInterval  = 30 * time.Second
 	stateActivityReconcileInterval = 5 * time.Second
-	stateProcessProjectionWarmup   = 50 * time.Millisecond
 )
 
 func (s *Server) openProjectsTopic(ctx context.Context, channel *stateChannel) error {
@@ -80,57 +79,6 @@ func (s *Server) openThreadUsageTopic(ctx context.Context, channel *stateChannel
 			}
 		case <-channel.Resnap():
 			if err := snapshot(); err != nil {
-				return err
-			}
-		}
-	}
-}
-
-func (s *Server) openProcessWebServersTopic(ctx context.Context, channel *stateChannel) error {
-	projectUpdates, unsubscribeProjects := s.projects.SubscribeLatestChanges()
-	defer unsubscribeProjects()
-	statusChanges, statusEvents := s.subscribeStateChanges("", "", stateTopicProcessWebServers)
-	if statusChanges != nil {
-		defer statusChanges.Close()
-	}
-
-	snapshot := func(refreshAll bool) error {
-		value := s.processWebServerCache.snapshotContext(ctx, s, refreshAll)
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return channel.Snapshot(value)
-	}
-	// Terminal panes are mounted immediately after the global state socket.
-	// Give their latency-sensitive setup a brief head start before launching a
-	// cross-project batch of tmux inspection clients.
-	warmup := time.NewTimer(stateProcessProjectionWarmup)
-	select {
-	case <-ctx.Done():
-		warmup.Stop()
-		return ctx.Err()
-	case <-warmup.C:
-	}
-	if err := snapshot(true); err != nil {
-		return err
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case _, open := <-projectUpdates:
-			if !open {
-				return stateTopicFailure("Project updates ended.")
-			}
-			if err := snapshot(true); err != nil {
-				return err
-			}
-		case <-statusEvents:
-			if err := snapshot(false); err != nil {
-				return err
-			}
-		case <-channel.Resnap():
-			if err := snapshot(true); err != nil {
 				return err
 			}
 		}
