@@ -35,10 +35,11 @@ import {
 import type { AgentContextStatus, ConnectionStatus } from '@/types'
 import { useSubscription } from '@/wire/react'
 import { SettingsTopic } from '@/wire/topics'
-import { PiActivityMonitor } from './PiActivityMonitor'
+import { NativeAgentActivityMonitor, type NativeAgentDescriptor } from './NativeAgentActivityMonitor'
 import { PiNativeComposer } from './PiNativeComposer'
+import { PiSessionUsage } from './PiSessionUsage'
 import { PiNativeTimelineEntry } from './PiNativeTimeline'
-import { derivePiActivity } from './piActivity'
+import { deriveAgentActivity } from './agentActivity'
 import {
   buildComposerSuggestions,
   modelIdentifier,
@@ -83,6 +84,12 @@ type PiNativePaneProps = {
   active: boolean
   onStatusChange: (status: ConnectionStatus) => void
   onContextStatusChange: (status: AgentContextStatus | null) => void
+}
+
+const PI_AGENT: NativeAgentDescriptor = {
+  name: 'Pi',
+  channelLabel: 'Pi RPC',
+  responseSubject: 'Pi',
 }
 
 const WORKFLOW_DISMISS_MARKER = '\u2063kiwi-code-no-ultracode\u2063'
@@ -936,12 +943,12 @@ export function PiNativePane({
   const hasDraftContent = draft.trim().length > 0 || draftImages.length > 0
   const canSend = !readOnly && connectionStatus === 'open' && hasDraftContent && !isUploadingImages
   const primaryActionIsStop = isStreaming && !hasDraftContent && !isUploadingImages
-  const activity = derivePiActivity({
+  const activity = deriveAgentActivity({
     clockNow,
     connectedAt,
     connectionStatus,
     isStreaming,
-    lastPiResponseAt,
+    lastResponseAt: lastPiResponseAt,
     lastProbeSentAt,
     latestWorkEvent,
     runPhase,
@@ -949,7 +956,8 @@ export function PiNativePane({
   })
   const { activityToggleLabel, monitorTone } = activity
   const activityPanel = activityExpanded ? (
-    <PiActivityMonitor
+    <NativeAgentActivityMonitor
+      agent={PI_AGENT}
       view={activity}
       connectionStatus={connectionStatus}
       isStreaming={isStreaming}
@@ -957,12 +965,11 @@ export function PiNativePane({
       runEventCount={runEventCount}
       connectedAt={connectedAt}
       lastProbeLatency={lastProbeLatency}
-      latestRpcEvent={latestRpcEvent}
+      latestEvent={latestRpcEvent}
       latestWorkEvent={latestWorkEvent}
       clockNow={clockNow}
       activityLog={activityLog}
-      sessionStats={sessionStats}
-      latestCacheHitRate={latestCacheHitRate}
+      sessionUsage={<PiSessionUsage stats={sessionStats} latestCacheHitRate={latestCacheHitRate} />}
       onInspect={inspectNow}
       onHide={() => setActivityExpanded(false)}
       onNotice={setNotice}

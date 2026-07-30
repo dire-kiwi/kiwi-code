@@ -15,33 +15,47 @@ import { apiWebSocketUrl } from '@/apiUrl'
 import { claudeModelChoices, claudeThinkingLevelIds } from '@/codingAgents'
 import { classNames } from '@/lib/classNames'
 import { formatDuration } from '@/lib/formatDuration'
-import {
-  formatNativeActivityAge,
-  formatNativeActivityClock,
-  nativeConnectionDescription,
-  nativeResponseDescription,
-  NATIVE_AGENT_RESPONSE_STALE_AFTER_MS,
-} from '@/lib/nativeAgentDiagnostics'
-import {
-  imageFilesFromClipboard,
-  isSupportedPiImageType,
-  piNativePromptImagePolicy,
-} from '@/lib/promptImages'
+import { imageFilesFromClipboard, piNativePromptImagePolicy } from '@/lib/promptImages'
 import { readClaudeNativeDraft, writeClaudeNativeDraft } from '@/lib/promptDrafts'
 import { useImageAttachments } from '@/lib/useImageAttachments'
 import { useNativeActivityLog } from '@/lib/useNativeActivityLog'
 import { useNativeAgentSocket } from '@/lib/useNativeAgentSocket'
 import type { AgentContextStatus, ConnectionStatus } from '@/types'
+import { ClaudeSessionUsage } from './ClaudeSessionUsage'
+import { NativeAgentActivityMonitor, type NativeAgentDescriptor } from './NativeAgentActivityMonitor'
+import { PiNativeComposer } from './PiNativeComposer'
+import { PiNativeTimelineEntry } from './PiNativeTimeline'
+import { deriveAgentActivity } from './agentActivity'
 import { piNativeStyles } from './piNativeStyles'
+import { usageValue } from './agentFormat'
 import {
-  PiNativeActivityPanel,
-  type PiStatusTone,
-} from './PiNativeActivityPanel'
-import { PiNativeComposer, type PiNativeComposerSuggestion } from './PiNativeComposer'
+  buildComposerSuggestions,
+  normalizeClaudeCommands,
+} from './claudeCommands'
 import {
-  PiNativeTimelineEntry,
-  type PiTimelineEntryValue as TimelineEntry,
-} from './PiNativeTimeline'
+  claudeEventLabel,
+  claudeStatusMessage,
+  isClaudeWorkEvent,
+} from './claudeEvents'
+import { runClaudeSlashCommand } from './claudeSlashCommands'
+import {
+  appendPendingUserMessage,
+  blockText,
+  buildTimeline,
+  contentBlocks,
+} from './claudeTimeline'
+import {
+  CLAUDE_DEFAULT_CONTEXT_WINDOW,
+  CLAUDE_PENDING_PROMPT_MATCH_MS,
+  type ClaudeChatMessage,
+  type ClaudeEvent,
+  type ClaudeEventStamp,
+  type ClaudeRunSummary,
+  type ClaudeSessionStats,
+  type ClaudeToolResult,
+  type ClaudeUsage,
+  type ComposerSuggestion,
+} from './claudeTypes'
 
 type ClaudeNativePaneProps = {
   projectId: string
@@ -57,129 +71,11 @@ type ClaudeNativePaneProps = {
   onContextStatusChange: (status: AgentContextStatus | null) => void
 }
 
-type ClaudeContentBlock = {
-  type?: string
-  text?: string
-  thinking?: string
-  id?: string
-  name?: string
-  input?: unknown
-  tool_use_id?: string
-  content?: unknown
-  is_error?: boolean
-  source?: {
-    type?: string
-    media_type?: string
-    data?: string
-  }
+const CLAUDE_AGENT: NativeAgentDescriptor = {
+  name: 'Claude',
+  channelLabel: 'Claude bridge',
+  responseSubject: 'bridge',
 }
-
-type ClaudeUsage = {
-  input_tokens?: number
-  output_tokens?: number
-  cache_creation_input_tokens?: number
-  cache_read_input_tokens?: number
-}
-
-type ClaudeApiMessage = {
-  id?: string
-  role?: string
-  content?: string | ClaudeContentBlock[]
-  stop_reason?: string | null
-  usage?: ClaudeUsage
-}
-
-type ClaudeStreamInnerEvent = {
-  type?: string
-  content_block?: { type?: string; name?: string }
-  delta?: { type?: string; text?: string; thinking?: string }
-}
-
-type ClaudeEvent = {
-  type?: string
-  subtype?: string
-  uuid?: string
-  session_id?: string
-  parent_tool_use_id?: string | null
-  message?: ClaudeApiMessage
-  event?: ClaudeStreamInnerEvent
-  model?: string
-  slash_commands?: unknown
-  result?: string
-  is_error?: boolean
-  usage?: ClaudeUsage
-  total_cost_usd?: number
-  num_turns?: number
-  // claude_native_* envelope fields from the Kiwi Code bridge.
-  isStreaming?: boolean
-  sessionId?: string
-  effort?: string
-  events?: Array<{ at?: number; event?: ClaudeEvent }>
-}
-
-type ClaudeChatMessage = {
-  key: string
-  role: 'user' | 'assistant'
-  at: number
-  blocks: ClaudeContentBlock[]
-  pending?: boolean
-}
-
-type ClaudeToolResult = {
-  output: unknown
-  isError: boolean
-  at: number
-}
-
-type ClaudeRunSummary = {
-  key: string
-  at: number
-  label: string
-  text: string
-  tone: 'warning' | 'error'
-}
-
-type ClaudeSessionStats = {
-  input: number
-  output: number
-  cacheRead: number
-  cacheWrite: number
-  cost: number
-  turns: number
-}
-
-type ClaudeEventStamp = {
-  at: number
-  label: string
-}
-
-type ComposerSuggestion = PiNativeComposerSuggestion & { completion: string }
-
-const CLAUDE_PENDING_PROMPT_MATCH_MS = 30_000
-const CLAUDE_DEFAULT_CONTEXT_WINDOW = 200_000
-
-const NATIVE_SLASH_COMMANDS: Array<{ name: string; description: string }> = [
-  {
-    name: 'restart',
-    description: 'Restart Claude Code and resume this saved conversation',
-  },
-  {
-    name: 'new',
-    description: 'Start a new saved Claude session in this thread',
-  },
-  {
-    name: 'model',
-    description: 'Switch the model for this Claude session',
-  },
-  {
-    name: 'thinking',
-    description: 'Set Claude’s reasoning effort',
-  },
-  {
-    name: 'session',
-    description: 'Show token, cache, turn, and cost totals',
-  },
-]
 
 export function ClaudeNativePane({
   projectId,
@@ -768,85 +664,25 @@ export function ClaudeNativePane({
     }
   }
 
-  function runNativeSlashCommand(message: string): boolean {
-    const match = message.match(/^\/(restart|new|model|thinking|session)(?:\s+([\s\S]*))?$/)
-    if (!match) return false
-
-    const commandName = match[1]
-    const argument = (match[2] ?? '').trim()
-    if (draftImages.length > 0) {
-      setError(`Remove image attachments before running /${commandName}.`)
-      return true
-    }
-    if (isStreaming && commandName !== 'session') {
-      setError(`Wait for Claude to finish before running /${commandName}.`)
-      return true
-    }
-
-    if (commandName === 'restart') {
-      if (argument) {
-        setError('Use /restart without arguments.')
-        return true
-      }
-      if (!sendSocketCommand({
-        type: 'restart',
-        ...(selectedModel ? { modelId: selectedModel } : {}),
-        ...(claudeThinkingLevelIds.some((level) => level === selectedThinking)
-          ? { level: selectedThinking }
-          : {}),
-      })) return true
-      clearSubmittedDraft()
-      setNotice('Restarting the Claude session…')
-      return true
-    }
-
-    if (commandName === 'new') {
-      if (argument) {
-        setError('Use /new without arguments.')
-        return true
-      }
-      if (!sendSocketCommand({ type: 'new_session' })) return true
-      clearSubmittedDraft()
-      setNotice('Starting a new Claude session…')
-      return true
-    }
-
-    if (commandName === 'model') {
-      if (!claudeModelChoices.some((choice) => choice.id === argument)) {
-        setError(`Use /model <${claudeModelChoices.map((choice) => choice.id).join('|')}>.`)
-        return true
-      }
-      if (!sendSocketCommand({ type: 'set_model', modelId: argument })) return true
-      setSelectedModel(argument)
-      clearSubmittedDraft()
-      setNotice(`Switching Claude to ${argument}…`)
-      return true
-    }
-
-    if (commandName === 'thinking') {
-      if (!claudeThinkingLevelIds.some((level) => level === argument)) {
-        setError(`Use /thinking <${claudeThinkingLevelIds.join('|')}>.`)
-        return true
-      }
-      if (!sendSocketCommand({ type: 'set_thinking_level', level: argument })) return true
-      setSelectedThinking(argument)
-      clearSubmittedDraft()
-      setNotice(`Setting Claude reasoning effort to ${argument}…`)
-      return true
-    }
-
-    if (argument) {
-      setError('Use /session without arguments.')
-      return true
-    }
-    clearSubmittedDraft()
-    setNotice(formatSessionStats(sessionStats))
-    return true
+  function handleSlashCommand(message: string): boolean {
+    return runClaudeSlashCommand(message, {
+      isStreaming,
+      hasImageAttachments: draftImages.length > 0,
+      selectedModel,
+      selectedThinking,
+      sessionStats,
+      send: sendSocketCommand,
+      setSelectedModel,
+      setSelectedThinking,
+      setError,
+      setNotice,
+      clearSubmittedDraft,
+    })
   }
 
   function submitDraft() {
     const message = draft.trim()
-    if ((!message && draftImages.length === 0) || (message && runNativeSlashCommand(message))) return
+    if ((!message && draftImages.length === 0) || (message && handleSlashCommand(message))) return
     void sendPrompt()
   }
 
@@ -959,94 +795,37 @@ export function ClaudeNativePane({
   const hasDraftContent = draft.trim().length > 0 || draftImages.length > 0
   const canSend = connectionStatus === 'open' && hasDraftContent && !isUploadingImages
   const primaryActionIsStop = isStreaming && !hasDraftContent && !isUploadingImages
-  const runElapsed = runStartedAt === null ? 0 : Math.max(0, clockNow - runStartedAt)
-  const responseAge = lastClaudeResponseAt === null ? null : Math.max(0, clockNow - lastClaudeResponseAt)
-  const workEventAge = latestWorkEvent === null ? null : Math.max(0, clockNow - latestWorkEvent.at)
-  const bridgeResponsive = connectionStatus === 'open'
-    && responseAge !== null
-    && responseAge <= NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
-  const responseOverdue = connectionStatus === 'open' && (
-    responseAge !== null
-      ? responseAge > NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
-      : connectedAt !== null && clockNow - connectedAt > NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
-  )
-  const probePending = lastProbeSentAt !== null
-    && clockNow - lastProbeSentAt <= NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
-  const bridgeTone: PiStatusTone = bridgeResponsive ? 'healthy' : responseOverdue ? 'warning' : 'idle'
-  const monitorTone: PiStatusTone = connectionStatus === 'error' || connectionStatus === 'closed'
-    ? 'error'
-    : connectionStatus !== 'open' || responseOverdue
-      ? 'warning'
-      : 'healthy'
-  const activityToggleLabel = isStreaming
-    ? `${runPhase} · ${formatDuration(runElapsed)}`
-    : connectionStatus === 'open' && bridgeResponsive
-      ? 'Activity - Idle'
-      : 'Activity · check status'
-
-  async function copyActivityDiagnostics() {
-    const lines = [
-      'Claude Native activity diagnostics',
-      `Captured: ${new Date().toISOString()}`,
-      `Transport: ${connectionStatus}`,
-      `Agent: ${isStreaming ? `${runPhase} for ${formatDuration(runElapsed)}` : 'idle'}`,
-      `Claude bridge: ${nativeResponseDescription('bridge', responseAge, connectedAt, clockNow)}`,
-      `Last probe latency: ${lastProbeLatency === null ? 'unknown' : `${lastProbeLatency}ms`}`,
-      `Last event: ${latestEvent ? `${latestEvent.label} (${formatNativeActivityAge(clockNow - latestEvent.at)})` : 'none'}`,
-      `Last work event: ${latestWorkEvent ? `${latestWorkEvent.label} (${formatNativeActivityAge(clockNow - latestWorkEvent.at)})` : 'none'}`,
-      `Run events observed: ${runEventCount}`,
-      '',
-      'Recent lifecycle events:',
-      ...activityLog.map((entry) => `${new Date(entry.at).toISOString()}  ${entry.event}${entry.repeats > 1 ? ` ×${entry.repeats}` : ''}  ${entry.summary}`),
-    ]
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
-      await navigator.clipboard.writeText(lines.join('\n'))
-      setNotice('Copied Claude activity diagnostics.')
-    } catch {
-      setError('Could not copy Claude activity diagnostics.')
-    }
-  }
-
+  const activity = deriveAgentActivity({
+    clockNow,
+    connectedAt,
+    connectionStatus,
+    isStreaming,
+    lastResponseAt: lastClaudeResponseAt,
+    lastProbeSentAt,
+    latestWorkEvent,
+    runPhase,
+    runStartedAt,
+  })
+  const { activityToggleLabel, monitorTone } = activity
   const activityPanel = activityExpanded ? (
-    <PiNativeActivityPanel
-      probePending={probePending}
-      probeDisabled={connectionStatus !== 'open' || probePending}
-      metrics={[
-        {
-          label: 'Transport',
-          tone: connectionStatus === 'open' ? 'healthy' : monitorTone,
-          value: nativeConnectionDescription(connectionStatus),
-        },
-        {
-          label: 'Claude bridge',
-          tone: bridgeTone,
-          value: nativeResponseDescription('bridge', responseAge, connectedAt, clockNow),
-          detail: lastProbeLatency !== null ? `${lastProbeLatency}ms round trip` : undefined,
-        },
-        {
-          label: 'Agent',
-          tone: isStreaming ? 'working' : 'idle',
-          value: isStreaming ? `${runPhase} · ${formatDuration(runElapsed)}` : 'Idle',
-          detail: isStreaming ? `${formatCount(runEventCount)} work events observed` : undefined,
-        },
-        {
-          label: 'Last work event',
-          tone: workEventAge !== null && workEventAge < NATIVE_AGENT_RESPONSE_STALE_AFTER_MS
-            ? 'working'
-            : 'idle',
-          value: latestWorkEvent ? <code>{latestWorkEvent.label}</code> : 'No agent events observed yet',
-          detail: latestWorkEvent ? formatNativeActivityAge(workEventAge ?? 0) : undefined,
-        },
-      ]}
+    <NativeAgentActivityMonitor
+      agent={CLAUDE_AGENT}
+      view={activity}
+      connectionStatus={connectionStatus}
+      isStreaming={isStreaming}
+      runPhase={runPhase}
+      runEventCount={runEventCount}
+      connectedAt={connectedAt}
+      lastProbeLatency={lastProbeLatency}
+      latestEvent={latestEvent}
+      latestWorkEvent={latestWorkEvent}
+      clockNow={clockNow}
+      activityLog={activityLog}
       sessionUsage={<ClaudeSessionUsage stats={sessionStats} />}
-      activityLog={activityLog.map((entry) => ({
-        ...entry,
-        clock: formatNativeActivityClock(entry.at),
-      }))}
       onInspect={inspectNow}
-      onCopy={() => void copyActivityDiagnostics()}
       onHide={() => setActivityExpanded(false)}
+      onNotice={setNotice}
+      onError={setError}
     />
   ) : null
   // Show the model reported by Claude when the user has not chosen an alias.
@@ -1157,333 +936,4 @@ export function ClaudeNativePane({
       />
     </section>
   )
-}
-
-function appendPendingUserMessage(
-  setMessages: (updater: (current: ClaudeChatMessage[]) => ClaudeChatMessage[]) => void,
-  sequence: { current: number },
-  text: string,
-  at: number,
-) {
-  setMessages((current) => [...current, {
-    key: `pending:${sequence.current += 1}`,
-    role: 'user',
-    at,
-    blocks: [{ type: 'text', text }],
-    pending: true,
-  }])
-}
-
-function claudeEventLabel(event: ClaudeEvent): string {
-  const type = event.type || 'unknown'
-  if (type === 'system' && event.subtype) return `${type} · ${event.subtype}`
-  if (type === 'stream_event' && event.event?.type) return `${type} · ${event.event.type}`
-  return type
-}
-
-function isClaudeWorkEvent(event: ClaudeEvent): boolean {
-  switch (event.type) {
-    case 'assistant':
-    case 'user':
-    case 'result':
-    case 'stream_event':
-      return true
-    default:
-      return false
-  }
-}
-
-function claudeStatusMessage(event: ClaudeEvent): string {
-  const message = (event as { message?: unknown }).message
-  return typeof message === 'string' ? message : ''
-}
-
-function normalizeClaudeCommands(commands: unknown): string[] {
-  if (!Array.isArray(commands)) return []
-  const seen = new Set<string>()
-  const normalized: string[] = []
-  for (const command of commands) {
-    const name = typeof command === 'string'
-      ? command.trim()
-      : typeof (command as { name?: unknown })?.name === 'string'
-        ? ((command as { name: string }).name).trim()
-        : ''
-    if (!name || name.includes('/') || /\s/.test(name) || seen.has(name)) continue
-    if (NATIVE_SLASH_COMMANDS.some((native) => native.name === name)) continue
-    seen.add(name)
-    normalized.push(name)
-  }
-  return normalized
-}
-
-function buildComposerSuggestions(draft: string, claudeCommands: string[]): ComposerSuggestion[] {
-  const commandMatch = draft.match(/^\/([^\s]*)$/)
-  if (commandMatch) {
-    const query = (commandMatch[1] ?? '').toLowerCase()
-    const native = NATIVE_SLASH_COMMANDS
-      .filter((command) => command.name.toLowerCase().startsWith(query))
-      .map((command, index) => ({
-        id: suggestionID('native', command.name, String(index)),
-        label: `/${command.name}`,
-        description: command.description,
-        source: 'native' as const,
-        completion: command.name === 'model' || command.name === 'thinking'
-          ? `/${command.name} `
-          : `/${command.name}`,
-      }))
-    const claude = claudeCommands
-      .filter((name) => name.toLowerCase().startsWith(query))
-      .map((name, index) => ({
-        id: suggestionID('claude', name, String(index)),
-        label: `/${name}`,
-        description: 'Claude Code command',
-        source: 'skill' as const,
-        completion: `/${name}`,
-      }))
-    return [...native, ...claude].slice(0, 12)
-  }
-
-  const modelMatch = draft.match(/^\/model\s+([^\s]*)$/)
-  if (modelMatch) {
-    const query = (modelMatch[1] ?? '').toLowerCase()
-    return claudeModelChoices
-      .filter((choice) => choice.id.toLowerCase().includes(query)
-        || choice.label.toLowerCase().includes(query))
-      .map((choice, index) => ({
-        id: suggestionID('model', choice.id, String(index)),
-        label: `/model ${choice.id}`,
-        description: choice.label,
-        source: 'model' as const,
-        completion: `/model ${choice.id}`,
-      }))
-  }
-
-  const thinkingMatch = draft.match(/^\/thinking\s+([^\s]*)$/)
-  if (thinkingMatch) {
-    const query = (thinkingMatch[1] ?? '').toLowerCase()
-    return claudeThinkingLevelIds
-      .filter((level) => level.startsWith(query))
-      .map((level, index) => ({
-        id: suggestionID('level', level, String(index)),
-        label: `/thinking ${level}`,
-        description: `Use ${level} reasoning effort`,
-        source: 'level' as const,
-        completion: `/thinking ${level}`,
-      }))
-  }
-
-  return []
-}
-
-function suggestionID(...parts: string[]): string {
-  return parts.join('-').replace(/[^a-z0-9_-]/gi, '-')
-}
-
-function formatSessionStats(stats: ClaudeSessionStats | null): string {
-  if (!stats) return 'No Claude session totals yet.'
-  return [
-    'Session',
-    `${formatCount(stats.turns)} turn${stats.turns === 1 ? '' : 's'}`,
-    `↑${formatTokens(stats.input)}`,
-    `↓${formatTokens(stats.output)}`,
-    `R${formatTokens(stats.cacheRead)}`,
-    `W${formatTokens(stats.cacheWrite)}`,
-    formatCost(stats.cost),
-  ].join(' · ')
-}
-
-function ClaudeSessionUsage({ stats }: { stats: ClaudeSessionStats | null }) {
-  if (!stats) {
-    return (
-      <div
-        className={classNames(piNativeStyles.sessionUsage, piNativeStyles.sessionUsageLoading)}
-        role="group"
-        aria-label="Waiting for Claude session token usage and cost"
-        data-testid="claude-native-session-usage"
-      >
-        <span aria-hidden="true">Session usage · waiting for the first run…</span>
-      </div>
-    )
-  }
-
-  const accessibleSummary = [
-    `${formatCount(stats.input)} input tokens`,
-    `${formatCount(stats.output)} output tokens`,
-    `${formatCount(stats.cacheRead)} cache-read tokens`,
-    `${formatCount(stats.cacheWrite)} cache-write tokens`,
-    `${formatCost(stats.cost)} cost`,
-  ].join(', ')
-
-  return (
-    <div
-      className={piNativeStyles.sessionUsage}
-      role="group"
-      aria-label={`Claude session usage: ${accessibleSummary}`}
-      data-testid="claude-native-session-usage"
-    >
-      <span className={piNativeStyles.sessionUsageMetric} title={`${formatCount(stats.input)} input tokens`} aria-hidden="true">
-        <b>↑</b>{formatTokens(stats.input)}
-      </span>
-      <span className={piNativeStyles.sessionUsageMetric} title={`${formatCount(stats.output)} output tokens`} aria-hidden="true">
-        <b>↓</b>{formatTokens(stats.output)}
-      </span>
-      <span className={piNativeStyles.sessionUsageMetric} title={`${formatCount(stats.cacheRead)} cache-read tokens`} aria-hidden="true">
-        <b>R</b>{formatTokens(stats.cacheRead)}
-      </span>
-      <span className={piNativeStyles.sessionUsageMetric} title={`${formatCount(stats.cacheWrite)} cache-write tokens`} aria-hidden="true">
-        <b>W</b>{formatTokens(stats.cacheWrite)}
-      </span>
-      <span className={piNativeStyles.sessionUsageCost} title="Cumulative session cost" aria-hidden="true">
-        {formatCost(stats.cost)}
-      </span>
-    </div>
-  )
-}
-
-function usageValue(value: number | undefined): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
-}
-
-// Keep the compact thresholds and precision aligned with the Pi Native pane.
-function formatTokens(value: number): string {
-  if (value < 1_000) return value.toString()
-  if (value < 10_000) return `${(value / 1_000).toFixed(1)}k`
-  if (value < 1_000_000) return `${Math.round(value / 1_000)}k`
-  if (value < 10_000_000) return `${(value / 1_000_000).toFixed(1)}M`
-  return `${Math.round(value / 1_000_000)}M`
-}
-
-function formatCost(value: number): string {
-  return `$${usageValue(value).toFixed(3)}`
-}
-
-function formatCount(value: number): string {
-  return new Intl.NumberFormat().format(value)
-}
-
-function contentBlocks(content: ClaudeApiMessage['content']): ClaudeContentBlock[] {
-  if (typeof content === 'string') {
-    return content ? [{ type: 'text', text: content }] : []
-  }
-  return Array.isArray(content) ? content : []
-}
-
-function blockText(blocks: ClaudeContentBlock[]): string {
-  return blocks
-    .flatMap((block) => (block.type === 'text' && typeof block.text === 'string' ? [block.text] : []))
-    .join('\n\n')
-}
-
-function blockImages(blocks: ClaudeContentBlock[]): Array<{ mimeType: string; data: string }> {
-  return blocks.flatMap((block) => (
-    block.type === 'image'
-      && block.source?.type === 'base64'
-      && typeof block.source.data === 'string'
-      && block.source.data.length > 0
-      && typeof block.source.media_type === 'string'
-      && isSupportedPiImageType(block.source.media_type)
-      ? [{ data: block.source.data, mimeType: block.source.media_type }]
-      : []
-  ))
-}
-
-function buildTimeline(
-  messages: ClaudeChatMessage[],
-  toolResults: Map<string, ClaudeToolResult>,
-  runSummaries: ClaudeRunSummary[],
-  liveText: string,
-): TimelineEntry[] {
-  const entries: TimelineEntry[] = []
-
-  messages.forEach((message, messageIndex) => {
-    const keyBase = `${message.key}:${messageIndex}`
-    if (message.role === 'user') {
-      entries.push({
-        kind: 'user',
-        key: keyBase,
-        text: blockText(message.blocks),
-        images: blockImages(message.blocks),
-        timestamp: message.at,
-      })
-      return
-    }
-    const text = blockText(message.blocks)
-    if (text.trim()) {
-      entries.push({ kind: 'assistant', key: `${keyBase}:text`, text, timestamp: message.at })
-    }
-    for (const block of message.blocks) {
-      if (block.type !== 'tool_use' || typeof block.id !== 'string' || !block.id) continue
-      const result = toolResults.get(block.id)
-      entries.push({
-        kind: 'tool',
-        key: `${keyBase}:tool:${block.id}`,
-        callId: block.id,
-        name: block.name || 'tool',
-        args: block.input,
-        output: result?.output,
-        status: result ? (result.isError ? 'error' : 'success') : 'running',
-        timestamp: result?.at ?? message.at,
-      })
-    }
-  })
-
-  for (const summary of runSummaries) {
-    entries.push({
-      kind: 'summary',
-      key: summary.key,
-      label: summary.label,
-      text: summary.text,
-      timestamp: summary.at,
-      tone: summary.tone,
-    })
-  }
-
-  entries.sort((left, right) => left.timestamp - right.timestamp)
-
-  if (liveText.trim()) {
-    entries.push({
-      kind: 'assistant',
-      key: 'live-assistant',
-      text: liveText,
-      timestamp: Number.MAX_SAFE_INTEGER,
-    })
-  }
-
-  return addTurnMarkers(entries)
-}
-
-function addTurnMarkers(entries: TimelineEntry[]): TimelineEntry[] {
-  const result: TimelineEntry[] = []
-  for (let index = 0; index < entries.length;) {
-    const entry = entries[index]
-    if (!entry) {
-      index += 1
-      continue
-    }
-    if (entry.kind !== 'user' || entry.timestamp <= 0) {
-      result.push(entry)
-      index += 1
-      continue
-    }
-
-    let end = entry.timestamp
-    let next = index + 1
-    for (; next < entries.length; next += 1) {
-      const candidate = entries[next]
-      if (candidate?.kind === 'user') break
-      if (!candidate || candidate.kind === 'turn-marker' || candidate.timestamp === Number.MAX_SAFE_INTEGER) continue
-      end = Math.max(end, candidate.timestamp)
-    }
-    result.push(...entries.slice(index, next))
-    if (end - entry.timestamp >= 1_000) {
-      result.push({
-        kind: 'turn-marker',
-        key: `turn:${entry.key}`,
-        durationMs: end - entry.timestamp,
-        timestamp: entry.timestamp,
-      })
-    }
-    index = next
-  }
-  return result
 }

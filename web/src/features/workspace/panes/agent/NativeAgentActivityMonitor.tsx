@@ -1,7 +1,14 @@
 // Everything behind the composer's activity toggle: the four health metrics,
-// the session usage strip, the lifecycle log, and the clipboard dump. Keeping
-// the metric list and its matching diagnostics text in one file is the point --
-// they have to agree, and they drifted easily when the pane owned both.
+// the session usage strip, the lifecycle log, and the clipboard dump.
+//
+// Keeping the metric list and its matching diagnostics text in one file is the
+// point -- they restate the same four facts and have to agree, which was easy
+// to miss with sixty lines of composer wiring between them.
+//
+// Shared by both native panes. Pi and Claude had structurally identical copies
+// of this; everything that actually differed is in NativeAgentDescriptor.
+import type { ReactNode } from 'react'
+import { formatDuration } from '@/lib/formatDuration'
 import {
   formatNativeActivityAge,
   formatNativeActivityClock,
@@ -9,36 +16,43 @@ import {
   nativeResponseDescription,
   NATIVE_AGENT_RESPONSE_STALE_AFTER_MS,
 } from '@/lib/nativeAgentDiagnostics'
-import { formatDuration } from '@/lib/formatDuration'
 import type { NativeActivityRecord } from '@/lib/useNativeActivityLog'
 import type { ConnectionStatus } from '@/types'
-import { formatCount } from './piFormatting'
+import type { AgentActivityView, AgentEventStamp } from './agentActivity'
+import { formatCount } from './agentFormat'
 import { PiNativeActivityPanel } from './PiNativeActivityPanel'
-import { PiSessionUsage } from './PiSessionUsage'
-import type { PiActivityView } from './piActivity'
-import type { PiEventStamp, PiSessionStats } from './piTypes'
 
-export type PiActivityMonitorProps = {
-  view: PiActivityView
+export type NativeAgentDescriptor = {
+  /** Heading and clipboard wording: "Pi Native activity diagnostics". */
+  name: string
+  /** The metric row for the agent's channel: "Pi RPC" or "Claude bridge". */
+  channelLabel: string
+  /** Subject handed to nativeResponseDescription: "Pi" or "bridge". */
+  responseSubject: string
+}
+
+export type NativeAgentActivityMonitorProps = {
+  agent: NativeAgentDescriptor
+  view: AgentActivityView
   connectionStatus: ConnectionStatus
   isStreaming: boolean
   runPhase: string
   runEventCount: number
   connectedAt: number | null
   lastProbeLatency: number | null
-  latestRpcEvent: PiEventStamp | null
-  latestWorkEvent: PiEventStamp | null
+  latestEvent: AgentEventStamp | null
+  latestWorkEvent: AgentEventStamp | null
   clockNow: number
   activityLog: NativeActivityRecord[]
-  sessionStats: PiSessionStats | undefined
-  latestCacheHitRate: number | undefined
+  sessionUsage: ReactNode
   onInspect: () => void
   onHide: () => void
   onNotice: (message: string) => void
   onError: (message: string) => void
 }
 
-export function PiActivityMonitor({
+export function NativeAgentActivityMonitor({
+  agent,
   view,
   connectionStatus,
   isStreaming,
@@ -46,28 +60,33 @@ export function PiActivityMonitor({
   runEventCount,
   connectedAt,
   lastProbeLatency,
-  latestRpcEvent,
+  latestEvent,
   latestWorkEvent,
   clockNow,
   activityLog,
-  sessionStats,
-  latestCacheHitRate,
+  sessionUsage,
   onInspect,
   onHide,
   onNotice,
   onError,
-}: PiActivityMonitorProps) {
-  const { monitorTone, probePending, responseAge, rpcTone, runElapsed, workEventAge } = view
+}: NativeAgentActivityMonitorProps) {
+  const { channelTone, monitorTone, probePending, responseAge, runElapsed, workEventAge } = view
+  const channelDescription = nativeResponseDescription(
+    agent.responseSubject,
+    responseAge,
+    connectedAt,
+    clockNow,
+  )
 
   async function copyDiagnostics() {
     const lines = [
-      'Pi Native activity diagnostics',
+      `${agent.name} Native activity diagnostics`,
       `Captured: ${new Date().toISOString()}`,
       `Transport: ${connectionStatus}`,
       `Agent: ${isStreaming ? `${runPhase} for ${formatDuration(runElapsed)}` : 'idle'}`,
-      `Pi RPC: ${nativeResponseDescription('Pi', responseAge, connectedAt, clockNow)}`,
+      `${agent.channelLabel}: ${channelDescription}`,
       `Last probe latency: ${lastProbeLatency === null ? 'unknown' : `${lastProbeLatency}ms`}`,
-      `Last RPC event: ${latestRpcEvent ? `${latestRpcEvent.label} (${formatNativeActivityAge(clockNow - latestRpcEvent.at)})` : 'none'}`,
+      `Last event: ${latestEvent ? `${latestEvent.label} (${formatNativeActivityAge(clockNow - latestEvent.at)})` : 'none'}`,
       `Last work event: ${latestWorkEvent ? `${latestWorkEvent.label} (${formatNativeActivityAge(clockNow - latestWorkEvent.at)})` : 'none'}`,
       `Run events observed: ${runEventCount}`,
       '',
@@ -77,9 +96,9 @@ export function PiActivityMonitor({
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
       await navigator.clipboard.writeText(lines.join('\n'))
-      onNotice('Copied Pi activity diagnostics.')
+      onNotice(`Copied ${agent.name} activity diagnostics.`)
     } catch {
-      onError('Could not copy Pi activity diagnostics.')
+      onError(`Could not copy ${agent.name} activity diagnostics.`)
     }
   }
 
@@ -94,9 +113,9 @@ export function PiActivityMonitor({
           value: nativeConnectionDescription(connectionStatus),
         },
         {
-          label: 'Pi RPC',
-          tone: rpcTone,
-          value: nativeResponseDescription('Pi', responseAge, connectedAt, clockNow),
+          label: agent.channelLabel,
+          tone: channelTone,
+          value: channelDescription,
           detail: lastProbeLatency !== null ? `${lastProbeLatency}ms round trip` : undefined,
         },
         {
@@ -114,7 +133,7 @@ export function PiActivityMonitor({
           detail: latestWorkEvent ? formatNativeActivityAge(workEventAge ?? 0) : undefined,
         },
       ]}
-      sessionUsage={<PiSessionUsage stats={sessionStats} latestCacheHitRate={latestCacheHitRate} />}
+      sessionUsage={sessionUsage}
       activityLog={activityLog.map((entry) => ({
         ...entry,
         clock: formatNativeActivityClock(entry.at),

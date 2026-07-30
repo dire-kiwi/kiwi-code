@@ -1,5 +1,6 @@
 // The slash-command vocabulary and the composer autocomplete built from it.
 import { piThinkingLevelIds } from '@/codingAgents'
+import { suggestionID } from './agentFormat'
 import { piSlashSourceLabel } from './PiNativeComposer'
 import type { ComposerSuggestion, PiModel, PiSlashCommand } from './piTypes'
 
@@ -137,10 +138,6 @@ export function buildComposerSuggestions(
   }
 
   return []
-}
-
-export function suggestionID(...parts: string[]): string {
-  return parts.join('-').replace(/[^a-z0-9_-]/gi, '-')
 }
 
 export function modelIdentifier(model: PiModel | undefined): string {
