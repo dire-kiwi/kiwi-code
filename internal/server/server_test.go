@@ -441,23 +441,10 @@ func TestThreadAPI(t *testing.T) {
 		t.Fatalf("unlock title status = %d, body = %s", unlockResponse.Code, unlockResponse.Body.String())
 	}
 
-	bookmarkResponse := httptest.NewRecorder()
-	handler.ServeHTTP(bookmarkResponse, httptest.NewRequest(http.MethodPatch, threadPath, bytes.NewBufferString(`{"bookmarked":true}`)))
-	if bookmarkResponse.Code != http.StatusOK {
-		t.Fatalf("bookmark thread status = %d, body = %s", bookmarkResponse.Code, bookmarkResponse.Body.String())
-	}
-	thread = project.Thread{}
-	if err := json.NewDecoder(bookmarkResponse.Body).Decode(&thread); err != nil {
-		t.Fatal(err)
-	}
-	if !thread.Bookmarked {
-		t.Fatalf("thread was not bookmarked: %#v", thread)
-	}
-
 	for name, body := range map[string]string{
 		"empty":         `{}`,
 		"multiple":      `{"archived":true,"titleLocked":true}`,
-		"unknown field": `{"favorite":true}`,
+		"unknown field": `{"unexpected":true}`,
 	} {
 		t.Run("rejects "+name+" update", func(t *testing.T) {
 			response := httptest.NewRecorder()
@@ -477,7 +464,7 @@ func TestThreadAPI(t *testing.T) {
 	if err := json.NewDecoder(getResponse.Body).Decode(&persistedThread); err != nil {
 		t.Fatal(err)
 	}
-	if persistedThread.Title != "Manually renamed thread" || !persistedThread.Bookmarked {
+	if persistedThread.Title != "Manually renamed thread" {
 		t.Fatalf("thread updates were not persisted: %#v", persistedThread)
 	}
 
@@ -489,8 +476,8 @@ func TestThreadAPI(t *testing.T) {
 	if err := json.NewDecoder(archiveResponse.Body).Decode(&persistedThread); err != nil {
 		t.Fatal(err)
 	}
-	if persistedThread.ArchivedAt == nil || !persistedThread.Bookmarked {
-		t.Fatalf("archived thread lost state: %#v", persistedThread)
+	if persistedThread.ArchivedAt == nil {
+		t.Fatalf("thread was not archived: %#v", persistedThread)
 	}
 
 	restoreResponse := httptest.NewRecorder()
@@ -502,21 +489,8 @@ func TestThreadAPI(t *testing.T) {
 	if err := json.NewDecoder(restoreResponse.Body).Decode(&persistedThread); err != nil {
 		t.Fatal(err)
 	}
-	if persistedThread.ArchivedAt != nil || !persistedThread.Bookmarked {
-		t.Fatalf("restored thread lost state: %#v", persistedThread)
-	}
-
-	clearBookmarkResponse := httptest.NewRecorder()
-	handler.ServeHTTP(clearBookmarkResponse, httptest.NewRequest(http.MethodPatch, threadPath, bytes.NewBufferString(`{"bookmarked":false}`)))
-	if clearBookmarkResponse.Code != http.StatusOK {
-		t.Fatalf("clear bookmark status = %d, body = %s", clearBookmarkResponse.Code, clearBookmarkResponse.Body.String())
-	}
-	persistedThread = project.Thread{}
-	if err := json.NewDecoder(clearBookmarkResponse.Body).Decode(&persistedThread); err != nil {
-		t.Fatal(err)
-	}
-	if persistedThread.Bookmarked {
-		t.Fatalf("thread remained bookmarked: %#v", persistedThread)
+	if persistedThread.ArchivedAt != nil {
+		t.Fatalf("thread was not restored: %#v", persistedThread)
 	}
 
 	deleteResponse := httptest.NewRecorder()

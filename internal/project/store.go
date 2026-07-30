@@ -79,7 +79,6 @@ type Thread struct {
 	TitleLocked            bool       `json:"titleLocked,omitempty"`
 	ClosedAt               *time.Time `json:"closedAt,omitempty"`
 	ArchivedAt             *time.Time `json:"archivedAt,omitempty"`
-	Bookmarked             bool       `json:"bookmarked,omitempty"`
 	TokenLimit             *int64     `json:"tokenLimit,omitempty"`
 	CostLimitUSD           *float64   `json:"costLimitUsd,omitempty"`
 }
@@ -1034,36 +1033,6 @@ func (s *Store) SetThreadTitleLocked(projectID, threadID string, locked bool) (T
 				thread.TitleLocked = locked
 				return saveProjectMutationResult(s, cloneThread(*thread), func() {
 					thread.TitleLocked = previous
-				})
-			}
-			return Thread{}, ErrThreadNotFound
-		}
-		return Thread{}, ErrNotFound
-	})
-}
-
-func (s *Store) SetThreadBookmarked(projectID, threadID string, bookmarked bool) (Thread, error) {
-	return withProjectMutationResult(s, func() (Thread, error) {
-		for projectIndex := range s.projects {
-			if s.projects[projectIndex].ID != projectID {
-				continue
-			}
-			for threadIndex := range s.projects[projectIndex].Threads {
-				thread := &s.projects[projectIndex].Threads[threadIndex]
-				if thread.ID != threadID {
-					continue
-				}
-				if thread.RollbackPending {
-					return Thread{}, ErrThreadRollbackPending
-				}
-				if thread.Bookmarked == bookmarked {
-					return cloneThread(*thread), nil
-				}
-
-				previous := thread.Bookmarked
-				thread.Bookmarked = bookmarked
-				return saveProjectMutationResult(s, cloneThread(*thread), func() {
-					thread.Bookmarked = previous
 				})
 			}
 			return Thread{}, ErrThreadNotFound

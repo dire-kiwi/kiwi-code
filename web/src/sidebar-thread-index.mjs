@@ -97,16 +97,6 @@ export function createThreadTreeIndex(threads) {
     return ordered
   }
 
-  function bookmarkedPathIds() {
-    const visible = new Set()
-    for (const thread of threads) {
-      if (!thread.bookmarked) continue
-      visible.add(thread.id)
-      for (const ancestor of ancestors(thread.id)) visible.add(ancestor.id)
-    }
-    return threads.filter((thread) => visible.has(thread.id)).map((thread) => thread.id)
-  }
-
   return {
     threads,
     byId,
@@ -117,7 +107,6 @@ export function createThreadTreeIndex(threads) {
     rootId,
     activityDisplayThread,
     orderedTreeIds,
-    bookmarkedPathIds,
   }
 }
 

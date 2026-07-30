@@ -37,13 +37,12 @@ sidebar resize could sit unwritten for as long as an agent streams. There is a
 starved by a steady stream of unrelated actions" (verified it fails without the
 cap).
 
-**4. `bookmarksOnly` and `expandedMoreProjectIds` moved into the sidebar slice.**
+**4. `expandedMoreProjectIds` moved into the sidebar slice.**
 
-They were `useState` in `ProjectSidebar` and remain unpersisted. They are in the
-slice because they are the same "which rows are open" concern as their persisted
-neighbours and the reveal-on-select effect touches all three at once. Side
-effect: they are now app-global rather than per-instance. `ProjectSidebar` is
-rendered once, so this is currently unobservable.
+It was `useState` in `ProjectSidebar` and remains unpersisted. It is in the slice
+because it shares the "which rows are open" concern with its persisted neighbours
+and the reveal-on-select effect updates it. It is now app-global rather than
+per-instance, which is unobservable while `ProjectSidebar` is rendered once.
 
 ## Things I deliberately did not do
 

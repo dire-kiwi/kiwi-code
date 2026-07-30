@@ -31,8 +31,8 @@ test('threads land in the first section that claims them', () => {
       thread('root', { lastPromptAt: iso(10) }),
       thread('agent', { parentThreadId: 'root', lastPromptAt: iso(5) }),
       thread('done-agent', { parentThreadId: 'root', lastPromptAt: iso(20) }),
-      thread('pinned', { bookmarked: true, lastPromptAt: iso(30) }),
-      thread('plain', { lastPromptAt: iso(40) }),
+      thread('newer-recent', { lastPromptAt: iso(30) }),
+      thread('older-recent', { lastPromptAt: iso(40) }),
     ]),
   ]
   const activities = [
@@ -43,8 +43,7 @@ test('threads land in the first section that claims them', () => {
   const groups = activityViewGroups(projects, activities)
   assert.deepEqual(entryIds(groups.working), ['p1:agent'])
   assert.deepEqual(entryIds(groups.needsReview), ['p1:root'])
-  assert.deepEqual(entryIds(groups.pinned), ['p1:pinned'])
-  assert.deepEqual(entryIds(groups.recent), ['p1:plain'])
+  assert.deepEqual(entryIds(groups.recent), ['p1:newer-recent', 'p1:older-recent'])
   assert.equal(groups.hiddenRecentCount, 0)
 })
 
@@ -100,9 +99,9 @@ test('grandchild activity cannot roll through an archived child to an active roo
   assert.deepEqual(entryIds(groups.recent), ['p1:root'])
 })
 
-test('a working thread never duplicates into needs review or pinned', () => {
+test('a working thread never duplicates into needs review or recent', () => {
   const projects = [
-    project('p1', [thread('busy', { bookmarked: true, lastPromptAt: iso(3) })]),
+    project('p1', [thread('busy', { lastPromptAt: iso(3) })]),
   ]
   const activities = [
     { projectId: 'p1', threadId: 'busy', state: 'working', updatedAt: iso(1) },
@@ -112,14 +111,13 @@ test('a working thread never duplicates into needs review or pinned', () => {
   const groups = activityViewGroups(projects, activities)
   assert.deepEqual(entryIds(groups.working), ['p1:busy'])
   assert.deepEqual(groups.needsReview, [])
-  assert.deepEqual(groups.pinned, [])
   assert.deepEqual(groups.recent, [])
 })
 
 test('archived threads are excluded everywhere, closed roots leave recent', () => {
   const projects = [
     project('p1', [
-      thread('archived', { archivedAt: iso(1), bookmarked: true }),
+      thread('archived', { archivedAt: iso(1) }),
       thread('closed', { closedAt: iso(1), lastPromptAt: iso(2) }),
       thread('open', { lastPromptAt: iso(3) }),
     ]),
@@ -131,7 +129,6 @@ test('archived threads are excluded everywhere, closed roots leave recent', () =
   const groups = activityViewGroups(projects, activities)
   assert.deepEqual(groups.working, [])
   assert.deepEqual(groups.needsReview, [])
-  assert.deepEqual(groups.pinned, [])
   assert.deepEqual(entryIds(groups.recent), ['p1:open'])
 })
 
@@ -163,9 +160,6 @@ test('subthreads stay directly below their parent in activity sections', () => {
       thread('working-child', { parentThreadId: 'working-parent', lastPromptAt: iso(3) }),
       thread('working-grandchild', { parentThreadId: 'working-child', lastPromptAt: iso(1) }),
       thread('other-working', { lastPromptAt: iso(2) }),
-      thread('pinned-parent', { bookmarked: true, lastPromptAt: iso(30) }),
-      thread('pinned-child', { parentThreadId: 'pinned-parent', bookmarked: true, lastPromptAt: iso(3) }),
-      thread('other-pinned', { bookmarked: true, lastPromptAt: iso(4) }),
     ]),
   ]
   const activities = [
@@ -181,11 +175,6 @@ test('subthreads stay directly below their parent in activity sections', () => {
     'p1:working-child',
     'p1:working-grandchild',
     'p1:other-working',
-  ])
-  assert.deepEqual(entryIds(groups.pinned), [
-    'p1:pinned-parent',
-    'p1:pinned-child',
-    'p1:other-pinned',
   ])
 })
 

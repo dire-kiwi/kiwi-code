@@ -19,7 +19,6 @@ vi.mock('@/api', () => ({
   deleteProject: vi.fn(),
   deleteThread: vi.fn(),
   setThreadArchived: vi.fn(),
-  setThreadBookmarked: vi.fn(),
   updateProjectOrder: vi.fn(),
   updateThreadOrder: vi.fn(),
 }))
