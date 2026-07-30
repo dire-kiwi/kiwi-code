@@ -3,7 +3,7 @@ import { memoryStorage } from '@/lib/memoryStorage'
 import { createAppStore } from './index'
 import { activeProfileSelected } from '@/store/slices/preferences'
 import {
-  bookmarksOnlyChanged,
+  moreThreadsToggled,
   projectCollapseToggled,
   sidebarViewChanged,
   sidebarWidthChanged,
@@ -138,7 +138,7 @@ describe('store persistence', () => {
     // resetting the timer and the width would never reach storage.
     for (let tick = 0; tick < 40; tick += 1) {
       await vi.advanceTimersByTimeAsync(50)
-      store.dispatch(bookmarksOnlyChanged(tick % 2 === 0))
+      store.dispatch(moreThreadsToggled(`project-${tick}`))
     }
 
     expect(storage.values.get('kiwi-code.sidebar.width')).toBe('320')
