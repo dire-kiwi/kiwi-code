@@ -38,38 +38,11 @@ interface KiwiCodeDesktopBrowserBridge {
   onWorkspaceShortcut(callback: (index: number) => void): () => void
 }
 
-type KiwiCodeDesktopCodeServerStatus = 'idle' | 'starting' | 'loading' | 'ready' | 'error'
-
-type KiwiCodeDesktopCodeServerState = {
-  projectId: string
-  threadId: string
-  visible: boolean
-  status: KiwiCodeDesktopCodeServerStatus
-  error: string
-}
-
-interface KiwiCodeDesktopCodeServerBridge {
-  show(input: KiwiCodeDesktopBrowserIdentity & {
-    bounds: KiwiCodeDesktopBrowserBounds
-    workspacePath: string
-  }): Promise<KiwiCodeDesktopCodeServerState>
-  hide(input: KiwiCodeDesktopBrowserIdentity): Promise<KiwiCodeDesktopCodeServerState>
-  setBounds(input: KiwiCodeDesktopBrowserIdentity & {
-    bounds: KiwiCodeDesktopBrowserBounds
-  }): Promise<KiwiCodeDesktopCodeServerState>
-  close(input: KiwiCodeDesktopBrowserIdentity): Promise<KiwiCodeDesktopCodeServerState>
-  onState(callback: (state: KiwiCodeDesktopCodeServerState) => void): () => void
-  onWorkspaceShortcut(callback: (index: number) => void): () => void
-}
-
 interface Window {
   kiwiCodeDesktopApp?: KiwiCodeDesktopAppBridge
   kiwiCodeDesktopBrowser?: KiwiCodeDesktopBrowserBridge
-  kiwiCodeDesktopCodeServer?: KiwiCodeDesktopCodeServerBridge
   /** Compatibility bridge exposed by a desktop renderer loaded before the rename. */
   direMuxDesktopApp?: KiwiCodeDesktopAppBridge
   /** Compatibility bridge exposed by a desktop renderer loaded before the rename. */
   direMuxDesktopBrowser?: KiwiCodeDesktopBrowserBridge
-  /** Compatibility bridge exposed by a desktop renderer loaded before the rename. */
-  direMuxDesktopCodeServer?: KiwiCodeDesktopCodeServerBridge
 }

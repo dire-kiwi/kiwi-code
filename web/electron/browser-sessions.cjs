@@ -435,7 +435,7 @@ class BrowserSession {
         !input.shift &&
         Number.isInteger(index) &&
         index >= 1 &&
-        index <= 7
+        index <= 6
       ) {
         event.preventDefault()
         this.onWorkspaceShortcut(index)

@@ -21,7 +21,6 @@ const routeSegmentByTool: Record<WorkspaceTool, string> = {
   lazygit: 'lazygit',
   process: 'process',
   browser: 'browser',
-  code: 'code',
 }
 
 const toolByRouteSegment = Object.fromEntries(

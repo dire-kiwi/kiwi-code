@@ -237,12 +237,6 @@ test('every Kiwi Code page renders and real Pi follows the deterministic chat fi
       await waitForText(page, 'No browser session yet')
     })
 
-    await renderedPage('Code workspace page', async () => {
-      await openPage(harness, `${threadPrefix}/code`)
-      await waitForAriaLabel(page, 'tabpanel', 'E2E Workspace Code workspace')
-      await waitForExactText(page, 'p', 'Code is available in the desktop app')
-    })
-
     let chatThreadID
     await renderedPage('Pi Native workspace page with real fixture chat', async () => {
       await openPage(harness, `${projectPrefix}/threads/new`)
