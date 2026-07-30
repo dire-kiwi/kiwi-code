@@ -16,24 +16,32 @@ import {
   X,
 } from 'lucide-react'
 import { createGitBranch, switchGitBranch } from '@/api'
-import type { AgentContextStatus, GitBranchState } from '@/types'
+import { useAppDispatch, useAppSelector } from '@/store/hooks'
+import {
+  branchOverlayOpenChanged,
+  branchStateReported,
+  selectBranchState,
+  threadRuntimeKey,
+} from '@/store/slices/threadWorkspaceRuntime'
+import type { AgentContextStatus } from '@/types'
 import { Button, GhostButton, IconButton, PrimaryButton, SelectionButton } from '@/ui/buttons'
 import { TextInput } from '@/ui/inputs'
 import { Surface } from '@/ui/layout'
 import { ContextStatus } from './ContextStatus'
 import { FeedbackMessage } from '@/ui/feedback'
 
+// branchState came down from TerminalWorkspace only to be handed back up after
+// a checkout, and the overlay flag went up so two sibling panes could suspend
+// their embedded surfaces. Both are slice state now; neither is this
+// component's to relay.
 type GitBranchBarProps = {
   projectId: string
   threadId: string
   worktree?: boolean
-  branchState: GitBranchState | null
   contextStatus: AgentContextStatus | null
   loading: boolean
   loadError: string
-  onBranchStateChange: (state: GitBranchState) => void
   onRetry: () => void
-  onOverlayOpenChange?: (open: boolean) => void
 }
 
 function messageFrom(reason: unknown) {
@@ -44,14 +52,14 @@ export function GitBranchBar({
   projectId,
   threadId,
   worktree = false,
-  branchState,
   contextStatus,
   loading,
   loadError,
-  onBranchStateChange,
   onRetry,
-  onOverlayOpenChange,
 }: GitBranchBarProps) {
+  const dispatch = useAppDispatch()
+  const branchState = useAppSelector(selectBranchState)
+  const threadKey = threadRuntimeKey(projectId, threadId)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [creating, setCreating] = useState(false)
@@ -68,9 +76,11 @@ export function GitBranchBar({
   }, [])
 
   useEffect(() => {
-    onOverlayOpenChange?.(open)
-    return () => onOverlayOpenChange?.(false)
-  }, [onOverlayOpenChange, open])
+    dispatch(branchOverlayOpenChanged(open))
+    return () => {
+      dispatch(branchOverlayOpenChanged(false))
+    }
+  }, [dispatch, open])
 
   useEffect(() => {
     if (!open) return
@@ -135,7 +145,7 @@ export function GitBranchBar({
     try {
       const next = await switchGitBranch(projectId, threadId, name)
       if (serial !== requestSerialRef.current) return
-      onBranchStateChange(next)
+      dispatch(branchStateReported({ threadKey, branchState: next }))
       setOpen(false)
       setQuery('')
     } catch (reason) {
@@ -156,7 +166,7 @@ export function GitBranchBar({
     try {
       const next = await createGitBranch(projectId, threadId, name)
       if (serial !== requestSerialRef.current) return
-      onBranchStateChange(next)
+      dispatch(branchStateReported({ threadKey, branchState: next }))
       setOpen(false)
       setCreating(false)
       setQuery('')

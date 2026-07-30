@@ -1,31 +1,29 @@
 import { Clock3, History, LoaderCircle, PanelsTopLeft, RotateCw, Settings2 } from 'lucide-react'
+import { useMatch } from 'react-router-dom'
 import { restartApplication, waitForApplicationRestart } from '@/api'
+import {
+  CLEANUP_ROUTE,
+  SESSION_LOG_ROUTE,
+  SETTINGS_ROUTE,
+  SETTINGS_SECTION_ROUTE,
+  TMUX_ROUTE,
+  settingsPath,
+} from '@/app/routes'
+import { DEFAULT_GLOBAL_SETTINGS_SECTION } from '@/features/settings/registry'
 import { reloadFrontend } from '@/frontend-reload.mjs'
 import { useState } from 'react'
 import { Button, SelectionButton } from '@/ui/buttons'
+import { useSidebarNavigation } from './useSidebarNavigation'
 
-export type SidebarFooterNavProps = {
-  cleanupSelected: boolean
-  sessionLogSelected: boolean
-  tmuxSelected: boolean
-  settingsSelected: boolean
-  onOpenCleanup: () => void
-  onOpenSessionLog: () => void
-  onOpenTmux: () => void
-  onOpenSettings: () => void
-}
-
-export function SidebarFooterNav({
-  cleanupSelected,
-  sessionLogSelected,
-  tmuxSelected,
-  settingsSelected,
-  onOpenCleanup,
-  onOpenSessionLog,
-  onOpenTmux,
-  onOpenSettings,
-}: SidebarFooterNavProps) {
+// No props: this is rendered once, and both halves of what it needs -- which
+// destination is current, and how to reach the others -- come from the router.
+export function SidebarFooterNav() {
   const [restarting, setRestarting] = useState(false)
+  const { navigateAndClose } = useSidebarNavigation()
+  const cleanupSelected = Boolean(useMatch(CLEANUP_ROUTE))
+  const sessionLogSelected = Boolean(useMatch(SESSION_LOG_ROUTE))
+  const tmuxSelected = Boolean(useMatch(TMUX_ROUTE))
+  const settingsSelected = Boolean(useMatch(SETTINGS_ROUTE)) || Boolean(useMatch(SETTINGS_SECTION_ROUTE))
 
   async function handleRestart() {
     if (restarting || !window.confirm('Restart Kiwi Code?\n\nThe application will fully exit before a fresh instance starts. Your tmux sessions and running tools will keep running.')) return
@@ -49,7 +47,7 @@ export function SidebarFooterNav({
         type="button"
         selected={cleanupSelected}
         selectionVariant="navigation-compact"
-        onClick={onOpenCleanup}
+        onClick={() => navigateAndClose(CLEANUP_ROUTE)}
         aria-current={cleanupSelected ? 'page' : undefined}
       >
         <Clock3 size={13} className={cleanupSelected ? 'text-ghost-green' : 'text-ghost-dim'} />
@@ -59,7 +57,7 @@ export function SidebarFooterNav({
         type="button"
         selected={sessionLogSelected}
         selectionVariant="navigation-compact"
-        onClick={onOpenSessionLog}
+        onClick={() => navigateAndClose(SESSION_LOG_ROUTE)}
         aria-current={sessionLogSelected ? 'page' : undefined}
       >
         <History size={13} className={sessionLogSelected ? 'text-ghost-green' : 'text-ghost-dim'} />
@@ -69,7 +67,7 @@ export function SidebarFooterNav({
         type="button"
         selected={tmuxSelected}
         selectionVariant="navigation-compact"
-        onClick={onOpenTmux}
+        onClick={() => navigateAndClose(TMUX_ROUTE)}
         aria-current={tmuxSelected ? 'page' : undefined}
       >
         <PanelsTopLeft size={13} className={tmuxSelected ? 'text-ghost-green' : 'text-ghost-dim'} />
@@ -81,7 +79,7 @@ export function SidebarFooterNav({
             type="button"
             selected={settingsSelected}
             selectionVariant="navigation-compact"
-            onClick={onOpenSettings}
+            onClick={() => navigateAndClose(settingsPath(DEFAULT_GLOBAL_SETTINGS_SECTION))}
             aria-current={settingsSelected ? 'page' : undefined}
           >
             <Settings2 size={13} className={settingsSelected ? 'text-ghost-green' : 'text-ghost-dim'} />

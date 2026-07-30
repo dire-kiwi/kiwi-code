@@ -1,15 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Navigate, Route, Routes, useLocation, useMatch, useNavigate } from 'react-router-dom'
-import {
-  acknowledgePiThreadActivity,
-  deleteProject,
-  deleteThread,
-  setThreadArchived,
-  setThreadBookmarked,
-  updateProjectOrder,
-  updateThreadOrder,
-} from '@/api'
-import { isCodingAgent } from '@/codingAgents'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { Navigate, Route, Routes, useMatch, useNavigate } from 'react-router-dom'
+import { piActivityKey } from '@/pi-activity-reconciliation.mjs'
 import { WorkspaceLoadingState } from './WorkspaceLoadingState'
 import { ProjectSidebar } from '@/features/project-sidebar/ProjectSidebar'
 import { ProjectThreadFinder } from '@/features/thread-finder/ProjectThreadFinder'
@@ -44,44 +35,43 @@ import {
   workspacePath,
   workspaceToolFromRoute,
 } from './routes'
-import {
-  piActivityKey,
-  piActivityVersion,
-  reconcileFailedPiAcknowledgements,
-  reconcilePiActivities,
-  restoreAcknowledgedPiActivity,
-  samePiActivities,
-  type PiActivityAcknowledgement,
-} from '@/pi-activity-reconciliation.mjs'
-import { createSidebarThreadIndex } from '@/sidebar-thread-index.mjs'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
+import { selectActiveProjects, selectThreadIndex } from '@/store/selectors/workspace'
+import { profileCreated, selectProfiles, selectProfilesHydrated } from '@/store/slices/profiles'
+import {
+  projectCreated,
+  projectRemoved,
+  projectUpdated,
+  selectArchivingThreadId,
+  selectDeletingProjectId,
+  selectDeletingThreadId,
+  selectProjects,
+  selectProjectsHydrated,
+  threadArchived,
+  threadCreated,
+  threadRemoved,
+} from '@/store/slices/projects'
+import { threadActivityAcknowledged } from '@/store/thunks/agentActivity'
 import { activeProfileSelected, selectActiveProfileId } from '@/store/slices/preferences'
 import {
-  detailsSidebarExpandedChanged,
   projectFinderClosed,
   projectFinderOpened,
-  selectDetailsSidebarExpanded,
   selectProjectFinderOpen,
-  selectSidebarOpen,
   sidebarClosed,
   sidebarDismissed,
   sidebarOpened,
 } from '@/store/slices/ui'
 import type {
   CodingAgentStart,
-  PiThreadActivity,
-  ProcessWebServer,
   Profile,
   Project,
   Thread,
   WorkspaceTool,
-  ThreadUsageSnapshot,
 } from '@/types'
 import { stateConnectionBanner } from '@/wire/connectionBanner'
 import {
   useApplicationInstance,
   useConnectionStatus,
-  useLastReadySubscriptionData,
   useSubscription,
 } from '@/wire/react'
 import {
@@ -95,146 +85,7 @@ import {
 
 const defaultWorkspaceTool: WorkspaceTool = 'pi'
 
-type NewThreadStart = CodingAgentStart & {
-  kind: 'new-thread-start'
-  projectId: string
-  threadId: string
-}
-
-function newThreadStartFromState(state: unknown): NewThreadStart | null {
-  if (!state || typeof state !== 'object') return null
-  const candidate = state as Partial<NewThreadStart>
-  const hasImagePaths = Array.isArray(candidate.imagePaths)
-    && candidate.imagePaths.length > 0
-    && candidate.imagePaths.every((path) => typeof path === 'string' && path.trim().length > 0)
-  if (
-    candidate.kind !== 'new-thread-start'
-    || typeof candidate.projectId !== 'string'
-    || typeof candidate.threadId !== 'string'
-    || !isCodingAgent(candidate.agent)
-    || (candidate.presentation !== undefined
-      && candidate.presentation !== 'native'
-      && candidate.presentation !== 'terminal')
-    || (candidate.agent !== 'pi' && candidate.agent !== 'claude'
-      && candidate.presentation !== undefined
-      && candidate.presentation !== 'terminal')
-    || typeof candidate.model !== 'string'
-    || typeof candidate.thinkingLevel !== 'string'
-    || typeof candidate.prompt !== 'string'
-    || (candidate.imagePaths !== undefined && !hasImagePaths)
-    || (hasImagePaths && (
-      (candidate.agent !== 'pi' && candidate.agent !== 'claude') || candidate.presentation !== 'native'
-    ))
-  ) {
-    return null
-  }
-  return candidate as NewThreadStart
-}
-
-function visibleProjectSnapshots(items: Project[]) {
-  return items.map((project) => {
-    const threads = project.threads.filter((thread) => !thread.rollbackPending)
-    return threads.length === project.threads.length ? project : { ...project, threads }
-  })
-}
-
-function sameThreads(current: readonly Thread[], next: readonly Thread[]) {
-  if (current.length !== next.length) return false
-  return current.every((thread, index) => {
-    const candidate = next[index]
-    return candidate
-      && candidate.id === thread.id
-      && candidate.title === thread.title
-      && candidate.cwd === thread.cwd
-      && candidate.createdAt === thread.createdAt
-      && candidate.lastPromptAt === thread.lastPromptAt
-      && candidate.parentThreadId === thread.parentThreadId
-      && candidate.agentModel === thread.agentModel
-      && candidate.agentThinkingLevel === thread.agentThinkingLevel
-      && candidate.workflowRunId === thread.workflowRunId
-      && candidate.workflowAgentId === thread.workflowAgentId
-      && candidate.worktree === thread.worktree
-      && candidate.branch === thread.branch
-      && candidate.worktreePath === thread.worktreePath
-      && candidate.autoNamed === thread.autoNamed
-      && candidate.titleLocked === thread.titleLocked
-      && candidate.closedAt === thread.closedAt
-      && candidate.archivedAt === thread.archivedAt
-      && candidate.bookmarked === thread.bookmarked
-      && candidate.tokenLimit === thread.tokenLimit
-      && candidate.costLimitUsd === thread.costLimitUsd
-      && candidate.nestedDepth === thread.nestedDepth
-      && candidate.rollbackPending === thread.rollbackPending
-      && candidate.rollbackCleanupReady === thread.rollbackCleanupReady
-  })
-}
-
-function sameProfiles(current: readonly Profile[], next: readonly Profile[]) {
-  if (current.length !== next.length) return false
-  return current.every((profile, index) => {
-    const candidate = next[index]
-    return candidate && candidate.id === profile.id && candidate.name === profile.name
-  })
-}
-
-function sameProjects(current: readonly Project[], next: readonly Project[]) {
-  if (current.length !== next.length) return false
-  return current.every((project, index) => {
-    const candidate = next[index]
-    return candidate
-      && candidate.id === project.id
-      && candidate.name === project.name
-      && candidate.path === project.path
-      && candidate.profileId === project.profileId
-      && candidate.host === project.host
-      && candidate.isGitRepo === project.isGitRepo
-      && candidate.createdAt === project.createdAt
-      && candidate.subAgentNestingDepthOverride === project.subAgentNestingDepthOverride
-      && candidate.worktreeBranchPrefix === project.worktreeBranchPrefix
-      && candidate.figmaMCPEnabled === project.figmaMCPEnabled
-      && JSON.stringify(candidate.environment) === JSON.stringify(project.environment)
-      && sameThreads(project.threads, candidate.threads)
-  })
-}
-
-function projectsWithProfileOrder(current: Project[], profileId: string, projectIds: string[]) {
-  const profileProjects = current.filter((project) => project.profileId === profileId)
-  if (profileProjects.length !== projectIds.length || new Set(projectIds).size !== projectIds.length) return current
-
-  const byId = new Map(profileProjects.map((project) => [project.id, project]))
-  const ordered = projectIds.map((id) => byId.get(id))
-  if (ordered.some((project) => !project)) return current
-
-  let orderedIndex = 0
-  return current.map((project) =>
-    project.profileId === profileId ? ordered[orderedIndex++]! : project,
-  )
-}
-
-function projectsWithNewProjectFirst(current: Project[], project: Project) {
-  if (current.some((item) => item.id === project.id)) return current
-
-  const updated = [...current, project]
-  const profileProjectIds = [
-    project.id,
-    ...current
-      .filter((item) => item.profileId === project.profileId)
-      .map((item) => item.id),
-  ]
-  return projectsWithProfileOrder(updated, project.profileId, profileProjectIds)
-}
-
-function projectsWithThreadOrder(current: Project[], projectId: string, threadIds: string[]) {
-  return current.map((project) => {
-    if (project.id !== projectId || project.threads.length !== threadIds.length) return project
-    if (new Set(threadIds).size !== threadIds.length) return project
-
-    const byId = new Map(project.threads.map((thread) => [thread.id, thread]))
-    const ordered = threadIds.map((id) => byId.get(id))
-    if (ordered.some((thread) => !thread)) return project
-    return { ...project, threads: ordered as Thread[] }
-  })
-}
+import type { NewThreadStart } from '@/features/workspace/newThreadStart'
 
 type LastWorkspace = {
   projectId: string
@@ -275,7 +126,6 @@ function rememberedWorkspacePath(projects: Project[], lastWorkspace: LastWorkspa
 
 export default function App() {
   const navigate = useNavigate()
-  const routeLocation = useLocation()
   const desktopApp = window.kiwiCodeDesktopApp ?? window.direMuxDesktopApp
   const desktopShellClassName = desktopApp
     ? `desktop-shell desktop-shell-${desktopApp.platform || 'unknown'}`
@@ -289,7 +139,6 @@ export default function App() {
   const cleanupMatch = useMatch(CLEANUP_ROUTE)
   const sessionLogMatch = useMatch(SESSION_LOG_ROUTE)
   const settingsMatch = useMatch(SETTINGS_ROUTE)
-  const settingsSectionMatch = useMatch(SETTINGS_SECTION_ROUTE)
   const tmuxMatch = useMatch(TMUX_ROUTE)
 
   const projectSubscription = useSubscription(ProjectsTopic, undefined)
@@ -305,108 +154,34 @@ export default function App() {
   useApplicationInstance(reloadForNewInstance)
 
   const dispatch = useAppDispatch()
-  const [profiles, setProfiles] = useState<Profile[]>([])
-  const [profilesHydrated, setProfilesHydrated] = useState(false)
+  // Server data comes from the store now; ServerStateBridge is what fills it.
+  // The five refs that used to shadow this state -- projectsRef, piActivitiesRef,
+  // threadIndexRef and the two acknowledgement maps -- existed only so socket
+  // callbacks would not go stale. Thunks read getState() instead.
+  const profiles = useAppSelector(selectProfiles)
+  const profilesHydrated = useAppSelector(selectProfilesHydrated)
+  const projects = useAppSelector(selectProjects)
+  const projectsHydrated = useAppSelector(selectProjectsHydrated)
   const activeProfileId = useAppSelector(selectActiveProfileId)
-  const [projects, setProjects] = useState<Project[]>([])
-  const [projectsHydrated, setProjectsHydrated] = useState(false)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null)
-  const [archivingThreadId, setArchivingThreadId] = useState<string | null>(null)
-  const [bookmarkingThreadId, setBookmarkingThreadId] = useState<string | null>(null)
-  const sidebarOpen = useAppSelector(selectSidebarOpen)
   const projectFinderOpen = useAppSelector(selectProjectFinderOpen)
-  const detailsSidebarExpanded = useAppSelector(selectDetailsSidebarExpanded)
-  const [piActivities, setPiActivities] = useState<PiThreadActivity[]>([])
-  const processWebServers = (
-    useLastReadySubscriptionData(processSubscription) as ProcessWebServer[] | null
-  ) ?? []
-  const usageSnapshots = (
-    useLastReadySubscriptionData(usageSubscription) as ThreadUsageSnapshot[] | null
-  ) ?? []
+  const threadIndex = useAppSelector(selectThreadIndex)
+  const deletingId = useAppSelector(selectDeletingProjectId)
+  const deletingThreadId = useAppSelector(selectDeletingThreadId)
+  const archivingThreadId = useAppSelector(selectArchivingThreadId)
   const lastWorkspacesRef = useRef<Record<string, LastWorkspace>>({})
-  const piActivitiesRef = useRef<PiThreadActivity[]>([])
-  const projectsRef = useRef<Project[]>(projects)
-  projectsRef.current = projects
-  const threadIndex = useMemo(
-    () => createSidebarThreadIndex(projects, piActivities),
-    [piActivities, projects],
-  )
-  const threadIndexRef = useRef(threadIndex)
-  threadIndexRef.current = threadIndex
-  const piAcknowledgementsRef = useRef(new Map<string, PiActivityAcknowledgement>())
-  const failedPiAcknowledgementsRef = useRef(new Map<string, string>())
   const previousActiveThreadRef = useRef<string | null>(null)
-  const replaceProjectSnapshots = useCallback((nextProjects: Project[]) => {
-    if (sameProjects(projectsRef.current, nextProjects)) return
-    projectsRef.current = nextProjects
-    threadIndexRef.current = createSidebarThreadIndex(nextProjects, piActivitiesRef.current)
-    setProjects(nextProjects)
-  }, [])
-  const replacePiActivities = useCallback((nextActivities: PiThreadActivity[]) => {
-    piActivitiesRef.current = nextActivities
-    threadIndexRef.current = createSidebarThreadIndex(projectsRef.current, nextActivities)
-    setPiActivities(nextActivities)
-  }, [])
 
   const workspaceProjectId = workspaceMatch?.params.projectId
   const workspaceThreadId = workspaceMatch?.params.threadId
   const activeTool = workspaceToolFromRoute(workspaceMatch?.params.tool)
-
-  const queuePiAcknowledgement = useCallback((
-    projectId: string,
-    activity: PiThreadActivity,
-    retryFailed: boolean,
-  ) => {
-    const key = piActivityKey(projectId, activity.threadId)
-    const version = piActivityVersion(activity)
-    if (piAcknowledgementsRef.current.has(key)) return
-    if (!retryFailed && failedPiAcknowledgementsRef.current.get(key) === version) return
-
-    failedPiAcknowledgementsRef.current.delete(key)
-    const acknowledgement: PiActivityAcknowledgement = {
-      activity,
-      index: piActivitiesRef.current.findIndex((item) =>
-        item.projectId === projectId && item.threadId === activity.threadId),
-    }
-    piAcknowledgementsRef.current.set(key, acknowledgement)
-    const nextActivities = piActivitiesRef.current.filter((item) =>
-      item.projectId !== projectId || item.threadId !== activity.threadId,
-    )
-    replacePiActivities(nextActivities)
-    void acknowledgePiThreadActivity(projectId, activity.threadId).catch(() => {
-      if (piAcknowledgementsRef.current.get(key) !== acknowledgement) return
-      piAcknowledgementsRef.current.delete(key)
-      failedPiAcknowledgementsRef.current.set(key, version)
-      const restoredActivities = restoreAcknowledgedPiActivity(piActivitiesRef.current, acknowledgement)
-      if (!samePiActivities(piActivitiesRef.current, restoredActivities)) {
-        replacePiActivities(restoredActivities)
-      }
-    })
-  }, [replacePiActivities])
 
   const acknowledgeThreadActivity = useCallback((
     projectId: string,
     threadId: string,
     retryFailed = false,
   ) => {
-    const activities = threadIndexRef.current.finishedActivities(projectId, threadId)
-    for (const activity of activities) queuePiAcknowledgement(projectId, activity, retryFailed)
-  }, [queuePiAcknowledgement])
-
-  // A thread that finishes while it is the active thread stays "finished"
-  // until the user actually interacts with it (select, key, pointer, wheel),
-  // so it remains visible under "Needs review" — no passive acknowledgment.
-  const applyPiActivities = useCallback((nextActivities: PiThreadActivity[]) => {
-    reconcileFailedPiAcknowledgements(nextActivities, failedPiAcknowledgementsRef.current)
-    const visibleActivities = reconcilePiActivities(
-      nextActivities,
-      piAcknowledgementsRef.current,
-    )
-    if (!samePiActivities(piActivitiesRef.current, visibleActivities)) {
-      replacePiActivities(visibleActivities)
-    }
-  }, [replacePiActivities])
+    void dispatch(threadActivityAcknowledged({ projectId, threadId, retryFailed }))
+  }, [dispatch])
 
   useEffect(() => {
     function handleProjectFinderShortcut(event: KeyboardEvent) {
@@ -420,27 +195,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleProjectFinderShortcut, true)
   }, [])
 
-  useEffect(() => {
-    if (projectSubscription.state === 'ready') {
-      replaceProjectSnapshots(visibleProjectSnapshots(projectSubscription.data as Project[]))
-      setProjectsHydrated(true)
-    }
-  }, [projectSubscription, replaceProjectSnapshots])
-
-  useEffect(() => {
-    if (profileSubscription.state === 'ready') {
-      const next = profileSubscription.data as Profile[]
-      setProfiles((current) => sameProfiles(current, next) ? current : next)
-      setProfilesHydrated(true)
-    }
-  }, [profileSubscription])
-
-  useEffect(() => {
-    if (activitySubscription.state === 'ready') {
-      applyPiActivities(activitySubscription.data as PiThreadActivity[])
-    }
-  }, [activitySubscription, applyPiActivities])
-
   const selectedProject = useMemo(
     () => workspaceProjectId ? threadIndex.projectById.get(workspaceProjectId) ?? null : null,
     [threadIndex, workspaceProjectId],
@@ -452,13 +206,6 @@ export default function App() {
       : null,
     [selectedProject, threadIndex, workspaceThreadId],
   )
-
-  const pendingThreadStart = newThreadStartFromState(routeLocation.state)
-  const initialThreadStart = pendingThreadStart
-    && pendingThreadStart.projectId === selectedProject?.id
-    && pendingThreadStart.threadId === selectedThread?.id
-    ? pendingThreadStart
-    : null
 
   const newThreadProject = useMemo(
     () => threadIndex.projectById.get(newThreadMatch?.params.projectId ?? '') ?? null,
@@ -493,14 +240,7 @@ export default function App() {
     () => profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0] ?? null,
     [activeProfileId, profiles],
   )
-  const activeProjects = useMemo(
-    () => projects.filter((project) => project.profileId === activeProfileId),
-    [activeProfileId, projects],
-  )
-  const activeProcessWebServers = useMemo(() => {
-    const projectIds = new Set(activeProjects.map((project) => project.id))
-    return processWebServers.filter((webServer) => projectIds.has(webServer.projectId))
-  }, [activeProjects, processWebServers])
+  const activeProjects = useAppSelector(selectActiveProjects)
   const defaultWorkspacePath = useMemo(() => firstWorkspacePath(activeProjects), [activeProjects])
   const routedProject = selectedProject ?? newThreadProject ?? legacyProject ?? landingProject ?? settingsProject
   const routedProfileId = routedProject?.profileId
@@ -632,16 +372,14 @@ export default function App() {
   }
 
   function handleProfileCreated(profile: Profile) {
-    setProfiles((current) => current.some((item) => item.id === profile.id)
-      ? current
-      : [...current, profile])
+    dispatch(profileCreated(profile))
     dispatch(activeProfileSelected(profile.id))
     dispatch(sidebarClosed())
     if (!cleanupMatch && !sessionLogMatch && !settingsMatch && !tmuxMatch) navigate('/')
   }
 
   function handleCreated(project: Project) {
-    setProjects((current) => projectsWithNewProjectFirst(current, project))
+    dispatch(projectCreated(project))
     dispatch(sidebarClosed())
     const thread = project.threads.find((item) => !item.parentThreadId) ?? project.threads[0]
     navigate(thread ? workspacePath(project.id, thread.id, defaultWorkspaceTool) : newThreadPath(project.id))
@@ -652,13 +390,7 @@ export default function App() {
     thread: Thread,
     start: CodingAgentStart,
   ) {
-    setProjects((current) => current.map((project) => {
-      if (project.id !== projectId || project.threads.some((item) => item.id === thread.id)) return project
-      return {
-        ...project,
-        threads: [thread, ...project.threads],
-      }
-    }))
+    dispatch(threadCreated({ projectId, thread }))
     dispatch(sidebarClosed())
     navigate(workspacePath(projectId, thread.id, 'pi'), {
       replace: true,
@@ -671,114 +403,42 @@ export default function App() {
     })
   }
 
-  function handleThreadUpdated(projectId: string, updatedThread: Thread) {
-    setProjects((current) => current.map((project) =>
-      project.id === projectId
-        ? {
-            ...project,
-            threads: project.threads.map((thread) =>
-              thread.id === updatedThread.id ? updatedThread : thread,
-            ),
-          }
-        : project,
-    ))
-  }
-
   function handleProjectUpdated(updatedProject: Project) {
-    const visibleProject = visibleProjectSnapshots([updatedProject])[0]
-    setProjects((current) => current.map((project) =>
-      project.id === visibleProject.id ? visibleProject : project,
-    ))
+    dispatch(projectUpdated(updatedProject))
     if (selectedProject?.id === updatedProject.id) {
       dispatch(activeProfileSelected(updatedProject.profileId))
     }
   }
 
-  async function handleProjectsReordered(projectIds: string[]) {
-    const profileId = activeProfileId
-    const previousProjectIds = projects
-      .filter((project) => project.profileId === profileId)
-      .map((project) => project.id)
-    setProjects((current) => projectsWithProfileOrder(current, profileId, projectIds))
-    try {
-      await updateProjectOrder(profileId, projectIds)
-    } catch (reason) {
-      setProjects((current) => projectsWithProfileOrder(current, profileId, previousProjectIds))
-      projectSubscription.retry()
-      window.alert(reason instanceof Error ? reason.message : 'Could not save the project order.')
-    }
-  }
-
-  async function handleThreadsReordered(projectId: string, threadIds: string[]) {
-    const previousThreadIds = projects
-      .find((project) => project.id === projectId)
-      ?.threads.map((thread) => thread.id) ?? []
-    setProjects((current) => projectsWithThreadOrder(current, projectId, threadIds))
-    try {
-      await updateThreadOrder(projectId, threadIds)
-    } catch (reason) {
-      setProjects((current) => projectsWithThreadOrder(current, projectId, previousThreadIds))
-      projectSubscription.retry()
-      window.alert(reason instanceof Error ? reason.message : 'Could not save the thread order.')
-    }
-  }
-
+  // The five mutations below are thunks: each moves the list optimistically and
+  // rolls back if the server refuses, and its pending/rejected lifecycle is what
+  // drives the sidebar's in-flight spinners. What stays here is the part a thunk
+  // must not own -- confirming with the user, and navigating afterwards.
   async function handleDelete(project: Project) {
     if (deletingId || !window.confirm(`Remove “${project.name}” from Kiwi Code?\n\nIts tmux sessions and running tools will be stopped. The project folder will not be deleted. Clean managed worktrees may be removed later according to automatic cleanup settings; their Git branches will remain.`)) {
       return
     }
-
-    setDeletingId(project.id)
-    try {
-      await deleteProject(project.id)
-      setProjects((current) => current.filter((item) => item.id !== project.id))
-    } catch (reason) {
-      window.alert(reason instanceof Error ? reason.message : 'Could not remove that project.')
-    } finally {
-      setDeletingId(null)
-    }
+    const result = await dispatch(projectRemoved(project.id))
+    if (projectRemoved.rejected.match(result)) window.alert(result.payload)
   }
 
   async function handleThreadArchived(project: Project, thread: Thread, archived: boolean) {
     if (archivingThreadId) return
-    setArchivingThreadId(thread.id)
-    try {
-      const updated = await setThreadArchived(project.id, thread.id, archived)
-      handleThreadUpdated(project.id, updated)
-      if (archived && selectedProject?.id === project.id && selectedThread?.id === thread.id) {
-        const nextThread = project.threads.find((candidate) => candidate.id !== thread.id && !candidate.parentThreadId && !candidate.archivedAt)
-        navigate(nextThread
-          ? workspacePath(project.id, nextThread.id, defaultWorkspaceTool)
-          : newThreadPath(project.id))
-      }
-    } catch (reason) {
-      window.alert(reason instanceof Error ? reason.message : `Could not ${archived ? 'archive' : 'restore'} that thread.`)
-    } finally {
-      setArchivingThreadId(null)
+    const result = await dispatch(threadArchived({
+      projectId: project.id,
+      threadId: thread.id,
+      archived,
+    }))
+    if (threadArchived.rejected.match(result)) {
+      window.alert(result.payload)
+      return
     }
-  }
-
-  async function handleThreadBookmarked(project: Project, thread: Thread, bookmarked: boolean) {
-    if (bookmarkingThreadId) return
-    setBookmarkingThreadId(thread.id)
-    try {
-      const updated = await setThreadBookmarked(project.id, thread.id, bookmarked)
-      setProjects((current) => current.map((candidateProject) =>
-        candidateProject.id === project.id
-          ? {
-              ...candidateProject,
-              threads: candidateProject.threads.map((candidateThread) =>
-                candidateThread.id === thread.id
-                  ? { ...candidateThread, bookmarked: updated.bookmarked }
-                  : candidateThread,
-              ),
-            }
-          : candidateProject,
-      ))
-    } catch (reason) {
-      window.alert(reason instanceof Error ? reason.message : `Could not ${bookmarked ? 'bookmark' : 'remove the bookmark from'} that thread.`)
-    } finally {
-      setBookmarkingThreadId(null)
+    // Archiving the thread you are looking at has to move you somewhere real.
+    if (archived && selectedProject?.id === project.id && selectedThread?.id === thread.id) {
+      const nextThread = project.threads.find((candidate) => candidate.id !== thread.id && !candidate.parentThreadId && !candidate.archivedAt)
+      navigate(nextThread
+        ? workspacePath(project.id, nextThread.id, defaultWorkspaceTool)
+        : newThreadPath(project.id))
     }
   }
 
@@ -800,20 +460,12 @@ export default function App() {
         : ''
     if (deletingThreadId || !window.confirm(`Delete “${thread.title}”?\n\nIts tmux sessions and running tools will be stopped.${childNotice}${worktreeNotice}`)) return
 
-    setDeletingThreadId(thread.id)
-    try {
-      await deleteThread(project.id, thread.id)
-      descendantIds.add(thread.id)
-      setProjects((current) => current.map((item) =>
-        item.id === project.id
-          ? { ...item, threads: item.threads.filter((candidate) => !descendantIds.has(candidate.id)) }
-          : item,
-      ))
-    } catch (reason) {
-      window.alert(reason instanceof Error ? reason.message : 'Could not remove that thread.')
-    } finally {
-      setDeletingThreadId(null)
-    }
+    const result = await dispatch(threadRemoved({
+      projectId: project.id,
+      threadId: thread.id,
+      descendantIds: [...descendantIds],
+    }))
+    if (threadRemoved.rejected.match(result)) window.alert(result.payload)
   }
 
   const invalidWorkspaceDestination = selectedProject && selectedThread
@@ -853,57 +505,12 @@ export default function App() {
         </div>
       )}
       <ProjectSidebar
-        profiles={profiles}
-        activeProfileId={activeProfileId}
-        projects={activeProjects}
-        piActivities={piActivities}
-        processWebServers={activeProcessWebServers}
-        usageSnapshots={usageSnapshots}
-        selectedThreadId={selectedThread?.id ?? null}
-        deletingProjectId={deletingId}
-        deletingThreadId={deletingThreadId}
-        archivingThreadId={archivingThreadId}
-        bookmarkingThreadId={bookmarkingThreadId}
-        cleanupSelected={Boolean(cleanupMatch)}
-        sessionLogSelected={Boolean(sessionLogMatch)}
-        tmuxSelected={Boolean(tmuxMatch)}
-        settingsSelected={Boolean(settingsMatch || settingsSectionMatch)}
-        isOpen={sidebarOpen}
-        onClose={() => dispatch(sidebarClosed())}
-        onOpenFinder={() => dispatch(projectFinderOpened())}
         onSelectProfile={handleProfileSelected}
         onProfileCreated={handleProfileCreated}
         onSelectThread={handleThreadSelected}
-        onNewThread={(projectId) => {
-          navigate(newThreadPath(projectId))
-          dispatch(sidebarClosed())
-        }}
-        onOpenProjectSettings={(projectId) => {
-          navigate(projectSettingsPath(projectId, DEFAULT_PROJECT_SETTINGS_SECTION))
-          dispatch(sidebarClosed())
-        }}
-        onOpenCleanup={() => {
-          navigate(CLEANUP_ROUTE)
-          dispatch(sidebarClosed())
-        }}
-        onOpenSessionLog={() => {
-          navigate(SESSION_LOG_ROUTE)
-          dispatch(sidebarClosed())
-        }}
-        onOpenTmux={() => {
-          navigate(TMUX_ROUTE)
-          dispatch(sidebarClosed())
-        }}
-        onOpenSettings={() => {
-          navigate(settingsPath(DEFAULT_GLOBAL_SETTINGS_SECTION))
-          dispatch(sidebarClosed())
-        }}
         onProjectCreated={handleCreated}
-        onReorderProjects={handleProjectsReordered}
-        onReorderThreads={handleThreadsReordered}
         onDeleteProject={handleDelete}
         onArchiveThread={(project, thread, archived) => void handleThreadArchived(project, thread, archived)}
-        onBookmarkThread={(project, thread, bookmarked) => void handleThreadBookmarked(project, thread, bookmarked)}
         onDeleteThread={(project, thread) => void handleDeleteThread(project, thread)}
       />
 
@@ -1018,29 +625,6 @@ export default function App() {
                   key={`${selectedProject.id}:${selectedThread.id}`}
                   project={selectedProject}
                   thread={selectedThread}
-                  usage={usageSnapshots.find((snapshot) =>
-                    snapshot.projectId === selectedProject.id && snapshot.threadId === selectedThread.id)}
-                  activeTool={activeTool}
-                  detailsExpanded={detailsSidebarExpanded}
-                  nativeViewSuppressed={sidebarOpen || projectFinderOpen}
-                  onDetailsExpandedChange={(expanded) => dispatch(detailsSidebarExpandedChanged(expanded))}
-                  onOpenSidebar={() => dispatch(sidebarOpened())}
-                  onThreadInteraction={() => acknowledgeThreadActivity(selectedProject.id, selectedThread.id)}
-                  onThreadUpdated={(thread) => handleThreadUpdated(selectedProject.id, thread)}
-                  onSelectThread={(thread) => handleThreadSelected(selectedProject.id, thread.id)}
-                  initialCodingAgent={initialThreadStart?.agent}
-                  initialPresentation={initialThreadStart?.presentation}
-                  initialModel={initialThreadStart?.model}
-                  initialThinkingLevel={initialThreadStart?.thinkingLevel}
-                  initialPrompt={initialThreadStart?.prompt}
-                  initialImagePaths={initialThreadStart?.imagePaths}
-                  onInitialPromptSent={initialThreadStart ? () => {
-                    navigate({
-                      pathname: routeLocation.pathname,
-                      search: routeLocation.search,
-                      hash: routeLocation.hash,
-                    }, { replace: true, state: null })
-                  } : undefined}
                 />
               ) : (
                 <Navigate to={invalidWorkspaceDestination} replace />

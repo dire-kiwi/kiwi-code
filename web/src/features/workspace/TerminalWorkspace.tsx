@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { shallowEqual } from 'react-redux'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useMatch, useNavigate } from 'react-router-dom'
 import {
   Activity,
   Bot,
@@ -18,23 +18,17 @@ import {
   codingAgentTargetForSelection,
   configuredCodingAgentChoices,
 } from '@/codingAgents'
-import { workspacePath } from '@/app/routes'
+import { WORKSPACE_ROUTE, workspacePath, workspaceToolFromRoute } from '@/app/routes'
+import { newThreadStartFromState } from './newThreadStart'
 import type {
-  AgentContextStatus,
-  CodingAgent,
   CodingAgentSelection,
   ConnectionStatus,
-  GitBranchState,
   PiPresentation,
-  ProcessWindow,
   Project,
   Thread,
   ThreadPlan,
   WorkspaceTool,
   ThreadStatusSnapshot,
-  ThreadUsageSnapshot,
-  TmuxWindow,
-  WorkflowRun,
 } from '@/types'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import {
@@ -46,6 +40,40 @@ import {
   threadWorkspaceMounted,
   type ThreadWorkspaceRouting,
 } from '@/store/slices/threadWorkspace'
+import { selectSettings } from '@/store/slices/settings'
+import { threadUpdated } from '@/store/slices/projects'
+import {
+  detailsSidebarExpandedChanged,
+  selectDetailsSidebarExpanded,
+  selectProjectFinderOpen,
+  selectSidebarOpen,
+  sidebarDismissed,
+  sidebarOpened,
+} from '@/store/slices/ui'
+import { threadActivityAcknowledged } from '@/store/thunks/agentActivity'
+import { useThreadUsage } from '@/wire/serverData'
+import {
+  claudeContextStatusReported,
+  claudePresentationStatusReported,
+  piContextStatusReported,
+  piPresentationStatusReported,
+  planSelected,
+  processStarted,
+  selectBranchOverlayOpen,
+  selectClaudeContextStatus,
+  selectClaudePresentationStatuses,
+  selectPiContextStatus,
+  selectPiPresentationStatuses,
+  selectProcessWindows,
+  selectRuntimeThreadKey,
+  selectSelectedPlan,
+  selectSelectedProcessId,
+  selectToolStatuses,
+  threadRuntimeKey,
+  threadStatusSnapshotReceived,
+  toolStatusReported,
+  workspaceEntered,
+} from '@/store/slices/threadWorkspaceRuntime'
 import { Select } from '@/ui/inputs'
 import { OpenSidebarButton } from '@/ui/buttons'
 import { GitBranchBar } from './GitBranchBar'
@@ -59,27 +87,15 @@ import { ThreadPlanViewer } from '@/features/workspace/plans/ThreadPlanViewer'
 import { ThreadProjectSidebar } from '@/features/workspace/details/ThreadProjectSidebar'
 import { TmuxWindowTabs } from './TmuxWindowTabs'
 import { useLastReadySubscriptionData, useSubscription } from '@/wire/react'
-import { SettingsTopic, ThreadStatusTopic } from '@/wire/topics'
+import { ThreadStatusTopic } from '@/wire/topics'
 
+// project and thread stay props on purpose. App has to resolve them anyway --
+// for the route guard that decides whether to render this at all, and for the
+// key that remounts it on a thread change -- so passing them keeps the non-null
+// contract explicit instead of re-deriving and re-asserting it here.
 type TerminalWorkspaceProps = {
   project: Project
   thread: Thread
-  usage?: ThreadUsageSnapshot
-  activeTool: WorkspaceTool
-  detailsExpanded: boolean
-  nativeViewSuppressed?: boolean
-  onDetailsExpandedChange: (expanded: boolean) => void
-  onOpenSidebar: () => void
-  onThreadInteraction: () => void
-  onThreadUpdated: (thread: Thread) => void
-  onSelectThread: (thread: Thread) => void
-  initialCodingAgent?: CodingAgent
-  initialPresentation?: PiPresentation
-  initialModel?: string
-  initialThinkingLevel?: string
-  initialPrompt?: string
-  initialImagePaths?: string[]
-  onInitialPromptSent?: () => void
 }
 
 const tools: Array<{
@@ -104,6 +120,9 @@ const statusCopy: Record<ConnectionStatus, string> = {
   error: 'Offline',
 }
 
+// A different thread always opens on this tool, matching what App did before.
+const defaultWorkspaceTool: WorkspaceTool = 'pi'
+
 const fallbackWorkspaceCodingAgents: Array<{ id: CodingAgentSelection; label: string }> = [
   { id: 'pi', label: 'Pi' },
   { id: 'pi-native', label: 'Pi Native' },
@@ -113,31 +132,76 @@ const fallbackWorkspaceCodingAgents: Array<{ id: CodingAgentSelection; label: st
 export function TerminalWorkspace({
   project,
   thread,
-  usage,
-  activeTool,
-  detailsExpanded,
-  nativeViewSuppressed = false,
-  onDetailsExpandedChange,
-  onOpenSidebar,
-  onThreadInteraction,
-  onThreadUpdated,
-  onSelectThread,
-  initialCodingAgent,
-  initialPresentation,
-  initialModel,
-  initialThinkingLevel,
-  initialPrompt,
-  initialImagePaths,
-  onInitialPromptSent,
 }: TerminalWorkspaceProps) {
   const navigate = useNavigate()
+  const routeLocation = useLocation()
+  const dispatch = useAppDispatch()
+  const activeTool = workspaceToolFromRoute(useMatch(WORKSPACE_ROUTE)?.params.tool) ?? 'pi'
+  const detailsExpanded = useAppSelector(selectDetailsSidebarExpanded)
+  // The sidebar and the finder both float over the pane area, so an embedded
+  // browser or code surface has to stand down while either is up.
+  //
+  // Read into variables, never `useAppSelector(a) || useAppSelector(b)`: `||`
+  // short-circuits, which would skip the second hook whenever the first is true
+  // and change the hook count between renders.
+  const sidebarOpen = useAppSelector(selectSidebarOpen)
+  const projectFinderOpen = useAppSelector(selectProjectFinderOpen)
+  const nativeViewSuppressed = sidebarOpen || projectFinderOpen
+  const usageSnapshots = useThreadUsage()
+  const usage = usageSnapshots.find((snapshot) =>
+    snapshot.projectId === project.id && snapshot.threadId === thread.id)
+
+  // The new-thread hand-off arrives in location state; unpacking it here rather
+  // than in App is what removes seven props.
+  const pendingStart = newThreadStartFromState(routeLocation.state)
+  const threadStart = pendingStart
+    && pendingStart.projectId === project.id
+    && pendingStart.threadId === thread.id
+    ? pendingStart
+    : null
+  const initialCodingAgent = threadStart?.agent
+  const initialPresentation = threadStart?.presentation
+  const initialModel = threadStart?.model
+  const initialThinkingLevel = threadStart?.thinkingLevel
+  const initialPrompt = threadStart?.prompt
+  const initialImagePaths = threadStart?.imagePaths
+  // Clearing the state stops the prompt being re-sent if the user navigates back.
+  const onInitialPromptSent = threadStart
+    ? () => {
+        navigate({
+          pathname: routeLocation.pathname,
+          search: routeLocation.search,
+          hash: routeLocation.hash,
+        }, { replace: true, state: null })
+      }
+    : undefined
+  const onThreadInteraction = () => {
+    void dispatch(threadActivityAcknowledged({ projectId: project.id, threadId: thread.id }))
+  }
+  const onThreadUpdated = (updated: Thread) => {
+    dispatch(threadUpdated({ projectId: project.id, thread: updated }))
+  }
+  const onSelectThread = (next: Thread) => {
+    void dispatch(threadActivityAcknowledged({
+      projectId: project.id,
+      threadId: next.id,
+      retryFailed: true,
+    }))
+    // A different thread opens on the default tool. Only re-selecting the thread
+    // you are already on keeps the current one.
+    const tool = next.id === thread.id ? activeTool : defaultWorkspaceTool
+    navigate(workspacePath(project.id, next.id, tool))
+    dispatch(sidebarDismissed())
+  }
+  const onOpenSidebar = () => dispatch(sidebarOpened())
+  const onDetailsExpandedChange = (expanded: boolean) =>
+    dispatch(detailsSidebarExpandedChanged(expanded))
   const readOnlySubagent = Boolean(thread.parentThreadId)
-  const settingsSubscription = useSubscription(SettingsTopic, undefined)
   const statusSubscription = useSubscription(ThreadStatusTopic, {
     projectId: project.id,
     threadId: thread.id,
   })
-  const settings = useLastReadySubscriptionData(settingsSubscription)
+  const settings = useAppSelector(selectSettings)
   const statusSnapshot = useLastReadySubscriptionData(statusSubscription) as ThreadStatusSnapshot | null
   const initialCodingAgentChoices = useMemo(() => {
     if (!initialCodingAgent || fallbackWorkspaceCodingAgents.some((agent) => agent.id === initialCodingAgent)) {
@@ -154,7 +218,6 @@ export function TerminalWorkspace({
       : initialCodingAgentChoices,
     [initialCodingAgentChoices, settings],
   )
-  const dispatch = useAppDispatch()
   const workspaceKey = threadWorkspaceKey(project.id, thread.id)
   const routing = useMemo<ThreadWorkspaceRouting>(
     () => ({ readOnlySubagent, initialCodingAgent, initialPresentation }),
@@ -173,29 +236,33 @@ export function TerminalWorkspace({
   const [piTerminalOpened, setPiTerminalOpened] = useState(() => piPresentation === 'terminal')
   const [claudeNativeOpened, setClaudeNativeOpened] = useState(() => claudePresentation === 'native')
   const [claudeTerminalOpened, setClaudeTerminalOpened] = useState(() => claudePresentation === 'terminal')
-  const [piPresentationStatuses, setPiPresentationStatuses] = useState<Record<PiPresentation, ConnectionStatus>>({
-    native: 'connecting',
-    terminal: 'connecting',
-  })
-  const [claudePresentationStatuses, setClaudePresentationStatuses] = useState<Record<PiPresentation, ConnectionStatus>>({
-    native: 'connecting',
-    terminal: 'connecting',
-  })
   const initialPiPresentationRef = useRef(piPresentation)
   const initialClaudePresentationRef = useRef(claudePresentation)
   const [openedTools, setOpenedTools] = useState<WorkspaceTool[]>(() => [activeTool])
-  const [statuses, setStatuses] = useState<Partial<Record<WorkspaceTool, ConnectionStatus>>>(() => ({
-    [activeTool]: 'connecting',
-  }))
-  const [processWindows, setProcessWindows] = useState<ProcessWindow[]>([])
-  const [selectedProcessId, setSelectedProcessId] = useState<string | null>(null)
-  const [branchState, setBranchState] = useState<GitBranchState | null>(null)
-  const [nativeContextStatus, setNativeContextStatus] = useState<AgentContextStatus | null>(null)
-  const [claudeNativeContextStatus, setClaudeNativeContextStatus] = useState<AgentContextStatus | null>(null)
-  const [shellWindows, setShellWindows] = useState<TmuxWindow[]>([])
-  const [workflowRuns, setWorkflowRuns] = useState<WorkflowRun[]>([])
-  const [selectedPlan, setSelectedPlan] = useState<ThreadPlan | null>(null)
-  const [branchOverlayOpen, setBranchOverlayOpen] = useState(false)
+
+  // Everything the tab bar, the branch bar and the details sidebar need to read
+  // lives in the runtime slice, so none of it has to travel back up through here
+  // on an onXChange prop. The reset on mount is what keeps a single un-keyed
+  // slice correct; see the SINGLE MOUNT note in the slice.
+  const threadKey = threadRuntimeKey(project.id, thread.id)
+  const entryTool = useRef(activeTool)
+  useEffect(() => {
+    // Seeds the entry tool's status. Not re-run per tab change -- switching tabs
+    // must not wipe the statuses the other panes have already reported.
+    dispatch(workspaceEntered({ threadKey, activeTool: entryTool.current }))
+  }, [dispatch, threadKey])
+  const runtimeThreadKey = useAppSelector(selectRuntimeThreadKey)
+
+  const statuses = useAppSelector(selectToolStatuses)
+  const piPresentationStatuses = useAppSelector(selectPiPresentationStatuses)
+  const claudePresentationStatuses = useAppSelector(selectClaudePresentationStatuses)
+  const nativeContextStatus = useAppSelector(selectPiContextStatus)
+  const claudeNativeContextStatus = useAppSelector(selectClaudeContextStatus)
+  const processWindows = useAppSelector(selectProcessWindows)
+  const selectedProcessId = useAppSelector(selectSelectedProcessId)
+  const selectedPlan = useAppSelector(selectSelectedPlan)
+  const branchOverlayOpen = useAppSelector(selectBranchOverlayOpen)
+
   const [runningEnvironmentAction, setRunningEnvironmentAction] = useState<string | null>(null)
   const [environmentActionError, setEnvironmentActionError] = useState('')
   const [environmentSetupStatus, setEnvironmentSetupStatus] = useState(
@@ -225,24 +292,39 @@ export function TerminalWorkspace({
     dispatch(threadCodingAgentChanged({ key: workspaceKey, codingAgent: 'pi' }))
   }, [codingAgent, codingAgentChoices, dispatch, workspaceKey])
 
+  const reportToolStatus = useCallback((tool: WorkspaceTool, status: ConnectionStatus) => {
+    dispatch(toolStatusReported({ threadKey, tool, status }))
+  }, [dispatch, threadKey])
+  const reportPiPresentationStatus = useCallback(
+    (presentation: PiPresentation, status: ConnectionStatus) => {
+      dispatch(piPresentationStatusReported({ threadKey, presentation, status }))
+    },
+    [dispatch, threadKey],
+  )
+  const reportClaudePresentationStatus = useCallback(
+    (presentation: PiPresentation, status: ConnectionStatus) => {
+      dispatch(claudePresentationStatusReported({ threadKey, presentation, status }))
+    },
+    [dispatch, threadKey],
+  )
+
   const markToolOpened = useCallback((tool: WorkspaceTool) => {
     setOpenedTools((current) => (current.includes(tool) ? current : [...current, tool]))
   }, [])
 
   const activateTool = useCallback((tool: WorkspaceTool) => {
-    setSelectedPlan(null)
+    dispatch(planSelected(null))
     markToolOpened(tool)
     navigate(workspacePath(project.id, thread.id, tool))
-  }, [markToolOpened, navigate, project.id, thread.id])
+  }, [dispatch, markToolOpened, navigate, project.id, thread.id])
 
   async function handleEnvironmentAction(actionId: string) {
     if (runningEnvironmentAction) return
     setRunningEnvironmentAction(actionId)
     setEnvironmentActionError('')
     try {
-      const process = await runEnvironmentAction(project.id, thread.id, actionId)
-      setProcessWindows((current) => current.some((item) => item.id === process.id) ? current : [...current, process])
-      setSelectedProcessId(process.id)
+      const started = await runEnvironmentAction(project.id, thread.id, actionId)
+      dispatch(processStarted({ threadKey, process: started }))
       activateTool('process')
     } catch (reason) {
       setEnvironmentActionError(reason instanceof Error ? reason.message : 'Could not run the environment action.')
@@ -272,28 +354,19 @@ export function TerminalWorkspace({
       dispatch(threadClaudePresentationChanged({ key: workspaceKey, presentation }))
     }
     dispatch(threadCodingAgentChanged({ key: workspaceKey, codingAgent: agent }))
-    setStatuses((current) => ({ ...current, pi: 'connecting' }))
+    reportToolStatus('pi', 'connecting')
     activateTool('pi')
   }
 
   useEffect(() => {
     markToolOpened(activeTool)
-    setSelectedPlan(null)
-  }, [activeTool, markToolOpened])
+    dispatch(planSelected(null))
+  }, [activeTool, dispatch, markToolOpened])
 
   useEffect(() => {
-    const snapshot = statusSnapshot
-    if (!snapshot) return
-    setProcessWindows(snapshot.processes as ProcessWindow[])
-    setSelectedProcessId((current) =>
-      current && snapshot.processes.some((window) => window.id === current)
-        ? current
-        : snapshot.processes[0]?.id ?? null,
-    )
-    setBranchState(snapshot.gitBranches)
-    setShellWindows(snapshot.shellWindows as TmuxWindow[])
-    setWorkflowRuns(snapshot.workflows as WorkflowRun[])
-  }, [statusSnapshot])
+    if (!statusSnapshot) return
+    dispatch(threadStatusSnapshotReceived({ threadKey, snapshot: statusSnapshot }))
+  }, [dispatch, statusSnapshot, threadKey])
 
   const statusError = statusSubscription.state === 'error'
     ? statusSubscription.error.message
@@ -309,11 +382,6 @@ export function TerminalWorkspace({
   const plansError = statusError || statusSnapshot?.errors.plans || ''
   const contextStatuses = statusSnapshot?.contextStatuses ?? {}
   const threadPlans = (statusSnapshot?.plans ?? []) as ThreadPlan[]
-
-  useEffect(() => {
-    setNativeContextStatus(null)
-    setClaudeNativeContextStatus(null)
-  }, [project.id, thread.id])
 
   useEffect(() => {
     let frame = 0
@@ -391,6 +459,11 @@ export function TerminalWorkspace({
         : contextStatuses['pi-terminal'] ?? null
   const hasSecondaryTabs = activeTool === 'terminal' || activeTool === 'process'
 
+  // The runtime slice still holds the previous thread for the one render before
+  // workspaceEntered commits. Rendering then would flash that thread's branch
+  // name, process list and tab dots, so hold off for a frame instead.
+  if (runtimeThreadKey !== threadKey) return null
+
   return (
     <div
       className={`relative flex h-full min-w-0 bg-ghost-black ${
@@ -436,7 +509,7 @@ export function TerminalWorkspace({
                       aria-label={selectedCodingAgent.label}
                       aria-selected={active}
                       onClick={() => {
-                        setSelectedPlan(null)
+                        dispatch(planSelected(null))
                         markToolOpened(tool.id)
                       }}
                       className="flex h-full items-center gap-2 pl-2.5 pr-1.5 lg:pl-3.5 lg:pr-2"
@@ -473,7 +546,7 @@ export function TerminalWorkspace({
                   role="tab"
                   aria-selected={active}
                   onClick={() => {
-                    setSelectedPlan(null)
+                    dispatch(planSelected(null))
                     markToolOpened(tool.id)
                   }}
                   className={`group relative flex h-9 shrink-0 items-center gap-2 rounded-lg px-2.5 text-[11px] font-medium transition lg:px-3.5 ${
@@ -573,20 +646,15 @@ export function TerminalWorkspace({
           <TmuxWindowTabs
             projectId={project.id}
             threadId={thread.id}
-            windows={shellWindows}
             loading={shellWindowsLoading}
             error={shellWindowsError}
-            onWindowsChange={setShellWindows}
             onRetry={statusSubscription.retry}
           />
         )}
         {activeTool === 'process' && (
           <ProcessWindowTabs
-            windows={processWindows}
-            selectedId={selectedProcessId}
             loading={processesLoading}
             error={processesError}
-            onSelect={setSelectedProcessId}
             onRetry={statusSubscription.retry}
           />
         )}
@@ -609,11 +677,7 @@ export function TerminalWorkspace({
                       const tool = tools[index - 1]
                       if (tool) activateTool(tool.id)
                     }}
-                    onStatusChange={(status) =>
-                      setStatuses((current) =>
-                        current.browser === status ? current : { ...current, browser: status },
-                      )
-                    }
+                    onStatusChange={(status) => reportToolStatus('browser', status)}
                   />
                 )
               }
@@ -631,11 +695,7 @@ export function TerminalWorkspace({
                       const selectedTool = tools[index - 1]
                       if (selectedTool) activateTool(selectedTool.id)
                     }}
-                    onStatusChange={(status) =>
-                      setStatuses((current) =>
-                        current.code === status ? current : { ...current, code: status },
-                      )
-                    }
+                    onStatusChange={(status) => reportToolStatus('code', status)}
                   />
                 )
               }
@@ -655,23 +715,9 @@ export function TerminalWorkspace({
                     onEnvironmentSetupFinished={setEnvironmentSetupStatus}
                     active={activeTool === 'pi'}
                     onStatusChange={(status) => {
-                      if (codingAgent === 'claude') {
-                        setClaudePresentationStatuses((current) => (
-                          current[claudePresentation] === status
-                            ? current
-                            : { ...current, [claudePresentation]: status }
-                        ))
-                        return
-                      }
-                      if (codingAgent === 'pi') {
-                        setPiPresentationStatuses((current) => (
-                          current[piPresentation] === status
-                            ? current
-                            : { ...current, [piPresentation]: status }
-                        ))
-                        return
-                      }
-                      setStatuses((current) => current.pi === status ? current : { ...current, pi: status })
+                      if (codingAgent === 'claude') reportClaudePresentationStatus(claudePresentation, status)
+                      else if (codingAgent === 'pi') reportPiPresentationStatus(piPresentation, status)
+                      else reportToolStatus('pi', status)
                     }}
                   />
                 )
@@ -691,12 +737,10 @@ export function TerminalWorkspace({
                         initialImagePaths={initialCodingAgent === 'claude' && initialPromptTargetsNative ? initialImagePaths : undefined}
                         onInitialPromptSent={initialCodingAgent === 'claude' && initialPromptTargetsNative ? onInitialPromptSent : undefined}
                         active={activeTool === 'pi' && claudePresentation === 'native'}
-                        onStatusChange={(status) =>
-                          setClaudePresentationStatuses((current) =>
-                            current.native === status ? current : { ...current, native: status },
-                          )
+                        onStatusChange={(status) => reportClaudePresentationStatus('native', status)}
+                        onContextStatusChange={(status) =>
+                          dispatch(claudeContextStatusReported({ threadKey, status }))
                         }
-                        onContextStatusChange={setClaudeNativeContextStatus}
                       />
                     )}
                     {claudeTerminalOpened && (
@@ -712,11 +756,7 @@ export function TerminalWorkspace({
                         initialPrompt={initialCodingAgent === 'claude' && !initialPromptTargetsNative ? initialPrompt : undefined}
                         onInitialPromptSent={initialCodingAgent === 'claude' && !initialPromptTargetsNative ? onInitialPromptSent : undefined}
                         active={activeTool === 'pi' && claudePresentation === 'terminal'}
-                        onStatusChange={(status) =>
-                          setClaudePresentationStatuses((current) =>
-                            current.terminal === status ? current : { ...current, terminal: status },
-                          )
-                        }
+                        onStatusChange={(status) => reportClaudePresentationStatus('terminal', status)}
                       />
                     )}
                   </Fragment>
@@ -738,12 +778,10 @@ export function TerminalWorkspace({
                         onInitialPromptSent={initialCodingAgent === 'pi' && initialPromptTargetsNative ? onInitialPromptSent : undefined}
                         readOnly={readOnlySubagent}
                         active={activeTool === 'pi' && piPresentation === 'native'}
-                        onStatusChange={(status) =>
-                          setPiPresentationStatuses((current) =>
-                            current.native === status ? current : { ...current, native: status },
-                          )
+                        onStatusChange={(status) => reportPiPresentationStatus('native', status)}
+                        onContextStatusChange={(status) =>
+                          dispatch(piContextStatusReported({ threadKey, status }))
                         }
-                        onContextStatusChange={setNativeContextStatus}
                       />
                     )}
                     {piTerminalOpened && (
@@ -759,11 +797,7 @@ export function TerminalWorkspace({
                         initialPrompt={initialCodingAgent === 'pi' && !initialPromptTargetsNative ? initialPrompt : undefined}
                         onInitialPromptSent={initialCodingAgent === 'pi' && !initialPromptTargetsNative ? onInitialPromptSent : undefined}
                         active={activeTool === 'pi' && piPresentation === 'terminal'}
-                        onStatusChange={(status) =>
-                          setPiPresentationStatuses((current) =>
-                            current.terminal === status ? current : { ...current, terminal: status },
-                          )
-                        }
+                        onStatusChange={(status) => reportPiPresentationStatus('terminal', status)}
                       />
                     )}
                   </Fragment>
@@ -784,11 +818,7 @@ export function TerminalWorkspace({
                   onInitialPromptSent={tool === 'pi' && codingAgent === initialCodingAgent ? onInitialPromptSent : undefined}
                   processId={processId}
                   active={activeTool === tool}
-                  onStatusChange={(status) =>
-                    setStatuses((current) =>
-                      current[tool] === status ? current : { ...current, [tool]: status },
-                    )
-                  }
+                  onStatusChange={(status) => reportToolStatus(tool, status)}
                 />
               )
             })}
@@ -811,7 +841,7 @@ export function TerminalWorkspace({
               <ThreadPlanViewer
                 projectId={project.id}
                 plan={selectedPlan}
-                onClose={() => setSelectedPlan(null)}
+                onClose={() => dispatch(planSelected(null))}
               />
             )}
           </div>
@@ -822,13 +852,10 @@ export function TerminalWorkspace({
           projectId={project.id}
           threadId={thread.id}
           worktree={thread.worktree}
-          branchState={branchState}
           contextStatus={contextStatus}
           loading={branchesLoading}
           loadError={branchesError}
-          onBranchStateChange={setBranchState}
           onRetry={statusSubscription.retry}
-          onOverlayOpenChange={setBranchOverlayOpen}
         />
       </div>
 
@@ -836,12 +863,9 @@ export function TerminalWorkspace({
         project={project}
         thread={thread}
         usage={usage}
-        workflowRuns={workflowRuns}
         workflowsError={workflowsError}
         plans={threadPlans}
         plansError={plansError}
-        onViewPlan={setSelectedPlan}
-        onWorkflowUpdated={(updated) => setWorkflowRuns((current) => current.map((run) => run.id === updated.id ? updated : run))}
         expanded={detailsExpanded}
         onExpandedChange={onDetailsExpandedChange}
         onThreadUpdated={onThreadUpdated}

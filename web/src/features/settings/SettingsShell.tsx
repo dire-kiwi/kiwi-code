@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { Search } from 'lucide-react'
 import { classNames } from '@/lib/classNames'
 import { projectSettingsPath, settingsPath } from '@/app/routes'
-import { useTheme } from '@/theme'
-import type { AppSettings, Profile, Project } from '@/types'
-import { useSubscription } from '@/wire/react'
+import { useAppSelector } from '@/store/hooks'
+import { retryTopic } from '@/store/socketAccess'
+import { selectSettings, selectSettingsError, selectSettingsStatus } from '@/store/slices/settings'
+import type { Profile, Project } from '@/types'
 import { SettingsTopic } from '@/wire/topics'
 import { TextInput } from '@/ui/inputs'
 import { LoadErrorPanel, LoadingPanel } from '@/ui/feedback'
@@ -106,35 +107,15 @@ export function SettingsShell({
 }: SettingsShellProps) {
   const navigate = useNavigate()
   const { section } = useParams()
-  const { setTheme: applyTheme } = useTheme()
-  const settingsSubscription = useSubscription(
-    SettingsTopic,
-    undefined,
-    { enabled: scope === 'global' },
-  )
+  // Settings come from the store rather than a local copy, so a section that
+  // saves is visible to every other reader immediately. ThemeProvider watches the
+  // same slice, which is why this no longer has to push the theme itself.
+  const settings = useAppSelector(selectSettings)
+  const settingsStatus = useAppSelector(selectSettingsStatus)
+  const settingsError = useAppSelector(selectSettingsError)
+  const settingsLoading = settingsStatus === 'loading'
 
-  const [settings, setSettings] = useState<AppSettings | null>(null)
-  const [settingsLoading, setSettingsLoading] = useState(scope === 'global')
-  const [settingsError, setSettingsError] = useState('')
   const [query, setQuery] = useState('')
-
-  useEffect(() => {
-    if (scope !== 'global') return
-    if (settingsSubscription.state === 'loading') {
-      setSettingsLoading(true)
-      return
-    }
-    setSettingsLoading(false)
-    if (settingsSubscription.state === 'error') {
-      setSettings(null)
-      setSettingsError(settingsSubscription.error.message)
-      return
-    }
-    const next = settingsSubscription.data as AppSettings
-    setSettings(next)
-    setSettingsError('')
-    applyTheme(next.theme)
-  }, [applyTheme, scope, settingsSubscription])
 
   if (scope === 'global' && !isGlobalSettingsSection(section)) {
     return <Navigate to={settingsPath(DEFAULT_GLOBAL_SETTINGS_SECTION)} replace />
@@ -181,22 +162,22 @@ export function SettingsShell({
       return (
         <LoadErrorPanel
           message={settingsError || 'Could not load settings.'}
-          onRetry={settingsSubscription.retry}
+          onRetry={() => retryTopic(SettingsTopic, undefined)}
         />
       )
     }
 
     switch (section as GlobalSettingsSectionId) {
       case 'worktrees':
-        return <WorktreesSection settings={settings} onSettingsUpdated={setSettings} />
+        return <WorktreesSection settings={settings} />
       case 'profiles':
-        return <ClaudeProfilesSection settings={settings} onSettingsUpdated={setSettings} />
+        return <ClaudeProfilesSection settings={settings} />
       case 'cleanup':
-        return <CleanupSection settings={settings} onSettingsUpdated={setSettings} />
+        return <CleanupSection settings={settings} />
       case 'agents':
-        return <AgentsSection settings={settings} onSettingsUpdated={setSettings} />
+        return <AgentsSection settings={settings} />
       case 'appearance':
-        return <AppearanceSection settings={settings} onSettingsUpdated={setSettings} />
+        return <AppearanceSection settings={settings} />
       case 'sandbox':
         return <SandboxSettingsScreen scope="global" embedded />
       case 'skills':

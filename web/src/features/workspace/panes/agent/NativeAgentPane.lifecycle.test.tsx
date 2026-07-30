@@ -2,32 +2,30 @@ import {
   act,
   cleanup,
   fireEvent,
-  render,
   screen,
 } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { settingsReceived } from '@/store/slices/settings'
+import { createTestStore, renderWithStore } from '@/store/testing'
+import type { AppSettings } from '@/types'
 import { ClaudeNativePane } from './ClaudeNativePane'
 import { PiNativePane } from './PiNativePane'
 
 const mocks = vi.hoisted(() => ({
   uploadPiImage: vi.fn(),
-  settingsSubscription: {
-    state: 'ready' as const,
-    data: {
-      disableWorkflows: false,
-      workflowKeywordTriggerEnabled: false,
-    },
-    retry: vi.fn(),
-  },
 }))
 
 vi.mock('@/api', () => ({
   uploadPiImage: mocks.uploadPiImage,
 }))
 
-vi.mock('@/wire/react', () => ({
-  useSubscription: () => mocks.settingsSubscription,
-}))
+// PiNativePane reads the workflow flags out of the settings slice, so the pane
+// is given a store rather than a mocked subscription. Only those two fields
+// matter to these tests; the rest of AppSettings is never read here.
+const paneSettings = {
+  disableWorkflows: false,
+  workflowKeywordTriggerEnabled: false,
+} as AppSettings
 
 type NativePaneKind = 'Pi' | 'Claude'
 type SentMessage = Record<string, unknown> & { type?: string }
@@ -138,9 +136,11 @@ function renderPane(kind: NativePaneKind) {
     onStatusChange,
     onContextStatusChange,
   }
+  const store = createTestStore()
+  store.dispatch(settingsReceived(paneSettings))
   const view = kind === 'Pi'
-    ? render(<PiNativePane {...commonProps} readOnly={false} />)
-    : render(<ClaudeNativePane {...commonProps} />)
+    ? renderWithStore(<PiNativePane {...commonProps} readOnly={false} />, { store })
+    : renderWithStore(<ClaudeNativePane {...commonProps} />, { store })
 
   return { ...view, onStatusChange, onContextStatusChange }
 }

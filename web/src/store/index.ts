@@ -7,6 +7,7 @@ import {
   type PersistWriter,
 } from './persistence'
 import { rootReducer, type RootState } from './rootReducer'
+import { initialAgentActivityState } from '@/store/slices/agentActivity'
 import {
   hydrateNewThreadPreferences,
   newThreadPreferencesWriters,
@@ -16,8 +17,12 @@ import {
   preferencesPersistence,
   preferencesWriters,
 } from '@/store/slices/preferences'
+import { initialProfilesState } from '@/store/slices/profiles'
+import { initialProjectsState } from '@/store/slices/projects'
+import { initialSettingsState } from '@/store/slices/settings'
 import { initialSidebarState, sidebarPersistence, sidebarWriters } from '@/store/slices/sidebar'
 import { hydrateThreadWorkspace, threadWorkspaceWriters } from '@/store/slices/threadWorkspace'
+import { initialThreadWorkspaceRuntimeState } from '@/store/slices/threadWorkspaceRuntime'
 import { initialUiState } from '@/store/slices/ui'
 
 export type CreateAppStoreOptions = {
@@ -45,6 +50,13 @@ export function createAppStore(options: CreateAppStoreOptions = {}) {
     preferences: hydrateFields(initialPreferencesState, preferencesPersistence, storage),
     sidebar: hydrateFields(initialSidebarState, sidebarPersistence, storage),
     threadWorkspace: hydrateThreadWorkspace(storage),
+    // Not persisted: server state, re-fetched over the socket on every connect.
+    agentActivity: initialAgentActivityState,
+    profiles: initialProfilesState,
+    projects: initialProjectsState,
+    settings: initialSettingsState,
+    // Not persisted: live state for whichever workspace is open right now.
+    threadWorkspaceRuntime: initialThreadWorkspaceRuntimeState,
     // Not persisted: this is chrome that is open now, not a remembered preference.
     ui: initialUiState,
   }

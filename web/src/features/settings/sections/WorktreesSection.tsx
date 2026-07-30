@@ -2,6 +2,8 @@ import { useState, type FormEvent } from 'react'
 import { FolderGit2, LoaderCircle, RotateCcw, Save } from 'lucide-react'
 import { updateSettings } from '@/api'
 import { useAsyncFeedback } from '@/lib/useAsyncFeedback'
+import { useAppDispatch } from '@/store/hooks'
+import { settingsReceived } from '@/store/slices/settings'
 import type { AppSettings } from '@/types'
 import { GhostButton, PrimaryButton } from '@/ui/buttons'
 import { TextInput } from '@/ui/inputs'
@@ -10,10 +12,10 @@ import { SectionHeader, Surface } from '@/ui/layout'
 
 type WorktreesSectionProps = {
   settings: AppSettings
-  onSettingsUpdated: (settings: AppSettings) => void
 }
 
-export function WorktreesSection({ settings, onSettingsUpdated }: WorktreesSectionProps) {
+export function WorktreesSection({ settings }: WorktreesSectionProps) {
+  const dispatch = useAppDispatch()
   const [worktreeBasePath, setWorktreeBasePath] = useState(settings.worktreeBasePath)
   const action = useAsyncFeedback<'save' | 'reset'>()
   const saving = action.pendingAction
@@ -32,7 +34,7 @@ export function WorktreesSection({ settings, onSettingsUpdated }: WorktreesSecti
       { success: 'Worktree location saved.', failure: 'Could not save settings.' },
     )
     if (!next) return
-    onSettingsUpdated(next)
+    dispatch(settingsReceived(next))
     setWorktreeBasePath(next.worktreeBasePath)
   }
 
@@ -47,7 +49,7 @@ export function WorktreesSection({ settings, onSettingsUpdated }: WorktreesSecti
       },
     )
     if (!next) return
-    onSettingsUpdated(next)
+    dispatch(settingsReceived(next))
     setWorktreeBasePath(next.worktreeBasePath)
   }
 

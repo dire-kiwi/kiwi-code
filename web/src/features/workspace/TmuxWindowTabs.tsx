@@ -1,16 +1,22 @@
 import { useState } from 'react'
 import { Plus, RefreshCw } from 'lucide-react'
 import { createShellWindow, selectShellWindow } from '@/api'
-import type { TmuxWindow } from '@/types'
+import { useAppDispatch, useAppSelector } from '@/store/hooks'
+import {
+  selectShellWindows,
+  shellWindowsReported,
+  threadRuntimeKey,
+} from '@/store/slices/threadWorkspaceRuntime'
 import { Button, IconButton, SelectionButton } from '@/ui/buttons'
 
+// The window list used to go up to TerminalWorkspace and straight back down
+// again: it is written both by the status socket and by this component's own
+// create/select calls, and read only here. Both writers land in the slice now.
 type TmuxWindowTabsProps = {
   projectId: string
   threadId: string
-  windows: TmuxWindow[]
   loading: boolean
   error: string
-  onWindowsChange: (windows: TmuxWindow[]) => void
   onRetry: () => void
 }
 
@@ -31,12 +37,13 @@ function errorMessage(reason: unknown) {
 export function TmuxWindowTabs({
   projectId,
   threadId,
-  windows,
   loading,
   error,
-  onWindowsChange,
   onRetry,
 }: TmuxWindowTabsProps) {
+  const dispatch = useAppDispatch()
+  const windows = useAppSelector(selectShellWindows)
+  const threadKey = threadRuntimeKey(projectId, threadId)
   const [pending, setPending] = useState<PendingAction>(null)
   const [actionError, setActionError] = useState('')
   const visibleError = actionError || error
@@ -46,7 +53,7 @@ export function TmuxWindowTabs({
     setPending('create')
     setActionError('')
     try {
-      onWindowsChange(await createShellWindow(projectId, threadId))
+      dispatch(shellWindowsReported({ threadKey, windows: await createShellWindow(projectId, threadId) }))
     } catch (reason) {
       setActionError(errorMessage(reason))
     } finally {
@@ -59,7 +66,10 @@ export function TmuxWindowTabs({
     setPending(index)
     setActionError('')
     try {
-      onWindowsChange(await selectShellWindow(projectId, threadId, index))
+      dispatch(shellWindowsReported({
+        threadKey,
+        windows: await selectShellWindow(projectId, threadId, index),
+      }))
     } catch (reason) {
       setActionError(errorMessage(reason))
     } finally {

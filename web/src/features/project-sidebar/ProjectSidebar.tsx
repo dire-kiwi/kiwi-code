@@ -22,10 +22,27 @@ import {
   Settings2,
   Trash2,
 } from 'lucide-react'
+import { useMatch } from 'react-router-dom'
+import { WORKSPACE_ROUTE, newThreadPath, projectSettingsPath } from '@/app/routes'
+import { DEFAULT_PROJECT_SETTINGS_SECTION } from '@/features/settings/registry'
 import { formatCompactTokens, formatCompactUsd, usageDescription } from '@/lib/formatUsage'
-import { createSidebarThreadIndex } from '@/sidebar-thread-index.mjs'
 import { defaultVisibleRootThreadIds } from '@/sidebar-thread-visibility.mjs'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
+import {
+  selectActiveProjectIds,
+  selectActiveProjects,
+  selectActiveThreadIndex,
+} from '@/store/selectors/workspace'
+import { selectActiveProfileId } from '@/store/slices/preferences'
+import { selectPiActivities } from '@/store/slices/agentActivity'
+import { selectProfiles } from '@/store/slices/profiles'
+import {
+  selectArchivingThreadId,
+  selectBookmarkingThreadId,
+  selectDeletingProjectId,
+  selectDeletingThreadId,
+  threadBookmarked,
+} from '@/store/slices/projects'
 import {
   bookmarksOnlyChanged,
   childThreadsCollapseToggled,
@@ -44,7 +61,9 @@ import {
   sidebarWidthReset,
   threadRevealed,
 } from '@/store/slices/sidebar'
-import type { PiThreadActivity, ProcessWebServer, Profile, Project, Thread, ThreadUsageSnapshot } from '@/types'
+import { projectFinderOpened, selectSidebarOpen, sidebarClosed } from '@/store/slices/ui'
+import type { Profile, Project, Thread } from '@/types'
+import { useProcessWebServers, useThreadUsage } from '@/wire/serverData'
 import { Button, IconButton, SelectionButton } from '@/ui/buttons'
 import { SidebarActivityView } from './SidebarActivityView'
 import { SidebarAddProjectForm } from './SidebarAddProjectForm'
@@ -52,100 +71,70 @@ import { SidebarFooterNav } from './SidebarFooterNav'
 import { SidebarProfileSwitcher } from './SidebarProfileSwitcher'
 import { SidebarWebServers } from './SidebarWebServers'
 import { ThreadActionsMenu } from './ThreadActionsMenu'
+import { useSidebarNavigation } from './useSidebarNavigation'
 import { useSidebarReorder } from './useSidebarReorder'
 
+// What is left as props are the four actions that are not purely data work:
+// each either confirms with the user first or navigates afterwards, and neither
+// belongs inside a thunk. Everything else the sidebar shows it now selects.
 type ProjectSidebarProps = {
-  profiles: Profile[]
-  activeProfileId: string
-  projects: Project[]
-  piActivities: PiThreadActivity[]
-  processWebServers: ProcessWebServer[]
-  usageSnapshots: ThreadUsageSnapshot[]
-  selectedThreadId: string | null
-  deletingProjectId: string | null
-  deletingThreadId: string | null
-  archivingThreadId: string | null
-  bookmarkingThreadId: string | null
-  cleanupSelected: boolean
-  sessionLogSelected: boolean
-  tmuxSelected: boolean
-  settingsSelected: boolean
-  isOpen: boolean
-  onClose: () => void
-  onOpenFinder: () => void
   onSelectProfile: (profileId: string) => void
   onProfileCreated: (profile: Profile) => void
   onSelectThread: (projectId: string, threadId: string) => void
-  onNewThread: (projectId: string) => void
-  onOpenProjectSettings: (projectId: string) => void
-  onOpenCleanup: () => void
-  onOpenSessionLog: () => void
-  onOpenTmux: () => void
-  onOpenSettings: () => void
   onProjectCreated: (project: Project) => void
-  onReorderProjects: (projectIds: string[]) => Promise<void>
-  onReorderThreads: (projectId: string, threadIds: string[]) => Promise<void>
   onDeleteProject: (project: Project) => void
   onArchiveThread: (project: Project, thread: Thread, archived: boolean) => void
-  onBookmarkThread: (project: Project, thread: Thread, bookmarked: boolean) => void
   onDeleteThread: (project: Project, thread: Thread) => void
 }
 
 
 export function ProjectSidebar({
-  profiles,
-  activeProfileId,
-  projects,
-  piActivities,
-  processWebServers,
-  usageSnapshots,
-  selectedThreadId,
-  deletingProjectId,
-  deletingThreadId,
-  archivingThreadId,
-  bookmarkingThreadId,
-  cleanupSelected,
-  sessionLogSelected,
-  tmuxSelected,
-  settingsSelected,
-  isOpen,
-  onClose,
-  onOpenFinder,
   onSelectProfile,
   onProfileCreated,
   onSelectThread,
-  onNewThread,
-  onOpenProjectSettings,
-  onOpenCleanup,
-  onOpenSessionLog,
-  onOpenTmux,
-  onOpenSettings,
   onProjectCreated,
-  onReorderProjects,
-  onReorderThreads,
   onDeleteProject,
   onArchiveThread,
-  onBookmarkThread,
   onDeleteThread,
 }: ProjectSidebarProps) {
   const [showProjectForm, setShowProjectForm] = useState(false)
   const dispatch = useAppDispatch()
+  const { navigateAndClose } = useSidebarNavigation()
+  // The router already holds which thread is open; App used to re-derive this
+  // with useMatch and pass it down, which made the URL a two-copy fact.
+  const selectedThreadId = useMatch(WORKSPACE_ROUTE)?.params.threadId ?? null
+  const activeProfileId = useAppSelector(selectActiveProfileId)
+  const profiles = useAppSelector(selectProfiles)
+  const projects = useAppSelector(selectActiveProjects)
+  const threadIndex = useAppSelector(selectActiveThreadIndex)
+  const activeProjectIds = useAppSelector(selectActiveProjectIds)
+  const deletingProjectId = useAppSelector(selectDeletingProjectId)
+  const deletingThreadId = useAppSelector(selectDeletingThreadId)
+  const archivingThreadId = useAppSelector(selectArchivingThreadId)
+  const bookmarkingThreadId = useAppSelector(selectBookmarkingThreadId)
+  const usageSnapshots = useThreadUsage()
+  const allWebServers = useProcessWebServers()
+  // Only servers belonging to a project the current profile can see.
+  const processWebServers = useMemo(
+    () => allWebServers.filter((server) => activeProjectIds.has(server.projectId)),
+    [activeProjectIds, allWebServers],
+  )
+  const isOpen = useAppSelector(selectSidebarOpen)
   const viewMode = useAppSelector(selectSidebarView)
   const sidebarWidth = useAppSelector(selectSidebarWidth)
   const collapsedProjectIds = useAppSelector(selectCollapsedProjectIds)
   const expandedMoreProjectIds = useAppSelector(selectExpandedMoreProjectIds)
   const collapsedChildThreadIds = useAppSelector(selectCollapsedChildThreadIds)
   const bookmarksOnly = useAppSelector(selectBookmarksOnly)
+  // Only for the default-visible-roots calculation below; the tree itself comes
+  // from the memoised index.
+  const piActivities = useAppSelector(selectPiActivities)
   const [threadMenuId, setThreadMenuId] = useState<string | null>(null)
   const asideRef = useRef<HTMLElement>(null)
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0]
   const usageByThread = useMemo(() => new Map(
     usageSnapshots.map((snapshot) => [`${snapshot.projectId}\0${snapshot.threadId}`, snapshot]),
   ), [usageSnapshots])
-  const threadIndex = useMemo(
-    () => createSidebarThreadIndex(projects, piActivities),
-    [piActivities, projects],
-  )
   const projectActivityCounts = threadIndex.projectActivityCounts
   const bookmarkThreadIdsByProject = useMemo(() => new Map(
     projects.map((project) => [
@@ -156,6 +145,21 @@ export function ProjectSidebar({
   const visibleProjects = bookmarksOnly
     ? projects.filter((project) => (bookmarkThreadIdsByProject.get(project.id)?.size ?? 0) > 0)
     : projects
+
+  // The thunk carries the failure message; something has to surface it, or a
+  // refused bookmark just stops the spinner and says nothing.
+  async function bookmarkThread(project: Project, thread: Thread) {
+    const result = await dispatch(threadBookmarked({
+      projectId: project.id,
+      threadId: thread.id,
+      bookmarked: !thread.bookmarked,
+    }))
+    if (threadBookmarked.rejected.match(result)) window.alert(result.payload)
+  }
+
+  const openNewThread = (projectId: string) => navigateAndClose(newThreadPath(projectId))
+  const openProjectSettings = (projectId: string) =>
+    navigateAndClose(projectSettingsPath(projectId, DEFAULT_PROJECT_SETTINGS_SECTION))
 
   useEffect(() => {
     if (!selectedThreadId) return
@@ -190,8 +194,6 @@ export function ProjectSidebar({
   } = useSidebarReorder({
     projects,
     treeFor: (projectId) => threadIndex.tree(projectId),
-    onReorderProjects,
-    onReorderThreads,
   })
 
   function renderThreadRow(
@@ -339,7 +341,7 @@ export function ProjectSidebar({
               size="xs"
               variant="subtle"
               disabled={Boolean(bookmarkingThreadId || archivingThreadId || deletingThreadId)}
-              onClick={() => onBookmarkThread(project, thread, !thread.bookmarked)}
+              onClick={() => void bookmarkThread(project, thread)}
               aria-pressed={Boolean(thread.bookmarked)}
               aria-label={thread.bookmarked ? `Remove bookmark from ${thread.title}` : `Bookmark ${thread.title}`}
               title={thread.bookmarked ? 'Remove bookmark' : 'Bookmark thread'}
@@ -451,7 +453,7 @@ export function ProjectSidebar({
         className={`fixed inset-0 z-30 bg-ghost-black/80 backdrop-blur-sm transition-opacity md:hidden ${
           isOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
         }`}
-        onClick={onClose}
+        onClick={() => dispatch(sidebarClosed())}
       />
 
       <aside
@@ -515,7 +517,7 @@ export function ProjectSidebar({
               type="button"
               size="sm"
               variant="subtle"
-              onClick={onOpenFinder}
+              onClick={() => dispatch(projectFinderOpened())}
               aria-label="Find a project or thread"
               title="Find projects and threads (Ctrl+F)"
             >
@@ -535,7 +537,7 @@ export function ProjectSidebar({
               type="button"
               size="sm"
               variant="subtle"
-              onClick={onClose}
+              onClick={() => dispatch(sidebarClosed())}
               className="md:hidden"
               aria-label="Close sidebar"
             >
@@ -570,18 +572,8 @@ export function ProjectSidebar({
             </div>
           ) : viewMode === 'activity' ? (
             <SidebarActivityView
-              projects={projects}
-              piActivities={piActivities}
-              threadIndex={threadIndex}
-              usageSnapshots={usageSnapshots}
-              selectedThreadId={selectedThreadId}
-              deletingThreadId={deletingThreadId}
-              archivingThreadId={archivingThreadId}
-              bookmarkingThreadId={bookmarkingThreadId}
               onSelectThread={onSelectThread}
-              onNewThread={onNewThread}
-              onOpenFinder={onOpenFinder}
-              onShowAllThreads={() => dispatch(sidebarViewChanged('tree'))}
+              onNewThread={openNewThread}
               onArchiveThread={onArchiveThread}
               onDeleteThread={onDeleteThread}
             />
@@ -689,7 +681,7 @@ export function ProjectSidebar({
                       size="xs"
                       shrink
                       variant="subtle-white"
-                      onClick={() => onNewThread(project.id)}
+                      onClick={() => openNewThread(project.id)}
                       className="opacity-0 group-hover/project:opacity-100 focus:opacity-100"
                       aria-label={`New thread in ${project.name}`}
                       title="New thread"
@@ -701,7 +693,7 @@ export function ProjectSidebar({
                       size="xs"
                       shrink
                       variant="subtle-white"
-                      onClick={() => onOpenProjectSettings(project.id)}
+                      onClick={() => openProjectSettings(project.id)}
                       className="opacity-0 group-hover/project:opacity-100 focus:opacity-100"
                       aria-label={`Settings for ${project.name}`}
                       title="Project settings"
@@ -736,19 +728,13 @@ export function ProjectSidebar({
             </ul>
           )}
 
-          <SidebarWebServers webServers={processWebServers} onNavigate={onClose} />
+          <SidebarWebServers
+            webServers={processWebServers}
+            onNavigate={() => dispatch(sidebarClosed())}
+          />
         </nav>
 
-        <SidebarFooterNav
-          cleanupSelected={cleanupSelected}
-          sessionLogSelected={sessionLogSelected}
-          tmuxSelected={tmuxSelected}
-          settingsSelected={settingsSelected}
-          onOpenCleanup={onOpenCleanup}
-          onOpenSessionLog={onOpenSessionLog}
-          onOpenTmux={onOpenTmux}
-          onOpenSettings={onOpenSettings}
-        />
+        <SidebarFooterNav />
 
         <div
           role="separator"

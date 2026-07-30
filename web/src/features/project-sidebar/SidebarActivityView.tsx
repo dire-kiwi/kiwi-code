@@ -1,28 +1,32 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Bookmark, CornerDownRight, Folder, Inbox, LoaderCircle, Plus, Search } from 'lucide-react'
+import { useMatch } from 'react-router-dom'
+import { WORKSPACE_ROUTE } from '@/app/routes'
 import { usageDescription } from '@/lib/formatUsage'
 import { projectsByMostRecentThread } from '@/new-thread-project-order.mjs'
 import { activityViewGroups, formatRelativeShort, type ActivityGroupEntry } from '@/sidebar-activity-groups.mjs'
-import type { SidebarThreadIndex } from '@/sidebar-thread-index.mjs'
-import type { PiThreadActivity, Project, Thread, ThreadUsageSnapshot } from '@/types'
+import { useAppDispatch, useAppSelector } from '@/store/hooks'
+import { selectActiveProjects, selectActiveThreadIndex } from '@/store/selectors/workspace'
+import { selectPiActivities } from '@/store/slices/agentActivity'
+import {
+  selectArchivingThreadId,
+  selectBookmarkingThreadId,
+  selectDeletingThreadId,
+} from '@/store/slices/projects'
+import { sidebarViewChanged } from '@/store/slices/sidebar'
+import { projectFinderOpened } from '@/store/slices/ui'
+import type { Project, Thread } from '@/types'
 import { Button, IconButton, SelectionButton } from '@/ui/buttons'
+import { useThreadUsage } from '@/wire/serverData'
 import { ThreadActionsMenu } from './ThreadActionsMenu'
 
 type SectionKind = 'working' | 'needsReview' | 'pinned' | 'recent'
 
+// Sibling of ProjectSidebar, rendered in its place when the view is switched.
+// It was handed eight of the sidebar's own props; it selects the same state.
 type SidebarActivityViewProps = {
-  projects: Project[]
-  piActivities: PiThreadActivity[]
-  threadIndex: SidebarThreadIndex<Thread, Project, PiThreadActivity>
-  usageSnapshots: ThreadUsageSnapshot[]
-  selectedThreadId: string | null
-  deletingThreadId: string | null
-  archivingThreadId: string | null
-  bookmarkingThreadId: string | null
   onSelectThread: (projectId: string, threadId: string) => void
   onNewThread: (projectId: string) => void
-  onOpenFinder: () => void
-  onShowAllThreads: () => void
   onArchiveThread: (project: Project, thread: Thread, archived: boolean) => void
   onDeleteThread: (project: Project, thread: Thread) => void
 }
@@ -35,21 +39,22 @@ const sectionStateDescriptions: Record<SectionKind, string> = {
 }
 
 export function SidebarActivityView({
-  projects,
-  piActivities,
-  threadIndex,
-  usageSnapshots,
-  selectedThreadId,
-  deletingThreadId,
-  archivingThreadId,
-  bookmarkingThreadId,
   onSelectThread,
   onNewThread,
-  onOpenFinder,
-  onShowAllThreads,
   onArchiveThread,
   onDeleteThread,
 }: SidebarActivityViewProps) {
+  const dispatch = useAppDispatch()
+  const projects = useAppSelector(selectActiveProjects)
+  const piActivities = useAppSelector(selectPiActivities)
+  const threadIndex = useAppSelector(selectActiveThreadIndex)
+  const usageSnapshots = useThreadUsage()
+  const selectedThreadId = useMatch(WORKSPACE_ROUTE)?.params.threadId ?? null
+  const deletingThreadId = useAppSelector(selectDeletingThreadId)
+  const archivingThreadId = useAppSelector(selectArchivingThreadId)
+  const bookmarkingThreadId = useAppSelector(selectBookmarkingThreadId)
+  const onOpenFinder = () => dispatch(projectFinderOpened())
+  const onShowAllThreads = () => dispatch(sidebarViewChanged('tree'))
   const [now, setNow] = useState(() => Date.now())
   const [projectPickerOpen, setProjectPickerOpen] = useState(false)
   const [threadMenuKey, setThreadMenuKey] = useState<string | null>(null)

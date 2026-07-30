@@ -49,7 +49,6 @@ import {
   prunePromptPastes,
 } from '@/prompt-pastes.mjs'
 import type {
-  AppSettings,
   CodingAgent,
   CodingAgentConfig,
   CodingAgentSelection,
@@ -58,15 +57,16 @@ import type {
   Project,
   Thread,
 } from '@/types'
-import { useAppDispatch, useAppStore } from '@/store/hooks'
+import { useAppDispatch, useAppSelector, useAppStore } from '@/store/hooks'
 import {
   newThreadPreferencesRemembered,
   selectNewThreadPreferences,
   type AgentModelPreferences,
   type ThreadLocation,
 } from '@/store/slices/newThreadPreferences'
+import { selectSettings, selectSettingsStatus } from '@/store/slices/settings'
 import { useSubscription } from '@/wire/react'
-import { CodingAgentsTopic, GitBranchesTopic, SettingsTopic } from '@/wire/topics'
+import { CodingAgentsTopic, GitBranchesTopic } from '@/wire/topics'
 import { GhostButton, PrimaryButton } from '@/ui/buttons'
 import { Select, TextArea } from '@/ui/inputs'
 import { FormScreenTemplate, ScreenHeader, Surface } from '@/ui/layout'
@@ -97,7 +97,6 @@ export function NewThreadScreen({
   onCreated,
 }: NewThreadScreenProps) {
   const codingAgentsSubscription = useSubscription(CodingAgentsTopic, { projectId: project.id })
-  const settingsSubscription = useSubscription(SettingsTopic, undefined)
   // Ask Git directly instead of relying on the project snapshot's repository
   // flag. That flag can briefly be stale, especially for projects that already
   // have managed worktree threads, and used to leave "project folder" as the
@@ -131,10 +130,8 @@ export function NewThreadScreen({
   const initialAgentModel = agentModels[codingAgentTargetForSelection(codingAgent).agent]
   const [model, setModel] = useState(initialAgentModel?.model ?? '')
   const [thinkingLevel, setThinkingLevel] = useState(initialAgentModel?.thinkingLevel ?? '')
-  const settings: AppSettings | null = settingsSubscription.state === 'ready'
-    ? settingsSubscription.data
-    : null
-  const settingsLoading = settingsSubscription.state === 'loading'
+  const settings = useAppSelector(selectSettings)
+  const settingsLoading = useAppSelector(selectSettingsStatus) === 'loading'
   const [nestedDepth, setNestedDepth] = useState<number | 'inherit'>('inherit')
   const [initialPrompt, setInitialPrompt] = useState(() => readNewThreadDraft(project.id))
   const [initialPromptPastes, setInitialPromptPastes] = useState(() => (
@@ -173,17 +170,16 @@ export function NewThreadScreen({
   }, [codingAgentsSubscription])
 
   useEffect(() => {
-    if (settingsSubscription.state !== 'ready' || settingsInitializedRef.current) return
+    if (!settings || settingsInitializedRef.current) return
     settingsInitializedRef.current = true
-    const next = settingsSubscription.data
-    const availableAgents = next.codingAgents.map(codingAgentSelectionForSetting)
-    const configuredDefault = defaultCodingAgentSelection(next.codingAgents)
+    const availableAgents = settings.codingAgents.map(codingAgentSelectionForSetting)
+    const configuredDefault = defaultCodingAgentSelection(settings.codingAgents)
     const nextAgent = availableAgents.includes(configuredDefault) ? configuredDefault : 'pi-native'
     const rememberedModel = agentModels[codingAgentTargetForSelection(nextAgent).agent]
     setCodingAgent(nextAgent)
     setModel(rememberedModel?.model ?? '')
     setThinkingLevel(rememberedModel?.thinkingLevel ?? '')
-  }, [agentModels, settingsSubscription])
+  }, [agentModels, settings])
 
   useEffect(() => {
     if (codingAgentsLoading) return

@@ -11,6 +11,8 @@ import {
 } from 'lucide-react'
 import { updateSettings } from '@/api'
 import { useAsyncFeedback } from '@/lib/useAsyncFeedback'
+import { useAppDispatch } from '@/store/hooks'
+import { settingsReceived } from '@/store/slices/settings'
 import type { AppSettings, CodingAgentSetting } from '@/types'
 import { GhostButton, PrimaryButton } from '@/ui/buttons'
 import { DirectoryPathAutocomplete, Select, TextInput } from '@/ui/inputs'
@@ -19,7 +21,6 @@ import { SectionHeader, Surface } from '@/ui/layout'
 
 type ClaudeProfilesSectionProps = {
   settings: AppSettings
-  onSettingsUpdated: (settings: AppSettings) => void
 }
 
 const maxCustomCodingAgents = 16
@@ -43,7 +44,8 @@ function agentTypeLabel(agent: CodingAgentSetting) {
   }
 }
 
-export function ClaudeProfilesSection({ settings, onSettingsUpdated }: ClaudeProfilesSectionProps) {
+export function ClaudeProfilesSection({ settings }: ClaudeProfilesSectionProps) {
+  const dispatch = useAppDispatch()
   const [codingAgents, setCodingAgents] = useState<CodingAgentSetting[]>(settings.codingAgents ?? [])
   const action = useAsyncFeedback()
   const saving = action.pending
@@ -132,7 +134,7 @@ export function ClaudeProfilesSection({ settings, onSettingsUpdated }: ClaudePro
       { success: 'Coding agents saved.', failure: 'Could not save coding agents.' },
     )
     if (!next) return
-    onSettingsUpdated(next)
+    dispatch(settingsReceived(next))
     setCodingAgents(next.codingAgents)
   }
 

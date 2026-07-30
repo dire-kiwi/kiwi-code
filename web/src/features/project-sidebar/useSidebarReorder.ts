@@ -6,6 +6,9 @@
 // relative order at the end, and the tree flattens the result back into the
 // parent-child order the server stores.
 import { useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
+import { useAppDispatch, useAppSelector } from '@/store/hooks'
+import { selectActiveProfileId } from '@/store/slices/preferences'
+import { projectsReordered, threadsReordered } from '@/store/slices/projects'
 import type { Project } from '@/types'
 import {
   projectDropPosition,
@@ -24,16 +27,14 @@ type ThreadTree = {
 export type SidebarReorderOptions = {
   projects: Project[]
   treeFor: (projectId: string) => ThreadTree | null | undefined
-  onReorderProjects: (projectIds: string[]) => Promise<void>
-  onReorderThreads: (projectId: string, threadIds: string[]) => Promise<void>
 }
 
 export function useSidebarReorder({
   projects,
   treeFor,
-  onReorderProjects,
-  onReorderThreads,
 }: SidebarReorderOptions) {
+  const dispatch = useAppDispatch()
+  const activeProfileId = useAppSelector(selectActiveProfileId)
   const [draggedItem, setDraggedItem] = useState<DragItem | null>(null)
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   const [savingOrder, setSavingOrder] = useState(false)
@@ -60,14 +61,24 @@ export function useSidebarReorder({
     const currentIds = projects.map((project) => project.id)
     if (sameOrder(currentIds, projectIds)) return
     setSavingOrder(true)
-    void onReorderProjects(projectIds).finally(() => setSavingOrder(false))
+    // The thunk owns the optimistic move and the rollback; the latch here is
+    // only about blocking a second drag while one is in flight.
+    void dispatch(projectsReordered({ profileId: activeProfileId, projectIds }))
+      .then((result) => {
+        if (projectsReordered.rejected.match(result)) window.alert(result.payload)
+      })
+      .finally(() => setSavingOrder(false))
   }
 
   function saveThreadOrder(project: Project, threadIds: string[]) {
     const currentIds = project.threads.map((thread) => thread.id)
     if (sameOrder(currentIds, threadIds)) return
     setSavingOrder(true)
-    void onReorderThreads(project.id, threadIds).finally(() => setSavingOrder(false))
+    void dispatch(threadsReordered({ projectId: project.id, threadIds }))
+      .then((result) => {
+        if (threadsReordered.rejected.match(result)) window.alert(result.payload)
+      })
+      .finally(() => setSavingOrder(false))
   }
 
   /** Active roots first, archived roots after, both in their current order. */

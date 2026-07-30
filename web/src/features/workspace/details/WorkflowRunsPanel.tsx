@@ -14,6 +14,12 @@ import {
 } from 'lucide-react'
 import { pauseWorkflow, resumeWorkflow, saveWorkflow, stopWorkflow } from '@/api'
 import { formatDuration } from '@/lib/formatDuration'
+import { useAppDispatch, useAppSelector } from '@/store/hooks'
+import {
+  selectOrderedWorkflowRuns,
+  threadRuntimeKey,
+  workflowRunUpdated,
+} from '@/store/slices/threadWorkspaceRuntime'
 import type { SavedWorkflow, Thread, WorkflowRun } from '@/types'
 import { Button, GhostButton, PrimaryButton } from '@/ui/buttons'
 import { Select, TextInput } from '@/ui/inputs'
@@ -24,9 +30,7 @@ type WorkflowRunsPanelProps = {
   projectId: string
   threadId: string
   threads: Thread[]
-  runs: WorkflowRun[]
   error: string
-  onRunUpdated: (run: WorkflowRun) => void
   onSelectThread: (thread: Thread) => void
 }
 
@@ -69,11 +73,13 @@ export function WorkflowRunsPanel({
   projectId,
   threadId,
   threads,
-  runs,
   error,
-  onRunUpdated,
   onSelectThread,
 }: WorkflowRunsPanelProps) {
+  const dispatch = useAppDispatch()
+  // Active runs first; the ordering is memoised in the selector because this
+  // list re-renders on every status push.
+  const runs = useAppSelector(selectOrderedWorkflowRuns)
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [pending, setPending] = useState<Record<string, RunAction | 'save' | undefined>>({})
   const [actionErrors, setActionErrors] = useState<Record<string, string | undefined>>({})
@@ -100,7 +106,7 @@ export function WorkflowRunsPanel({
         : action === 'resume'
           ? await resumeWorkflow(projectId, threadId, run.id)
           : await stopWorkflow(projectId, threadId, run.id)
-      onRunUpdated(updated)
+      dispatch(workflowRunUpdated({ threadKey: threadRuntimeKey(projectId, threadId), run: updated }))
     } catch (reason) {
       setActionErrors((current) => ({
         ...current,

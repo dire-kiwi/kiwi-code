@@ -33,8 +33,8 @@ import {
   prunePromptPastes,
 } from '@/prompt-pastes.mjs'
 import type { AgentContextStatus, ConnectionStatus } from '@/types'
-import { useSubscription } from '@/wire/react'
-import { SettingsTopic } from '@/wire/topics'
+import { useAppSelector } from '@/store/hooks'
+import { selectSettings } from '@/store/slices/settings'
 import { NativeAgentActivityMonitor, type NativeAgentDescriptor } from './NativeAgentActivityMonitor'
 import { PiNativeComposer } from './PiNativeComposer'
 import { PiSessionUsage } from './PiSessionUsage'
@@ -109,7 +109,7 @@ export function PiNativePane({
   onStatusChange,
   onContextStatusChange,
 }: PiNativePaneProps) {
-  const settingsSubscription = useSubscription(SettingsTopic, undefined)
+  const settings = useAppSelector(selectSettings)
   const [messages, setMessages] = useState<PiAgentMessage[]>([])
   const [liveAssistant, setLiveAssistant] = useState<PiAgentMessage | null>(null)
   const [toolStates, setToolStates] = useState<Map<string, PiToolState>>(() => new Map())
@@ -196,9 +196,8 @@ export function PiNativePane({
 
   // Derived, not mirrored into state: nothing else writes these, so copying them
   // in an effect only bought a second render of the pane per settings snapshot.
-  const workflowSettings = settingsSubscription.state === 'ready' ? settingsSubscription.data : null
-  const workflowKeywordTriggerEnabled = workflowSettings?.workflowKeywordTriggerEnabled ?? false
-  const workflowsEnabled = workflowSettings ? !workflowSettings.disableWorkflows : false
+  const workflowKeywordTriggerEnabled = settings?.workflowKeywordTriggerEnabled ?? false
+  const workflowsEnabled = settings ? !settings.disableWorkflows : false
 
   const updateConnectionStatus = useCallback((status: ConnectionStatus) => {
     setConnectionStatus(status)

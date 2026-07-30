@@ -11,8 +11,8 @@ import {
 import type { ITheme } from '@xterm/xterm'
 import { DEFAULT_THEME } from './defaultTheme.generated'
 import type { ThemeColors, ThemeSettings } from './types'
-import { useSubscription } from '@/wire/react'
-import { SettingsTopic } from '@/wire/topics'
+import { useAppSelector } from '@/store/hooks'
+import { selectTheme } from '@/store/slices/settings'
 
 export { DEFAULT_THEME } from './defaultTheme.generated'
 
@@ -106,15 +106,18 @@ const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeSettings>(DEFAULT_THEME)
-  const settings = useSubscription(SettingsTopic, undefined)
+  // Local state on top of the stored theme, not instead of it: the appearance
+  // editor previews unsaved edits through setTheme, and the saved value arriving
+  // in the settings slice overwrites the preview.
+  const storedTheme = useAppSelector(selectTheme)
 
   const setTheme = useCallback((next: ThemeSettings) => {
     setThemeState(next)
   }, [])
 
   useEffect(() => {
-    if (settings.state === 'ready') setThemeState(settings.data.theme)
-  }, [settings])
+    if (storedTheme) setThemeState(storedTheme)
+  }, [storedTheme])
 
   useLayoutEffect(() => applyTheme(theme), [theme])
 

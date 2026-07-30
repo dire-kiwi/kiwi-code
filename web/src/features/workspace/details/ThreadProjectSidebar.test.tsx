@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { setThreadTitleLocked, updateThreadTitle } from '@/api'
+import { renderWithStore } from '@/store/testing'
 import type { Project, Thread } from '@/types'
 import { ThreadProjectSidebar } from './ThreadProjectSidebar'
 
@@ -34,12 +35,9 @@ function sidebar(currentThread: Thread, onThreadUpdated = vi.fn()) {
       <ThreadProjectSidebar
         project={{ ...project, threads: [currentThread] }}
         thread={currentThread}
-        workflowRuns={[]}
         workflowsError=""
         plans={[]}
         plansError=""
-        onViewPlan={() => {}}
-        onWorkflowUpdated={() => {}}
         expanded
         onExpandedChange={() => {}}
         onThreadUpdated={onThreadUpdated}
@@ -59,7 +57,7 @@ describe('ThreadProjectSidebar title lock', () => {
     const locked = { ...thread, titleLocked: true }
     vi.mocked(setThreadTitleLocked).mockResolvedValueOnce(locked)
 
-    const view = render(sidebar(thread, onThreadUpdated))
+    const view = renderWithStore(sidebar(thread, onThreadUpdated))
     fireEvent.click(screen.getByRole('button', { name: 'Lock thread title' }))
 
     await waitFor(() => {

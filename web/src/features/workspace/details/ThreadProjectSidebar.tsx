@@ -20,6 +20,8 @@ import {
 import { setThreadTitleLocked, updateThreadTitle } from '@/api'
 import { formatWhen } from '@/lib/formatWhen'
 import { threadSandboxPath } from '@/app/routes'
+import { useAppDispatch, useAppSelector } from '@/store/hooks'
+import { planSelected, selectWorkflowRuns } from '@/store/slices/threadWorkspaceRuntime'
 import type { Project, Thread, ThreadPlan, ThreadUsageSnapshot, WorkflowRun } from '@/types'
 import { Button, GhostButton, IconButton, PrimaryButton } from '@/ui/buttons'
 import { TextInput } from '@/ui/inputs'
@@ -37,18 +39,14 @@ const sidebarTabs: ReadonlyArray<{ id: SidebarTab; label: string }> = [
 ]
 
 const liveWorkflowStates: ReadonlySet<WorkflowRun['state']> = new Set(['queued', 'running'])
-const activeWorkflowStates: ReadonlySet<WorkflowRun['state']> = new Set(['queued', 'running', 'paused'])
 
 type ThreadProjectSidebarProps = {
   project: Project
   thread: Thread
   usage?: ThreadUsageSnapshot
-  workflowRuns: WorkflowRun[]
   workflowsError: string
   plans: ThreadPlan[]
   plansError: string
-  onViewPlan: (plan: ThreadPlan) => void
-  onWorkflowUpdated: (run: WorkflowRun) => void
   expanded: boolean
   onExpandedChange: (expanded: boolean) => void
   onThreadUpdated: (thread: Thread) => void
@@ -59,17 +57,18 @@ export function ThreadProjectSidebar({
   project,
   thread,
   usage,
-  workflowRuns,
   workflowsError,
   plans,
   plansError,
-  onViewPlan,
-  onWorkflowUpdated,
   expanded,
   onExpandedChange,
   onThreadUpdated,
   onSelectThread,
 }: ThreadProjectSidebarProps) {
+  const dispatch = useAppDispatch()
+  // Read only for the live-workflow badge on the activity tab; the panel below
+  // selects its own ordered copy.
+  const workflowRuns = useAppSelector(selectWorkflowRuns)
   const inputRef = useRef<HTMLInputElement>(null)
   const tabRefs = useRef<Partial<Record<SidebarTab, HTMLButtonElement | null>>>({})
   const [tab, setTab] = useState<SidebarTab>('thread')
@@ -105,9 +104,6 @@ export function ThreadProjectSidebar({
     .sort((left, right) => Date.parse(right.closedAt!) - Date.parse(left.closedAt!))
 
   const hasLiveWorkflow = workflowRuns.some((run) => liveWorkflowStates.has(run.state))
-  const orderedRuns = [...workflowRuns].sort(
-    (left, right) => Number(activeWorkflowStates.has(right.state)) - Number(activeWorkflowStates.has(left.state)),
-  )
   const showWorkflows = !thread.parentThreadId
   const showPlans = !thread.parentThreadId || plans.length > 0 || Boolean(plansError)
   const showAgents = Boolean(thread.parentThreadId) || completedAgentThreads.length > 0
@@ -458,9 +454,7 @@ export function ThreadProjectSidebar({
                     projectId={project.id}
                     threadId={thread.id}
                     threads={project.threads}
-                    runs={orderedRuns}
                     error={workflowsError}
-                    onRunUpdated={onWorkflowUpdated}
                     onSelectThread={onSelectThread}
                   />
                 )}
@@ -472,7 +466,7 @@ export function ThreadProjectSidebar({
                       projectId={project.id}
                       plans={plans}
                       error={plansError}
-                      onViewPlan={onViewPlan}
+                      onViewPlan={(plan) => dispatch(planSelected(plan))}
                     />
                   </>
                 )}

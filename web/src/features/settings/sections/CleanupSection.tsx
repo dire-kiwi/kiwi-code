@@ -2,6 +2,8 @@ import { useState, type FormEvent } from 'react'
 import { Archive, Clock3, FolderGit2, LoaderCircle, Save } from 'lucide-react'
 import { updateSettings } from '@/api'
 import { useAsyncFeedback } from '@/lib/useAsyncFeedback'
+import { useAppDispatch } from '@/store/hooks'
+import { settingsReceived } from '@/store/slices/settings'
 import { MAX_CLEANUP_RETENTION_DAYS } from '@/lib/validation'
 import type { AppSettings } from '@/types'
 import { PrimaryButton } from '@/ui/buttons'
@@ -11,10 +13,10 @@ import { ActionFeedback, InfoCallout } from '@/ui/feedback'
 
 type CleanupSectionProps = {
   settings: AppSettings
-  onSettingsUpdated: (settings: AppSettings) => void
 }
 
-export function CleanupSection({ settings, onSettingsUpdated }: CleanupSectionProps) {
+export function CleanupSection({ settings }: CleanupSectionProps) {
+  const dispatch = useAppDispatch()
   const [archivedThreadRetentionDays, setArchivedThreadRetentionDays] = useState(
     String(settings.archivedThreadRetentionDays),
   )
@@ -58,7 +60,7 @@ export function CleanupSection({ settings, onSettingsUpdated }: CleanupSectionPr
       },
     )
     if (!next) return
-    onSettingsUpdated(next)
+    dispatch(settingsReceived(next))
     setArchivedThreadRetentionDays(String(next.archivedThreadRetentionDays))
     setOrphanedWorktreeRetentionDays(String(next.orphanedWorktreeRetentionDays))
   }

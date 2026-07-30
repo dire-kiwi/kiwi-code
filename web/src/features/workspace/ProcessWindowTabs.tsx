@@ -1,24 +1,28 @@
 import { Activity, RefreshCw } from 'lucide-react'
-import type { ProcessWindow } from '@/types'
+import { useAppDispatch, useAppSelector } from '@/store/hooks'
+import {
+  processSelected,
+  selectProcessWindows,
+  selectSelectedProcessId,
+} from '@/store/slices/threadWorkspaceRuntime'
 import { Button, SelectionButton } from '@/ui/buttons'
 
+// The shell list and the selection are shared with the tool tab badge and with
+// the pane that renders the selected shell, so both come from the slice.
 type ProcessWindowTabsProps = {
-  windows: ProcessWindow[]
-  selectedId: string | null
   loading: boolean
   error: string
-  onSelect: (id: string) => void
   onRetry: () => void
 }
 
 export function ProcessWindowTabs({
-  windows,
-  selectedId,
   loading,
   error,
-  onSelect,
   onRetry,
 }: ProcessWindowTabsProps) {
+  const dispatch = useAppDispatch()
+  const windows = useAppSelector(selectProcessWindows)
+  const selectedId = useAppSelector(selectSelectedProcessId)
   return (
     <div className="flex h-9 shrink-0 items-center gap-2 bg-ghost-background px-3 sm:px-5">
       <span className="hidden shrink-0 items-center gap-1.5 font-mono text-[8px] font-medium uppercase tracking-[0.16em] text-ghost-faint sm:flex">
@@ -42,7 +46,7 @@ export function ProcessWindowTabs({
               selectionVariant="compact-tab"
               role="tab"
               aria-selected={active}
-              onClick={() => onSelect(window.id)}
+              onClick={() => dispatch(processSelected(window.id))}
               title={window.currentCommand || window.name}
             >
               <span className={active ? 'text-ghost-green/80' : 'text-ghost-faint'}>{window.index}</span>

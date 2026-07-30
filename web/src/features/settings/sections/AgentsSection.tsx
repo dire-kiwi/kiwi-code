@@ -2,6 +2,8 @@ import { useState, type FormEvent } from 'react'
 import { LoaderCircle, Network, Save, Workflow } from 'lucide-react'
 import { updateSettings } from '@/api'
 import { useAsyncFeedback } from '@/lib/useAsyncFeedback'
+import { useAppDispatch } from '@/store/hooks'
+import { settingsReceived } from '@/store/slices/settings'
 import type { AppSettings } from '@/types'
 import { PrimaryButton } from '@/ui/buttons'
 import { Select, TextInput } from '@/ui/inputs'
@@ -10,10 +12,10 @@ import { SectionHeader, Surface } from '@/ui/layout'
 
 type AgentsSectionProps = {
   settings: AppSettings
-  onSettingsUpdated: (settings: AppSettings) => void
 }
 
-export function AgentsSection({ settings, onSettingsUpdated }: AgentsSectionProps) {
+export function AgentsSection({ settings }: AgentsSectionProps) {
+  const dispatch = useAppDispatch()
   const [subAgentNestingDepth, setSubAgentNestingDepth] = useState(String(settings.subAgentNestingDepth))
   const nestingFeedback = useAsyncFeedback()
 
@@ -51,7 +53,7 @@ export function AgentsSection({ settings, onSettingsUpdated }: AgentsSectionProp
       },
     )
     if (!next) return
-    onSettingsUpdated(next)
+    dispatch(settingsReceived(next))
     setSubAgentNestingDepth(String(next.subAgentNestingDepth))
   }
 
@@ -71,7 +73,7 @@ export function AgentsSection({ settings, onSettingsUpdated }: AgentsSectionProp
       },
     )
     if (!next) return
-    onSettingsUpdated(next)
+    dispatch(settingsReceived(next))
     setDisableWorkflows(next.disableWorkflows)
     setWorkflowKeywordTrigger(next.workflowKeywordTriggerEnabled)
     setWorkflowSizeGuideline(next.workflowSizeGuideline)

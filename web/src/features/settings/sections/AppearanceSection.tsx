@@ -2,6 +2,8 @@ import { useState, type FormEvent } from 'react'
 import { LoaderCircle, Palette, RotateCcw, Save } from 'lucide-react'
 import { updateSettings } from '@/api'
 import { useAsyncFeedback } from '@/lib/useAsyncFeedback'
+import { useAppDispatch } from '@/store/hooks'
+import { settingsReceived } from '@/store/slices/settings'
 import { isHexColor } from '@/lib/validation'
 import { themesEqual, useTheme } from '@/theme'
 import type { AppSettings, ThemeColors, ThemeSettings } from '@/types'
@@ -13,7 +15,6 @@ import { ThemeColorInput } from '@/features/settings/ThemeColorInput'
 
 type AppearanceSectionProps = {
   settings: AppSettings
-  onSettingsUpdated: (settings: AppSettings) => void
 }
 
 type ThemeColorGroup = {
@@ -78,7 +79,8 @@ const themeColorGroups: ThemeColorGroup[] = [
   },
 ]
 
-export function AppearanceSection({ settings, onSettingsUpdated }: AppearanceSectionProps) {
+export function AppearanceSection({ settings }: AppearanceSectionProps) {
+  const dispatch = useAppDispatch()
   const { setTheme: applyTheme } = useTheme()
   const [theme, setTheme] = useState<ThemeSettings>(settings.theme)
   const action = useAsyncFeedback<'save' | 'reset'>()
@@ -116,7 +118,7 @@ export function AppearanceSection({ settings, onSettingsUpdated }: AppearanceSec
       },
     )
     if (!next) return
-    onSettingsUpdated(next)
+    dispatch(settingsReceived(next))
     setTheme(next.theme)
     applyTheme(next.theme)
   }
@@ -132,7 +134,7 @@ export function AppearanceSection({ settings, onSettingsUpdated }: AppearanceSec
       },
     )
     if (!next) return
-    onSettingsUpdated(next)
+    dispatch(settingsReceived(next))
     setTheme(next.theme)
     applyTheme(next.theme)
   }

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PiThreadActivity, Profile, Project, Thread } from '@/types'
 import { workspacePath } from './routes'
 import App from './App'
+import { ServerStateBridge } from '@/store/ServerStateBridge'
 import { renderWithStore } from '@/store/testing'
 
 const mocks = vi.hoisted(() => {
@@ -21,6 +22,15 @@ const mocks = vi.hoisted(() => {
       data: unknown
       retry: ReturnType<typeof vi.fn>
     }>,
+    // The real useSubscription is a useSyncExternalStore: a new snapshot
+    // re-renders its subscribers by itself. ServerStateBridge uses no router
+    // hooks, so without that push it would never see a snapshot delivered during
+    // a navigation, and this test would pass or fail on an artefact of the mock
+    // rather than on the behaviour it is about.
+    listeners: new Set<() => void>(),
+    publish() {
+      for (const listener of mocks.listeners) listener()
+    },
   }
 })
 
@@ -29,14 +39,27 @@ vi.mock('@/api', async (importOriginal) => ({
   acknowledgePiThreadActivity: mocks.acknowledgePiThreadActivity,
 }))
 
-vi.mock('@/wire/react', () => ({
-  useApplicationInstance: () => {},
-  useConnectionStatus: () => ({ state: 'open', instanceId: 'fixture' }),
-  useLastReadySubscriptionData: (
-    subscription: { state: string; data?: unknown },
-  ) => subscription.state === 'ready' ? subscription.data : null,
-  useSubscription: (topic: { tag: string }) => mocks.subscriptions[topic.tag],
-}))
+vi.mock('@/wire/react', async () => {
+  const { useEffect, useState } = await import('react')
+  return {
+    useApplicationInstance: () => {},
+    useConnectionStatus: () => ({ state: 'open', instanceId: 'fixture' }),
+    useLastReadySubscriptionData: (
+      subscription: { state: string; data?: unknown },
+    ) => subscription.state === 'ready' ? subscription.data : null,
+    useSubscription: (topic: { tag: string }) => {
+      const [, bump] = useState(0)
+      useEffect(() => {
+        const listener = () => bump((value) => value + 1)
+        mocks.listeners.add(listener)
+        return () => {
+          mocks.listeners.delete(listener)
+        }
+      }, [])
+      return mocks.subscriptions[topic.tag]
+    },
+  }
+})
 
 vi.mock('@/features/project-sidebar/ProjectSidebar', () => ({
   ProjectSidebar: () => null,
@@ -124,8 +147,12 @@ afterEach(() => {
 
 describe('App activity acknowledgement', () => {
   it('acknowledges a finished snapshot received in the same commit as an active route change', async () => {
+    // ServerStateBridge is what copies the socket topics into the store, and it
+    // sits beside App in main.tsx rather than inside it. Rendering App without it
+    // would leave every slice empty.
     renderWithStore(
       <MemoryRouter initialEntries={[workspacePath(project.id, firstThread.id, 'pi')]}>
+        <ServerStateBridge />
         <RouteChangeButton />
         <App />
       </MemoryRouter>,
@@ -148,6 +175,7 @@ describe('App activity acknowledgement', () => {
         threads: [...project.threads, childThread],
       }])
       mocks.subscriptions.agentActivity = ready([finished])
+      mocks.publish()
       fireEvent.click(screen.getByRole('button', { name: 'Open second thread' }))
     })
 

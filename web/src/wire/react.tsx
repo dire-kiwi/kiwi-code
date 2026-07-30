@@ -7,6 +7,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react'
+import { registerStateSocketClient } from '@/store/socketAccess'
 import {
   StateSocketClient,
   type StateConnectionSnapshot,
@@ -29,7 +30,11 @@ export function StateSocketProvider({
   const client = useMemo(() => suppliedClient ?? new StateSocketClient(), [suppliedClient])
   useEffect(() => {
     client.start()
+    // Late-bound so the store can be built before the socket exists; see the
+    // ordering note in main.tsx and the comment in store/socketAccess.ts.
+    registerStateSocketClient(client)
     return () => {
+      registerStateSocketClient(null)
       if (!suppliedClient) client.stop()
     }
   }, [client, suppliedClient])
