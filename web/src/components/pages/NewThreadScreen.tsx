@@ -25,8 +25,6 @@ import {
   defaultCodingAgentSelection,
   fallbackCodingAgentConfigs,
   isClaudeGPTCodingAgent,
-  isCodingAgent,
-  isCodingAgentSelection,
   isNativeCodingAgentSelection,
   nativeCodingAgentLabel,
 } from '../../codingAgents'
@@ -60,6 +58,13 @@ import type {
   Project,
   Thread,
 } from '../../types'
+import { useAppDispatch, useAppStore } from '../../store/hooks'
+import {
+  newThreadPreferencesRemembered,
+  selectNewThreadPreferences,
+  type AgentModelPreferences,
+  type ThreadLocation,
+} from '../../store/slices/newThreadPreferences'
 import { useSubscription } from '../../wire/react'
 import { CodingAgentsTopic, GitBranchesTopic, SettingsTopic } from '../../wire/topics'
 import { GhostButton, PrimaryButton } from '../atoms/Button'
@@ -69,8 +74,6 @@ import { Surface } from '../atoms/Surface'
 import { FeedbackMessage } from '../molecules/FeedbackMessage'
 import { ScreenHeader } from '../molecules/ScreenHeader'
 import { FormScreenTemplate } from '../templates/FormScreenTemplate'
-
-export type ThreadLocation = 'project' | 'worktree'
 
 type NewThreadScreenProps = {
   project: Project
@@ -85,85 +88,6 @@ const INITIAL_PROMPT_MAX_LENGTH = 12_000
 // inline Select, with hairline dividers between neighbouring controls.
 const inlineSettingClass = 'flex h-[26px] min-w-0 items-center gap-1 whitespace-nowrap font-mono text-[8px] text-ghost-dim'
 const inlineDividerClass = 'ml-[7px] border-l border-ghost-border/55 pl-[7px]'
-
-type AgentModelPreferences = {
-  model: string
-  thinkingLevel: string
-}
-
-type NewThreadPreferences = {
-  location: ThreadLocation
-  baseBranch: string
-  codingAgent: CodingAgentSelection
-  agentModels: Partial<Record<CodingAgent, AgentModelPreferences>>
-}
-
-function newThreadPreferencesStorageKey(projectId: string) {
-  return `kiwi-code:new-thread-preferences:${projectId}`
-}
-
-function rememberedNewThreadPreferences(projectId: string): NewThreadPreferences | null {
-  try {
-    const value: unknown = JSON.parse(
-      window.localStorage.getItem(newThreadPreferencesStorageKey(projectId)) ?? 'null',
-    )
-    if (!value || typeof value !== 'object') return null
-    const candidate = value as Partial<NewThreadPreferences> & Partial<AgentModelPreferences>
-    if (
-      (candidate.location !== 'project' && candidate.location !== 'worktree')
-      || !isCodingAgentSelection(candidate.codingAgent)
-      || typeof candidate.baseBranch !== 'string'
-    ) {
-      return null
-    }
-
-    const agentModels: Partial<Record<CodingAgent, AgentModelPreferences>> = {}
-    if (candidate.agentModels && typeof candidate.agentModels === 'object') {
-      for (const [agent, preferences] of Object.entries(candidate.agentModels)) {
-        if (
-          isCodingAgent(agent)
-          && preferences
-          && typeof preferences.model === 'string'
-          && typeof preferences.thinkingLevel === 'string'
-        ) {
-          agentModels[agent] = preferences
-        }
-      }
-    }
-
-    // Migrate preferences saved before model settings were remembered per agent.
-    if (typeof candidate.model === 'string' && typeof candidate.thinkingLevel === 'string') {
-      const agent = codingAgentTargetForSelection(candidate.codingAgent).agent
-      agentModels[agent] ??= {
-        model: candidate.model,
-        thinkingLevel: candidate.thinkingLevel,
-      }
-    }
-
-    return {
-      location: candidate.location,
-      baseBranch: candidate.baseBranch,
-      codingAgent: candidate.codingAgent,
-      agentModels,
-    }
-  } catch {
-    // Storage can be unavailable or contain stale data. The form defaults are
-    // still usable for this visit.
-    return null
-  }
-}
-
-function rememberNewThreadPreferences(projectId: string, preferences: NewThreadPreferences) {
-  try {
-    window.localStorage.setItem(
-      newThreadPreferencesStorageKey(projectId),
-      JSON.stringify(preferences),
-    )
-  } catch {
-    // A successful thread creation should not fail just because the browser
-    // blocks persistent storage.
-  }
-}
 
 function initialPromptWithImages(prompt: string, imagePaths: string[]) {
   return [prompt, imagePaths.join('\n')].filter(Boolean).join('\n\n')
@@ -183,7 +107,12 @@ export function NewThreadScreen({
   // only available choice.
   const branchesSubscription = useSubscription(GitBranchesTopic, { projectId: project.id })
   const settingsInitializedRef = useRef(false)
-  const [rememberedPreferences] = useState(() => rememberedNewThreadPreferences(project.id))
+  const dispatch = useAppDispatch()
+  const store = useAppStore()
+  // Read once: later remembering must not disturb a form already being filled in.
+  const [rememberedPreferences] = useState(
+    () => selectNewThreadPreferences(store.getState(), project.id),
+  )
   const hasManagedWorktree = project.threads.some((thread) => thread.worktree)
   const [location, setLocation] = useState<ThreadLocation>(() => {
     if (!project.isGitRepo && !hasManagedWorktree) return 'project'
@@ -348,15 +277,18 @@ export function NewThreadScreen({
         baseBranch: creatingWorktree ? baseBranch : undefined,
         nestedDepth: nestedDepth === 'inherit' ? undefined : nestedDepth,
       })
-      rememberNewThreadPreferences(project.id, {
-        location,
-        baseBranch,
-        codingAgent,
-        agentModels: {
-          ...agentModels,
-          [agentTarget.agent]: { model, thinkingLevel },
+      dispatch(newThreadPreferencesRemembered({
+        projectId: project.id,
+        preferences: {
+          location,
+          baseBranch,
+          codingAgent,
+          agentModels: {
+            ...agentModels,
+            [agentTarget.agent]: { model, thinkingLevel },
+          },
         },
-      })
+      }))
       writeNewThreadDraft(project.id, '')
       writeNewThreadPastes(project.id, [])
       onCreated(thread, {

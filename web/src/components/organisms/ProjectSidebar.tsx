@@ -45,13 +45,29 @@ import {
 } from '../../api'
 import { reloadFrontend } from '../../frontend-reload.mjs'
 import { formatCompactTokens, formatCompactUsd, usageDescription } from '../../lib/formatUsage'
-import {
-  booleanStoredState,
-  guardedStoredStateCodec,
-  useStoredState,
-} from '../../lib/storedState'
 import { createSidebarThreadIndex } from '../../sidebar-thread-index.mjs'
 import { defaultVisibleRootThreadIds } from '../../sidebar-thread-visibility.mjs'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
+import {
+  bookmarksOnlyChanged,
+  childThreadsCollapseToggled,
+  moreThreadsToggled,
+  projectCollapseToggled,
+  selectBookmarksOnly,
+  selectCollapsedChildThreadIds,
+  selectCollapsedProjectIds,
+  selectExpandedMoreProjectIds,
+  selectSidebarView,
+  selectSidebarWidth,
+  selectWebServersCollapsed,
+  sidebarViewChanged,
+  sidebarWidthChanged,
+  sidebarWidthKeyboardStep,
+  sidebarWidthNudged,
+  sidebarWidthReset,
+  threadRevealed,
+  webServersCollapseToggled,
+} from '../../store/slices/sidebar'
 import type { PiThreadActivity, ProcessWebServer, Profile, Project, Thread, ThreadUsageSnapshot } from '../../types'
 import { Button } from '../atoms/Button'
 import { IconButton } from '../atoms/IconButton'
@@ -101,48 +117,6 @@ type ProjectSidebarProps = {
 }
 
 const newProfileValue = '__new-profile__'
-
-type SidebarViewMode = 'activity' | 'tree'
-
-const sidebarViewStorageKey = 'kiwi-code.sidebar.view'
-const sidebarWidthStorageKey = 'kiwi-code.sidebar.width'
-const collapsedProjectsStorageKey = 'kiwi-code.sidebar.collapsed-projects'
-const collapsedChildThreadsStorageKey = 'kiwi-code.sidebar.collapsed-child-threads'
-const webServersCollapsedStorageKey = 'kiwi-code.sidebar.web-servers-collapsed'
-
-const defaultSidebarWidth = 288
-const minSidebarWidth = 288
-const maxSidebarWidth = 384
-const sidebarWidthKeyboardStep = 16
-
-const sidebarViewCodec = guardedStoredStateCodec(
-  (raw) => raw,
-  (value): value is SidebarViewMode => value === 'activity' || value === 'tree',
-)
-
-const storedIdSetCodec = guardedStoredStateCodec<ReadonlySet<string>>(
-  (raw) => {
-    const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed)
-      && parsed.every((id) => typeof id === 'string')
-      ? new Set(parsed)
-      : parsed
-  },
-  (value): value is ReadonlySet<string> => value instanceof Set,
-  (value) => JSON.stringify([...value]),
-)
-
-function clampSidebarWidth(value: number) {
-  return Math.min(maxSidebarWidth, Math.max(minSidebarWidth, Math.round(value)))
-}
-
-const sidebarWidthCodec = guardedStoredStateCodec(
-  (raw) => {
-    const value = Number(raw)
-    return Number.isFinite(value) && value > 0 ? clampSidebarWidth(value) : value
-  },
-  (value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0,
-)
 
 type DragItem =
   | { kind: 'project'; id: string }
@@ -233,33 +207,14 @@ export function ProjectSidebar({
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   const [savingOrder, setSavingOrder] = useState(false)
   const [restarting, setRestarting] = useState(false)
-  const [viewMode, setViewMode] = useStoredState(
-    sidebarViewStorageKey,
-    'activity',
-    sidebarViewCodec,
-  )
-  const [sidebarWidth, setSidebarWidth] = useStoredState(
-    sidebarWidthStorageKey,
-    defaultSidebarWidth,
-    sidebarWidthCodec,
-  )
-  const [collapsedProjectIds, setCollapsedProjectIds] = useStoredState(
-    collapsedProjectsStorageKey,
-    () => new Set<string>(),
-    storedIdSetCodec,
-  )
-  const [expandedMoreProjectIds, setExpandedMoreProjectIds] = useState<ReadonlySet<string>>(() => new Set())
-  const [collapsedChildThreadIds, setCollapsedChildThreadIds] = useStoredState(
-    collapsedChildThreadsStorageKey,
-    () => new Set<string>(),
-    storedIdSetCodec,
-  )
-  const [bookmarksOnly, setBookmarksOnly] = useState(false)
-  const [webServersCollapsed, setWebServersCollapsed] = useStoredState(
-    webServersCollapsedStorageKey,
-    false,
-    booleanStoredState,
-  )
+  const dispatch = useAppDispatch()
+  const viewMode = useAppSelector(selectSidebarView)
+  const sidebarWidth = useAppSelector(selectSidebarWidth)
+  const collapsedProjectIds = useAppSelector(selectCollapsedProjectIds)
+  const expandedMoreProjectIds = useAppSelector(selectExpandedMoreProjectIds)
+  const collapsedChildThreadIds = useAppSelector(selectCollapsedChildThreadIds)
+  const bookmarksOnly = useAppSelector(selectBookmarksOnly)
+  const webServersCollapsed = useAppSelector(selectWebServersCollapsed)
   const [threadMenuId, setThreadMenuId] = useState<string | null>(null)
   const draggedItemRef = useRef<DragItem | null>(null)
   const asideRef = useRef<HTMLElement>(null)
@@ -290,27 +245,13 @@ export function ProjectSidebar({
     if (!project || !tree || !selected) return
 
     const ancestors = tree.ancestors(selected.id)
-    if (ancestors.length > 0) {
-      setCollapsedChildThreadIds((current) => {
-        const next = new Set(current)
-        for (const ancestor of ancestors) next.delete(ancestor.id)
-        return next.size === current.size ? current : next
-      })
-    }
     const root = ancestors.at(-1) ?? selected
-    if (root?.archivedAt) {
-      setExpandedMoreProjectIds((current) => {
-        if (current.has(project.id)) return current
-        return new Set(current).add(project.id)
-      })
-    }
-    setCollapsedProjectIds((current) => {
-      if (!current.has(project.id)) return current
-      const next = new Set(current)
-      next.delete(project.id)
-      return next
-    })
-  }, [selectedThreadId, setCollapsedChildThreadIds, setCollapsedProjectIds, threadIndex])
+    dispatch(threadRevealed({
+      projectId: project.id,
+      ancestorIds: ancestors.map((ancestor) => ancestor.id),
+      expandArchived: Boolean(root?.archivedAt),
+    }))
+  }, [dispatch, selectedThreadId, threadIndex])
 
   async function handleProfileSelection(profileId: string) {
     if (profileId !== newProfileValue) {
@@ -369,36 +310,15 @@ export function ProjectSidebar({
   }
 
   function toggleProject(projectId: string) {
-    setCollapsedProjectIds((current) => {
-      const next = new Set(current)
-      if (next.has(projectId)) {
-        next.delete(projectId)
-      } else {
-        next.add(projectId)
-      }
-      return next
-    })
+    dispatch(projectCollapseToggled(projectId))
   }
 
   function toggleMoreThreads(projectId: string) {
-    setExpandedMoreProjectIds((current) => {
-      const next = new Set(current)
-      if (next.has(projectId)) {
-        next.delete(projectId)
-      } else {
-        next.add(projectId)
-      }
-      return next
-    })
+    dispatch(moreThreadsToggled(projectId))
   }
 
   function toggleChildThreads(threadId: string) {
-    setCollapsedChildThreadIds((current) => {
-      const next = new Set(current)
-      if (next.has(threadId)) next.delete(threadId)
-      else next.add(threadId)
-      return next
-    })
+    dispatch(childThreadsCollapseToggled(threadId))
   }
 
   function startProjectDrag(event: DragEvent<HTMLButtonElement>, projectId: string) {
@@ -819,7 +739,7 @@ export function ProjectSidebar({
                 type="button"
                 size="xs"
                 variant="subtle"
-                onClick={() => setViewMode('activity')}
+                onClick={() => dispatch(sidebarViewChanged('activity'))}
                 aria-pressed={viewMode === 'activity'}
                 aria-label="Activity view"
                 title="Activity view: working, needs review, pinned, recent"
@@ -831,7 +751,7 @@ export function ProjectSidebar({
                 type="button"
                 size="xs"
                 variant="subtle"
-                onClick={() => setViewMode('tree')}
+                onClick={() => dispatch(sidebarViewChanged('tree'))}
                 aria-pressed={viewMode === 'tree'}
                 aria-label="Projects view"
                 title="Projects view: the full project and thread tree"
@@ -845,7 +765,7 @@ export function ProjectSidebar({
                 type="button"
                 size="sm"
                 variant="subtle"
-                onClick={() => setBookmarksOnly((current) => !current)}
+                onClick={() => dispatch(bookmarksOnlyChanged(!bookmarksOnly))}
                 aria-pressed={bookmarksOnly}
                 aria-label={bookmarksOnly ? 'Show all threads' : 'Show bookmarked threads only'}
                 title={bookmarksOnly ? 'Show all threads' : 'Show bookmarked threads only'}
@@ -965,7 +885,7 @@ export function ProjectSidebar({
               onSelectThread={onSelectThread}
               onNewThread={onNewThread}
               onOpenFinder={onOpenFinder}
-              onShowAllThreads={() => setViewMode('tree')}
+              onShowAllThreads={() => dispatch(sidebarViewChanged('tree'))}
               onArchiveThread={onArchiveThread}
               onDeleteThread={onDeleteThread}
             />
@@ -976,7 +896,7 @@ export function ProjectSidebar({
               <Button
                 type="button"
                 variant="text"
-                onClick={() => setBookmarksOnly(false)}
+                onClick={() => dispatch(bookmarksOnlyChanged(false))}
                 className="mt-2 text-[9px] text-ghost-green"
               >
                 Show all threads
@@ -1124,7 +1044,7 @@ export function ProjectSidebar({
             <section className="mt-4 border-t border-ghost-border/55 pt-1.5" aria-labelledby="sidebar-web-servers-title">
               <Button
                 type="button"
-                onClick={() => setWebServersCollapsed((current) => !current)}
+                onClick={() => dispatch(webServersCollapseToggled())}
                 aria-expanded={!webServersCollapsed}
                 aria-controls="sidebar-web-servers-list"
                 className="flex h-6 w-full items-center gap-1.5 rounded-md px-1.5 text-left transition hover:bg-ghost-raised/45"
@@ -1246,14 +1166,14 @@ export function ProjectSidebar({
           onPointerMove={(event) => {
             if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
             const left = asideRef.current?.getBoundingClientRect().left ?? 0
-            setSidebarWidth(clampSidebarWidth(event.clientX - left))
+            dispatch(sidebarWidthChanged(event.clientX - left))
           }}
-          onDoubleClick={() => setSidebarWidth(defaultSidebarWidth)}
+          onDoubleClick={() => dispatch(sidebarWidthReset())}
           onKeyDown={(event) => {
             if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
             event.preventDefault()
             const delta = event.key === 'ArrowLeft' ? -sidebarWidthKeyboardStep : sidebarWidthKeyboardStep
-            setSidebarWidth((current) => clampSidebarWidth(current + delta))
+            dispatch(sidebarWidthNudged(delta))
           }}
           className="absolute inset-y-0 right-0 z-50 hidden w-1 cursor-col-resize transition-colors hover:bg-ghost-green/30 focus-visible:bg-ghost-green/40 active:bg-ghost-green/40 md:block"
         />

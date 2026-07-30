@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { shallowEqual } from 'react-redux'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   Activity,
@@ -16,9 +17,7 @@ import {
   codingAgentSelectionForTarget,
   codingAgentTargetForSelection,
   configuredCodingAgentChoices,
-  isCodingAgent,
 } from '../../codingAgents'
-import { guardedStoredStateCodec, useStoredState } from '../../lib/storedState'
 import { workspacePath } from '../../routes'
 import type {
   AgentContextStatus,
@@ -37,6 +36,16 @@ import type {
   TmuxWindow,
   WorkflowRun,
 } from '../../types'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
+import {
+  resolveThreadWorkspace,
+  threadClaudePresentationChanged,
+  threadCodingAgentChanged,
+  threadPiPresentationChanged,
+  threadWorkspaceKey,
+  threadWorkspaceMounted,
+  type ThreadWorkspaceRouting,
+} from '../../store/slices/threadWorkspace'
 import { Select } from '../atoms/Select'
 import { OpenSidebarButton } from '../molecules/OpenSidebarButton'
 import { GitBranchBar } from '../organisms/GitBranchBar'
@@ -101,28 +110,6 @@ const fallbackWorkspaceCodingAgents: Array<{ id: CodingAgentSelection; label: st
   { id: 'codex', label: 'Codex CLI' },
 ]
 
-function codingAgentStorageKey(projectId: string, threadId: string) {
-  return `kiwi-code:coding-agent:${projectId}:${threadId}`
-}
-
-function piPresentationStorageKey(projectId: string, threadId: string) {
-  return `kiwi-code:pi-presentation:${projectId}:${threadId}`
-}
-
-function claudePresentationStorageKey(projectId: string, threadId: string) {
-  return `kiwi-code:claude-presentation:${projectId}:${threadId}`
-}
-
-const codingAgentCodec = guardedStoredStateCodec(
-  (raw) => raw,
-  isCodingAgent,
-)
-
-const presentationCodec = guardedStoredStateCodec(
-  (raw) => raw,
-  (value): value is PiPresentation => value === 'native' || value === 'terminal',
-)
-
 export function TerminalWorkspace({
   project,
   thread,
@@ -167,35 +154,21 @@ export function TerminalWorkspace({
       : initialCodingAgentChoices,
     [initialCodingAgentChoices, settings],
   )
-  const [codingAgent, setCodingAgent] = useStoredState<CodingAgent>(
-    codingAgentStorageKey(project.id, thread.id),
-    readOnlySubagent ? 'pi' : initialCodingAgent ?? 'pi',
-    codingAgentCodec,
-    {
-      load: !readOnlySubagent && !initialCodingAgent,
-      save: !readOnlySubagent,
-    },
+  const dispatch = useAppDispatch()
+  const workspaceKey = threadWorkspaceKey(project.id, thread.id)
+  const routing = useMemo<ThreadWorkspaceRouting>(
+    () => ({ readOnlySubagent, initialCodingAgent, initialPresentation }),
+    [initialCodingAgent, initialPresentation, readOnlySubagent],
   )
-  const [piPresentation, setPiPresentation] = useStoredState<PiPresentation>(
-    piPresentationStorageKey(project.id, thread.id),
-    readOnlySubagent || initialCodingAgent !== 'pi' || !initialPresentation
-      ? 'native'
-      : initialPresentation,
-    presentationCodec,
-    {
-      load: !readOnlySubagent && !(initialCodingAgent === 'pi' && initialPresentation),
-      save: !readOnlySubagent,
-    },
+  // Selecting through the same resolver the reducer uses keeps the first render
+  // correct, so the panes below never seed themselves from the wrong presentation.
+  const { codingAgent, piPresentation, claudePresentation } = useAppSelector(
+    (state) => resolveThreadWorkspace(state.threadWorkspace.byThread[workspaceKey], routing),
+    shallowEqual,
   )
-  const [claudePresentation, setClaudePresentation] = useStoredState<PiPresentation>(
-    claudePresentationStorageKey(project.id, thread.id),
-    initialCodingAgent === 'claude' && initialPresentation ? initialPresentation : 'terminal',
-    presentationCodec,
-    {
-      load: !(initialCodingAgent === 'claude' && initialPresentation),
-      save: !readOnlySubagent,
-    },
-  )
+  useEffect(() => {
+    dispatch(threadWorkspaceMounted({ key: workspaceKey, routing }))
+  }, [dispatch, routing, workspaceKey])
   const [piNativeOpened, setPiNativeOpened] = useState(() => piPresentation === 'native')
   const [piTerminalOpened, setPiTerminalOpened] = useState(() => piPresentation === 'terminal')
   const [claudeNativeOpened, setClaudeNativeOpened] = useState(() => claudePresentation === 'native')
@@ -248,10 +221,9 @@ export function TerminalWorkspace({
   }, [project.id, thread.id])
 
   useEffect(() => {
-    setCodingAgent((current) =>
-      codingAgentChoices.some((choice) => choice.id === current) ? current : 'pi',
-    )
-  }, [codingAgentChoices, setCodingAgent])
+    if (codingAgentChoices.some((choice) => choice.id === codingAgent)) return
+    dispatch(threadCodingAgentChanged({ key: workspaceKey, codingAgent: 'pi' }))
+  }, [codingAgent, codingAgentChoices, dispatch, workspaceKey])
 
   const markToolOpened = useCallback((tool: WorkspaceTool) => {
     setOpenedTools((current) => (current.includes(tool) ? current : [...current, tool]))
@@ -292,14 +264,14 @@ export function TerminalWorkspace({
     if (agent === 'pi') {
       if (presentation === 'native') setPiNativeOpened(true)
       if (presentation === 'terminal') setPiTerminalOpened(true)
-      setPiPresentation(presentation)
+      dispatch(threadPiPresentationChanged({ key: workspaceKey, presentation }))
     }
     if (agent === 'claude') {
       if (presentation === 'native') setClaudeNativeOpened(true)
       if (presentation === 'terminal') setClaudeTerminalOpened(true)
-      setClaudePresentation(presentation)
+      dispatch(threadClaudePresentationChanged({ key: workspaceKey, presentation }))
     }
-    setCodingAgent(agent)
+    dispatch(threadCodingAgentChanged({ key: workspaceKey, codingAgent: agent }))
     setStatuses((current) => ({ ...current, pi: 'connecting' }))
     activateTool('pi')
   }

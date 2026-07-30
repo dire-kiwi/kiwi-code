@@ -10,7 +10,6 @@ import {
   updateThreadOrder,
 } from './api'
 import { isCodingAgent } from './codingAgents'
-import { guardedStoredStateCodec, useStoredState } from './lib/storedState'
 import { WorkspaceLoadingState } from './components/molecules/WorkspaceLoadingState'
 import { ProjectSidebar } from './components/organisms/ProjectSidebar'
 import { ProjectThreadFinder } from './components/organisms/ProjectThreadFinder'
@@ -55,6 +54,19 @@ import {
   type PiActivityAcknowledgement,
 } from './pi-activity-reconciliation.mjs'
 import { createSidebarThreadIndex } from './sidebar-thread-index.mjs'
+import { useAppDispatch, useAppSelector } from './store/hooks'
+import { activeProfileSelected, selectActiveProfileId } from './store/slices/preferences'
+import {
+  detailsSidebarExpandedChanged,
+  projectFinderClosed,
+  projectFinderOpened,
+  selectDetailsSidebarExpanded,
+  selectProjectFinderOpen,
+  selectSidebarOpen,
+  sidebarClosed,
+  sidebarDismissed,
+  sidebarOpened,
+} from './store/slices/ui'
 import type {
   CodingAgentStart,
   PiThreadActivity,
@@ -82,11 +94,6 @@ import {
 } from './wire/topics'
 
 const defaultWorkspaceTool: WorkspaceTool = 'pi'
-const activeProfileStorageKey = 'kiwi-code-active-profile'
-const activeProfileCodec = guardedStoredStateCodec(
-  (raw) => raw,
-  (value): value is string => typeof value === 'string' && value.length > 0,
-)
 
 type NewThreadStart = CodingAgentStart & {
   kind: 'new-thread-start'
@@ -297,22 +304,19 @@ export default function App() {
   }, [])
   useApplicationInstance(reloadForNewInstance)
 
+  const dispatch = useAppDispatch()
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [profilesHydrated, setProfilesHydrated] = useState(false)
-  const [activeProfileId, setActiveProfileId] = useStoredState(
-    activeProfileStorageKey,
-    'personal',
-    activeProfileCodec,
-  )
+  const activeProfileId = useAppSelector(selectActiveProfileId)
   const [projects, setProjects] = useState<Project[]>([])
   const [projectsHydrated, setProjectsHydrated] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null)
   const [archivingThreadId, setArchivingThreadId] = useState<string | null>(null)
   const [bookmarkingThreadId, setBookmarkingThreadId] = useState<string | null>(null)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [projectFinderOpen, setProjectFinderOpen] = useState(false)
-  const [detailsSidebarExpanded, setDetailsSidebarExpanded] = useState(false)
+  const sidebarOpen = useAppSelector(selectSidebarOpen)
+  const projectFinderOpen = useAppSelector(selectProjectFinderOpen)
+  const detailsSidebarExpanded = useAppSelector(selectDetailsSidebarExpanded)
   const [piActivities, setPiActivities] = useState<PiThreadActivity[]>([])
   const processWebServers = (
     useLastReadySubscriptionData(processSubscription) as ProcessWebServer[] | null
@@ -409,7 +413,7 @@ export default function App() {
       if (!event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'f') return
       event.preventDefault()
       event.stopPropagation()
-      setProjectFinderOpen(true)
+      dispatch(projectFinderOpened())
     }
 
     window.addEventListener('keydown', handleProjectFinderShortcut, true)
@@ -542,13 +546,14 @@ export default function App() {
 
   useEffect(() => {
     if (profilesLoading || profiles.length === 0 || profiles.some((profile) => profile.id === activeProfileId)) return
-    setActiveProfileId(profiles[0].id)
-  }, [activeProfileId, profiles, profilesLoading])
+    dispatch(activeProfileSelected(profiles[0].id))
+  }, [activeProfileId, dispatch, profiles, profilesLoading])
 
   useEffect(() => {
     if (!routedProfileId) return
-    setActiveProfileId((current) => current === routedProfileId ? current : routedProfileId)
-  }, [routedProfileId])
+    // An equal assignment is a no-op under immer, so no guard is needed here.
+    dispatch(activeProfileSelected(routedProfileId))
+  }, [dispatch, routedProfileId])
 
   useEffect(() => {
     if (!routedProjectId) return
@@ -561,8 +566,7 @@ export default function App() {
       if (event.repeat || newThreadProjectId === projectId) return
 
       navigate(newThreadPath(projectId))
-      setSidebarOpen(false)
-      setProjectFinderOpen(false)
+      dispatch(sidebarDismissed())
     }
 
     window.addEventListener('keydown', handleNewThreadShortcut, true)
@@ -599,8 +603,7 @@ export default function App() {
       ? activeTool
       : defaultWorkspaceTool
     navigate(workspacePath(projectId, threadId, tool))
-    setSidebarOpen(false)
-    setProjectFinderOpen(false)
+    dispatch(sidebarDismissed())
   }
 
   function handleFinderProjectSelected(project: Project) {
@@ -612,14 +615,13 @@ export default function App() {
       return
     }
     navigate(newThreadPath(project.id))
-    setSidebarOpen(false)
-    setProjectFinderOpen(false)
+    dispatch(sidebarDismissed())
   }
 
   function handleProfileSelected(profileId: string) {
     if (!profiles.some((profile) => profile.id === profileId)) return
-    setActiveProfileId(profileId)
-    setSidebarOpen(false)
+    dispatch(activeProfileSelected(profileId))
+    dispatch(sidebarClosed())
     if (cleanupMatch || sessionLogMatch || settingsMatch || tmuxMatch) return
 
     const profileProjects = projects.filter((project) => project.profileId === profileId)
@@ -633,14 +635,14 @@ export default function App() {
     setProfiles((current) => current.some((item) => item.id === profile.id)
       ? current
       : [...current, profile])
-    setActiveProfileId(profile.id)
-    setSidebarOpen(false)
+    dispatch(activeProfileSelected(profile.id))
+    dispatch(sidebarClosed())
     if (!cleanupMatch && !sessionLogMatch && !settingsMatch && !tmuxMatch) navigate('/')
   }
 
   function handleCreated(project: Project) {
     setProjects((current) => projectsWithNewProjectFirst(current, project))
-    setSidebarOpen(false)
+    dispatch(sidebarClosed())
     const thread = project.threads.find((item) => !item.parentThreadId) ?? project.threads[0]
     navigate(thread ? workspacePath(project.id, thread.id, defaultWorkspaceTool) : newThreadPath(project.id))
   }
@@ -657,7 +659,7 @@ export default function App() {
         threads: [thread, ...project.threads],
       }
     }))
-    setSidebarOpen(false)
+    dispatch(sidebarClosed())
     navigate(workspacePath(projectId, thread.id, 'pi'), {
       replace: true,
       state: {
@@ -688,7 +690,7 @@ export default function App() {
       project.id === visibleProject.id ? visibleProject : project,
     ))
     if (selectedProject?.id === updatedProject.id) {
-      setActiveProfileId(updatedProject.profileId)
+      dispatch(activeProfileSelected(updatedProject.profileId))
     }
   }
 
@@ -867,34 +869,34 @@ export default function App() {
         tmuxSelected={Boolean(tmuxMatch)}
         settingsSelected={Boolean(settingsMatch || settingsSectionMatch)}
         isOpen={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-        onOpenFinder={() => setProjectFinderOpen(true)}
+        onClose={() => dispatch(sidebarClosed())}
+        onOpenFinder={() => dispatch(projectFinderOpened())}
         onSelectProfile={handleProfileSelected}
         onProfileCreated={handleProfileCreated}
         onSelectThread={handleThreadSelected}
         onNewThread={(projectId) => {
           navigate(newThreadPath(projectId))
-          setSidebarOpen(false)
+          dispatch(sidebarClosed())
         }}
         onOpenProjectSettings={(projectId) => {
           navigate(projectSettingsPath(projectId, DEFAULT_PROJECT_SETTINGS_SECTION))
-          setSidebarOpen(false)
+          dispatch(sidebarClosed())
         }}
         onOpenCleanup={() => {
           navigate(CLEANUP_ROUTE)
-          setSidebarOpen(false)
+          dispatch(sidebarClosed())
         }}
         onOpenSessionLog={() => {
           navigate(SESSION_LOG_ROUTE)
-          setSidebarOpen(false)
+          dispatch(sidebarClosed())
         }}
         onOpenTmux={() => {
           navigate(TMUX_ROUTE)
-          setSidebarOpen(false)
+          dispatch(sidebarClosed())
         }}
         onOpenSettings={() => {
           navigate(settingsPath(DEFAULT_GLOBAL_SETTINGS_SECTION))
-          setSidebarOpen(false)
+          dispatch(sidebarClosed())
         }}
         onProjectCreated={handleCreated}
         onReorderProjects={handleProjectsReordered}
@@ -914,7 +916,7 @@ export default function App() {
               path={CLEANUP_ROUTE}
               element={(
                 <CleanupScreen
-                  onOpenSidebar={() => setSidebarOpen(true)}
+                  onOpenSidebar={() => dispatch(sidebarOpened())}
                   onBack={() => navigate(workspaceReturnDestination(), { replace: true })}
                 />
               )}
@@ -923,7 +925,7 @@ export default function App() {
               path={SESSION_LOG_ROUTE}
               element={(
                 <SessionLogScreen
-                  onOpenSidebar={() => setSidebarOpen(true)}
+                  onOpenSidebar={() => dispatch(sidebarOpened())}
                   onBack={() => navigate(workspaceReturnDestination(), { replace: true })}
                 />
               )}
@@ -932,7 +934,7 @@ export default function App() {
               path={TMUX_ROUTE}
               element={(
                 <TmuxScreen
-                  onOpenSidebar={() => setSidebarOpen(true)}
+                  onOpenSidebar={() => dispatch(sidebarOpened())}
                   onBack={() => navigate(workspaceReturnDestination(), { replace: true })}
                 />
               )}
@@ -948,7 +950,7 @@ export default function App() {
                   scope="global"
                   profiles={profiles}
                   onProjectUpdated={handleProjectUpdated}
-                  onOpenSidebar={() => setSidebarOpen(true)}
+                  onOpenSidebar={() => dispatch(sidebarOpened())}
                   onBack={() => navigate(workspaceReturnDestination(), { replace: true })}
                 />
               )}
@@ -961,7 +963,7 @@ export default function App() {
                   scope="thread"
                   project={selectedProject}
                   thread={selectedThread}
-                  onOpenSidebar={() => setSidebarOpen(true)}
+                  onOpenSidebar={() => dispatch(sidebarOpened())}
                   onBack={() => navigate(
                     workspacePath(selectedProject.id, selectedThread.id, defaultWorkspaceTool),
                     { replace: true },
@@ -987,7 +989,7 @@ export default function App() {
                   project={settingsProject}
                   profiles={profiles}
                   onProjectUpdated={handleProjectUpdated}
-                  onOpenSidebar={() => setSidebarOpen(true)}
+                  onOpenSidebar={() => dispatch(sidebarOpened())}
                   onBack={() => navigate(workspaceReturnDestination(settingsProject.id), { replace: true })}
                 />
               ) : (
@@ -1000,7 +1002,7 @@ export default function App() {
                 <NewThreadScreen
                   key={newThreadProject.id}
                   project={newThreadProject}
-                  onOpenSidebar={() => setSidebarOpen(true)}
+                  onOpenSidebar={() => dispatch(sidebarOpened())}
                   onCancel={() => navigate(workspaceReturnDestination(newThreadProject.id), { replace: true })}
                   onCreated={(thread, start) =>
                     handleThreadCreated(newThreadProject.id, thread, start)}
@@ -1021,8 +1023,8 @@ export default function App() {
                   activeTool={activeTool}
                   detailsExpanded={detailsSidebarExpanded}
                   nativeViewSuppressed={sidebarOpen || projectFinderOpen}
-                  onDetailsExpandedChange={setDetailsSidebarExpanded}
-                  onOpenSidebar={() => setSidebarOpen(true)}
+                  onDetailsExpandedChange={(expanded) => dispatch(detailsSidebarExpandedChanged(expanded))}
+                  onOpenSidebar={() => dispatch(sidebarOpened())}
                   onThreadInteraction={() => acknowledgeThreadActivity(selectedProject.id, selectedThread.id)}
                   onThreadUpdated={(thread) => handleThreadUpdated(selectedProject.id, thread)}
                   onSelectThread={(thread) => handleThreadSelected(selectedProject.id, thread.id)}
@@ -1055,7 +1057,7 @@ export default function App() {
                   loadError={loadError}
                   projectCount={activeProjects.length}
                   profileName={activeProfile?.name ?? 'this profile'}
-                  onOpenSidebar={() => setSidebarOpen(true)}
+                  onOpenSidebar={() => dispatch(sidebarOpened())}
                 />
               )}
             />
@@ -1070,7 +1072,7 @@ export default function App() {
           projects={projects}
           currentProjectId={selectedProject?.id ?? null}
           currentThreadId={selectedThread?.id ?? null}
-          onClose={() => setProjectFinderOpen(false)}
+          onClose={() => dispatch(projectFinderClosed())}
           onSelectProject={handleFinderProjectSelected}
           onSelectThread={(project, thread) => handleThreadSelected(project.id, thread.id)}
         />

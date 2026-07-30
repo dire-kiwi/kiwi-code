@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fallbackCodingAgentConfigs } from '../../codingAgents'
 import type { Project } from '../../types'
+import { renderWithStore } from '../../store/testing'
 import { NewThreadScreen } from './NewThreadScreen'
 
 const mocks = vi.hoisted(() => ({
@@ -65,7 +66,7 @@ beforeEach(() => {
 
 describe('NewThreadScreen worktree controls', () => {
   it('shows a separate start location and searchable authoritative branch list', async () => {
-    render(
+    renderWithStore(
       <NewThreadScreen
         project={project}
         onOpenSidebar={() => {}}

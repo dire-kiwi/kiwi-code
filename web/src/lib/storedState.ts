@@ -1,16 +1,8 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
-
 export type StorageLike = Pick<Storage, 'getItem' | 'setItem'>
 
 export type StoredStateCodec<Value> = {
   decode: (raw: string) => Value | undefined
   encode: (value: Value) => string
-}
-
-type StoredStateOptions = {
-  storage?: StorageLike | null
-  load?: boolean
-  save?: boolean
 }
 
 function fallbackValue<Value>(fallback: Value | (() => Value)): Value {
@@ -19,7 +11,7 @@ function fallbackValue<Value>(fallback: Value | (() => Value)): Value {
     : fallback
 }
 
-function browserStorage(): StorageLike | null {
+export function browserStorage(): Storage | null {
   try {
     return window.localStorage
   } catch {
@@ -77,26 +69,6 @@ export function writeStoredState<Value>(
   } catch {
     return false
   }
-}
-
-export function useStoredState<Value>(
-  key: string,
-  fallback: Value | (() => Value),
-  codec: StoredStateCodec<Value>,
-  options: StoredStateOptions = {},
-): [Value, Dispatch<SetStateAction<Value>>] {
-  const storage = options.storage === undefined ? browserStorage() : options.storage
-  const load = options.load !== false
-  const save = options.save !== false
-  const [value, setValue] = useState<Value>(() =>
-    load ? readStoredState(key, fallback, codec, storage) : fallbackValue(fallback),
-  )
-
-  useEffect(() => {
-    if (save) writeStoredState(key, value, codec, storage)
-  }, [codec, key, save, storage, value])
-
-  return [value, setValue]
 }
 
 export const booleanStoredState = guardedStoredStateCodec(

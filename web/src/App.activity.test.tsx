@@ -2,7 +2,6 @@ import {
   act,
   cleanup,
   fireEvent,
-  render,
   screen,
   waitFor,
 } from '@testing-library/react'
@@ -11,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PiThreadActivity, Profile, Project, Thread } from './types'
 import { workspacePath } from './routes'
 import App from './App'
+import { renderWithStore } from './store/testing'
 
 const mocks = vi.hoisted(() => {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
@@ -124,7 +124,7 @@ afterEach(() => {
 
 describe('App activity acknowledgement', () => {
   it('acknowledges a finished snapshot received in the same commit as an active route change', async () => {
-    render(
+    renderWithStore(
       <MemoryRouter initialEntries={[workspacePath(project.id, firstThread.id, 'pi')]}>
         <RouteChangeButton />
         <App />
