@@ -19,7 +19,6 @@ const (
 	stateTopicThreadStatus      = "thread.status"
 	stateTopicSettings          = "settings"
 	stateTopicCodingAgents      = "codingAgents"
-	stateTopicSandboxConfig     = "sandboxConfig"
 	stateTopicCleanup           = "cleanup"
 	stateTopicSessionClosures   = "sessionClosures"
 	stateTopicGitBranches       = "git.branches"
@@ -60,13 +59,6 @@ type stateThreadTopic struct {
 type stateCodingAgentsTopic struct {
 	Tag       string `json:"tag"`
 	ProjectID string `json:"projectId,omitempty"`
-}
-
-type stateSandboxTopic struct {
-	Tag       string `json:"tag"`
-	Scope     string `json:"scope"`
-	ProjectID string `json:"projectId,omitempty"`
-	ThreadID  string `json:"threadId,omitempty"`
 }
 
 func (s *Server) decodeStateTopic(raw json.RawMessage, protectedOrigins []string) (stateTopicHandler, any, error) {
@@ -166,30 +158,6 @@ func (s *Server) stateTopicRegistry(protectedOrigins []string) map[string]stateT
 		},
 		open: func(ctx context.Context, value any, channel *stateChannel) error {
 			return s.openCodingAgentsTopic(ctx, value.(stateCodingAgentsTopic).ProjectID, channel)
-		},
-	}
-	registry[stateTopicSandboxConfig] = stateTopicDefinition{
-		decode: func(raw json.RawMessage) (any, error) {
-			var params stateSandboxTopic
-			if err := wire.DecodeExactObject(raw, &params, "tag", "scope", "projectId", "threadId"); err != nil || params.Tag != stateTopicSandboxConfig {
-				return nil, errors.New("Invalid state topic parameters.")
-			}
-			switch params.Scope {
-			case "global":
-				if params.ProjectID != "" || params.ThreadID != "" {
-					return nil, errors.New("Global sandbox topics do not accept project or thread ids.")
-				}
-			case "thread":
-				if strings.TrimSpace(params.ProjectID) == "" || strings.TrimSpace(params.ThreadID) == "" {
-					return nil, errors.New("Thread sandbox topics require project and thread ids.")
-				}
-			default:
-				return nil, errors.New("Sandbox scope must be global or thread.")
-			}
-			return params, nil
-		},
-		open: func(ctx context.Context, value any, channel *stateChannel) error {
-			return s.openSandboxConfigTopic(ctx, value.(stateSandboxTopic), channel)
 		},
 	}
 	return registry

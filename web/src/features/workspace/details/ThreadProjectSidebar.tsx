@@ -13,13 +13,12 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Pencil,
-  Shield,
   SquareTerminal,
   X,
 } from 'lucide-react'
 import { setThreadTitleLocked, updateThreadTitle } from '@/api'
 import { formatWhen } from '@/lib/formatWhen'
-import { threadSandboxPath } from '@/app/routes'
+import { projectSettingsPath } from '@/app/routes'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { planSelected, selectWorkflowRuns } from '@/store/slices/threadWorkspaceRuntime'
 import type { Project, Thread, ThreadPlan, ThreadUsageSnapshot, WorkflowRun } from '@/types'
@@ -422,12 +421,12 @@ export function ThreadProjectSidebar({
                     {thread.cwd}
                   </p>
                   <Link
-                    to={threadSandboxPath(project.id, thread.id)}
+                    to={projectSettingsPath(project.id, 'branches')}
                     className="mt-2.5 flex items-center gap-1.5 rounded-lg border border-ghost-border/70 px-2.5 py-1.5 text-[10px] font-medium text-ghost-muted transition hover:border-ghost-green/45 hover:text-ghost-bright-white"
-                    title="Configure the Kiwi Sandbox for this thread"
+                    title="Configure related projects for coding agents"
                   >
-                    <Shield size={11} className="text-ghost-green" />
-                    Sandbox settings
+                    <FolderGit2 size={11} className="text-ghost-green" />
+                    Related projects
                   </Link>
                 </section>
 

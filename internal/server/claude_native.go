@@ -379,7 +379,7 @@ func (m *claudeNativeManager) getOrStart(
 		return current, nil
 	}
 
-	process, err := m.startProcess(key, thread, threadEndpoint, launchOptions, false)
+	process, err := m.startProcess(key, item, thread, threadEndpoint, launchOptions, false)
 	if err != nil {
 		return nil, err
 	}
@@ -431,7 +431,7 @@ func (m *claudeNativeManager) restart(
 		}
 	}
 
-	process, err := m.startProcess(key, thread, threadEndpoint, launchOptions, resetSession)
+	process, err := m.startProcess(key, item, thread, threadEndpoint, launchOptions, resetSession)
 	if err != nil {
 		return nil, err
 	}
@@ -448,6 +448,7 @@ func (m *claudeNativeManager) restart(
 
 func (m *claudeNativeManager) startProcess(
 	key piNativeProcessKey,
+	item project.Project,
 	thread project.Thread,
 	threadEndpoint string,
 	launchOptions codingAgentLaunchOptions,
@@ -481,9 +482,7 @@ func (m *claudeNativeManager) startProcess(
 			return nil, errors.New("Claude Code is not installed or not on PATH")
 		}
 	}
-	// Kiwi Sandbox is intentionally not loaded into Claude for now. Preserve
-	// its related-project ergonomics through Claude's native --add-dir flag.
-	relatedDirectories, err := codingAgentRelatedProjectDirectories(thread)
+	relatedDirectories, err := codingAgentRelatedProjectDirectories(item, thread)
 	if err != nil {
 		return nil, err
 	}

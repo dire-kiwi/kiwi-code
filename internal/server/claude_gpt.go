@@ -21,8 +21,7 @@ const (
 	defaultClaudeGPTHaikuModel    = "gpt-5.6-luna"
 	claudeGPTProfileDirectoryName = "claude-code-gpt-profile"
 	claudeSettingsFileName        = "settings.json"
-	claudeSandboxPluginID         = "sandbox-exec@dire-agent-extensions"
-	claudeLaunchSettings          = `{"skipDangerousModePermissionPrompt":true,"enabledPlugins":{"` + claudeSandboxPluginID + `":false}}`
+	claudeLaunchSettings          = `{"skipDangerousModePermissionPrompt":true}`
 	maxCLIProxyAPIModelsResponse  = 1 << 20
 	cliProxyAPIBaseURLEnvironment = "KIWI_CODE_CLIPROXY_BASE_URL"
 	cliProxyAPIKeyEnvironment     = "KIWI_CODE_CLIPROXY_API_KEY"
@@ -345,22 +344,6 @@ func filterClaudeGPTSettings(contents []byte) ([]byte, error) {
 		}
 		settings["env"] = encoded
 	}
-	if rawPlugins, ok := settings["enabledPlugins"]; ok {
-		var plugins map[string]json.RawMessage
-		if err := json.Unmarshal(rawPlugins, &plugins); err != nil {
-			return nil, fmt.Errorf("decode Claude settings enabledPlugins: %w", err)
-		}
-		// Kiwi Sandbox replaces the legacy user-installed sandbox-exec plugin.
-		// Keep the old plugin disabled in the isolated GPT profile so both
-		// permission hooks cannot race or wrap the same tool call.
-		delete(plugins, claudeSandboxPluginID)
-		encoded, err := json.Marshal(plugins)
-		if err != nil {
-			return nil, fmt.Errorf("encode Claude settings enabledPlugins: %w", err)
-		}
-		settings["enabledPlugins"] = encoded
-	}
-
 	filtered, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("encode Claude GPT settings: %w", err)

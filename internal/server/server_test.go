@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/dire-kiwi/kiwi-code/internal/project"
@@ -295,6 +296,20 @@ func TestProfileAPIAndProjectAssignment(t *testing.T) {
 	}
 	if updated.WorktreeBranchPrefix != "ivan/" {
 		t.Fatalf("updated project branch prefix = %q", updated.WorktreeBranchPrefix)
+	}
+
+	relatedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(relatedResponse, httptest.NewRequest(http.MethodPatch, updatePath,
+		bytes.NewBufferString(`{"relatedProjects":[" ../shared ","$HOME/personal"]}`)))
+	if relatedResponse.Code != http.StatusOK {
+		t.Fatalf("update related projects status = %d, body = %s", relatedResponse.Code, relatedResponse.Body.String())
+	}
+	updated = project.Project{}
+	if err := json.NewDecoder(relatedResponse.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(updated.RelatedProjects, []string{"../shared", "$HOME/personal"}) {
+		t.Fatalf("updated related projects = %#v", updated.RelatedProjects)
 	}
 
 	invalidPrefixResponse := httptest.NewRecorder()

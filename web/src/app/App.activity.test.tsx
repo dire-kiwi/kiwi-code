@@ -104,6 +104,7 @@ const project: Project = {
   createdAt: '2026-07-27T00:00:00Z',
   threads: [firstThread, secondThread],
   worktreeBranchPrefix: 'codex/',
+  relatedProjects: [],
   environment: {
     name: 'Local',
     setupScripts: { default: '', macos: '', linux: '', windows: '' },

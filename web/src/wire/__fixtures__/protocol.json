@@ -235,6 +235,7 @@
           }
         ],
         "worktreeBranchPrefix": "kiwi-code/",
+        "relatedProjects": [],
         "environment": {
           "name": "Local",
           "setupScripts": {
@@ -255,60 +256,6 @@
         "figmaMCPEnabled": false
       }
     ],
-    "sandboxConfig": {
-      "scope": "global",
-      "path": "/workspace/sandbox.json",
-      "exists": false,
-      "config": {},
-      "inherited": {
-        "defaults": {
-          "read": [
-            "$CWD",
-            "/bin",
-            "/sbin",
-            "/usr",
-            "/System",
-            "/Library",
-            "/opt/homebrew",
-            "/private/etc",
-            "/dev"
-          ],
-          "write": [
-            "$CWD",
-            "$TMPDIR"
-          ]
-        },
-        "commands": [],
-        "network": false,
-        "pty": false,
-        "shell": "/bin/zsh",
-        "relatedProjects": []
-      },
-      "effective": {
-        "defaults": {
-          "read": [
-            "$CWD",
-            "/bin",
-            "/sbin",
-            "/usr",
-            "/System",
-            "/Library",
-            "/opt/homebrew",
-            "/private/etc",
-            "/dev"
-          ],
-          "write": [
-            "$CWD",
-            "$TMPDIR"
-          ]
-        },
-        "commands": [],
-        "network": false,
-        "pty": false,
-        "shell": "/bin/zsh",
-        "relatedProjects": []
-      }
-    },
     "sessionClosures": {
       "generatedAt": "2026-07-26T12:34:56Z",
       "inactivityHours": 24,

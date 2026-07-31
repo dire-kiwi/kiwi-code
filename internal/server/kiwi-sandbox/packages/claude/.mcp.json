@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "kiwi-sandbox": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["--experimental-strip-types", "${CLAUDE_PLUGIN_ROOT}/src/mcp.ts", "--cwd", "${CLAUDE_PROJECT_DIR}"]
-    }
-  }
-}

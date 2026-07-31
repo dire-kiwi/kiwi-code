@@ -175,7 +175,6 @@ func TestPiCommandReceivesChildThreadCapability(t *testing.T) {
 	handler := &terminalHandler{
 		envPath:          "/usr/bin/env",
 		piExtensionPaths: []string{"/extension/child-threads.ts"},
-		piSkillPaths:     []string{"/skills/kiwi-sandbox-config"},
 		agentToken:       "agent-capability",
 	}
 	command, args, notice, err := handler.commandForCodingAgentPane(
@@ -195,8 +194,6 @@ func TestPiCommandReceivesChildThreadCapability(t *testing.T) {
 	for _, expected := range []string{
 		"--extension",
 		"/extension/child-threads.ts",
-		"--skill",
-		"/skills/kiwi-sandbox-config",
 		"KIWI_CODE_AGENT_TOKEN=agent-capability",
 		"KIWI_CODE_PARENT_THREAD_ID=parent",
 		piPath,
@@ -218,20 +215,13 @@ func TestClaudeCommandUsesTheFixedPiWindow(t *testing.T) {
 	}
 	t.Setenv("PATH", directory)
 	threadRoot := t.TempDir()
-	configPath := filepath.Join(threadRoot, ".config", "kiwi-sandbox.json")
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(configPath, []byte(`{"relatedProjects":["../shared-library"]}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	handler := &terminalHandler{
 		envPath:          "/usr/bin/env",
 		claudePluginPath: "/plugin/kiwi-code",
 		agentToken:       "pi-only-token",
 	}
 	command, args, notice, err := handler.commandForCodingAgentPane(
-		project.Project{ID: "project"},
+		project.Project{ID: "project", RelatedProjects: []string{"../shared-library"}},
 		project.Thread{ID: "thread", Cwd: threadRoot, ParentThreadID: "parent"},
 		codingAgentClaude,
 		"http://127.0.0.1:8080/api/projects/project/threads/thread",
@@ -251,7 +241,7 @@ func TestClaudeCommandUsesTheFixedPiWindow(t *testing.T) {
 		filepath.Clean(filepath.Join(threadRoot, "../shared-library")),
 		"--dangerously-skip-permissions",
 		"--settings",
-		`{"skipDangerousModePermissionPrompt":true,"enabledPlugins":{"sandbox-exec@dire-agent-extensions":false}}`,
+		`{"skipDangerousModePermissionPrompt":true}`,
 		"KIWI_CODE_TMUX_SESSION=kiwi-code-project-thread-tools",
 		"KIWI_CODE_TMUX_WINDOW=pi",
 		"KIWI_CODE_THREAD_ENDPOINT=http://127.0.0.1:8080/api/projects/project/threads/thread",
@@ -264,7 +254,7 @@ func TestClaudeCommandUsesTheFixedPiWindow(t *testing.T) {
 			t.Fatalf("Claude environment %q does not contain %q", joined, expected)
 		}
 	}
-	for _, forbidden := range []string{"/plugin/kiwi-sandbox", "KIWI_CODE_AGENT_TOKEN=", "KIWI_CODE_PARENT_THREAD_ID=", "KIWI_CODE_CLAUDE_PATH="} {
+	for _, forbidden := range []string{"KIWI_CODE_AGENT_TOKEN=", "KIWI_CODE_PARENT_THREAD_ID=", "KIWI_CODE_CLAUDE_PATH="} {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("Claude environment %q unexpectedly contains %q", joined, forbidden)
 		}
@@ -282,13 +272,6 @@ func TestCodexCommandUsesManagedPluginAndRelatedProjects(t *testing.T) {
 	}
 	t.Setenv("PATH", directory)
 	threadRoot := t.TempDir()
-	configPath := filepath.Join(threadRoot, ".config", "kiwi-sandbox.json")
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(configPath, []byte(`{"relatedProjects":["../shared-library"]}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	dataDirectory := t.TempDir()
 	installation, err := materializeCodexPlugin(dataDirectory)
 	if err != nil {
@@ -307,7 +290,7 @@ func TestCodexCommandUsesManagedPluginAndRelatedProjects(t *testing.T) {
 		codexProfileName: managedCodexProfileName(dataDirectory),
 	}
 	command, args, notice, err := handler.commandForCodingAgentPane(
-		project.Project{ID: "project"},
+		project.Project{ID: "project", RelatedProjects: []string{"../shared-library"}},
 		project.Thread{ID: "thread", Cwd: threadRoot, ParentThreadID: "parent"},
 		codingAgentCodex,
 		"http://127.0.0.1:8080/api/projects/project/threads/thread",

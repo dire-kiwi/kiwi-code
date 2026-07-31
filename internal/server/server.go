@@ -175,8 +175,6 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("PUT /api/settings", server.updateSettings)
 	mux.HandleFunc("GET /api/settings/agent-skills", server.getAgentSkillStatus)
 	mux.HandleFunc("POST /api/settings/agent-skills", server.installAgentSkill)
-	mux.HandleFunc("GET /api/sandbox/config", server.getGlobalSandboxConfig)
-	mux.HandleFunc("PUT /api/sandbox/config", server.updateGlobalSandboxConfig)
 	mux.HandleFunc("GET /api/cleanup", server.getCleanupOverview)
 	mux.HandleFunc("GET /api/session-closures", server.getSessionClosureLog)
 	mux.HandleFunc("GET /api/coding-agents", server.terminal.listCodingAgents)
@@ -225,8 +223,6 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("PATCH /api/projects/{id}/threads/{threadId}", server.updateThread)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/coding-agent", server.terminal.startCodingAgent)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/environment/actions/{actionId}", server.runEnvironmentAction)
-	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/sandbox/config", server.getThreadSandboxConfig)
-	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/sandbox/config", server.updateThreadSandboxConfig)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/limits", server.updateThreadLimits)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/usage", server.updateThreadUsage)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/budget", server.threadBudget)
@@ -506,6 +502,7 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 		ProfileID                    *string                     `json:"profileId"`
 		SubAgentNestingDepthOverride optionalProjectNestingDepth `json:"subAgentNestingDepthOverride"`
 		WorktreeBranchPrefix         *string                     `json:"worktreeBranchPrefix"`
+		RelatedProjects              *[]string                   `json:"relatedProjects"`
 		Environment                  *project.LocalEnvironment   `json:"environment"`
 		FigmaMCPEnabled              *bool                       `json:"figmaMCPEnabled"`
 	}
@@ -521,6 +518,7 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 		SubAgentNestingDepthOverride:       input.SubAgentNestingDepthOverride.value,
 		UpdateSubAgentNestingDepthOverride: input.SubAgentNestingDepthOverride.present,
 		WorktreeBranchPrefix:               input.WorktreeBranchPrefix,
+		RelatedProjects:                    input.RelatedProjects,
 		Environment:                        input.Environment,
 		FigmaMCPEnabled:                    input.FigmaMCPEnabled,
 	})

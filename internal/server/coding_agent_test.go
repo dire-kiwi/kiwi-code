@@ -127,8 +127,8 @@ func TestSyncClaudeGPTProfileSettingsCopiesNonModelConfiguration(t *testing.T) {
 		"effortLevel":            "high",
 		"theme":                  "dark",
 		"enabledPlugins": map[string]bool{
-			claudeSandboxPluginID: true,
-			"formatter@example":   true,
+			"linter@example":    true,
+			"formatter@example": true,
 		},
 		"env": map[string]string{
 			"EDITOR":                        "nvim",
@@ -168,7 +168,7 @@ func TestSyncClaudeGPTProfileSettingsCopiesNonModelConfiguration(t *testing.T) {
 		t.Fatalf("copied Claude GPT settings = %#v", copied)
 	}
 	plugins, _ := copied["enabledPlugins"].(map[string]any)
-	if _, duplicated := plugins[claudeSandboxPluginID]; duplicated || plugins["formatter@example"] != true {
+	if plugins["linter@example"] != true || plugins["formatter@example"] != true {
 		t.Fatalf("copied Claude GPT plugins = %#v", plugins)
 	}
 	environment, _ := copied["env"].(map[string]any)
@@ -194,7 +194,7 @@ func configureTestClaudeGPTUserConfiguration(t *testing.T, handler *terminalHand
 	}
 	if err := os.WriteFile(
 		filepath.Join(configDirectory, claudeSettingsFileName),
-		[]byte(`{"theme":"dark","enabledPlugins":{"sandbox-exec@dire-agent-extensions":true}}`),
+		[]byte(`{"theme":"dark","enabledPlugins":{"formatter@example":true}}`),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
@@ -795,7 +795,7 @@ func TestConfiguredClaudeCodeProfileUsesTheDefaultClaudeLaunchConfiguration(t *t
 	if err := os.MkdirAll(pluginDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	settings := []byte(`{"theme":"dark","enabledPlugins":{"sandbox-exec@dire-agent-extensions":true,"formatter@example":true}}`)
+	settings := []byte(`{"theme":"dark","enabledPlugins":{"formatter@example":true}}`)
 	if err := os.WriteFile(filepath.Join(configDirectory, claudeSettingsFileName), settings, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -842,7 +842,7 @@ func TestConfiguredClaudeCodeProfileUsesTheDefaultClaudeLaunchConfiguration(t *t
 		"CLAUDE_CODE_PLUGIN_CACHE_DIR=" + pluginDirectory,
 		"--plugin-dir\n/plugin/kiwi-code",
 		"--dangerously-skip-permissions",
-		`{"skipDangerousModePermissionPrompt":true,"enabledPlugins":{"sandbox-exec@dire-agent-extensions":false}}`,
+		`{"skipDangerousModePermissionPrompt":true}`,
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("configured Claude args %#v do not contain %q", profileArgs, expected)

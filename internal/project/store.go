@@ -47,6 +47,8 @@ const (
 	maxCodingAgentIDLength               = 64
 	maxCodingAgentNameLength             = 80
 	maxWorktreeBranchPrefixLength        = 100
+	maxRelatedProjects                   = 100
+	maxRelatedProjectPathLength          = 4096
 	PersonalProfileID                    = "personal"
 	WorkProfileID                        = "work"
 )
@@ -95,6 +97,7 @@ type Project struct {
 	Threads                      []Thread         `json:"threads"`
 	SubAgentNestingDepthOverride *int             `json:"subAgentNestingDepthOverride,omitempty"`
 	WorktreeBranchPrefix         string           `json:"worktreeBranchPrefix"`
+	RelatedProjects              []string         `json:"relatedProjects"`
 	Environment                  LocalEnvironment `json:"environment"`
 	FigmaMCPEnabled              bool             `json:"figmaMCPEnabled"`
 }
@@ -242,6 +245,7 @@ type ProjectUpdate struct {
 	SubAgentNestingDepthOverride       *int
 	UpdateSubAgentNestingDepthOverride bool
 	WorktreeBranchPrefix               *string
+	RelatedProjects                    *[]string
 	Environment                        *LocalEnvironment
 	FigmaMCPEnabled                    *bool
 }
@@ -560,6 +564,9 @@ func cloneProject(source Project) Project {
 		depth := *source.SubAgentNestingDepthOverride
 		item.SubAgentNestingDepthOverride = &depth
 	}
+	if source.RelatedProjects != nil {
+		item.RelatedProjects = append([]string{}, source.RelatedProjects...)
+	}
 	item.Environment = cloneLocalEnvironment(source.Environment)
 	return item
 }
@@ -704,6 +711,11 @@ func readProjectsFile(path string) ([]Project, error) {
 		if item.WorktreeBranchPrefix != "" {
 			if _, err := normalizeWorktreeBranchPrefix(item.WorktreeBranchPrefix); err != nil {
 				return nil, fmt.Errorf("decode projects: worktree branch prefix for project %q: %w", item.ID, err)
+			}
+		}
+		if item.RelatedProjects != nil {
+			if _, err := normalizeRelatedProjects(item.RelatedProjects); err != nil {
+				return nil, fmt.Errorf("decode projects: related projects for project %q: %w", item.ID, err)
 			}
 		}
 		if !localEnvironmentIsZero(item.Environment) {
@@ -1611,6 +1623,7 @@ func (s *Store) Add(name, path string, profileIDs ...string) (Project, error) {
 	if len(name) > 80 {
 		return Project{}, errors.New("project name must be 80 characters or fewer")
 	}
+	legacyRelatedProjects := readLegacyRelatedProjects(absPath)
 
 	return withProjectMutationResult(s, func() (Project, error) {
 		if !s.profileExistsLocked(profileID) {
@@ -1634,7 +1647,7 @@ func (s *Store) Add(name, path string, profileIDs ...string) (Project, error) {
 		item := Project{
 			ID: id, Name: name, Path: absPath, ProfileID: profileID, Host: localHostname(), IsGitRepo: isGitRepository(absPath), CreatedAt: now,
 			Threads: []Thread{{ID: threadID, Title: defaultThreadTitle, Cwd: absPath, CreatedAt: now}}, WorktreeBranchPrefix: DefaultWorktreeBranchPrefix,
-			Environment: defaultLocalEnvironment(),
+			RelatedProjects: legacyRelatedProjects, Environment: defaultLocalEnvironment(),
 		}
 		previous := s.projects
 		updated := make([]Project, len(previous)+1)
@@ -1701,7 +1714,8 @@ func (s *Store) UpdateProjectProfile(projectID, profileID string) (Project, erro
 
 func (s *Store) UpdateProject(projectID string, update ProjectUpdate) (result Project, err error) {
 	if update.ProfileID == nil && !update.UpdateSubAgentNestingDepthOverride &&
-		update.WorktreeBranchPrefix == nil && update.Environment == nil && update.FigmaMCPEnabled == nil {
+		update.WorktreeBranchPrefix == nil && update.RelatedProjects == nil &&
+		update.Environment == nil && update.FigmaMCPEnabled == nil {
 		return Project{}, errors.New("at least one project setting is required")
 	}
 	var profileID string
@@ -1719,6 +1733,13 @@ func (s *Store) UpdateProject(projectID string, update ProjectUpdate) (result Pr
 	var branchPrefix string
 	if update.WorktreeBranchPrefix != nil {
 		branchPrefix, err = normalizeWorktreeBranchPrefix(*update.WorktreeBranchPrefix)
+		if err != nil {
+			return Project{}, err
+		}
+	}
+	var relatedProjects []string
+	if update.RelatedProjects != nil {
+		relatedProjects, err = normalizeRelatedProjects(*update.RelatedProjects)
 		if err != nil {
 			return Project{}, err
 		}
@@ -1761,6 +1782,10 @@ func (s *Store) UpdateProject(projectID string, update ProjectUpdate) (result Pr
 		}
 		if update.WorktreeBranchPrefix != nil && s.projects[projectIndex].WorktreeBranchPrefix != branchPrefix {
 			s.projects[projectIndex].WorktreeBranchPrefix = branchPrefix
+			changed = true
+		}
+		if update.RelatedProjects != nil && !equalStrings(s.projects[projectIndex].RelatedProjects, relatedProjects) {
+			s.projects[projectIndex].RelatedProjects = append([]string{}, relatedProjects...)
 			changed = true
 		}
 		if update.Environment != nil && !equalLocalEnvironment(s.projects[projectIndex].Environment, environment) {
@@ -2516,6 +2541,62 @@ func normalizeWorktreeBranchPrefix(value string) (string, error) {
 	return prefix, nil
 }
 
+// readLegacyRelatedProjects imports the one non-policy setting that used to
+// live in the removed Kiwi Sandbox project file. New updates are persisted in
+// Kiwi Code's project store instead.
+func readLegacyRelatedProjects(projectPath string) []string {
+	contents, err := os.ReadFile(filepath.Join(projectPath, ".config", "kiwi-sandbox.json"))
+	if err != nil {
+		return []string{}
+	}
+	var config struct {
+		RelatedProjects *[]string `json:"relatedProjects"`
+	}
+	if err := json.Unmarshal(contents, &config); err != nil || config.RelatedProjects == nil {
+		return []string{}
+	}
+	relatedProjects, err := normalizeRelatedProjects(*config.RelatedProjects)
+	if err != nil {
+		return []string{}
+	}
+	return relatedProjects
+}
+
+func normalizeRelatedProjects(values []string) ([]string, error) {
+	if len(values) > maxRelatedProjects {
+		return nil, fmt.Errorf("related projects must contain at most %d paths", maxRelatedProjects)
+	}
+	normalized := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		path := strings.TrimSpace(value)
+		if path == "" {
+			return nil, errors.New("related project paths must not be empty")
+		}
+		if utf8.RuneCountInString(path) > maxRelatedProjectPathLength {
+			return nil, fmt.Errorf("related project paths must be %d characters or fewer", maxRelatedProjectPathLength)
+		}
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+		normalized = append(normalized, path)
+	}
+	return normalized, nil
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
 func validGitBranchName(name string) bool {
 	if name == "" || name == "@" || strings.HasPrefix(name, "-") || strings.HasPrefix(name, "/") ||
 		strings.HasSuffix(name, "/") || strings.HasSuffix(name, ".") || strings.Contains(name, "//") ||
@@ -2943,6 +3024,16 @@ func (s *Store) load() error {
 		if projects[index].WorktreeBranchPrefix == "" {
 			projects[index].WorktreeBranchPrefix = DefaultWorktreeBranchPrefix
 			changed = true
+		}
+		if projects[index].RelatedProjects == nil {
+			projects[index].RelatedProjects = readLegacyRelatedProjects(projects[index].Path)
+			changed = true
+		} else {
+			relatedProjects, normalizeErr := normalizeRelatedProjects(projects[index].RelatedProjects)
+			if normalizeErr != nil {
+				return fmt.Errorf("migrate project related paths %q: %w", projects[index].ID, normalizeErr)
+			}
+			projects[index].RelatedProjects = relatedProjects
 		}
 		if localEnvironmentIsZero(projects[index].Environment) {
 			projects[index].Environment = defaultLocalEnvironment()

@@ -41,54 +41,6 @@ export const LocalEnvironmentSchema = Schema.Struct({
 })
 export type LocalEnvironment = Schema.Schema.Type<typeof LocalEnvironmentSchema>
 
-export const SandboxFileAccessSchema = Schema.Struct({
-  read: StringArray,
-  write: StringArray,
-})
-export type SandboxFileAccess = Schema.Schema.Type<typeof SandboxFileAccessSchema>
-
-export const SandboxCommandRuleSchema = Schema.Struct({
-  patterns: StringArray,
-  files: Schema.optional(SandboxFileAccessSchema),
-  network: Schema.optional(Schema.Boolean),
-})
-export type SandboxCommandRule = Schema.Schema.Type<typeof SandboxCommandRuleSchema>
-
-export const SandboxConfigSchema = Schema.mutable(Schema.Struct({
-  defaults: Schema.optional(SandboxFileAccessSchema),
-  commands: Schema.optional(MutableArray(SandboxCommandRuleSchema)),
-  network: Schema.optional(Schema.Boolean),
-  pty: Schema.optional(Schema.Boolean),
-  shell: Schema.optional(Schema.String),
-  relatedProjects: Schema.optional(StringArray),
-}))
-export type SandboxConfig = Schema.Schema.Type<typeof SandboxConfigSchema>
-
-export const EffectiveSandboxConfigSchema = Schema.Struct({
-  defaults: SandboxFileAccessSchema,
-  commands: MutableArray(SandboxCommandRuleSchema),
-  network: Schema.Boolean,
-  pty: Schema.Boolean,
-  shell: Schema.String,
-  relatedProjects: StringArray,
-})
-export type EffectiveSandboxConfig = Schema.Schema.Type<typeof EffectiveSandboxConfigSchema>
-
-export const SandboxConfigScopeSchema = Schema.Literal('global', 'thread')
-export type SandboxConfigScope = Schema.Schema.Type<typeof SandboxConfigScopeSchema>
-
-export const SandboxConfigStateSchema = Schema.Struct({
-  scope: SandboxConfigScopeSchema,
-  path: Schema.String,
-  exists: Schema.Boolean,
-  parseError: Schema.optional(Schema.String),
-  globalParseError: Schema.optional(Schema.String),
-  config: SandboxConfigSchema,
-  inherited: EffectiveSandboxConfigSchema,
-  effective: EffectiveSandboxConfigSchema,
-})
-export type SandboxConfigState = Schema.Schema.Type<typeof SandboxConfigStateSchema>
-
 export const ThreadSchema = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
@@ -128,6 +80,7 @@ export const ProjectSchema = Schema.Struct({
   threads: MutableArray(ThreadSchema),
   subAgentNestingDepthOverride: Schema.optional(Schema.NullOr(Schema.Number)),
   worktreeBranchPrefix: Schema.String,
+  relatedProjects: StringArray,
   environment: LocalEnvironmentSchema,
   figmaMCPEnabled: Schema.Boolean,
 })

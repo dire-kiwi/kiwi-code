@@ -27,7 +27,6 @@ GET /api/projects/{id}/threads/{threadId}/plans
 GET /api/projects/{id}/threads/{threadId}/plans/{planId}
 GET /api/projects/{id}/threads/{threadId}/processes
 GET /api/projects/{id}/threads/{threadId}/processes/{processId}/logs
-GET /api/projects/{id}/threads/{threadId}/sandbox/config
 GET /api/projects/{id}/threads/{threadId}/shell/windows
 GET /api/projects/{id}/threads/{threadId}/terminal
 GET /api/projects/{id}/threads/{threadId}/terminal/lines
@@ -35,7 +34,6 @@ GET /api/projects/{id}/threads/{threadId}/workflows
 GET /api/projects/{id}/threads/{threadId}/workflows/saved
 GET /api/projects/{id}/threads/{threadId}/workflows/{runId}
 GET /api/projects/{id}/threads/{threadId}/workflows/{runId}/agents/{agentId}
-GET /api/sandbox/config
 GET /api/session-closures
 GET /api/settings
 GET /api/settings/agent-skills
@@ -86,8 +84,6 @@ PUT /api/projects/{id}/threads/{threadId}/codex/activity
 PUT /api/projects/{id}/threads/{threadId}/context/status
 PUT /api/projects/{id}/threads/{threadId}/limits
 PUT /api/projects/{id}/threads/{threadId}/pi/activity
-PUT /api/projects/{id}/threads/{threadId}/sandbox/config
 PUT /api/projects/{id}/threads/{threadId}/tmux/activity
 PUT /api/projects/{id}/threads/{threadId}/usage
-PUT /api/sandbox/config
 PUT /api/settings

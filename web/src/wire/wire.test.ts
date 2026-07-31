@@ -3,10 +3,7 @@ import { describe, expect, it } from 'vitest'
 import fixture from '@/wire/__fixtures__/protocol.json'
 import { decodeStrict } from './client'
 import { protocolVersion, ServerMessageSchema } from './protocol'
-import {
-  allTopics,
-  SandboxConfigParamsSchema,
-} from './topics'
+import { allTopics } from './topics'
 
 const expectedServerMessageTypes = [
   'event',
@@ -52,20 +49,4 @@ describe('Go/TypeScript protocol fixtures', () => {
     }
   })
 
-  it('rejects invalid cross-scope sandbox parameters', () => {
-    expect(() =>
-      decodeStrict(
-        SandboxConfigParamsSchema,
-        { scope: 'global', projectId: 'project-1' },
-        'global sandbox params',
-      )
-    ).toThrow()
-    expect(() =>
-      decodeStrict(
-        SandboxConfigParamsSchema,
-        { scope: 'thread', projectId: 'project-1' },
-        'thread sandbox params',
-      )
-    ).toThrow()
-  })
 })

@@ -32,6 +32,7 @@ const project: Project = {
     branch: 'kiwi-code/existing',
   }],
   worktreeBranchPrefix: 'kiwi-code/',
+  relatedProjects: [],
   environment: {
     name: 'Local',
     setupScripts: { default: '', macos: '', linux: '', windows: '' },

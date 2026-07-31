@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Folder, FolderGit2, LoaderCircle, Save } from 'lucide-react'
-import { updateProjectWorktreeBranchPrefix } from '@/api'
+import { updateProjectBranchesAndPaths } from '@/api'
 import { useAsyncFeedback } from '@/lib/useAsyncFeedback'
 import type { Project } from '@/types'
 import { PrimaryButton } from '@/ui/buttons'
-import { TextInput } from '@/ui/inputs'
+import { TextArea, TextInput } from '@/ui/inputs'
 import { SectionHeader, Surface } from '@/ui/layout'
 import { ActionFeedback, InfoCallout } from '@/ui/feedback'
 
@@ -14,18 +14,27 @@ type ProjectBranchesSectionProps = {
 }
 
 export function ProjectBranchesSection({ project, onProjectUpdated }: ProjectBranchesSectionProps) {
+  const storedRelatedProjects = project.relatedProjects.join('\n')
   const [branchPrefix, setBranchPrefix] = useState(project.worktreeBranchPrefix)
+  const [relatedProjects, setRelatedProjects] = useState(storedRelatedProjects)
   const action = useAsyncFeedback()
   const saving = action.pending
 
   useEffect(() => {
     setBranchPrefix(project.worktreeBranchPrefix)
+    setRelatedProjects(storedRelatedProjects)
     action.clearFeedback()
-  }, [action.clearFeedback, project.id, project.worktreeBranchPrefix])
+  }, [action.clearFeedback, project.id, project.worktreeBranchPrefix, storedRelatedProjects])
 
   const normalizedBranchPrefix = branchPrefix.trim()
-  const dirty = normalizedBranchPrefix.length > 0
-    && normalizedBranchPrefix !== project.worktreeBranchPrefix
+  const normalizedRelatedProjects = relatedProjects
+    .split(/\r?\n/)
+    .map((path) => path.trim())
+    .filter(Boolean)
+  const dirty = normalizedBranchPrefix.length > 0 && (
+    normalizedBranchPrefix !== project.worktreeBranchPrefix
+    || normalizedRelatedProjects.join('\n') !== storedRelatedProjects
+  )
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -33,12 +42,13 @@ export function ProjectBranchesSection({ project, onProjectUpdated }: ProjectBra
 
     const updated = await action.run(
       'default',
-      () => updateProjectWorktreeBranchPrefix(project.id, normalizedBranchPrefix),
-      { success: 'Branch prefix saved.', failure: 'Could not update the branch prefix.' },
+      () => updateProjectBranchesAndPaths(project.id, normalizedBranchPrefix, normalizedRelatedProjects),
+      { success: 'Branch and path settings saved.', failure: 'Could not update branch and path settings.' },
     )
     if (!updated) return
     onProjectUpdated(updated)
     setBranchPrefix(updated.worktreeBranchPrefix)
+    setRelatedProjects(updated.relatedProjects.join('\n'))
   }
 
   return (
@@ -89,6 +99,33 @@ export function ProjectBranchesSection({ project, onProjectUpdated }: ProjectBra
             branches are not renamed.
           </InfoCallout>
 
+          <label
+            htmlFor="project-related-projects"
+            className="mt-6 block text-[10px] font-semibold uppercase tracking-[0.14em] text-ghost-dim"
+          >
+            Related project paths
+            <TextArea
+              id="project-related-projects"
+              value={relatedProjects}
+              onChange={(event) => {
+                setRelatedProjects(event.target.value)
+                action.clearFeedback()
+              }}
+              disabled={saving}
+              spellCheck={false}
+              placeholder={'../shared-library\n$HOME/personal/other-repo'}
+              className="mt-2.5"
+            />
+          </label>
+          <InfoCallout className="mt-4">
+            Add one path per line. Relative paths resolve against the active thread directory, and paths may use
+            <span className="font-mono text-ghost-blue"> $CWD</span>,
+            <span className="font-mono text-ghost-blue"> $HOME</span>,
+            <span className="font-mono text-ghost-blue"> $TMPDIR</span>, or
+            <span className="font-mono text-ghost-blue"> ~</span>. Kiwi Code passes these directories to Claude
+            Code and Codex CLI with <span className="font-mono text-ghost-blue">--add-dir</span>.
+          </InfoCallout>
+
           <ActionFeedback
             id="project-worktree-branch-prefix-error"
             feedback={action.feedback}
@@ -104,7 +141,7 @@ export function ProjectBranchesSection({ project, onProjectUpdated }: ProjectBra
             className="flex min-w-28 items-center justify-center gap-2"
           >
             {saving ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
-            Save prefix
+            Save settings
           </PrimaryButton>
         </div>
       </Surface>

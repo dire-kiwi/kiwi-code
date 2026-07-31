@@ -1,7 +1,0 @@
-{
-  "name": "kiwi-sandbox",
-  "version": "0.2.0",
-  "description": "Routes bash and filesystem tools through macOS Seatbelt",
-  "author": { "name": "Dire Kiwi" },
-  "keywords": ["sandbox", "seatbelt", "mcp"]
-}
