@@ -30,7 +30,7 @@ func TestHeadlessClientExercisesMultipleClientsEndToEnd(t *testing.T) {
 	mux.HandleFunc("POST /api/projects/{id}/threads", serverState.addThread)
 	mux.HandleFunc("PATCH /api/projects/{id}/threads/{threadId}", serverState.updateThread)
 	mux.HandleFunc("DELETE /api/projects/{id}/threads/{threadId}", serverState.deleteThread)
-	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/pi/activity", serverState.updatePiActivity)
+	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/agents/{agent}/activity", serverState.updateAgentScopedActivity)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/terminal", terminal.serve)
 	testServer := httptest.NewServer(mux)
 	defer testServer.Close()
@@ -81,7 +81,7 @@ func TestHeadlessClientCanSkipTerminalChecks(t *testing.T) {
 	mux.HandleFunc("POST /api/projects/{id}/threads", serverState.addThread)
 	mux.HandleFunc("PATCH /api/projects/{id}/threads/{threadId}", serverState.updateThread)
 	mux.HandleFunc("DELETE /api/projects/{id}/threads/{threadId}", serverState.deleteThread)
-	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/pi/activity", serverState.updatePiActivity)
+	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/agents/{agent}/activity", serverState.updateAgentScopedActivity)
 	testServer := httptest.NewServer(mux)
 	defer testServer.Close()
 

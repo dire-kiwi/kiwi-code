@@ -4077,3 +4077,17 @@ func terminalEnvironment() []string {
 func tmuxEnvironment() []string {
 	return tmux.NewClient("", "", terminalEnvironment).Environment()
 }
+
+// serveAgentNative dispatches the agent-parameterized native websocket route
+// to the agent's native runtime. The legacy /pi/native and /claude/native
+// routes remain as aliases.
+func (h *terminalHandler) serveAgentNative(w http.ResponseWriter, r *http.Request) {
+	switch r.PathValue("agent") {
+	case agent.IDPi:
+		h.servePiNative(w, r)
+	case agent.IDClaude:
+		h.serveClaudeNative(w, r)
+	default:
+		writeError(w, http.StatusNotFound, "Unknown native coding agent.")
+	}
+}

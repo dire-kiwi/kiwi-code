@@ -237,7 +237,7 @@ export function updateThreadOrder(projectId: string, threadIds: string[]) {
 }
 
 export function acknowledgePiThreadActivity(projectId: string, threadId: string) {
-  return request<void>(`${threadPath(projectId, threadId)}/pi/activity`, { method: 'DELETE' })
+  return request<void>(`${threadPath(projectId, threadId)}/agents/pi/activity`, { method: 'DELETE' })
 }
 
 function browserPath(projectId: string, threadId: string) {

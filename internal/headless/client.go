@@ -156,7 +156,7 @@ func Run(ctx context.Context, options Options) error {
 	}
 	pass(options.Output, "thread creation reached every global client")
 
-	activityPath := threadPath(item.ID, firstThread.ID) + "/pi/activity"
+	activityPath := threadPath(item.ID, firstThread.ID) + "/agents/pi/activity"
 	if err := requestJSON(ctx, httpClient, baseURL, http.MethodPut, activityPath,
 		map[string]string{"state": "working"}, nil, http.StatusOK); err != nil {
 		return fmt.Errorf("set working activity: %w", err)

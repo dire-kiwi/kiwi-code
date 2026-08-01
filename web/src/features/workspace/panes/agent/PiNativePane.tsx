@@ -574,7 +574,7 @@ export function PiNativePane({
       params.set('thinking', initialThinkingRef.current)
     }
     const url = apiWebSocketUrl(
-      `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/pi/native`,
+      `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/agents/pi/native`,
     )
     url.search = params.toString()
     return url.toString()

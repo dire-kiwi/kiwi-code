@@ -164,3 +164,36 @@ const (
 	piWorkingTimeout         = activity.WorkingTimeout
 	piActivityOrderRetention = activity.OrderRetention
 )
+
+// resolveActivityRoute maps an {agent} path segment to its activity route.
+func resolveActivityRoute(segment string) (agent.ActivityRoute, bool) {
+	for _, route := range agent.ActivityRoutes() {
+		if route.Segment == segment {
+			return route, true
+		}
+	}
+	return agent.ActivityRoute{}, false
+}
+
+// updateAgentScopedActivity serves the agent-parameterized activity route.
+// The legacy agent-named routes remain as aliases for panes launched before
+// an upgrade whose materialized hook scripts still post to the old paths.
+func (s *Server) updateAgentScopedActivity(w http.ResponseWriter, r *http.Request) {
+	route, found := resolveActivityRoute(r.PathValue("agent"))
+	if !found {
+		writeError(w, http.StatusNotFound, "Unknown coding agent.")
+		return
+	}
+	s.updateAgentActivity(w, r, route.AgentID, route.Label)
+}
+
+// acknowledgeAgentScopedActivity generalizes the pi-only acknowledge route.
+// Acknowledgement is thread-scoped, so any known agent segment acknowledges
+// the thread's activity.
+func (s *Server) acknowledgeAgentScopedActivity(w http.ResponseWriter, r *http.Request) {
+	if _, found := resolveActivityRoute(r.PathValue("agent")); !found {
+		writeError(w, http.StatusNotFound, "Unknown coding agent.")
+		return
+	}
+	s.acknowledgePiActivity(w, r)
+}
