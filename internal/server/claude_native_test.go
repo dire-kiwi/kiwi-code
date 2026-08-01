@@ -48,7 +48,7 @@ func TestClaudeNativeArgumentsUseStreamJSONAndPreserveLaunchChoices(t *testing.T
 		"--verbose",
 		"--add-dir", "/tmp/related-one", "/tmp/related-two",
 		"--dangerously-skip-permissions",
-		"--settings", `{"skipDangerousModePermissionPrompt":true,"enabledPlugins":{"sandbox-exec@dire-agent-extensions":false}}`,
+		"--settings", `{"skipDangerousModePermissionPrompt":true}`,
 		"--plugin-dir", "/tmp/claude-plugin",
 		"--resume", "session-123",
 		"--model", "opus",

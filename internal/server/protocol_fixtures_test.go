@@ -72,7 +72,6 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 	currentTargetID := "page-fixture"
 	startedAt := fixtureTime.Add(-time.Minute)
 	scheduledDeletionAt := fixtureTime.Add(24 * time.Hour)
-	defaultSandbox := defaultEffectiveSandboxConfig()
 	defaultTheme := project.DefaultTheme()
 
 	values := map[string]any{
@@ -88,6 +87,7 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 				ID: "thread-1", Title: "Fixture thread", Cwd: "/workspace/fixture", CreatedAt: fixtureTime,
 			}},
 			WorktreeBranchPrefix: project.DefaultWorktreeBranchPrefix,
+			RelatedProjects:      []string{},
 			Environment: project.LocalEnvironment{
 				Name:      "Local",
 				Variables: []project.EnvironmentVariable{},
@@ -151,13 +151,6 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 				ID: "high", Label: "High",
 			}},
 		}},
-		stateTopicSandboxConfig: sandboxConfigState{
-			Scope:     "global",
-			Path:      "/workspace/sandbox.json",
-			Config:    sandboxConfig{},
-			Inherited: defaultSandbox,
-			Effective: defaultSandbox,
-		},
 		stateTopicCleanup: project.CleanupOverview{
 			GeneratedAt:                   fixtureTime,
 			ArchivedThreadRetentionDays:   30,

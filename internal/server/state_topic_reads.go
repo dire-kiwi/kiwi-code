@@ -11,9 +11,8 @@ import (
 )
 
 const (
-	sandboxStateReconcileInterval = 2 * time.Second
-	tmuxStateReconcileInterval    = 2 * time.Second
-	agentSkillReconcileInterval   = 5 * time.Second
+	tmuxStateReconcileInterval  = 2 * time.Second
+	agentSkillReconcileInterval = 5 * time.Second
 )
 
 func (s *Server) openSettingsTopic(ctx context.Context, channel *stateChannel) error {
@@ -77,43 +76,6 @@ func (s *Server) openCodingAgentsTopic(ctx context.Context, projectID string, ch
 			}
 		}
 	}
-}
-
-func (s *Server) openSandboxConfigTopic(ctx context.Context, params stateSandboxTopic, channel *stateChannel) error {
-	changes, events := s.subscribeStateChanges(
-		params.ProjectID,
-		params.ThreadID,
-		stateTopicSandboxConfig,
-	)
-	if changes != nil {
-		defer changes.Close()
-	}
-	snapshot := func() error {
-		var (
-			state sandboxConfigState
-			err   error
-		)
-		if params.Scope == "global" {
-			state, err = globalSandboxConfigState()
-		} else {
-			_, thread, threadErr := s.projects.GetThread(params.ProjectID, params.ThreadID)
-			if threadErr != nil {
-				if errors.Is(threadErr, project.ErrNotFound) || errors.Is(threadErr, project.ErrThreadNotFound) {
-					return stateTopicFailure("Thread not found.")
-				}
-				return stateTopicFailure("Could not load the thread.")
-			}
-			state, err = threadSandboxConfigState(thread)
-		}
-		if err != nil {
-			return stateTopicFailure("Could not load the sandbox configuration.")
-		}
-		return channel.Snapshot(state)
-	}
-	return runSnapshotTopic(ctx, channel, events, snapshotTopicOptions{
-		updatesEnded:      "Sandbox configuration updates ended.",
-		reconcileInterval: sandboxStateReconcileInterval,
-	}, snapshot)
 }
 
 func (s *Server) openCleanupTopic(ctx context.Context, channel *stateChannel) error {

@@ -9,7 +9,6 @@ import {
   PiThreadActivitySchema,
   ProfileSchema,
   ProjectSchema,
-  SandboxConfigStateSchema,
   SessionClosureOverviewSchema,
   ThreadStatusSnapshotSchema,
   ThreadUsageSnapshotSchema,
@@ -89,23 +88,6 @@ export const CodingAgentsTopic = parameterizedTopic(
   ({ projectId }) => projectId ?? '',
 )
 
-export const SandboxConfigParamsSchema = Schema.Union(
-  Schema.Struct({ scope: Schema.Literal('global') }),
-  Schema.Struct({
-    scope: Schema.Literal('thread'),
-    projectId: Schema.String,
-    threadId: Schema.String,
-  }),
-)
-export const SandboxConfigTopic = parameterizedTopic(
-  'sandboxConfig',
-  SandboxConfigParamsSchema,
-  SandboxConfigStateSchema,
-  (params) => params.scope === 'global'
-    ? 'global'
-    : JSON.stringify(['thread', params.projectId, params.threadId]),
-)
-
 export const GitBranchesParamsSchema = Schema.Struct({ projectId: Schema.String })
 export const GitBranchesTopic = parameterizedTopic(
   'git.branches',
@@ -133,7 +115,6 @@ export const allTopics = [
   ThreadStatusTopic,
   SettingsTopic,
   CodingAgentsTopic,
-  SandboxConfigTopic,
   CleanupTopic,
   SessionClosuresTopic,
   GitBranchesTopic,

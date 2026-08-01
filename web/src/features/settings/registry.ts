@@ -3,7 +3,6 @@ import {
   FolderGit2,
   Palette,
   Settings2,
-  Shield,
   Sparkles,
   UserRound,
   type LucideIcon,
@@ -24,7 +23,6 @@ export type GlobalSettingsSectionId =
   | 'profiles'
   | 'cleanup'
   | 'appearance'
-  | 'sandbox'
   | 'skills'
 
 export type ProjectSettingsSectionId = 'profile' | 'environment' | 'branches'
@@ -59,13 +57,6 @@ export const GLOBAL_SETTINGS_SECTIONS: Array<SettingsSectionMeta<GlobalSettingsS
     tone: 'magenta',
   },
   {
-    id: 'sandbox',
-    label: 'Kiwi Sandbox',
-    keywords: ['sandbox', 'policy', 'file access', 'network', 'shell', 'security'],
-    icon: Shield,
-    tone: 'green',
-  },
-  {
     id: 'skills',
     label: 'Agent skills',
     keywords: ['install', 'threads', 'processes', 'mermaid', 'pi'],
@@ -92,7 +83,7 @@ export const PROJECT_SETTINGS_SECTIONS: Array<SettingsSectionMeta<ProjectSetting
   {
     id: 'branches',
     label: 'Branches & paths',
-    keywords: ['branch prefix', 'worktree', 'project root', 'path'],
+    keywords: ['branch prefix', 'worktree', 'project root', 'path', 'related projects', 'add-dir', 'claude'],
     icon: FolderGit2,
     tone: 'green',
   },

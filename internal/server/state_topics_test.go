@@ -12,7 +12,6 @@ func TestStateTopicRegistryDecodesEveryCatalogTopic(t *testing.T) {
 		stateTopicThreadStatus:    `{"tag":"thread.status","projectId":"project","threadId":"thread"}`,
 		stateTopicSettings:        `{"tag":"settings"}`,
 		stateTopicCodingAgents:    `{"tag":"codingAgents","projectId":"project"}`,
-		stateTopicSandboxConfig:   `{"tag":"sandboxConfig","scope":"global"}`,
 		stateTopicCleanup:         `{"tag":"cleanup"}`,
 		stateTopicSessionClosures: `{"tag":"sessionClosures"}`,
 		stateTopicGitBranches:     `{"tag":"git.branches","projectId":"project"}`,
@@ -70,9 +69,6 @@ func TestStateTopicRegistryRejectsInvalidParameters(t *testing.T) {
 		`{"tag":"thread.status","projectId":"project"}`,
 		`{"tag":"git.branches","projectId":""}`,
 		`{"tag":"browser.status","projectId":"project","threadId":""}`,
-		`{"tag":"sandboxConfig","scope":"unknown"}`,
-		`{"tag":"sandboxConfig","scope":"global","projectId":"project"}`,
-		`{"tag":"sandboxConfig","scope":"thread","projectId":"project"}`,
 	}
 	for _, raw := range tests {
 		t.Run(raw, func(t *testing.T) {

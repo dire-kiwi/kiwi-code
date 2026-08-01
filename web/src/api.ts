@@ -10,8 +10,6 @@ import type {
   ProcessWindow,
   Profile,
   Project,
-  SandboxConfig,
-  SandboxConfigState,
   Thread,
   TmuxWindow,
 } from './types'
@@ -112,18 +110,6 @@ export function updateSettings(input: string | Partial<Pick<
   )
 }
 
-export function updateGlobalSandboxConfig(config: SandboxConfig) {
-  return jsonRequest<SandboxConfigState>('/api/sandbox/config', 'PUT', config)
-}
-
-export function updateThreadSandboxConfig(projectId: string, threadId: string, config: SandboxConfig) {
-  return jsonRequest<SandboxConfigState>(
-    `/api/projects/${projectId}/threads/${threadId}/sandbox/config`,
-    'PUT',
-    config,
-  )
-}
-
 export function touchThreadTmuxActivity(projectId: string, threadId: string, signal?: AbortSignal) {
   return request<void>(`${threadPath(projectId, threadId)}/tmux/activity`, { method: 'PUT', signal })
 }
@@ -145,6 +131,7 @@ export function updateProject(
   input: {
     profileId?: string
     worktreeBranchPrefix?: string
+    relatedProjects?: string[]
     environment?: LocalEnvironment
     figmaMCPEnabled?: boolean
   },
@@ -156,8 +143,8 @@ export function updateProjectProfile(id: string, profileId: string) {
   return updateProject(id, { profileId })
 }
 
-export function updateProjectWorktreeBranchPrefix(id: string, prefix: string) {
-  return updateProject(id, { worktreeBranchPrefix: prefix })
+export function updateProjectBranchesAndPaths(id: string, worktreeBranchPrefix: string, relatedProjects: string[]) {
+  return updateProject(id, { worktreeBranchPrefix, relatedProjects })
 }
 
 export function updateProjectEnvironment(id: string, environment: LocalEnvironment) {

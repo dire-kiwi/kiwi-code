@@ -12,7 +12,6 @@ import { TextInput } from '@/ui/inputs'
 import { LoadErrorPanel, LoadingPanel } from '@/ui/feedback'
 import { ScreenHeader } from '@/ui/layout'
 import { ProjectEnvironmentSettings } from './ProjectEnvironmentSettings'
-import { SandboxSettingsScreen } from './SandboxSettingsScreen'
 import {
   DEFAULT_GLOBAL_SETTINGS_SECTION,
   DEFAULT_PROJECT_SETTINGS_SECTION,
@@ -175,8 +174,6 @@ export function SettingsShell({
         return <CleanupSection settings={settings} />
       case 'appearance':
         return <AppearanceSection settings={settings} />
-      case 'sandbox':
-        return <SandboxSettingsScreen scope="global" embedded />
       case 'skills':
         return <SkillsSection />
     }

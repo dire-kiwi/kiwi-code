@@ -1,7 +1,0 @@
-{
-  "name": "@dire-kiwi/kiwi-sandbox-claude",
-  "version": "0.2.0",
-  "private": true,
-  "type": "module",
-  "dependencies": {}
-}

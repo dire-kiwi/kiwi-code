@@ -30,7 +30,6 @@ type terminalHandler struct {
 	tmuxPath              string
 	tmuxSocket            string
 	piExtensionPaths      []string
-	piSkillPaths          []string
 	piExtensionErr        error
 	piFigmaExtensionPath  string
 	piFigmaExtensionErr   error
@@ -226,14 +225,6 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 	tmuxPath, _ := exec.LookPath("tmux")
 	envPath, _ := exec.LookPath("env")
 	extensionPaths, extensionErr := materializePiExtensions(projects.DataDirectory())
-	kiwiSandboxPiPath, _, kiwiSandboxErr := materializeKiwiSandbox(projects.DataDirectory())
-	var piSkillPaths []string
-	if kiwiSandboxErr == nil {
-		extensionPaths = append(extensionPaths, kiwiSandboxPiPath)
-		piSkillPaths = append(piSkillPaths, kiwiSandboxPiSkillPath(projects.DataDirectory()))
-	} else {
-		extensionErr = errors.Join(extensionErr, kiwiSandboxErr)
-	}
 	// The Figma bridge is materialized separately from the always-on extensions
 	// so it only loads for projects that enabled Figma MCP support.
 	figmaExtensionPath, figmaExtensionErr := materializePiFigmaMCPExtension(projects.DataDirectory())
@@ -250,7 +241,6 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 		tmuxPath:             tmuxPath,
 		tmuxSocket:           tmuxSocket,
 		piExtensionPaths:     extensionPaths,
-		piSkillPaths:         piSkillPaths,
 		piExtensionErr:       extensionErr,
 		piFigmaExtensionPath: figmaExtensionPath,
 		piFigmaExtensionErr:  figmaExtensionErr,
@@ -260,7 +250,6 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 		nativePi: newPiNativeManager(
 			projects.DataDirectory(),
 			extensionPaths,
-			piSkillPaths,
 			extensionErr,
 			agentToken,
 			figmaExtensionPath,
@@ -3363,12 +3352,9 @@ func (h *terminalHandler) commandForTmuxTarget(
 			}
 			extensionPaths = append(append([]string(nil), extensionPaths...), h.piFigmaExtensionPath)
 		}
-		extensionArgs := make([]string, 0, len(extensionPaths)*2+len(h.piSkillPaths)*2+len(args))
+		extensionArgs := make([]string, 0, len(extensionPaths)*2+len(args))
 		for _, extensionPath := range extensionPaths {
 			extensionArgs = append(extensionArgs, "--extension", extensionPath)
-		}
-		for _, skillPath := range h.piSkillPaths {
-			extensionArgs = append(extensionArgs, "--skill", skillPath)
 		}
 		args = append(extensionArgs, args...)
 	}
@@ -3387,7 +3373,7 @@ func (h *terminalHandler) commandForTmuxTarget(
 			"--dangerously-bypass-approvals-and-sandbox",
 			"--dangerously-bypass-hook-trust",
 		}
-		relatedDirectories, err := codingAgentRelatedProjectDirectories(thread)
+		relatedDirectories, err := codingAgentRelatedProjectDirectories(item, thread)
 		if err != nil {
 			return "", nil, "", err
 		}
@@ -3432,10 +3418,8 @@ func (h *terminalHandler) commandForTmuxTarget(
 				return "", nil, "", err
 			}
 		}
-		// Kiwi Sandbox is intentionally not loaded into Claude for now. Preserve
-		// its related-project ergonomics through Claude's native --add-dir flag.
 		pluginArguments := []string{"--plugin-dir", h.claudePluginPath}
-		relatedDirectories, err := codingAgentRelatedProjectDirectories(thread)
+		relatedDirectories, err := codingAgentRelatedProjectDirectories(item, thread)
 		if err != nil {
 			return "", nil, "", err
 		}

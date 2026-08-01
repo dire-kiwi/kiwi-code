@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/dire-kiwi/kiwi-code/internal/project"
@@ -120,6 +121,35 @@ func TestProjectEnvironmentAPI(t *testing.T) {
 	}
 	if action.Name != "Run tests" || command == "" || len(variables) < 2 {
 		t.Fatalf("resolved environment action = %#v, command = %q, variables = %#v", action, command, variables)
+	}
+}
+
+func TestProjectRelatedProjectsAPI(t *testing.T) {
+	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := newIsolatedServerHandler(t, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPatch, "/api/projects/"+item.ID,
+		bytes.NewBufferString(`{"relatedProjects":[" ../shared ","$HOME/personal"]}`)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("update related projects status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var updated project.Project
+	if err := json.NewDecoder(response.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(updated.RelatedProjects, []string{"../shared", "$HOME/personal"}) {
+		t.Fatalf("updated related projects = %#v", updated.RelatedProjects)
 	}
 }
 

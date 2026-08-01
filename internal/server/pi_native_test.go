@@ -56,7 +56,6 @@ func TestPiNativeArgumentsResumeTheSelectedSessionFile(t *testing.T) {
 		"/tmp/sessions",
 		"/tmp/sessions/active.jsonl",
 		nil,
-		nil,
 		"",
 		codingAgentLaunchOptions{},
 	)
@@ -119,7 +118,7 @@ func TestPiNativeActiveSessionSurvivesManagerRestartAndCwdChange(t *testing.T) {
 	if header.Cwd != movedCwd {
 		t.Fatalf("aligned session cwd = %q, want %q", header.Cwd, movedCwd)
 	}
-	arguments := piNativeArguments(sessionDirectory, selected, nil, nil, "", codingAgentLaunchOptions{})
+	arguments := piNativeArguments(sessionDirectory, selected, nil, "", codingAgentLaunchOptions{})
 	if !reflect.DeepEqual(arguments[:6], []string{
 		"--mode", "rpc", "--session-dir", sessionDirectory, "--session", older,
 	}) {
@@ -611,7 +610,7 @@ done
 		t.Fatal(err)
 	}
 
-	manager := newPiNativeManager(filepath.Join(directory, "data"), nil, nil, nil, "test-agent-token", "")
+	manager := newPiNativeManager(filepath.Join(directory, "data"), nil, nil, "test-agent-token", "")
 	manager.piPath = fakePi
 	item := project.Project{ID: "project-a"}
 	thread := project.Thread{ID: "thread-a", Cwd: directory}

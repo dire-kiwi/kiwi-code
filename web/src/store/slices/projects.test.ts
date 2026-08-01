@@ -45,6 +45,7 @@ function project(id: string, threads: Thread[], profileId = 'personal'): Project
     createdAt: '2026-07-27T00:00:00Z',
     threads,
     worktreeBranchPrefix: '',
+    relatedProjects: [],
     environment: {
       name: 'Local',
       setupScripts: { default: '', macos: '', linux: '', windows: '' },
