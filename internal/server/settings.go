@@ -16,10 +16,6 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 		WorktreeBasePath              *string                       `json:"worktreeBasePath"`
 		ArchivedThreadRetentionDays   *int                          `json:"archivedThreadRetentionDays"`
 		OrphanedWorktreeRetentionDays *int                          `json:"orphanedWorktreeRetentionDays"`
-		SubAgentNestingDepth          *int                          `json:"subAgentNestingDepth"`
-		DisableWorkflows              *bool                         `json:"disableWorkflows"`
-		WorkflowKeywordTrigger        *bool                         `json:"workflowKeywordTriggerEnabled"`
-		WorkflowSizeGuideline         *string                       `json:"workflowSizeGuideline"`
 		CodingAgents                  *[]project.CodingAgentSetting `json:"codingAgents"`
 		Theme                         *project.Theme                `json:"theme"`
 	}
@@ -27,9 +23,7 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil || (input.WorktreeBasePath == nil &&
 		input.ArchivedThreadRetentionDays == nil &&
-		input.OrphanedWorktreeRetentionDays == nil && input.SubAgentNestingDepth == nil &&
-		input.DisableWorkflows == nil && input.WorkflowKeywordTrigger == nil &&
-		input.WorkflowSizeGuideline == nil && input.CodingAgents == nil && input.Theme == nil) {
+		input.OrphanedWorktreeRetentionDays == nil && input.CodingAgents == nil && input.Theme == nil) {
 		writeError(w, http.StatusBadRequest, "Invalid settings.")
 		return
 	}
@@ -37,10 +31,6 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 		WorktreeBasePath:              input.WorktreeBasePath,
 		ArchivedThreadRetentionDays:   input.ArchivedThreadRetentionDays,
 		OrphanedWorktreeRetentionDays: input.OrphanedWorktreeRetentionDays,
-		SubAgentNestingDepth:          input.SubAgentNestingDepth,
-		DisableWorkflows:              input.DisableWorkflows,
-		WorkflowKeywordTrigger:        input.WorkflowKeywordTrigger,
-		WorkflowSizeGuideline:         input.WorkflowSizeGuideline,
 		CodingAgents:                  input.CodingAgents,
 		Theme:                         input.Theme,
 	})

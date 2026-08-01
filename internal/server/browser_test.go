@@ -44,10 +44,6 @@ func (p browserActionTestProvider) Action(ctx context.Context, request browserco
 	return p.action(ctx, request)
 }
 
-func (browserActionTestProvider) OpenRecordingRange(context.Context, string, string, string, string) (browsercontrol.Recording, error) {
-	return browsercontrol.Recording{}, browsercontrol.ErrRecordingNotFound
-}
-
 func (browserActionTestProvider) Close(context.Context) error {
 	return nil
 }
@@ -162,7 +158,6 @@ func TestBrowserOperationAllowlist(t *testing.T) {
 		"tabs.list", "tabs.new", "tabs.select", "tabs.close",
 		"navigate.goto", "navigate.back", "navigate.forward", "navigate.reload",
 		"snapshot", "click", "fill", "key", "wait", "evaluate", "screenshot", "cdp", "preview",
-		"recording.start", "recording.stop", "recording.status", "recording.delete",
 	}
 	got := make([]string, 0, len(allowedBrowserOperations))
 	for operation := range allowedBrowserOperations {
@@ -172,13 +167,6 @@ func TestBrowserOperationAllowlist(t *testing.T) {
 	sort.Strings(want)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("browser operation allowlist = %v, want %v", got, want)
-	}
-}
-
-func TestRecordingFilenameUsesPurposeTitleWithoutPathContent(t *testing.T) {
-	got := recordingFilename(" Demonstrate Checkout / Login Flow ", "rec-0123456789abcdef")
-	if got != "demonstrate-checkout-login-flow-456789abcdef.webm" {
-		t.Fatalf("recordingFilename() = %q", got)
 	}
 }
 
@@ -548,48 +536,6 @@ func TestDecodeBrowserFrameBoundsDataAndMetadata(t *testing.T) {
 	}
 }
 
-func TestThreadDeletionStopsBrowserSessionsAfterPublication(t *testing.T) {
-	var mu sync.Mutex
-	var stopped []string
-	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var action recordedBrowserAction
-		_ = json.NewDecoder(r.Body).Decode(&action)
-		if action.Operation == "session.stop" {
-			mu.Lock()
-			stopped = append(stopped, action.ThreadID)
-			mu.Unlock()
-		}
-		// Provider cleanup failure must not change durable deletion semantics.
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"ok":false,"error":{"code":"already_stopped"}}`))
-	}))
-	defer provider.Close()
-	store, item, root, handler := newBrowserHTTPFixture(t, provider.URL)
-	child, err := store.AddThreadWithOptions(item.ID, "Child", project.AddThreadOptions{ParentThreadID: root.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	path := "/api/projects/" + item.ID + "/threads/" + root.ID
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodDelete, path, nil))
-	if response.Code != http.StatusNoContent {
-		t.Fatalf("delete response = %d, body = %s", response.Code, response.Body.String())
-	}
-	if _, _, err := store.GetThread(item.ID, root.ID); !errors.Is(err, project.ErrThreadNotFound) {
-		t.Fatalf("deleted root still exists: %v", err)
-	}
-	mu.Lock()
-	sort.Strings(stopped)
-	got := append([]string(nil), stopped...)
-	mu.Unlock()
-	want := []string{child.ID, root.ID}
-	sort.Strings(want)
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("stopped browser threads = %v, want %v", got, want)
-	}
-}
-
 func TestProjectDeletionStopsAllBrowserSessions(t *testing.T) {
 	var mu sync.Mutex
 	var stopped []string
@@ -728,7 +674,6 @@ func newBrowserHTTPFixture(t *testing.T, providerURL string) (*project.Store, pr
 		terminal:        terminal,
 		piActivity:      newPiActivityTracker(),
 		contextStatuses: newContextStatusTracker(),
-		threadMessages:  newChildThreadMessageStore(),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("DELETE /api/projects/{id}", application.deleteProject)

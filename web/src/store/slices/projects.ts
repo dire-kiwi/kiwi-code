@@ -3,7 +3,6 @@ import {
   deleteProject,
   deleteThread,
   setThreadArchived,
-  setThreadBookmarked,
   updateProjectOrder,
   updateThreadOrder,
 } from '@/api'
@@ -12,7 +11,7 @@ import { retryTopic } from '@/store/socketAccess'
 import type { Project, Thread } from '@/types'
 import { ProjectsTopic } from '@/wire/topics'
 
-// The project tree, and the four "one of these is in flight" ids the sidebar
+// The project tree, and the three "one of these is in flight" ids the sidebar
 // uses to show spinners.
 //
 // Every mutation here is optimistic: the list moves first and rolls back if the
@@ -28,7 +27,6 @@ export type ProjectsState = {
   deletingProjectId: string | null
   deletingThreadId: string | null
   archivingThreadId: string | null
-  bookmarkingThreadId: string | null
 }
 
 export const initialProjectsState: ProjectsState = {
@@ -37,7 +35,6 @@ export const initialProjectsState: ProjectsState = {
   deletingProjectId: null,
   deletingThreadId: null,
   archivingThreadId: null,
-  bookmarkingThreadId: null,
 }
 
 // --- pure helpers, lifted out of App unchanged -----------------------------
@@ -60,22 +57,14 @@ function sameThreads(current: readonly Thread[], next: readonly Thread[]) {
       && candidate.cwd === thread.cwd
       && candidate.createdAt === thread.createdAt
       && candidate.lastPromptAt === thread.lastPromptAt
-      && candidate.parentThreadId === thread.parentThreadId
-      && candidate.agentModel === thread.agentModel
-      && candidate.agentThinkingLevel === thread.agentThinkingLevel
-      && candidate.workflowRunId === thread.workflowRunId
-      && candidate.workflowAgentId === thread.workflowAgentId
       && candidate.worktree === thread.worktree
       && candidate.branch === thread.branch
       && candidate.worktreePath === thread.worktreePath
       && candidate.autoNamed === thread.autoNamed
       && candidate.titleLocked === thread.titleLocked
-      && candidate.closedAt === thread.closedAt
       && candidate.archivedAt === thread.archivedAt
-      && candidate.bookmarked === thread.bookmarked
       && candidate.tokenLimit === thread.tokenLimit
       && candidate.costLimitUsd === thread.costLimitUsd
-      && candidate.nestedDepth === thread.nestedDepth
       && candidate.rollbackPending === thread.rollbackPending
       && candidate.rollbackCleanupReady === thread.rollbackCleanupReady
   })
@@ -98,7 +87,6 @@ export function sameProjects(current: readonly Project[], next: readonly Project
       && candidate.host === project.host
       && candidate.isGitRepo === project.isGitRepo
       && candidate.createdAt === project.createdAt
-      && candidate.subAgentNestingDepthOverride === project.subAgentNestingDepthOverride
       && candidate.worktreeBranchPrefix === project.worktreeBranchPrefix
       && candidate.figmaMCPEnabled === project.figmaMCPEnabled
       && JSON.stringify(candidate.environment) === JSON.stringify(project.environment)
@@ -231,30 +219,14 @@ export const threadArchived = createAsyncThunk<
   }
 })
 
-export const threadBookmarked = createAsyncThunk<
-  { projectId: string; threadId: string; bookmarked: boolean },
-  { projectId: string; threadId: string; bookmarked: boolean },
-  ThunkConfig
->('projects/threadBookmarked', async ({ projectId, threadId, bookmarked }, { rejectWithValue }) => {
-  try {
-    const updated = await setThreadBookmarked(projectId, threadId, bookmarked)
-    return { projectId, threadId, bookmarked: updated.bookmarked ?? false }
-  } catch (reason) {
-    return rejectWithValue(errorMessage(
-      reason,
-      `Could not ${bookmarked ? 'bookmark' : 'remove the bookmark from'} that thread.`,
-    ))
-  }
-})
-
 export const threadRemoved = createAsyncThunk<
   { projectId: string; threadIds: string[] },
-  { projectId: string; threadId: string; descendantIds: string[] },
+  { projectId: string; threadId: string },
   ThunkConfig
->('projects/threadRemoved', async ({ projectId, threadId, descendantIds }, { rejectWithValue }) => {
+>('projects/threadRemoved', async ({ projectId, threadId }, { rejectWithValue }) => {
   try {
     await deleteThread(projectId, threadId)
-    return { projectId, threadIds: [threadId, ...descendantIds] }
+    return { projectId, threadIds: [threadId] }
   } catch (reason) {
     return rejectWithValue(errorMessage(reason, 'Could not delete that thread.'))
   }
@@ -330,26 +302,6 @@ export const projectsSlice = createSlice({
         state.archivingThreadId = null
       })
 
-      .addCase(threadBookmarked.pending, (state, action) => {
-        state.bookmarkingThreadId = action.meta.arg.threadId
-      })
-      .addCase(threadBookmarked.fulfilled, (state, action) => {
-        const { projectId, threadId, bookmarked } = action.payload
-        state.projects = state.projects.map((project) =>
-          project.id === projectId
-            ? {
-                ...project,
-                threads: project.threads.map((thread) =>
-                  thread.id === threadId ? { ...thread, bookmarked } : thread),
-              }
-            : project,
-        )
-        state.bookmarkingThreadId = null
-      })
-      .addCase(threadBookmarked.rejected, (state) => {
-        state.bookmarkingThreadId = null
-      })
-
       .addCase(threadRemoved.pending, (state, action) => {
         state.deletingThreadId = action.meta.arg.threadId
       })
@@ -384,4 +336,3 @@ export const selectProjectsHydrated = (state: RootState) => state.projects.hydra
 export const selectDeletingProjectId = (state: RootState) => state.projects.deletingProjectId
 export const selectDeletingThreadId = (state: RootState) => state.projects.deletingThreadId
 export const selectArchivingThreadId = (state: RootState) => state.projects.archivingThreadId
-export const selectBookmarkingThreadId = (state: RootState) => state.projects.bookmarkingThreadId

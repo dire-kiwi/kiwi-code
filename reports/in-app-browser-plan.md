@@ -161,7 +161,6 @@ The browser integration should:
 - use a thin Pi adapter that calls the Kiwi Code browser service through the existing thread endpoint and `X-Kiwi-Code-Agent-Token`;
 - load the skill through `resources_discover` or an explicit `--skill` path, because passing only `--extension` does not load a package manifest's skills;
 - make terminal Pi and Pi Native in the same Kiwi Code thread intentionally share one browser session;
-- give child threads separate sessions;
 - detect an already installed `@dire-pi/chrome-devtools` package and produce a clear migration warning instead of ambiguous duplicate tools;
 - provide a stable reload/import path so existing terminal Pi sessions can acquire the first-party extension with `/reload` where possible.
 
@@ -287,7 +286,6 @@ The UI should call projected content a **browser preview**, not promise a perfec
 - Backend: **In app**
 - Ownership: one browser session per Kiwi Code thread
 - Terminal Pi and Pi Native: shared browser session
-- Child threads: isolated browser sessions
 - Storage: ephemeral per thread initially; persistent site data is explicit opt-in
 - Preview: capture after actions; live refresh only while visible
 - Control conflict: user takes precedence and pauses agent input
@@ -317,7 +315,7 @@ Retain and extend the current `dire-pi-ext` tests. Add coverage for:
 - whole-process-tree cleanup;
 - agent capability and origin rejection;
 - no browser start before successful authorization/upgrade;
-- per-thread and child-thread isolation;
+- per-thread isolation;
 - user/agent control leasing;
 - screenshot limits and frame backpressure;
 - stale frame input rejection;

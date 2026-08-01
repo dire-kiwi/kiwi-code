@@ -27,69 +27,8 @@ function byPromptNewestFirst(left, right) {
   return right.promptAt - left.promptAt || left.order - right.order
 }
 
-function orderThreadFamilies(
-  entries,
-  threadsByKey,
-  recencyValue = (entry) => entry.at,
-  byEntryRecency = byNewestFirst,
-) {
-  if (entries.length < 2) return entries
-
-  const entriesByKey = new Map(entries.map((entry) => [entryKey(entry.projectId, entry.threadId), entry]))
-  const childrenByKey = new Map()
-  const childKeys = new Set()
-
-  for (const entry of entries) {
-    const key = entryKey(entry.projectId, entry.threadId)
-    let parentId = threadsByKey.get(key)?.thread.parentThreadId
-    const visited = new Set([entry.threadId])
-    while (parentId && !visited.has(parentId)) {
-      visited.add(parentId)
-      const parentKey = entryKey(entry.projectId, parentId)
-      if (entriesByKey.has(parentKey)) {
-        const children = childrenByKey.get(parentKey) ?? []
-        children.push(entry)
-        childrenByKey.set(parentKey, children)
-        childKeys.add(key)
-        break
-      }
-      parentId = threadsByKey.get(parentKey)?.thread.parentThreadId
-    }
-  }
-
-  const newestInFamily = new Map()
-  const familyRecency = (entry, visiting = new Set()) => {
-    const key = entryKey(entry.projectId, entry.threadId)
-    const cached = newestInFamily.get(key)
-    if (cached !== undefined) return cached
-    if (visiting.has(key)) return recencyValue(entry)
-    const nextVisiting = new Set(visiting).add(key)
-    let newest = recencyValue(entry)
-    for (const child of childrenByKey.get(key) ?? []) {
-      newest = Math.max(newest, familyRecency(child, nextVisiting))
-    }
-    newestInFamily.set(key, newest)
-    return newest
-  }
-  const byFamilyRecency = (left, right) =>
-    familyRecency(right) - familyRecency(left) || byEntryRecency(left, right)
-
-  const ordered = []
-  const appended = new Set()
-  const appendFamily = (entry) => {
-    const key = entryKey(entry.projectId, entry.threadId)
-    if (appended.has(key)) return
-    appended.add(key)
-    ordered.push(entry)
-    for (const child of (childrenByKey.get(key) ?? []).sort(byFamilyRecency)) appendFamily(child)
-  }
-
-  const roots = entries.filter((entry) => !childKeys.has(entryKey(entry.projectId, entry.threadId)))
-  for (const root of roots.sort(byFamilyRecency)) appendFamily(root)
-  // Cyclic relationships are rejected by the backend, but keep every row
-  // visible if malformed data ever reaches the client.
-  for (const entry of entries.sort(byEntryRecency)) appendFamily(entry)
-  return ordered
+function orderEntries(entries, byEntryRecency = byNewestFirst) {
+  return [...entries].sort(byEntryRecency)
 }
 
 function publicEntry({ projectId, threadId, at }) {
@@ -98,10 +37,9 @@ function publicEntry({ projectId, threadId, at }) {
 
 /**
  * Groups every thread across all projects into the activity view's sections,
- * in priority order: working, needs review, pinned, recent. A thread appears
+ * in priority order: working, needs review, recent. A thread appears
  * in the first section that claims it. Entries within a section keep each
- * visible subthread directly below its parent, while thread families remain
- * ordered by their newest member. Recent holds only active root threads and is
+ * recency order. Recent holds active threads and is
  * capped at recentLimit; the overflow is reported as hiddenRecentCount.
  */
 export function activityViewGroups(
@@ -142,24 +80,18 @@ export function activityViewGroups(
     // Working heartbeats refresh while the LLM responds. Keep that timestamp
     // for the row display, but only let a user's latest prompt change ordering.
     return state === 'working'
-      ? orderThreadFamilies(entries, threadsByKey, (entry) => entry.promptAt, byPromptNewestFirst)
-      : orderThreadFamilies(entries, threadsByKey)
+      ? orderEntries(entries, byPromptNewestFirst)
+      : orderEntries(entries)
   }
 
   const working = collectActivityEntries('working')
   const needsReview = collectActivityEntries('finished')
 
-  const pinned = []
   const remaining = []
   for (const [key, { projectId, thread, order: threadOrder }] of threadsByKey) {
     if (included.has(key) || thread.archivedAt) continue
-    if (thread.bookmarked) {
-      pinned.push({ projectId, threadId: thread.id, at: threadRecency(thread), order: threadOrder })
-    } else if (!thread.parentThreadId && !thread.closedAt) {
-      remaining.push({ projectId, threadId: thread.id, at: threadRecency(thread), order: threadOrder })
-    }
+    remaining.push({ projectId, threadId: thread.id, at: threadRecency(thread), order: threadOrder })
   }
-  const orderedPinned = orderThreadFamilies(pinned, threadsByKey)
   remaining.sort(byNewestFirst)
   const boundedLimit = Number.isInteger(recentLimit) && recentLimit > 0 ? recentLimit : 0
   const recent = remaining.slice(0, boundedLimit)
@@ -167,7 +99,6 @@ export function activityViewGroups(
   return {
     working: working.map(publicEntry),
     needsReview: needsReview.map(publicEntry),
-    pinned: orderedPinned.map(publicEntry),
     recent: recent.map(publicEntry),
     hiddenRecentCount: remaining.length - recent.length,
   }

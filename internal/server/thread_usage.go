@@ -32,7 +32,6 @@ type threadUsageSnapshot struct {
 	ProjectID     string            `json:"projectId"`
 	ThreadID      string            `json:"threadId"`
 	Own           threadUsageTotals `json:"own"`
-	Children      threadUsageTotals `json:"children"`
 	Total         threadUsageTotals `json:"total"`
 	TokenLimit    *int64            `json:"tokenLimit,omitempty"`
 	CostLimitUSD  *float64          `json:"costLimitUsd,omitempty"`
@@ -203,75 +202,21 @@ func (t *threadUsageTracker) snapshots(projects []project.Project) []threadUsage
 				updated[key.ThreadID] = record.UpdatedAt
 			}
 		}
-		children := make(map[string][]string)
 		for _, thread := range item.Threads {
-			if thread.ParentThreadID != "" {
-				children[thread.ParentThreadID] = append(children[thread.ParentThreadID], thread.ID)
-			}
-		}
-		var descendantUsage func(string) (threadUsageTotals, time.Time)
-		descendantUsage = func(threadID string) (threadUsageTotals, time.Time) {
-			var totals threadUsageTotals
-			latest := updated[threadID]
-			for _, childID := range children[threadID] {
-				childTotal, childUpdated := descendantUsage(childID)
-				totals = addThreadUsage(totals, addThreadUsage(threadOwn[childID], childTotal))
-				if childUpdated.After(latest) {
-					latest = childUpdated
-				}
-			}
-			return totals, latest
-		}
-		projectStart := len(result)
-		for _, thread := range item.Threads {
-			childTotals, latest := descendantUsage(thread.ID)
-			if updated[thread.ID].After(latest) {
-				latest = updated[thread.ID]
-			}
-			total := addThreadUsage(threadOwn[thread.ID], childTotals)
+			total := threadOwn[thread.ID]
 			reached := usageLimitReached(total, thread)
 			snapshot := threadUsageSnapshot{
-				ProjectID: item.ID, ThreadID: thread.ID, Own: threadOwn[thread.ID], Children: childTotals, Total: total,
+				ProjectID: item.ID, ThreadID: thread.ID, Own: total, Total: total,
 				TokenLimit: thread.TokenLimit, CostLimitUSD: thread.CostLimitUSD, LimitReached: reached,
 			}
 			if reached {
 				snapshot.LimitThreadID = thread.ID
 			}
-			if !latest.IsZero() {
+			if latest := updated[thread.ID]; !latest.IsZero() {
 				value := latest.UTC()
 				snapshot.UpdatedAt = &value
 			}
 			result = append(result, snapshot)
-		}
-		byID := make(map[string]*threadUsageSnapshot, len(item.Threads))
-		for index := projectStart; index < len(result); index++ {
-			byID[result[index].ThreadID] = &result[index]
-		}
-		for _, thread := range item.Threads {
-			current := byID[thread.ID]
-			if current == nil || current.LimitReached {
-				continue
-			}
-			parentID := thread.ParentThreadID
-			for parentID != "" {
-				parent := byID[parentID]
-				if parent == nil {
-					break
-				}
-				if parent.LimitReached {
-					current.LimitReached = true
-					current.LimitThreadID = parent.LimitThreadID
-					break
-				}
-				parentThreadID := ""
-				for _, candidate := range item.Threads {
-					if candidate.ID == parentID {
-						parentThreadID = candidate.ParentThreadID
-						break
-					}
-				}
-				parentID = parentThreadID
-			}
 		}
 	}
 	return result

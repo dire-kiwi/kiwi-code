@@ -124,6 +124,35 @@ func TestProjectEnvironmentAPI(t *testing.T) {
 	}
 }
 
+func TestProjectRelatedProjectsAPI(t *testing.T) {
+	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := newIsolatedServerHandler(t, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPatch, "/api/projects/"+item.ID,
+		bytes.NewBufferString(`{"relatedProjects":[" ../shared ","$HOME/personal"]}`)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("update related projects status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var updated project.Project
+	if err := json.NewDecoder(response.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(updated.RelatedProjects, []string{"../shared", "$HOME/personal"}) {
+		t.Fatalf("updated related projects = %#v", updated.RelatedProjects)
+	}
+}
+
 func TestProjectAndThreadOrderAPI(t *testing.T) {
 	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
 	if err != nil {
@@ -192,353 +221,6 @@ func TestProjectAndThreadOrderAPI(t *testing.T) {
 	handler.ServeHTTP(unknownResponse, httptest.NewRequest(http.MethodPut, "/api/projects/missing/threads/order", bytes.NewBufferString(`{"threadIds":[]}`)))
 	if unknownResponse.Code != http.StatusNotFound {
 		t.Fatalf("missing project order status = %d, body = %s", unknownResponse.Code, unknownResponse.Body.String())
-	}
-}
-
-func TestProfileAPIAndProjectAssignment(t *testing.T) {
-	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler, err := newIsolatedServerHandler(t, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	listResponse := httptest.NewRecorder()
-	handler.ServeHTTP(listResponse, httptest.NewRequest(http.MethodGet, "/api/profiles", nil))
-	if listResponse.Code != http.StatusOK {
-		t.Fatalf("list profiles status = %d, body = %s", listResponse.Code, listResponse.Body.String())
-	}
-	var profiles []project.Profile
-	if err := json.NewDecoder(listResponse.Body).Decode(&profiles); err != nil {
-		t.Fatal(err)
-	}
-	if len(profiles) != 2 || profiles[0].ID != project.PersonalProfileID || profiles[1].ID != project.WorkProfileID {
-		t.Fatalf("default profiles = %#v", profiles)
-	}
-
-	createProfileResponse := httptest.NewRecorder()
-	handler.ServeHTTP(createProfileResponse, httptest.NewRequest(http.MethodPost, "/api/profiles", bytes.NewBufferString(`{"name":"Client"}`)))
-	if createProfileResponse.Code != http.StatusCreated {
-		t.Fatalf("create profile status = %d, body = %s", createProfileResponse.Code, createProfileResponse.Body.String())
-	}
-	var profile project.Profile
-	if err := json.NewDecoder(createProfileResponse.Body).Decode(&profile); err != nil {
-		t.Fatal(err)
-	}
-
-	projectPath := t.TempDir()
-	createProjectBody, err := json.Marshal(map[string]string{"name": "Client app", "path": projectPath, "profileId": profile.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	createProjectResponse := httptest.NewRecorder()
-	handler.ServeHTTP(createProjectResponse, httptest.NewRequest(http.MethodPost, "/api/projects", bytes.NewReader(createProjectBody)))
-	if createProjectResponse.Code != http.StatusCreated {
-		t.Fatalf("create project status = %d, body = %s", createProjectResponse.Code, createProjectResponse.Body.String())
-	}
-	var item project.Project
-	if err := json.NewDecoder(createProjectResponse.Body).Decode(&item); err != nil {
-		t.Fatal(err)
-	}
-	if item.ProfileID != profile.ID {
-		t.Fatalf("created project profile = %q, want %q", item.ProfileID, profile.ID)
-	}
-
-	updateResponse := httptest.NewRecorder()
-	updatePath := "/api/projects/" + item.ID
-	handler.ServeHTTP(updateResponse, httptest.NewRequest(http.MethodPatch, updatePath, bytes.NewBufferString(`{"profileId":"work"}`)))
-	if updateResponse.Code != http.StatusOK {
-		t.Fatalf("update project profile status = %d, body = %s", updateResponse.Code, updateResponse.Body.String())
-	}
-	var updated project.Project
-	if err := json.NewDecoder(updateResponse.Body).Decode(&updated); err != nil {
-		t.Fatal(err)
-	}
-	if updated.ProfileID != project.WorkProfileID {
-		t.Fatalf("updated project profile = %q, want %q", updated.ProfileID, project.WorkProfileID)
-	}
-
-	depthResponse := httptest.NewRecorder()
-	handler.ServeHTTP(depthResponse, httptest.NewRequest(http.MethodPatch, updatePath, bytes.NewBufferString(`{"subAgentNestingDepthOverride":3}`)))
-	if depthResponse.Code != http.StatusOK {
-		t.Fatalf("update project nesting status = %d, body = %s", depthResponse.Code, depthResponse.Body.String())
-	}
-	if err := json.NewDecoder(depthResponse.Body).Decode(&updated); err != nil {
-		t.Fatal(err)
-	}
-	if updated.ProfileID != project.WorkProfileID || updated.SubAgentNestingDepthOverride == nil || *updated.SubAgentNestingDepthOverride != 3 {
-		t.Fatalf("updated project nesting = %#v", updated)
-	}
-
-	combinedResponse := httptest.NewRecorder()
-	handler.ServeHTTP(combinedResponse, httptest.NewRequest(http.MethodPatch, updatePath, bytes.NewBufferString(`{"profileId":"personal","subAgentNestingDepthOverride":null}`)))
-	if combinedResponse.Code != http.StatusOK {
-		t.Fatalf("clear project nesting status = %d, body = %s", combinedResponse.Code, combinedResponse.Body.String())
-	}
-	updated = project.Project{}
-	if err := json.NewDecoder(combinedResponse.Body).Decode(&updated); err != nil {
-		t.Fatal(err)
-	}
-	if updated.ProfileID != project.PersonalProfileID || updated.SubAgentNestingDepthOverride != nil {
-		t.Fatalf("cleared project nesting = %#v", updated)
-	}
-
-	prefixResponse := httptest.NewRecorder()
-	handler.ServeHTTP(prefixResponse, httptest.NewRequest(http.MethodPatch, updatePath, bytes.NewBufferString(`{"worktreeBranchPrefix":"ivan/"}`)))
-	if prefixResponse.Code != http.StatusOK {
-		t.Fatalf("update project branch prefix status = %d, body = %s", prefixResponse.Code, prefixResponse.Body.String())
-	}
-	updated = project.Project{}
-	if err := json.NewDecoder(prefixResponse.Body).Decode(&updated); err != nil {
-		t.Fatal(err)
-	}
-	if updated.WorktreeBranchPrefix != "ivan/" {
-		t.Fatalf("updated project branch prefix = %q", updated.WorktreeBranchPrefix)
-	}
-
-	relatedResponse := httptest.NewRecorder()
-	handler.ServeHTTP(relatedResponse, httptest.NewRequest(http.MethodPatch, updatePath,
-		bytes.NewBufferString(`{"relatedProjects":[" ../shared ","$HOME/personal"]}`)))
-	if relatedResponse.Code != http.StatusOK {
-		t.Fatalf("update related projects status = %d, body = %s", relatedResponse.Code, relatedResponse.Body.String())
-	}
-	updated = project.Project{}
-	if err := json.NewDecoder(relatedResponse.Body).Decode(&updated); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(updated.RelatedProjects, []string{"../shared", "$HOME/personal"}) {
-		t.Fatalf("updated related projects = %#v", updated.RelatedProjects)
-	}
-
-	invalidPrefixResponse := httptest.NewRecorder()
-	handler.ServeHTTP(invalidPrefixResponse, httptest.NewRequest(http.MethodPatch, updatePath, bytes.NewBufferString(`{"worktreeBranchPrefix":"bad prefix/"}`)))
-	if invalidPrefixResponse.Code != http.StatusBadRequest {
-		t.Fatalf("invalid project branch prefix status = %d, body = %s", invalidPrefixResponse.Code, invalidPrefixResponse.Body.String())
-	}
-
-	invalidDepthResponse := httptest.NewRecorder()
-	handler.ServeHTTP(invalidDepthResponse, httptest.NewRequest(http.MethodPatch, updatePath, bytes.NewBufferString(`{"subAgentNestingDepthOverride":5}`)))
-	if invalidDepthResponse.Code != http.StatusBadRequest {
-		t.Fatalf("invalid project nesting status = %d, body = %s", invalidDepthResponse.Code, invalidDepthResponse.Body.String())
-	}
-
-	missingResponse := httptest.NewRecorder()
-	handler.ServeHTTP(missingResponse, httptest.NewRequest(http.MethodPatch, updatePath, bytes.NewBufferString(`{"profileId":"missing"}`)))
-	if missingResponse.Code != http.StatusBadRequest {
-		t.Fatalf("missing profile status = %d, body = %s", missingResponse.Code, missingResponse.Body.String())
-	}
-}
-
-func TestThreadAPI(t *testing.T) {
-	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	item, err := store.Add("Demo", t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler, err := newIsolatedServerHandler(t, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	createResponse := httptest.NewRecorder()
-	createRequest := httptest.NewRequest(http.MethodPost, "/api/projects/"+item.ID+"/threads", bytes.NewBufferString(`{"nestedDepth":0}`))
-	handler.ServeHTTP(createResponse, createRequest)
-	if createResponse.Code != http.StatusCreated {
-		t.Fatalf("create thread status = %d, body = %s", createResponse.Code, createResponse.Body.String())
-	}
-	var thread project.Thread
-	if err := json.NewDecoder(createResponse.Body).Decode(&thread); err != nil {
-		t.Fatal(err)
-	}
-	if thread.Title != "New thread" || thread.Cwd != item.Path || thread.NestedDepth == nil || *thread.NestedDepth != 0 {
-		t.Fatalf("unexpected thread: %#v", thread)
-	}
-
-	invalidAgentResponse := httptest.NewRecorder()
-	invalidAgentRequest := httptest.NewRequest(
-		http.MethodPost,
-		"/api/projects/"+item.ID+"/threads/"+thread.ID+"/coding-agent",
-		bytes.NewBufferString(`{"agent":"unknown","model":"example/model","prompt":"Start this"}`),
-	)
-	handler.ServeHTTP(invalidAgentResponse, invalidAgentRequest)
-	if invalidAgentResponse.Code != http.StatusBadRequest {
-		t.Fatalf("invalid coding agent status = %d, body = %s", invalidAgentResponse.Code, invalidAgentResponse.Body.String())
-	}
-
-	invalidDepthResponse := httptest.NewRecorder()
-	invalidDepthRequest := httptest.NewRequest(http.MethodPost, "/api/projects/"+item.ID+"/threads", bytes.NewBufferString(`{"nestedDepth":2}`))
-	handler.ServeHTTP(invalidDepthResponse, invalidDepthRequest)
-	if invalidDepthResponse.Code != http.StatusBadRequest {
-		t.Fatalf("invalid thread depth status = %d, body = %s", invalidDepthResponse.Code, invalidDepthResponse.Body.String())
-	}
-
-	threadPath := "/api/projects/" + item.ID + "/threads/" + thread.ID
-	updateResponse := httptest.NewRecorder()
-	updateRequest := httptest.NewRequest(http.MethodPatch, threadPath, bytes.NewBufferString(`{"title":"Generated thread title","autoGenerated":true}`))
-	handler.ServeHTTP(updateResponse, updateRequest)
-	if updateResponse.Code != http.StatusOK {
-		t.Fatalf("update thread status = %d, body = %s", updateResponse.Code, updateResponse.Body.String())
-	}
-	if err := json.NewDecoder(updateResponse.Body).Decode(&thread); err != nil {
-		t.Fatal(err)
-	}
-	if thread.Title != "Generated thread title" || !thread.AutoNamed {
-		t.Fatalf("unexpected updated thread: %#v", thread)
-	}
-
-	secondUpdateResponse := httptest.NewRecorder()
-	secondUpdateRequest := httptest.NewRequest(http.MethodPatch, threadPath, bytes.NewBufferString(`{"title":"Do not replace","autoGenerated":true}`))
-	handler.ServeHTTP(secondUpdateResponse, secondUpdateRequest)
-	if secondUpdateResponse.Code != http.StatusOK {
-		t.Fatalf("second update status = %d, body = %s", secondUpdateResponse.Code, secondUpdateResponse.Body.String())
-	}
-	if err := json.NewDecoder(secondUpdateResponse.Body).Decode(&thread); err != nil {
-		t.Fatal(err)
-	}
-	if thread.Title != "Generated thread title" {
-		t.Fatalf("generated title was replaced: %#v", thread)
-	}
-
-	manualUpdateResponse := httptest.NewRecorder()
-	manualUpdateRequest := httptest.NewRequest(http.MethodPatch, threadPath, bytes.NewBufferString(`{"title":"Manually renamed thread","autoGenerated":false}`))
-	handler.ServeHTTP(manualUpdateResponse, manualUpdateRequest)
-	if manualUpdateResponse.Code != http.StatusOK {
-		t.Fatalf("manual update status = %d, body = %s", manualUpdateResponse.Code, manualUpdateResponse.Body.String())
-	}
-	thread = project.Thread{}
-	if err := json.NewDecoder(manualUpdateResponse.Body).Decode(&thread); err != nil {
-		t.Fatal(err)
-	}
-	if thread.Title != "Manually renamed thread" || thread.AutoNamed {
-		t.Fatalf("unexpected manually updated thread: %#v", thread)
-	}
-
-	lockResponse := httptest.NewRecorder()
-	handler.ServeHTTP(lockResponse, httptest.NewRequest(http.MethodPatch, threadPath, bytes.NewBufferString(`{"titleLocked":true}`)))
-	if lockResponse.Code != http.StatusOK {
-		t.Fatalf("lock title status = %d, body = %s", lockResponse.Code, lockResponse.Body.String())
-	}
-	thread = project.Thread{}
-	if err := json.NewDecoder(lockResponse.Body).Decode(&thread); err != nil {
-		t.Fatal(err)
-	}
-	if !thread.TitleLocked {
-		t.Fatalf("thread title was not locked: %#v", thread)
-	}
-
-	lockedRenameResponse := httptest.NewRecorder()
-	handler.ServeHTTP(lockedRenameResponse, httptest.NewRequest(http.MethodPatch, threadPath, bytes.NewBufferString(`{"title":"Blocked rename","autoGenerated":false}`)))
-	if lockedRenameResponse.Code != http.StatusConflict {
-		t.Fatalf("locked rename status = %d, body = %s", lockedRenameResponse.Code, lockedRenameResponse.Body.String())
-	}
-
-	generatedLockedResponse := httptest.NewRecorder()
-	handler.ServeHTTP(generatedLockedResponse, httptest.NewRequest(http.MethodPatch, threadPath, bytes.NewBufferString(`{"title":"Ignored generated rename","autoGenerated":true}`)))
-	if generatedLockedResponse.Code != http.StatusOK {
-		t.Fatalf("generated locked rename status = %d, body = %s", generatedLockedResponse.Code, generatedLockedResponse.Body.String())
-	}
-	thread = project.Thread{}
-	if err := json.NewDecoder(generatedLockedResponse.Body).Decode(&thread); err != nil {
-		t.Fatal(err)
-	}
-	if thread.Title != "Manually renamed thread" || !thread.TitleLocked {
-		t.Fatalf("generated title replaced locked title: %#v", thread)
-	}
-
-	unlockResponse := httptest.NewRecorder()
-	handler.ServeHTTP(unlockResponse, httptest.NewRequest(http.MethodPatch, threadPath, bytes.NewBufferString(`{"titleLocked":false}`)))
-	if unlockResponse.Code != http.StatusOK {
-		t.Fatalf("unlock title status = %d, body = %s", unlockResponse.Code, unlockResponse.Body.String())
-	}
-
-	bookmarkResponse := httptest.NewRecorder()
-	handler.ServeHTTP(bookmarkResponse, httptest.NewRequest(http.MethodPatch, threadPath, bytes.NewBufferString(`{"bookmarked":true}`)))
-	if bookmarkResponse.Code != http.StatusOK {
-		t.Fatalf("bookmark thread status = %d, body = %s", bookmarkResponse.Code, bookmarkResponse.Body.String())
-	}
-	thread = project.Thread{}
-	if err := json.NewDecoder(bookmarkResponse.Body).Decode(&thread); err != nil {
-		t.Fatal(err)
-	}
-	if !thread.Bookmarked {
-		t.Fatalf("thread was not bookmarked: %#v", thread)
-	}
-
-	for name, body := range map[string]string{
-		"empty":         `{}`,
-		"multiple":      `{"archived":true,"titleLocked":true}`,
-		"unknown field": `{"favorite":true}`,
-	} {
-		t.Run("rejects "+name+" update", func(t *testing.T) {
-			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, httptest.NewRequest(http.MethodPatch, threadPath, bytes.NewBufferString(body)))
-			if response.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
-			}
-		})
-	}
-
-	getResponse := httptest.NewRecorder()
-	handler.ServeHTTP(getResponse, httptest.NewRequest(http.MethodGet, threadPath, nil))
-	if getResponse.Code != http.StatusOK {
-		t.Fatalf("get thread status = %d, body = %s", getResponse.Code, getResponse.Body.String())
-	}
-	var persistedThread project.Thread
-	if err := json.NewDecoder(getResponse.Body).Decode(&persistedThread); err != nil {
-		t.Fatal(err)
-	}
-	if persistedThread.Title != "Manually renamed thread" || !persistedThread.Bookmarked {
-		t.Fatalf("thread updates were not persisted: %#v", persistedThread)
-	}
-
-	archiveResponse := httptest.NewRecorder()
-	handler.ServeHTTP(archiveResponse, httptest.NewRequest(http.MethodPatch, threadPath, bytes.NewBufferString(`{"archived":true}`)))
-	if archiveResponse.Code != http.StatusOK {
-		t.Fatalf("archive thread status = %d, body = %s", archiveResponse.Code, archiveResponse.Body.String())
-	}
-	if err := json.NewDecoder(archiveResponse.Body).Decode(&persistedThread); err != nil {
-		t.Fatal(err)
-	}
-	if persistedThread.ArchivedAt == nil || !persistedThread.Bookmarked {
-		t.Fatalf("archived thread lost state: %#v", persistedThread)
-	}
-
-	restoreResponse := httptest.NewRecorder()
-	handler.ServeHTTP(restoreResponse, httptest.NewRequest(http.MethodPatch, threadPath, bytes.NewBufferString(`{"archived":false}`)))
-	if restoreResponse.Code != http.StatusOK {
-		t.Fatalf("restore thread status = %d, body = %s", restoreResponse.Code, restoreResponse.Body.String())
-	}
-	persistedThread = project.Thread{}
-	if err := json.NewDecoder(restoreResponse.Body).Decode(&persistedThread); err != nil {
-		t.Fatal(err)
-	}
-	if persistedThread.ArchivedAt != nil || !persistedThread.Bookmarked {
-		t.Fatalf("restored thread lost state: %#v", persistedThread)
-	}
-
-	clearBookmarkResponse := httptest.NewRecorder()
-	handler.ServeHTTP(clearBookmarkResponse, httptest.NewRequest(http.MethodPatch, threadPath, bytes.NewBufferString(`{"bookmarked":false}`)))
-	if clearBookmarkResponse.Code != http.StatusOK {
-		t.Fatalf("clear bookmark status = %d, body = %s", clearBookmarkResponse.Code, clearBookmarkResponse.Body.String())
-	}
-	persistedThread = project.Thread{}
-	if err := json.NewDecoder(clearBookmarkResponse.Body).Decode(&persistedThread); err != nil {
-		t.Fatal(err)
-	}
-	if persistedThread.Bookmarked {
-		t.Fatalf("thread remained bookmarked: %#v", persistedThread)
-	}
-
-	deleteResponse := httptest.NewRecorder()
-	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/projects/"+item.ID+"/threads/"+thread.ID, nil)
-	handler.ServeHTTP(deleteResponse, deleteRequest)
-	if deleteResponse.Code != http.StatusNoContent {
-		t.Fatalf("delete thread status = %d, body = %s", deleteResponse.Code, deleteResponse.Body.String())
 	}
 }
 

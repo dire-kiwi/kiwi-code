@@ -4,10 +4,7 @@ export type ActivityGroupThread = {
   id: string
   createdAt: string
   lastPromptAt?: string
-  parentThreadId?: string
-  closedAt?: string
   archivedAt?: string
-  bookmarked?: boolean
 }
 
 export type ActivityGroupProject = {
@@ -32,7 +29,6 @@ export type ActivityGroupEntry = {
 export type ActivityViewGroups = {
   working: ActivityGroupEntry[]
   needsReview: ActivityGroupEntry[]
-  pinned: ActivityGroupEntry[]
   recent: ActivityGroupEntry[]
   hiddenRecentCount: number
 }

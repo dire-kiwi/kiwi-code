@@ -59,37 +59,13 @@
         }
       ]
     },
-    "browser.recordings": [
-      {
-        "id": "rec-active",
-        "state": "recording",
-        "targetId": "page-fixture",
-        "title": "Active fixture recording",
-        "startedAt": "2026-07-26T12:33:56Z",
-        "idleTimeoutMs": 60000,
-        "idleDeadlineAt": "2026-07-26T12:34:56Z"
-      },
-      {
-        "id": "rec-complete",
-        "state": "completed",
-        "targetId": "page-fixture",
-        "title": "Completed fixture recording",
-        "startedAt": "2026-07-26T12:32:56Z",
-        "finishedAt": "2026-07-26T12:34:56Z",
-        "durationMs": 60000,
-        "bytes": 1024,
-        "mimeType": "video/webm",
-        "filename": "fixture.webm"
-      }
-    ],
     "browser.status": {
       "backend": "headless-chrome",
       "presentation": "stream",
       "capabilities": {
         "nativeView": false,
         "interactiveStream": true,
-        "preview": true,
-        "recording": true
+        "preview": true
       },
       "reachable": true,
       "running": true,
@@ -108,39 +84,7 @@
         "canGoBack": false,
         "canGoForward": true,
         "loading": false
-      },
-      "recording": {
-        "id": "rec-active",
-        "state": "recording",
-        "targetId": "page-fixture",
-        "title": "Active fixture recording",
-        "startedAt": "2026-07-26T12:33:56Z",
-        "idleTimeoutMs": 60000,
-        "idleDeadlineAt": "2026-07-26T12:34:56Z"
-      },
-      "recordings": [
-        {
-          "id": "rec-active",
-          "state": "recording",
-          "targetId": "page-fixture",
-          "title": "Active fixture recording",
-          "startedAt": "2026-07-26T12:33:56Z",
-          "idleTimeoutMs": 60000,
-          "idleDeadlineAt": "2026-07-26T12:34:56Z"
-        },
-        {
-          "id": "rec-complete",
-          "state": "completed",
-          "targetId": "page-fixture",
-          "title": "Completed fixture recording",
-          "startedAt": "2026-07-26T12:32:56Z",
-          "finishedAt": "2026-07-26T12:34:56Z",
-          "durationMs": 60000,
-          "bytes": 1024,
-          "mimeType": "video/webm",
-          "filename": "fixture.webm"
-        }
-      ]
+      }
     },
     "cleanup": {
       "generatedAt": "2026-07-26T12:34:56Z",
@@ -200,17 +144,6 @@
         }
       ]
     },
-    "processWebServers": [
-      {
-        "projectId": "project-1",
-        "projectName": "Fixture project",
-        "threadId": "thread-1",
-        "threadTitle": "Fixture thread",
-        "processId": "process-1",
-        "processName": "Vite",
-        "url": "http://127.0.0.1:5173"
-      }
-    ],
     "profiles": [
       {
         "id": "personal",
@@ -282,11 +215,6 @@
       "usingDefault": true,
       "archivedThreadRetentionDays": 30,
       "orphanedWorktreeRetentionDays": 30,
-      "subAgentNestingDepth": 1,
-      "maxSubAgentNestingDepth": 4,
-      "disableWorkflows": false,
-      "workflowKeywordTriggerEnabled": true,
-      "workflowSizeGuideline": "unrestricted",
       "codingAgents": [
         {
           "id": "pi-native",
@@ -394,10 +322,7 @@
           "id": "process-1",
           "index": 1,
           "name": "Vite",
-          "currentCommand": "node",
-          "webServers": [
-            "http://127.0.0.1:5173"
-          ]
+          "currentCommand": "node"
         }
       ],
       "shellWindows": [
@@ -405,65 +330,6 @@
           "index": 0,
           "name": "shell",
           "active": true
-        }
-      ],
-      "workflows": [
-        {
-          "id": "workflow-1",
-          "projectId": "project-1",
-          "threadId": "thread-1",
-          "state": "running",
-          "attempt": 1,
-          "name": "Fixture workflow",
-          "description": "Exercises the workflow snapshot schema.",
-          "whenToUse": "During protocol compatibility tests.",
-          "phases": [
-            {
-              "title": "Implement",
-              "detail": "Build the fixture.",
-              "model": "openai/gpt-5"
-            }
-          ],
-          "currentPhase": "Implement",
-          "scriptPath": "/workspace/workflow.mjs",
-          "processId": "process-1",
-          "createdAt": "2026-07-26T12:33:56Z",
-          "startedAt": "2026-07-26T12:33:56Z",
-          "updatedAt": "2026-07-26T12:34:56Z",
-          "result": {
-            "progress": 0.5
-          },
-          "logs": [
-            {
-              "message": "Workflow started.",
-              "createdAt": "2026-07-26T12:33:56Z"
-            }
-          ],
-          "agents": [
-            {
-              "id": "agent-1",
-              "label": "Implementer",
-              "phase": "Implement",
-              "state": "working",
-              "threadId": "child-thread-1",
-              "childRunId": 7,
-              "startedAt": "2026-07-26T12:33:56Z",
-              "value": {
-                "status": "working"
-              }
-            }
-          ]
-        }
-      ],
-      "plans": [
-        {
-          "id": "plan-1",
-          "projectId": "project-1",
-          "threadId": "thread-1",
-          "sourceThreadId": "thread-1",
-          "title": "Fixture plan",
-          "createdAt": "2026-07-26T12:34:56Z",
-          "sizeBytes": 2048
         }
       ],
       "errors": {
@@ -481,14 +347,6 @@
           "cacheWriteTokens": 4,
           "totalTokens": 10,
           "costUsd": 0.01
-        },
-        "children": {
-          "inputTokens": 0,
-          "outputTokens": 0,
-          "cacheReadTokens": 0,
-          "cacheWriteTokens": 0,
-          "totalTokens": 0,
-          "costUsd": 0
         },
         "total": {
           "inputTokens": 1,

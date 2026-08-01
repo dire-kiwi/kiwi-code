@@ -3,8 +3,6 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,7 +12,6 @@ import (
 	"time"
 
 	"github.com/dire-kiwi/kiwi-code/internal/project"
-	"github.com/gorilla/websocket"
 )
 
 func TestStartClaudeNativeProcessRejectsRollbackPendingThread(t *testing.T) {
@@ -434,120 +431,4 @@ func waitForCondition(t *testing.T, label string, check func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", label)
-}
-
-func TestServeClaudeNativeEndToEnd(t *testing.T) {
-	directory := t.TempDir()
-	fakeClaude := filepath.Join(directory, "fake-claude")
-	script := `#!/bin/sh
-printf '%s\n' '{"type":"system","subtype":"init","session_id":"session-e2e","model":"claude-test-1","slash_commands":["compact"],"uuid":"evt-init"}'
-while IFS= read -r line; do
-  case "$line" in
-    *'"type":"user"'*)
-      printf '%s\n' '{"type":"assistant","message":{"id":"msg-1","role":"assistant","content":[{"type":"text","text":"Hello"}]},"session_id":"session-e2e","uuid":"evt-assistant"}'
-      printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"session-e2e","usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"total_cost_usd":0.01,"uuid":"evt-result"}'
-      ;;
-  esac
-done
-`
-	if err := os.WriteFile(fakeClaude, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-
-	store, err := project.NewStore(filepath.Join(directory, "data", "projects.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	item, err := store.Add("Demo", t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	thread := item.Threads[0]
-	child, err := store.AddThreadWithOptions(item.ID, "Child", project.AddThreadOptions{
-		ParentThreadID: thread.ID,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	handler := newTerminalHandlerUnreconciledWithOptions(store, originPolicy{}, "kcv-claude-native-test")
-	// This flow must never reach tmux; fail loudly if it tries.
-	handler.tmuxPath = ""
-	handler.nativeClaude.claudePath = fakeClaude
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/claude/native", handler.serveClaudeNative)
-	server := httptest.NewServer(mux)
-	defer server.Close()
-	defer handler.nativeClaude.stopAll()
-
-	baseURL := "ws" + strings.TrimPrefix(server.URL, "http")
-	if _, response, err := websocket.DefaultDialer.Dial(
-		baseURL+"/api/projects/"+item.ID+"/threads/"+child.ID+"/claude/native", nil,
-	); err == nil || response == nil || response.StatusCode != http.StatusForbidden {
-		t.Fatalf("child thread dial: error=%v response=%v, want 403", err, response)
-	}
-
-	connection, _, err := websocket.DefaultDialer.Dial(
-		baseURL+"/api/projects/"+item.ID+"/threads/"+thread.ID+"/claude/native?model=opus&thinking=high", nil,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer connection.Close()
-
-	readEvent := func(wanted string) map[string]any {
-		t.Helper()
-		deadline := time.Now().Add(5 * time.Second)
-		for {
-			if err := connection.SetReadDeadline(deadline); err != nil {
-				t.Fatal(err)
-			}
-			_, payload, err := connection.ReadMessage()
-			if err != nil {
-				t.Fatalf("read while waiting for %s: %v", wanted, err)
-			}
-			var event map[string]any
-			if err := json.Unmarshal(payload, &event); err != nil {
-				t.Fatalf("decode event while waiting for %s: %v", wanted, err)
-			}
-			if event["type"] == wanted {
-				return event
-			}
-		}
-	}
-
-	readEvent("claude_native_ready")
-	history := readEvent("claude_native_history")
-	if _, ok := history["events"].([]any); !ok {
-		t.Fatalf("history events missing: %#v", history)
-	}
-	readEvent("claude_native_state")
-
-	if err := connection.WriteJSON(map[string]any{"type": "prompt", "message": "hi"}); err != nil {
-		t.Fatal(err)
-	}
-	assistant := readEvent("assistant")
-	if assistant["session_id"] != "session-e2e" {
-		t.Fatalf("assistant event = %#v", assistant)
-	}
-	readEvent("result")
-
-	if err := connection.WriteJSON(map[string]any{"type": "get_state"}); err != nil {
-		t.Fatal(err)
-	}
-	state := readEvent("claude_native_state")
-	if state["model"] != "claude-test-1" || state["sessionId"] != "session-e2e" || state["effort"] != "high" {
-		t.Fatalf("state event = %#v", state)
-	}
-
-	if err := connection.WriteJSON(map[string]any{"type": "restart"}); err != nil {
-		t.Fatal(err)
-	}
-	readEvent("claude_native_restarting")
-	readEvent("claude_native_reloaded")
-	restartHistory := readEvent("claude_native_history")
-	events, ok := restartHistory["events"].([]any)
-	if !ok || len(events) < 3 {
-		t.Fatalf("history after restart = %#v", restartHistory)
-	}
 }

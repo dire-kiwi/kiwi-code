@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import { assertDevelopmentApiTarget, assertDevelopmentPort } from './scripts/dev-stack-options.mjs'
+import { assertDevelopmentApiPort, assertDevelopmentPort } from './scripts/dev-stack-options.mjs'
 
 export default defineConfig({
   plugins: [
@@ -11,10 +11,7 @@ export default defineConfig({
       configResolved(config) {
         if (config.command === 'serve') {
           assertDevelopmentPort(config.server.port, 'Vite development server')
-          assertDevelopmentApiTarget(
-            config.env.VITE_KIWI_CODE_API_PORT,
-            config.env.VITE_KIWI_CODE_API_URL,
-          )
+          assertDevelopmentApiPort(config.env.VITE_KIWI_CODE_API_PORT)
         }
       },
     },

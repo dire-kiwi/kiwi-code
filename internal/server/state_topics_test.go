@@ -2,26 +2,22 @@ package server
 
 import "testing"
 
-const legacyBrowserRecordingsTopic = "browser.recordings"
-
 func TestStateTopicRegistryDecodesEveryCatalogTopic(t *testing.T) {
 	server := &Server{}
 	valid := map[string]string{
-		stateTopicProjects:           `{"tag":"projects"}`,
-		stateTopicProfiles:           `{"tag":"profiles"}`,
-		stateTopicAgentActivity:      `{"tag":"agentActivity"}`,
-		stateTopicThreadUsage:        `{"tag":"threadUsage"}`,
-		stateTopicProcessWebServers:  `{"tag":"processWebServers"}`,
-		stateTopicThreadStatus:       `{"tag":"thread.status","projectId":"project","threadId":"thread"}`,
-		stateTopicSettings:           `{"tag":"settings"}`,
-		stateTopicCodingAgents:       `{"tag":"codingAgents","projectId":"project"}`,
-		stateTopicCleanup:            `{"tag":"cleanup"}`,
-		stateTopicSessionClosures:    `{"tag":"sessionClosures"}`,
-		stateTopicGitBranches:        `{"tag":"git.branches","projectId":"project"}`,
-		stateTopicBrowserStatus:      `{"tag":"browser.status","projectId":"project","threadId":"thread"}`,
-		legacyBrowserRecordingsTopic: `{"tag":"browser.recordings","projectId":"project","threadId":"thread"}`,
-		stateTopicTmuxSessions:       `{"tag":"tmuxSessions"}`,
-		stateTopicAgentSkills:        `{"tag":"agentSkills"}`,
+		stateTopicProjects:        `{"tag":"projects"}`,
+		stateTopicProfiles:        `{"tag":"profiles"}`,
+		stateTopicAgentActivity:   `{"tag":"agentActivity"}`,
+		stateTopicThreadUsage:     `{"tag":"threadUsage"}`,
+		stateTopicThreadStatus:    `{"tag":"thread.status","projectId":"project","threadId":"thread"}`,
+		stateTopicSettings:        `{"tag":"settings"}`,
+		stateTopicCodingAgents:    `{"tag":"codingAgents","projectId":"project"}`,
+		stateTopicCleanup:         `{"tag":"cleanup"}`,
+		stateTopicSessionClosures: `{"tag":"sessionClosures"}`,
+		stateTopicGitBranches:     `{"tag":"git.branches","projectId":"project"}`,
+		stateTopicBrowserStatus:   `{"tag":"browser.status","projectId":"project","threadId":"thread"}`,
+		stateTopicTmuxSessions:    `{"tag":"tmuxSessions"}`,
+		stateTopicAgentSkills:     `{"tag":"agentSkills"}`,
 	}
 	registry := server.stateTopicRegistry(nil)
 	if len(registry) != len(valid) {

@@ -12,7 +12,6 @@ export type {
   BrowserCapabilities,
   BrowserCurrentPage,
   BrowserPage,
-  BrowserRecording,
   BrowserStatusResult,
   BuiltInCodingAgent,
   CleanupOverview,
@@ -29,18 +28,15 @@ export type {
   PiActivityState,
   PiThreadActivity,
   PlatformScripts,
-  ProcessWebServer,
   ProcessWindow,
   Profile,
   Project,
-  SavedWorkflow,
   SessionClosureEvent,
   SessionClosureOverview,
   ThemeColors,
   ThemeSettings,
   Thread,
   ThreadCleanupOverview,
-  ThreadPlan,
   ThreadStatusErrors,
   ThreadStatusSnapshot,
   ThreadUsageSnapshot,
@@ -48,10 +44,6 @@ export type {
   TmuxBrowserSession,
   TmuxBrowserWindow,
   TmuxWindow,
-  WorkflowAgent,
-  WorkflowLogEntry,
-  WorkflowPhase,
-  WorkflowRun,
   WorktreeCleanupOverview,
 } from '@/wire/domain'
 
@@ -75,18 +67,11 @@ export type BrowserActionOperation =
   | 'navigate.back'
   | 'navigate.forward'
   | 'navigate.reload'
-  | 'recording.start'
-  | 'recording.stop'
-  | 'recording.status'
-  | 'recording.delete'
   | 'evaluate'
 
 export type BrowserActionParams = {
   url?: string
   targetId?: string
-  recordingId?: string
-  title?: string
-  idleTimeoutMs?: number
   expression?: string
 }
 

@@ -11,9 +11,7 @@ import type {
   Profile,
   Project,
   Thread,
-  SavedWorkflow,
   TmuxWindow,
-  WorkflowRun,
 } from './types'
 
 type ErrorResponse = {
@@ -103,8 +101,7 @@ export async function waitForApplicationRestart(instanceId: string, timeoutMs = 
 
 export function updateSettings(input: string | Partial<Pick<
   AppSettings,
-  'worktreeBasePath' | 'archivedThreadRetentionDays' | 'orphanedWorktreeRetentionDays' | 'subAgentNestingDepth'
-  | 'disableWorkflows' | 'workflowKeywordTriggerEnabled' | 'workflowSizeGuideline' | 'codingAgents' | 'theme'
+  'worktreeBasePath' | 'archivedThreadRetentionDays' | 'orphanedWorktreeRetentionDays' | 'codingAgents' | 'theme'
 >>) {
   return jsonRequest<AppSettings>(
     '/api/settings',
@@ -133,7 +130,6 @@ export function updateProject(
   id: string,
   input: {
     profileId?: string
-    subAgentNestingDepthOverride?: number | null
     worktreeBranchPrefix?: string
     relatedProjects?: string[]
     environment?: LocalEnvironment
@@ -145,10 +141,6 @@ export function updateProject(
 
 export function updateProjectProfile(id: string, profileId: string) {
   return updateProject(id, { profileId })
-}
-
-export function updateProjectSubAgentNestingDepth(id: string, depth: number | null) {
-  return updateProject(id, { subAgentNestingDepthOverride: depth })
 }
 
 export function updateProjectBranchesAndPaths(id: string, worktreeBranchPrefix: string, relatedProjects: string[]) {
@@ -195,7 +187,6 @@ export function createThread(
     title?: string
     worktree: boolean
     baseBranch?: string
-    nestedDepth?: number
   },
 ) {
   return jsonRequest<Thread>(
@@ -221,32 +212,6 @@ export function setThreadTitleLocked(projectId: string, threadId: string, titleL
   return jsonRequest<Thread>(threadPath(projectId, threadId), 'PATCH', { titleLocked })
 }
 
-function workflowPath(projectId: string, threadId: string, runId?: string) {
-  const base = `${threadPath(projectId, threadId)}/workflows`
-  return runId ? `${base}/${encodeURIComponent(runId)}` : base
-}
-
-export function pauseWorkflow(projectId: string, threadId: string, runId: string) {
-  return jsonRequest<WorkflowRun>(`${workflowPath(projectId, threadId, runId)}/pause`, 'POST', {})
-}
-
-export function resumeWorkflow(projectId: string, threadId: string, runId: string) {
-  return jsonRequest<WorkflowRun>(`${workflowPath(projectId, threadId, runId)}/resume`, 'POST', {})
-}
-
-export function stopWorkflow(projectId: string, threadId: string, runId: string) {
-  return jsonRequest<WorkflowRun>(`${workflowPath(projectId, threadId, runId)}/stop`, 'POST', {})
-}
-
-export function saveWorkflow(
-  projectId: string,
-  threadId: string,
-  runId: string,
-  input: { name: string; scope: 'project' | 'personal'; overwrite?: boolean },
-) {
-  return jsonRequest<SavedWorkflow>(`${workflowPath(projectId, threadId, runId)}/save`, 'POST', input)
-}
-
 export function updateThreadLimits(
   projectId: string,
   threadId: string,
@@ -257,10 +222,6 @@ export function updateThreadLimits(
 
 export function setThreadArchived(projectId: string, threadId: string, archived: boolean) {
   return jsonRequest<Thread>(threadPath(projectId, threadId), 'PATCH', { archived })
-}
-
-export function setThreadBookmarked(projectId: string, threadId: string, bookmarked: boolean) {
-  return jsonRequest<Thread>(threadPath(projectId, threadId), 'PATCH', { bookmarked })
 }
 
 export function deleteThread(projectId: string, threadId: string) {
@@ -277,27 +238,6 @@ export function updateThreadOrder(projectId: string, threadIds: string[]) {
 
 export function acknowledgePiThreadActivity(projectId: string, threadId: string) {
   return request<void>(`${threadPath(projectId, threadId)}/pi/activity`, { method: 'DELETE' })
-}
-
-export function threadPlanDownloadUrl(projectId: string, threadId: string, planId: string) {
-  return apiUrl(`${threadPath(projectId, threadId)}/plans/${encodeURIComponent(planId)}`)
-}
-
-export async function getThreadPlanMarkdown(
-  projectId: string,
-  threadId: string,
-  planId: string,
-  signal?: AbortSignal,
-) {
-  const response = await fetch(threadPlanDownloadUrl(projectId, threadId, planId), {
-    headers: { Accept: 'text/markdown' },
-    cache: 'no-store',
-    signal,
-  })
-  if (!response.ok) {
-    throw new Error(await decodeApiError(response, `Could not load the plan (${response.status})`))
-  }
-  return response.text()
 }
 
 function browserPath(projectId: string, threadId: string) {
@@ -320,14 +260,6 @@ export function performBrowserAction<Result = unknown>(
 
 export function browserStreamUrl(projectId: string, threadId: string) {
   return apiWebSocketUrl(`${browserPath(projectId, threadId)}/stream`).toString()
-}
-
-export function browserRecordingDownloadUrl(projectId: string, threadId: string, recordingId: string) {
-  return apiUrl(`${browserPath(projectId, threadId)}/recordings/${encodeURIComponent(recordingId)}`)
-}
-
-export function browserRecordingPlaybackUrl(projectId: string, threadId: string, recordingId: string) {
-  return `${browserRecordingDownloadUrl(projectId, threadId, recordingId)}?disposition=inline`
 }
 
 export async function getBrowserFrame(

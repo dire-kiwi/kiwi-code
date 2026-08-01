@@ -51,34 +51,6 @@ const tools = [
     annotations: { destructiveHint: true, openWorldHint: true },
   },
   {
-    name: "browser_recording",
-    title: "Browser Recording",
-    description:
-      "Inspect, start, or stop video recording for the current in-app browser tab. Start requires a concise purpose title, lazily opens a blank tab if needed, and defaults to a 300-second inactivity timeout. Browser operations refresh the timeout; inactivity automatically finalizes the WebM.",
-    inputSchema: object(
-      {
-        action: string("Recording operation.", { enum: ["status", "start", "stop"] }),
-        targetId: string("Target tab ID for start; defaults to the selected tab.", {
-          minLength: 1,
-        }),
-        title: string("Required for start: 2–12 words explaining the point of the recording.", {
-          minLength: 3,
-          maxLength: 80,
-        }),
-        recordingId: string("Exact recording ID required for stop.", {
-          minLength: 1,
-        }),
-        idleTimeoutSeconds: integer(
-          "Auto-stop after this many seconds without browser activity; defaults to 300.",
-          30,
-          3_600,
-        ),
-      },
-      ["action"],
-    ),
-    annotations: { destructiveHint: true, openWorldHint: true },
-  },
-  {
     name: "browser_tabs",
     title: "Browser Tabs",
     description:
@@ -242,11 +214,9 @@ const tools = [
   },
 ];
 
-// Browser work belongs in the bundled context: fork skill so it runs in its own
-// agent context. Remind the caller on every tool, because a client that defers
-// tool schemas may surface a browser tool without ever showing the skill.
+// Remind callers to load the bundled browser skill before using deferred tools.
 const SKILL_REMINDER =
-  "Requires the kiwi-code-in-app-browser skill: invoke that skill first and call this tool from inside it, not from the main conversation.";
+  "Requires the kiwi-code-in-app-browser skill: load that skill before calling this tool and follow its workflow.";
 
 for (const tool of tools) {
   tool.description = `${tool.description} ${SKILL_REMINDER}`;
@@ -276,27 +246,7 @@ function hasPageFields(value) {
   ]);
 }
 
-function validBrowserRecording(value) {
-  return isRecord(value) && hasFields(value, [
-    ["id", "string"],
-    ["startedAt", "string"],
-    ["state", "string"],
-    ["targetId", "string"],
-    ["title", "string"],
-  ]) && ["starting", "recording", "finalizing", "completed"].includes(value.state) &&
-    (value.idleTimeoutMs === undefined || typeof value.idleTimeoutMs === "number") &&
-    (value.idleDeadlineAt === undefined || typeof value.idleDeadlineAt === "string");
-}
-
 function validBrowserActionResult(operation, result) {
-  if (operation === "recording.status") {
-    return Object.hasOwn(result, "recording") &&
-      (result.recording === null || validBrowserRecording(result.recording)) &&
-      Array.isArray(result.recordings) && result.recordings.every(validBrowserRecording);
-  }
-  if (operation === "recording.start" || operation === "recording.stop") {
-    return validBrowserRecording(result);
-  }
   if (operation.startsWith("session.")) {
     if (!hasFields(result, [["message", "string"], ["status", "object"]])) return false;
     return hasFields(result.status, [
@@ -424,24 +374,6 @@ function validateArguments(tool, args) {
       ((typeof args.ref === "string") === (typeof args.selector === "string"))) {
     throw new Error("Provide exactly one of ref or selector.");
   }
-  if (tool.name === "browser_recording") {
-    if (args.action !== "stop" && args.recordingId) {
-      throw new Error("recordingId is only valid for recording.stop.");
-    }
-    if (args.action === "stop" && !args.recordingId) {
-      throw new Error("recordingId is required for recording.stop.");
-    }
-    if (args.action === "start") {
-      const title = typeof args.title === "string" ? args.title.replace(/\s+/g, " ").trim() : "";
-      const words = title.split(" ").filter(Boolean);
-      if (title.length < 3 || title.length > 80 || words.length < 2 || words.length > 12) {
-        throw new Error("recording.start requires a 2–12 word title explaining the point of the recording.");
-      }
-      args.title = title;
-    } else if (args.targetId || args.title || args.idleTimeoutSeconds !== undefined) {
-      throw new Error("targetId, title, and idleTimeoutSeconds are only valid for recording.start.");
-    }
-  }
   if (tool.name === "browser_tabs" && args.action === "select" && !args.targetId) {
     throw new Error("targetId is required when selecting a browser tab.");
   }
@@ -472,15 +404,6 @@ function actionForTool(name, args) {
     case "browser_session": {
       delete params.action;
       return { operation: `session.${args.action}`, params };
-    }
-    case "browser_recording": {
-      delete params.action;
-      delete params.idleTimeoutSeconds;
-      if (args.action === "start") {
-        params.title = args.title;
-        params.idleTimeoutMs = (args.idleTimeoutSeconds ?? 300) * 1_000;
-      }
-      return { operation: `recording.${args.action}`, params };
     }
     case "browser_tabs": {
       delete params.action;
@@ -753,7 +676,7 @@ async function handleRequest(message) {
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
         instructions:
-          "Controls the in-app browser owned by the current Kiwi Code thread. Do not call these tools directly from the main conversation: invoke the kiwi-code-in-app-browser context: fork skill first and drive the browser from there. Inside that skill, use focused browser_* tools and inspect the page with browser_snapshot before interacting with refs.",
+          "Controls the in-app browser owned by the current Kiwi Code thread. Load the kiwi-code-in-app-browser skill before calling these tools and follow its browser workflow. Inside that skill, use focused browser_* tools and inspect the page with browser_snapshot before interacting with refs.",
       });
       return;
     }

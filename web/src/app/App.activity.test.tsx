@@ -90,10 +90,6 @@ function thread(id: string): Thread {
 
 const firstThread = thread('first')
 const secondThread = thread('second')
-const childThread: Thread = {
-  ...thread('child'),
-  parentThreadId: secondThread.id,
-}
 const project: Project = {
   id: 'project',
   name: 'Project',
@@ -136,7 +132,6 @@ beforeEach(() => {
     profiles: ready([profile]),
     agentActivity: ready([]),
     threadUsage: ready([]),
-    processWebServers: ready([]),
     settings: ready({}),
   }
 })
@@ -166,15 +161,11 @@ describe('App activity acknowledgement', () => {
 
     const finished: PiThreadActivity = {
       projectId: project.id,
-      threadId: childThread.id,
+      threadId: secondThread.id,
       state: 'finished',
       updatedAt: '2026-07-27T00:01:00Z',
     }
     await act(async () => {
-      mocks.subscriptions.projects = ready([{
-        ...project,
-        threads: [...project.threads, childThread],
-      }])
       mocks.subscriptions.agentActivity = ready([finished])
       mocks.publish()
       fireEvent.click(screen.getByRole('button', { name: 'Open second thread' }))
@@ -184,7 +175,7 @@ describe('App activity acknowledgement', () => {
     expect(mocks.acknowledgePiThreadActivity).toHaveBeenCalledOnce()
     expect(mocks.acknowledgePiThreadActivity).toHaveBeenCalledWith(
       project.id,
-      childThread.id,
+      secondThread.id,
     )
   })
 })

@@ -5,119 +5,30 @@ export function sidebarThreadKey(projectId, threadId) {
 }
 
 export function createThreadTreeIndex(threads) {
-  const byId = new Map()
-  const childrenByParentId = new Map()
-  const roots = []
-
-  for (const thread of threads) {
-    byId.set(thread.id, thread)
-    if (!thread.parentThreadId) {
-      roots.push(thread)
-      continue
-    }
-    const children = childrenByParentId.get(thread.parentThreadId) ?? []
-    children.push(thread)
-    childrenByParentId.set(thread.parentThreadId, children)
+  const byId = new Map(threads.map((thread) => [thread.id, thread]))
+  const roots = [...threads]
+  const rootId = (threadId) => byId.has(threadId) ? threadId : null
+  const activityDisplayThread = (activity, rejectArchived = true) => {
+    const thread = byId.get(activity.threadId)
+    return thread && (!rejectArchived || !thread.archivedAt) ? thread : null
   }
-
-  function children(threadId) {
-    return childrenByParentId.get(threadId) ?? []
-  }
-
-  function ancestors(threadId) {
-    const found = []
-    const visited = new Set([threadId])
-    let parentId = byId.get(threadId)?.parentThreadId
-    while (parentId && !visited.has(parentId)) {
-      visited.add(parentId)
-      const parent = byId.get(parentId)
-      if (!parent) break
-      found.push(parent)
-      parentId = parent.parentThreadId
-    }
-    return found
-  }
-
-  function descendants(threadId) {
-    const found = []
-    const visited = new Set([threadId])
-    const visit = (parentId) => {
-      for (const child of children(parentId)) {
-        if (visited.has(child.id)) continue
-        visited.add(child.id)
-        found.push(child)
-        visit(child.id)
-      }
-    }
-    visit(threadId)
-    return found
-  }
-
-  function rootId(threadId) {
-    let current = byId.get(threadId)
-    if (!current) return null
-    const visited = new Set()
-    while (current.parentThreadId) {
-      if (visited.has(current.id)) return null
-      visited.add(current.id)
-      const parent = byId.get(current.parentThreadId)
-      if (!parent) return null
-      current = parent
-    }
-    return current.id
-  }
-
-  function activityDisplayThread(activity, rejectArchived = true) {
-    let thread = byId.get(activity.threadId)
-    if (!thread || (rejectArchived && thread.archivedAt)) return null
-    if (activity.state !== 'finished') return thread
-
-    const visited = new Set()
-    while (thread?.parentThreadId && !visited.has(thread.id)) {
-      visited.add(thread.id)
-      const parent = byId.get(thread.parentThreadId)
-      if (!parent) break
-      if (rejectArchived && parent.archivedAt) return null
-      thread = parent
-    }
-    return thread
-  }
-
-  function orderedTreeIds(rootIds) {
+  const orderedTreeIds = (rootIds) => {
     const ordered = []
     const seen = new Set()
-    const append = (threadId) => {
-      if (seen.has(threadId)) return
-      seen.add(threadId)
-      ordered.push(threadId)
-      for (const child of children(threadId)) append(child.id)
+    for (const id of [...rootIds, ...threads.map((thread) => thread.id)]) {
+      if (seen.has(id)) continue
+      seen.add(id)
+      ordered.push(id)
     }
-    for (const rootId of rootIds) append(rootId)
-    for (const thread of threads) append(thread.id)
     return ordered
   }
-
-  function bookmarkedPathIds() {
-    const visible = new Set()
-    for (const thread of threads) {
-      if (!thread.bookmarked) continue
-      visible.add(thread.id)
-      for (const ancestor of ancestors(thread.id)) visible.add(ancestor.id)
-    }
-    return threads.filter((thread) => visible.has(thread.id)).map((thread) => thread.id)
-  }
-
   return {
     threads,
     byId,
     roots,
-    children,
-    ancestors,
-    descendants,
     rootId,
     activityDisplayThread,
     orderedTreeIds,
-    bookmarkedPathIds,
   }
 }
 
@@ -137,32 +48,24 @@ export function createSidebarThreadIndex(projects, activities) {
     }
   }
 
-  const activitiesByDisplayKey = new Map()
-  const finishedActivitiesByDisplayKey = new Map()
+  const activitiesByKey = new Map()
+  const finishedActivitiesByKey = new Map()
   for (const activity of activities) {
-    const tree = treeByProjectId.get(activity.projectId)
-    if (!tree) continue
-
-    const visibleDisplay = tree.activityDisplayThread(activity, true)
-    if (visibleDisplay) {
-      const key = sidebarThreadKey(activity.projectId, visibleDisplay.id)
-      const displayed = activitiesByDisplayKey.get(key) ?? []
-      displayed.push(activity)
-      activitiesByDisplayKey.set(key, displayed)
-    }
-
+    const entry = entryByKey.get(sidebarThreadKey(activity.projectId, activity.threadId))
+    if (!entry || entry.thread.archivedAt) continue
+    const key = sidebarThreadKey(activity.projectId, activity.threadId)
+    const displayed = activitiesByKey.get(key) ?? []
+    displayed.push(activity)
+    activitiesByKey.set(key, displayed)
     if (activity.state === 'finished') {
-      const display = tree.activityDisplayThread(activity, false)
-      if (!display) continue
-      const key = sidebarThreadKey(activity.projectId, display.id)
-      const finished = finishedActivitiesByDisplayKey.get(key) ?? []
+      const finished = finishedActivitiesByKey.get(key) ?? []
       finished.push(activity)
-      finishedActivitiesByDisplayKey.set(key, finished)
+      finishedActivitiesByKey.set(key, finished)
     }
   }
 
   const preferredActivityByKey = new Map()
-  for (const [key, displayed] of activitiesByDisplayKey) {
+  for (const [key, displayed] of activitiesByKey) {
     const preferred = displayed.find((activity) => activity.state === 'working')
       ?? displayed.find((activity) => activity.state === 'finished')
     if (preferred) preferredActivityByKey.set(key, preferred)
@@ -170,34 +73,21 @@ export function createSidebarThreadIndex(projects, activities) {
 
   const projectActivityCounts = new Map()
   for (const [key, activity] of preferredActivityByKey) {
-    if (activity.state !== 'working' && activity.state !== 'finished') continue
     const separator = key.indexOf(keySeparator)
     const projectId = key.slice(0, separator)
     const current = projectActivityCounts.get(projectId) ?? { working: 0, finished: 0 }
     if (activity.state === 'working') current.working += 1
-    else current.finished += 1
+    else if (activity.state === 'finished') current.finished += 1
     projectActivityCounts.set(projectId, current)
   }
 
-  function tree(projectId) {
-    return treeByProjectId.get(projectId) ?? null
-  }
-
-  function entry(projectId, threadId) {
-    return entryByKey.get(sidebarThreadKey(projectId, threadId)) ?? null
-  }
-
-  function threadActivity(projectId, threadId) {
-    const activity = preferredActivityByKey.get(sidebarThreadKey(projectId, threadId)) ?? null
-    return {
-      activity,
-      childActivity: Boolean(activity && activity.threadId !== threadId),
-    }
-  }
-
-  function finishedActivities(projectId, threadId) {
-    return finishedActivitiesByDisplayKey.get(sidebarThreadKey(projectId, threadId)) ?? []
-  }
+  const tree = (projectId) => treeByProjectId.get(projectId) ?? null
+  const entry = (projectId, threadId) => entryByKey.get(sidebarThreadKey(projectId, threadId)) ?? null
+  const threadActivity = (projectId, threadId) => ({
+    activity: preferredActivityByKey.get(sidebarThreadKey(projectId, threadId)) ?? null,
+  })
+  const finishedActivities = (projectId, threadId) =>
+    finishedActivitiesByKey.get(sidebarThreadKey(projectId, threadId)) ?? []
 
   return {
     projects,

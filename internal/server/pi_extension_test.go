@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,186 +10,41 @@ import (
 	"testing"
 )
 
-func TestMaterializePiExtensions(t *testing.T) {
+func TestMaterializePiExtensionsRemovesOrchestrationArtifacts(t *testing.T) {
 	directory := t.TempDir()
-	paths, err := materializePiExtensions(directory)
-	if err != nil {
-		t.Fatal(err)
+	obsolete := []string{
+		filepath.Join(directory, "extensions", "kiwi-code-child-threads.ts"),
+		filepath.Join(directory, "extensions", "kiwi-code-workflows.ts"),
+		filepath.Join(directory, "extensions", "kiwi-code-skill-forks.ts"),
+		filepath.Join(directory, "skills", "kiwi-code-planner", "SKILL.md"),
 	}
-
-	tests := []struct {
-		name     string
-		contents []byte
-	}{
-		{name: "kiwi-code-thread-title.ts", contents: piThreadTitleExtension},
-		{name: "kiwi-code-thread-activity.ts", contents: piThreadActivityExtension},
-		{name: "kiwi-code-thread-context.ts", contents: piThreadContextExtension},
-		{name: "kiwi-code-child-threads.ts", contents: piChildThreadsExtension},
-		{name: "kiwi-code-workflows.ts", contents: piWorkflowsExtension},
-	}
-	if len(paths) != len(tests) {
-		t.Fatalf("materialized %d extensions, want %d", len(paths), len(tests))
-	}
-	usageContents, err := os.ReadFile(filepath.Join(directory, "extensions", "kiwi-code-thread-usage.ts"))
-	if err != nil || !bytes.Equal(usageContents, piThreadUsageExtension) {
-		t.Fatalf("materialized usage extension differs from embedded source: %v", err)
-	}
-	browserContents, err := os.ReadFile(filepath.Join(directory, "extensions", "kiwi-code-browser.ts"))
-	if err != nil || !bytes.Equal(browserContents, piBrowserExtension) {
-		t.Fatalf("materialized browser extension differs from embedded source: %v", err)
-	}
-	skillForksContents, err := os.ReadFile(filepath.Join(directory, "extensions", "kiwi-code-skill-forks.ts"))
-	if err != nil || !bytes.Equal(skillForksContents, piSkillForksExtension) {
-		t.Fatalf("materialized skill-forks extension differs from embedded source: %v", err)
-	}
-	for index, test := range tests {
-		path := paths[index]
-		if filepath.Base(path) != test.name {
-			t.Fatalf("extension path = %q, want %q", path, test.name)
-		}
-		contents, err := os.ReadFile(path)
-		if err != nil {
+	for _, path := range obsolete {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if !bytes.Equal(contents, test.contents) {
-			t.Fatalf("materialized %s differs from the embedded source", test.name)
+		if err := os.WriteFile(path, []byte("obsolete"), 0o600); err != nil {
+			t.Fatal(err)
 		}
 	}
 
-	skillPath := filepath.Join(directory, "skills", "kiwi-code-in-app-browser", "SKILL.md")
-	skillContents, err := os.ReadFile(skillPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(skillContents, piBrowserSkill) {
-		t.Fatal("materialized browser skill differs from the embedded source")
-	}
-	if !bytes.Contains(skillContents, []byte("\ncontext: fork\n")) {
-		t.Fatal("Pi browser skill does not run in a forked agent context")
-	}
-
-	plannerPath := filepath.Join(directory, "skills", "kiwi-code-planner", "SKILL.md")
-	plannerContents, err := os.ReadFile(plannerPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(plannerContents, piPlannerSkill) {
-		t.Fatal("materialized planner skill differs from the embedded source")
-	}
-	for _, expected := range [][]byte{
-		[]byte("\ncontext: fork\n"),
-		[]byte("\nagent: Plan\n"),
-		[]byte("publish_thread_plan"),
-		[]byte("$ARGUMENTS"),
-	} {
-		if !bytes.Contains(plannerContents, expected) {
-			t.Fatalf("Pi planner skill does not contain %q", expected)
-		}
-	}
-}
-
-func TestPiBrowserExtensionHarness(t *testing.T) {
-	nodePath, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is not installed")
-	}
-	versionCheck := exec.Command(nodePath, "-e", `
-const [major, minor] = process.versions.node.split(".").map(Number);
-if (major < 22 || (major === 22 && minor < 19)) process.exit(1);
-`)
-	if err := versionCheck.Run(); err != nil {
-		t.Skip("Pi's extension runtime requires Node.js 22.19 or newer")
-	}
-	piPath, err := exec.LookPath("pi")
-	if err != nil {
-		t.Skip("pi is not installed")
-	}
-	resolvedPiPath, err := filepath.EvalSymlinks(piPath)
-	if err != nil {
-		t.Skipf("resolve Pi installation: %v", err)
-	}
-	piPackageRoot := filepath.Dir(filepath.Dir(resolvedPiPath))
-	jitiPath := filepath.Join(piPackageRoot, "node_modules", "jiti", "lib", "jiti.mjs")
-	for _, path := range []string{
-		filepath.Join(piPackageRoot, "package.json"),
-		jitiPath,
-		filepath.Join(piPackageRoot, "node_modules", "typebox"),
-		filepath.Join(piPackageRoot, "node_modules", "@earendil-works", "pi-ai"),
-	} {
-		if _, err := os.Stat(path); err != nil {
-			t.Skipf("Pi test dependency %q is unavailable: %v", path, err)
-		}
-	}
-
-	directory := t.TempDir()
 	paths, err := materializePiExtensions(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(paths) == 0 {
-		t.Fatal("materialized extension paths are missing")
+	if len(paths) != 3 {
+		t.Fatalf("materialized extension paths = %v, want title, activity, and context", paths)
 	}
-	browserExtensionPath := filepath.Join(directory, "extensions", "kiwi-code-browser.ts")
-	if _, err := os.Stat(browserExtensionPath); err != nil {
-		t.Fatalf("materialized browser extension path is missing: %v", err)
-	}
-	childThreadsExtensionPath := filepath.Join(directory, "extensions", "kiwi-code-child-threads.ts")
-	if _, err := os.Stat(childThreadsExtensionPath); err != nil {
-		t.Fatalf("materialized child-thread extension path is missing: %v", err)
-	}
-	workflowsExtensionPath := filepath.Join(directory, "extensions", "kiwi-code-workflows.ts")
-	if _, err := os.Stat(workflowsExtensionPath); err != nil {
-		t.Fatalf("materialized workflow extension path is missing: %v", err)
-	}
-	skillForksExtensionPath := filepath.Join(directory, "extensions", "kiwi-code-skill-forks.ts")
-	if _, err := os.Stat(skillForksExtensionPath); err != nil {
-		t.Fatalf("materialized skill-forks extension path is missing: %v", err)
-	}
-	browserSkillPath := filepath.Join(directory, "skills", "kiwi-code-in-app-browser")
-	plannerSkillPath := filepath.Join(directory, "skills", "kiwi-code-planner")
-
-	nodeModules := filepath.Join(directory, "node_modules")
-	scopeDirectory := filepath.Join(nodeModules, "@earendil-works")
-	if err := os.MkdirAll(scopeDirectory, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	links := []struct {
-		name   string
-		target string
-	}{
-		{name: filepath.Join(nodeModules, "typebox"), target: filepath.Join(piPackageRoot, "node_modules", "typebox")},
-		{name: filepath.Join(scopeDirectory, "pi-ai"), target: filepath.Join(piPackageRoot, "node_modules", "@earendil-works", "pi-ai")},
-		{name: filepath.Join(scopeDirectory, "pi-coding-agent"), target: piPackageRoot},
-	}
-	for _, link := range links {
-		if err := os.Symlink(link.target, link.name); err != nil {
-			t.Fatalf("link Pi test dependency %q: %v", link.name, err)
+	for _, path := range obsolete {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("obsolete artifact still exists at %q: %v", path, err)
 		}
 	}
-
-	harnessPath, err := filepath.Abs(filepath.Join("testdata", "pi-browser-extension-harness.mjs"))
+	browserSkill, err := os.ReadFile(filepath.Join(directory, "skills", "kiwi-code-in-app-browser", "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(nodePath, "--unhandled-rejections=strict", harnessPath)
-	command.Env = append(os.Environ(),
-		"KIWI_CODE_THREAD_ENDPOINT=http://127.0.0.1:43210/api/projects/project/threads/thread",
-		"KIWI_CODE_BROWSER_THREAD_ENDPOINT=http://127.0.0.1:43210/api/projects/project/threads/parent",
-		"KIWI_CODE_AGENT_TOKEN=browser-agent-capability",
-		"PI_BROWSER_EXTENSION="+browserExtensionPath,
-		"PI_BROWSER_SKILL="+browserSkillPath,
-		"PI_PLANNER_SKILL="+plannerSkillPath,
-		"PI_CHILD_THREADS_EXTENSION="+childThreadsExtensionPath,
-		"PI_WORKFLOWS_EXTENSION="+workflowsExtensionPath,
-		"PI_SKILL_FORKS_EXTENSION="+skillForksExtensionPath,
-		"PI_JITI_PATH="+jitiPath,
-	)
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("run Pi browser extension harness: %v\n%s", err, output)
-	}
-	if !strings.Contains(string(output), "Pi browser extension harness passed") {
-		t.Fatalf("Pi browser extension harness did not finish: %s", output)
+	if bytes.Contains(browserSkill, []byte("context: fork")) {
+		t.Fatal("browser skill still requests a forked context")
 	}
 }
 
@@ -284,109 +140,5 @@ process.stdout.write("context reported\n");
 	}
 	if !strings.Contains(string(output), "context reported") {
 		t.Fatalf("Pi context harness did not finish: %s", output)
-	}
-}
-
-func TestPiActivityFetchFailureIsHandled(t *testing.T) {
-	nodePath, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is not installed")
-	}
-
-	// The application loads this TypeScript directly through Pi, but Kiwi Code
-	// supports Node 20, before Node's built-in type stripping. Remove the small,
-	// known set of type-only fragments so the lifecycle test can run everywhere
-	// the project's JavaScript hook tests run.
-	extensionSource := string(piThreadActivityExtension)
-	for _, replacement := range [][2]string{
-		{`import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";`, ""},
-		{`import threadUsageExtension from "./kiwi-code-thread-usage.ts";`, `const threadUsageExtension = () => {};`},
-		{`import browserExtension from "./kiwi-code-browser.ts";`, `const browserExtension = () => {};`},
-		{`import skillForksExtension from "./kiwi-code-skill-forks.ts";`, `const skillForksExtension = () => {};`},
-		{`type ActivityState = "working" | "finished" | "idle";`, ""},
-		{`export default function (pi: ExtensionAPI) {`, `export default function (pi) {`},
-		{`let activePromptStartedAt: string | undefined;`, `let activePromptStartedAt;`},
-		{`let heartbeat: ReturnType<typeof setInterval> | undefined;`, `let heartbeat;`},
-		{`async function sendActivity(state: ActivityState, promptStartedAt?: string): Promise<void> {`, `async function sendActivity(state, promptStartedAt) {`},
-		{`function queueActivity(state: ActivityState, promptStartedAt?: string): Promise<void> {`, `function queueActivity(state, promptStartedAt) {`},
-		{`function stopHeartbeat(): void {`, `function stopHeartbeat() {`},
-	} {
-		if count := strings.Count(extensionSource, replacement[0]); count != 1 {
-			t.Fatalf("Pi activity source contains %d copies of %q, want 1", count, replacement[0])
-		}
-		extensionSource = strings.Replace(extensionSource, replacement[0], replacement[1], 1)
-	}
-	extensionPath := filepath.Join(t.TempDir(), "kiwi-code-thread-activity.mjs")
-	if err := os.WriteFile(extensionPath, []byte(extensionSource), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	harnessPath := filepath.Join(t.TempDir(), "pi-activity-failure.mjs")
-	harness := `
-import { pathToFileURL } from "node:url";
-
-const activities = [];
-let inFlight = 0;
-let maxInFlight = 0;
-globalThis.fetch = async (_url, init) => {
-	activities.push(JSON.parse(init.body));
-	inFlight += 1;
-	maxInFlight = Math.max(maxInFlight, inFlight);
-	await new Promise((resolve) => setImmediate(resolve));
-	inFlight -= 1;
-	throw new Error("kiwi-code is unreachable");
-};
-
-const handlers = new Map();
-const pi = {
-	on(event, handler) {
-		handlers.set(event, handler);
-	},
-};
-
-const extension = await import(pathToFileURL(process.env.PI_ACTIVITY_EXTENSION).href);
-extension.default(pi);
-
-for (const event of ["agent_start", "agent_settled", "session_shutdown"]) {
-	if (!handlers.has(event)) throw new Error("missing " + event + " handler");
-}
-
-handlers.get("agent_start")();
-await handlers.get("agent_settled")();
-if (activities.map(({ state }) => state).join(",") !== "working,finished") {
-	throw new Error("settled returned before the sidebar transition completed");
-}
-handlers.get("agent_start")();
-await handlers.get("session_shutdown")();
-await new Promise((resolve) => setImmediate(resolve));
-
-if (maxInFlight !== 1) throw new Error("activity requests were not serialized");
-const states = activities.map(({ state }) => state);
-if (states.join(",") !== "working,finished,working,idle") {
-	throw new Error("unexpected activity states: " + states.join(","));
-}
-if (typeof activities[0].promptStartedAt !== "string" || typeof activities[2].promptStartedAt !== "string") {
-	throw new Error("working transitions did not include prompt start times");
-}
-if (activities[1].promptStartedAt || activities[3].promptStartedAt) {
-	throw new Error("settled activity included a prompt start time");
-}
-process.stdout.write("activity failures handled\n");
-`
-	if err := os.WriteFile(harnessPath, []byte(harness), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	command := exec.Command(nodePath, "--unhandled-rejections=strict", harnessPath)
-	command.Env = append(os.Environ(),
-		"KIWI_CODE_THREAD_ENDPOINT=http://127.0.0.1:1/api/projects/project/threads/thread",
-		"PI_ACTIVITY_EXTENSION="+extensionPath,
-	)
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("run Pi activity extension with failing fetch: %v\n%s", err, output)
-	}
-	if !strings.Contains(string(output), "activity failures handled") {
-		t.Fatalf("Pi activity harness did not finish: %s", output)
 	}
 }

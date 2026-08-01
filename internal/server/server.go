@@ -11,7 +11,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,36 +33,17 @@ type Server struct {
 	piActivity                *piActivityTracker
 	threadUsage               *threadUsageTracker
 	contextStatuses           *contextStatusTracker
-	threadMessages            *childThreadMessageStore
 	stateChanges              *stateChangeBroker
 	browserStateInvalidations browserStateInvalidationThrottle
-	processWebServerCache     sidebarProcessWebServerCache
-	workflows                 *workflowManager
-	plans                     *threadPlanManager
 	sessionClosures           *sessionClosureLog
 	agentSkills               *agentSkillInstaller
 	instanceIDOnce            sync.Once
 	instanceID                string
 	restart                   func()
-	allowChildThreadCreation  bool
-	childCreationBeforeCommit func(project.Thread)
-	workflowProcessLauncher   workflowProcessLauncher
-	workflowProcessStopper    workflowProcessStopper
-	workflowWatchMu           sync.Mutex
-	workflowWatches           map[threadStatusKey]*workflowProcessWatch
-	workflowWatchesStopped    bool
-	workflowKickMu            sync.Mutex
-	workflowKicks             map[threadStatusKey]*workflowProcessKick
-	workflowKicksStopped      bool
 	assets                    fs.FS
 	static                    http.Handler
 	handler                   http.Handler
 }
-
-// General direct child creation remains disabled. Scoped server-side workflow
-// runners and context: fork skills enter the hardened child transaction through
-// separate authorization paths.
-const childThreadCreationEnabled = false
 
 const (
 	maxPiImageBytes   int64 = 50 << 20
@@ -92,14 +72,6 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 		return nil, err
 	}
 	usage, err := newThreadUsageTracker(projects.DataDirectory())
-	if err != nil {
-		return nil, err
-	}
-	workflows, err := newWorkflowManager(projects.DataDirectory())
-	if err != nil {
-		return nil, err
-	}
-	plans, err := newThreadPlanManager(projects.DataDirectory())
 	if err != nil {
 		return nil, err
 	}
@@ -135,10 +107,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 		piActivity:          newPiActivityTracker(),
 		threadUsage:         usage,
 		contextStatuses:     newContextStatusTracker(),
-		threadMessages:      newChildThreadMessageStore(),
 		stateChanges:        newStateChangeBroker(),
-		workflows:           workflows,
-		plans:               plans,
 		sessionClosures:     sessionClosures,
 		agentSkills:         newAgentSkillInstaller(agentSkillsDirectory),
 		instanceID:          newServerInstanceID(),
@@ -146,10 +115,8 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 		assets:              assets,
 		static:              http.FileServer(http.FS(assets)),
 	}
-	server.allowChildThreadCreation = childThreadCreationEnabled
 	terminal.threadStatusChanged = server.notifyThreadStatusChanged
 	server.piActivity.stateChanged = terminal.markThreadTmuxStatusChanged
-	terminal.workflowChanged = server.queueWorkflowProcessReconcile
 	terminal.budgetReached = server.threadBudgetReached
 	terminal.nativePi.usageReporter = func(key piNativeProcessKey, sessionID string, totals threadUsageTotals) {
 		if err := server.threadUsage.report(key.ProjectID, key.ThreadID, sessionID, totals); err != nil {
@@ -164,8 +131,6 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	if err := server.recoverPendingThreadCreationRollbacks(); err != nil {
 		return nil, fmt.Errorf("recover pending thread creation rollbacks: %w", err)
 	}
-	server.recoverWorkflowProcessWatches()
-	server.stopWorkflowProcessWatchesOnContext(options.CleanupContext)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", server.health)
@@ -193,32 +158,6 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("GET /api/projects/{id}/git/branches", server.listProjectGitBranches)
 	mux.HandleFunc("POST /api/projects/{id}/threads", server.addThread)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/order", server.reorderThreads)
-	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/nesting", server.getThreadNestingContext)
-	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/workflows", server.startWorkflow)
-	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/workflows", server.listWorkflows)
-	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/workflows/activation", server.activateWorkflows)
-	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/workflows/saved", server.listSavedWorkflows)
-	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/workflows/commands/run/{name}", server.startSavedWorkflow)
-	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/workflows/{runId}", server.getWorkflow)
-	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/workflows/{runId}/save", server.saveWorkflow)
-	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/workflows/{runId}/pause", server.pauseWorkflow)
-	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/workflows/{runId}/resume", server.resumeWorkflow)
-	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/workflows/{runId}/stop", server.stopWorkflow)
-	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/workflows/{runId}/events", server.workflowRunnerEvent)
-	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/workflows/{runId}/agents/{agentId}", server.createWorkflowAgent)
-	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/workflows/{runId}/agents/{agentId}", server.getWorkflowAgentRun)
-	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/workflows/{runId}/agents/{agentId}/close", server.closeWorkflowAgent)
-	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/skill-forks", server.createSkillForkChild)
-	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/skill-forks/{childId}/stop", server.stopSkillForkChild)
-	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/children", server.createChildThread)
-	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/children", server.listChildThreads)
-	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/children/{childId}/close", server.closeChildThread)
-	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/children/{childId}/runs/{runId}", server.getChildThreadRun)
-	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/messages", server.sendThreadMessage)
-	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/messages/receive", server.receiveThreadMessages)
-	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/plans", server.listThreadPlans)
-	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/plans", server.uploadThreadPlan)
-	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/plans/{planId}", server.downloadThreadPlan)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}", server.getThread)
 	mux.HandleFunc("PATCH /api/projects/{id}/threads/{threadId}", server.updateThread)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/coding-agent", server.terminal.startCodingAgent)
@@ -231,7 +170,6 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/browser/actions", server.browserAction)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/frame", server.browserFrame)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/stream", server.browserStream)
-	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/recordings/{recordingId}", server.browserRecording)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/pi/activity", server.updatePiActivity)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/codex/activity", server.updateCodexActivity)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/claude/activity", server.updateClaudeActivity)
@@ -246,7 +184,6 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/shell/windows/{index}/select", server.terminal.selectShellWindow)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/processes", server.terminal.listProcesses)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/processes", server.terminal.createProcess)
-	mux.HandleFunc("PATCH /api/projects/{id}/threads/{threadId}/processes/{processId}", server.terminal.updateProcess)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/processes/{processId}/logs", server.terminal.processLogs)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/terminal/lines", server.terminal.readTmuxLines)
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/processes/{processId}/input", server.terminal.sendProcessInput)
@@ -285,9 +222,8 @@ func configuredBrowserProvider(projects *project.Store, options Options) (browse
 	switch backend {
 	case browsercontrol.BackendHeadless:
 		return browserhost.New(browserhost.Options{
-			ChromeBinary:        options.BrowserChromeBinary,
-			ProtectedOrigins:    append([]string(nil), options.BrowserProtectedOrigins...),
-			RecordingsDirectory: filepath.Join(projects.DataDirectory(), "browser-recordings", "headless"),
+			ChromeBinary:     options.BrowserChromeBinary,
+			ProtectedOrigins: append([]string(nil), options.BrowserProtectedOrigins...),
 		}), nil
 	case browsercontrol.BackendElectron:
 		return browsercontrol.New(browsercontrol.ConfigPaths(projects.DataDirectory())...), nil
@@ -303,7 +239,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // Close shuts down server-owned background clients, browser processes, and
 // contexts.
 func (s *Server) Close(ctx context.Context) error {
-	s.stopWorkflowProcessWatches()
 	var closeErrors []error
 	if s.terminal != nil {
 		if err := s.terminal.stopTmuxWatches(ctx); err != nil {
@@ -416,7 +351,6 @@ func clientProjects(projects []project.Project) []project.Project {
 		threads := make([]project.Thread, 0, len(item.Threads))
 		for _, thread := range item.Threads {
 			if !thread.RollbackPending {
-				thread.SkillForkRequestID = ""
 				threads = append(threads, thread)
 			}
 		}
@@ -478,33 +412,13 @@ func (s *Server) reorderProjects(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type optionalProjectNestingDepth struct {
-	present bool
-	value   *int
-}
-
-func (o *optionalProjectNestingDepth) UnmarshalJSON(data []byte) error {
-	o.present = true
-	if string(data) == "null" {
-		o.value = nil
-		return nil
-	}
-	var value int
-	if err := json.Unmarshal(data, &value); err != nil {
-		return err
-	}
-	o.value = &value
-	return nil
-}
-
 func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		ProfileID                    *string                     `json:"profileId"`
-		SubAgentNestingDepthOverride optionalProjectNestingDepth `json:"subAgentNestingDepthOverride"`
-		WorktreeBranchPrefix         *string                     `json:"worktreeBranchPrefix"`
-		RelatedProjects              *[]string                   `json:"relatedProjects"`
-		Environment                  *project.LocalEnvironment   `json:"environment"`
-		FigmaMCPEnabled              *bool                       `json:"figmaMCPEnabled"`
+		ProfileID            *string                   `json:"profileId"`
+		WorktreeBranchPrefix *string                   `json:"worktreeBranchPrefix"`
+		RelatedProjects      *[]string                 `json:"relatedProjects"`
+		Environment          *project.LocalEnvironment `json:"environment"`
+		FigmaMCPEnabled      *bool                     `json:"figmaMCPEnabled"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20))
 	decoder.DisallowUnknownFields()
@@ -514,13 +428,11 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	item, err := s.projects.UpdateProject(r.PathValue("id"), project.ProjectUpdate{
-		ProfileID:                          input.ProfileID,
-		SubAgentNestingDepthOverride:       input.SubAgentNestingDepthOverride.value,
-		UpdateSubAgentNestingDepthOverride: input.SubAgentNestingDepthOverride.present,
-		WorktreeBranchPrefix:               input.WorktreeBranchPrefix,
-		RelatedProjects:                    input.RelatedProjects,
-		Environment:                        input.Environment,
-		FigmaMCPEnabled:                    input.FigmaMCPEnabled,
+		ProfileID:            input.ProfileID,
+		WorktreeBranchPrefix: input.WorktreeBranchPrefix,
+		RelatedProjects:      input.RelatedProjects,
+		Environment:          input.Environment,
+		FigmaMCPEnabled:      input.FigmaMCPEnabled,
 	})
 	if errors.Is(err, project.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "Project not found.")
@@ -564,13 +476,11 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 				_ = s.threadUsage.remove(projectID, "")
 			}
 			s.contextStatuses.removeProject(projectID)
-			s.removeDeletedProjectPlans(projectID)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		// A previous deletion may have removed the project before its auxiliary
 		// plan cleanup completed and before a durable stop marker remained.
-		s.removeDeletedProjectPlans(projectID)
 		writeError(w, http.StatusNotFound, "Project not found.")
 		return
 	}
@@ -603,7 +513,6 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 				_ = s.threadUsage.remove(projectID, "")
 			}
 			s.contextStatuses.removeProject(projectID)
-			s.removeDeletedProjectPlans(projectID)
 			if resolveErr != nil {
 				log.Printf("finish published deleted project terminal stop: project=%q store_error=%v finish_error=%v", projectID, storeErr, resolveErr)
 				writeError(w, http.StatusInternalServerError, "The project was removed, but its terminal cleanup did not finish.")
@@ -632,10 +541,6 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.contextStatuses.removeProject(projectID)
-	s.removeDeletedProjectPlans(projectID)
-	if s.threadMessages != nil {
-		s.threadMessages.removeProject(projectID)
-	}
 	if finishErr != nil {
 		log.Printf("finish deleted project terminal stop: project=%q error=%v", projectID, finishErr)
 		writeError(w, http.StatusInternalServerError, "The project was removed, but its terminal cleanup did not finish.")
@@ -646,10 +551,9 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) addThread(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Title       string `json:"title"`
-		Worktree    bool   `json:"worktree"`
-		BaseBranch  string `json:"baseBranch"`
-		NestedDepth *int   `json:"nestedDepth"`
+		Title      string `json:"title"`
+		Worktree   bool   `json:"worktree"`
+		BaseBranch string `json:"baseBranch"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
@@ -663,7 +567,6 @@ func (s *Server) addThread(w http.ResponseWriter, r *http.Request) {
 		Worktree:              input.Worktree,
 		DeferEnvironmentSetup: true,
 		BaseBranch:            input.BaseBranch,
-		NestedDepth:           input.NestedDepth,
 	})
 	if err != nil && thread.ID != "" {
 		rollbackErr := s.projects.RollbackThreadCreation(projectID, thread.ID)
@@ -733,7 +636,6 @@ func (s *Server) updateThread(w http.ResponseWriter, r *http.Request) {
 		AutoGenerated bool    `json:"autoGenerated"`
 		TitleLocked   *bool   `json:"titleLocked"`
 		Archived      *bool   `json:"archived"`
-		Bookmarked    *bool   `json:"bookmarked"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
@@ -742,7 +644,7 @@ func (s *Server) updateThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fieldCount := 0
-	for _, provided := range []bool{input.Title != nil, input.TitleLocked != nil, input.Archived != nil, input.Bookmarked != nil} {
+	for _, provided := range []bool{input.Title != nil, input.TitleLocked != nil, input.Archived != nil} {
 		if provided {
 			fieldCount++
 		}
@@ -773,12 +675,6 @@ func (s *Server) updateThread(w http.ResponseWriter, r *http.Request) {
 			r.PathValue("id"),
 			r.PathValue("threadId"),
 			*input.Archived,
-		)
-	case input.Bookmarked != nil:
-		thread, err = s.projects.SetThreadBookmarked(
-			r.PathValue("id"),
-			r.PathValue("threadId"),
-			*input.Bookmarked,
 		)
 	}
 	if errors.Is(err, project.ErrNotFound) || errors.Is(err, project.ErrThreadNotFound) {
@@ -862,49 +758,11 @@ func (s *Server) updateThreadLimits(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteThread(w http.ResponseWriter, r *http.Request) {
-	if failure := s.deleteThreadTree(r.PathValue("id"), r.PathValue("threadId"), nil); failure != nil {
+	if failure := s.deleteThreadRecord(r.PathValue("id"), r.PathValue("threadId"), nil); failure != nil {
 		writeError(w, failure.status, failure.message)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-type threadTreeStop struct {
-	threadID string
-	lease    *terminalStopLease
-}
-
-func projectThreadTree(item project.Project, rootThreadID string) []project.Thread {
-	included := map[string]struct{}{rootThreadID: {}}
-	for changed := true; changed; {
-		changed = false
-		for _, thread := range item.Threads {
-			if _, found := included[thread.ID]; found {
-				continue
-			}
-			if _, parentFound := included[thread.ParentThreadID]; !parentFound {
-				continue
-			}
-			included[thread.ID] = struct{}{}
-			changed = true
-		}
-	}
-	tree := make([]project.Thread, 0, len(included))
-	for _, thread := range item.Threads {
-		if thread.ID == rootThreadID {
-			tree = append(tree, thread)
-			break
-		}
-	}
-	for _, thread := range item.Threads {
-		if thread.ID == rootThreadID {
-			continue
-		}
-		if _, found := included[thread.ID]; found {
-			tree = append(tree, thread)
-		}
-	}
-	return tree
 }
 
 func (s *Server) reconcileDeletedThreadMarkers(projectID, requestedThreadID string) (bool, error) {
@@ -950,123 +808,72 @@ func (s *Server) reconcileDeletedThreadMarkers(projectID, requestedThreadID stri
 	return requestedFound, errors.Join(reconcileErrors...)
 }
 
-func (s *Server) deleteThreadTree(projectID, threadID string, archivedBefore *time.Time) *deleteThreadFailure {
-	item, _, err := s.projects.GetThreadPersisted(projectID, threadID)
+func (s *Server) deleteThreadRecord(projectID, threadID string, archivedBefore *time.Time) *deleteThreadFailure {
+	item, thread, err := s.projects.GetThreadPersisted(projectID, threadID)
 	if errors.Is(err, project.ErrNotFound) || errors.Is(err, project.ErrThreadNotFound) {
 		found, recoveryErr := s.reconcileDeletedThreadMarkers(projectID, threadID)
 		if recoveryErr != nil {
 			log.Printf("retry deleted thread terminal cleanup: project=%q thread=%q error=%v", projectID, threadID, recoveryErr)
-			return &deleteThreadFailure{status: http.StatusInternalServerError, message: "Could not finish the thread tree's terminal cleanup.", cause: recoveryErr}
+			return &deleteThreadFailure{status: http.StatusInternalServerError, message: "Could not finish the thread's terminal cleanup.", cause: recoveryErr}
 		}
 		if found {
 			return nil
-		}
-		if s.plans != nil {
-			if planErr := s.plans.removeThread(projectID, threadID); planErr != nil {
-				log.Printf("remove plans for already-deleted thread: project=%q thread=%q error=%v", projectID, threadID, planErr)
-			}
 		}
 		return &deleteThreadFailure{status: http.StatusNotFound, message: "Thread not found.", cause: err}
 	}
 	if err != nil {
 		return &deleteThreadFailure{status: http.StatusInternalServerError, message: "Could not load the thread.", cause: err}
 	}
-
-	tree := projectThreadTree(item, threadID)
-	for _, treeThread := range tree {
-		if treeThread.RollbackPending {
-			return &deleteThreadFailure{
-				status:  http.StatusConflict,
-				message: "The thread tree contains a pending creation rollback.",
-				cause:   project.ErrThreadRollbackPending,
-			}
-		}
-	}
-	expectedThreadIDs := make([]string, 0, len(tree))
-	stops := make([]threadTreeStop, 0, len(tree))
-	rollbackStops := func() error {
-		var rollbackErrors []error
-		for index := len(stops) - 1; index >= 0; index-- {
-			rollbackErrors = append(rollbackErrors, s.terminal.cancelStopThread(projectID, stops[index].threadID, stops[index].lease))
-		}
-		return errors.Join(rollbackErrors...)
-	}
-	for _, treeThread := range tree {
-		expectedThreadIDs = append(expectedThreadIDs, treeThread.ID)
-		lease, stopErr := s.terminal.stopThreadSessions(item, treeThread.ID)
-		if stopErr != nil {
-			rollbackErr := rollbackStops()
-			return &deleteThreadFailure{
-				status:  http.StatusInternalServerError,
-				message: "Could not stop the thread tree's terminal sessions.",
-				cause:   errors.Join(stopErr, rollbackErr),
-			}
-		}
-		stops = append(stops, threadTreeStop{threadID: treeThread.ID, lease: lease})
+	if thread.RollbackPending {
+		return &deleteThreadFailure{status: http.StatusConflict, message: "The thread is being rolled back.", cause: project.ErrThreadRollbackPending}
 	}
 
+	lease, stopErr := s.terminal.stopThreadSessions(item, threadID)
+	if stopErr != nil {
+		return &deleteThreadFailure{status: http.StatusInternalServerError, message: "Could not stop the thread's terminal sessions.", cause: stopErr}
+	}
 	if archivedBefore == nil {
-		err = s.projects.DeleteThreadTree(projectID, threadID, expectedThreadIDs)
+		err = s.projects.DeleteThread(projectID, threadID)
 	} else {
-		err = s.projects.DeleteArchivedThreadTree(projectID, threadID, expectedThreadIDs, *archivedBefore)
+		err = s.projects.DeleteArchivedThread(projectID, threadID, *archivedBefore)
 	}
 	if err != nil {
-		publishedCount := 0
-		publishedThreadIDs := make([]string, 0, len(stops))
-		var resolveErrors []error
-		for _, stop := range stops {
-			published, resolveErr := s.terminal.resolveStopThreadStoreError(item, stop.threadID, stop.lease)
-			if published {
-				publishedCount++
-				publishedThreadIDs = append(publishedThreadIDs, stop.threadID)
-				s.finishDeletedThreadRuntime(projectID, stop.threadID, "published")
-			}
-			resolveErrors = append(resolveErrors, resolveErr)
-		}
-		s.stopDeletedBrowserSessions(projectID, publishedThreadIDs)
-		resolveErr := errors.Join(resolveErrors...)
-		if publishedCount == len(stops) {
+		published, resolveErr := s.terminal.resolveStopThreadStoreError(item, threadID, lease)
+		if published {
+			s.stopDeletedBrowserSessions(projectID, []string{threadID})
+			s.finishDeletedThreadRuntime(projectID, threadID, "published")
 			if resolveErr != nil {
-				log.Printf("finish published deleted thread tree: project=%q thread=%q store_error=%v finish_error=%v", projectID, threadID, err, resolveErr)
-				return &deleteThreadFailure{status: http.StatusInternalServerError, message: "The thread tree was removed, but its terminal cleanup did not finish.", cause: errors.Join(err, resolveErr)}
+				return &deleteThreadFailure{status: http.StatusInternalServerError, message: "The thread was removed, but its terminal cleanup did not finish.", cause: errors.Join(err, resolveErr)}
 			}
 			if errors.Is(err, project.ErrNotFound) || errors.Is(err, project.ErrThreadNotFound) {
 				return nil
 			}
-			log.Printf("thread tree deletion was published with a Store durability error: project=%q thread=%q error=%v", projectID, threadID, err)
-			return &deleteThreadFailure{status: http.StatusInternalServerError, message: "The thread tree was removed, but its metadata cleanup did not finish.", cause: err}
+			return &deleteThreadFailure{status: http.StatusInternalServerError, message: "The thread was removed, but its metadata cleanup did not finish.", cause: err}
 		}
-		if publishedCount != 0 || resolveErr != nil {
-			log.Printf("resolve failed thread tree Store deletion: project=%q thread=%q published=%d/%d store_error=%v resolve_error=%v", projectID, threadID, publishedCount, len(stops), err, resolveErr)
-			return &deleteThreadFailure{status: http.StatusInternalServerError, message: "Could not resolve the thread tree deletion.", cause: errors.Join(err, resolveErr)}
+		cancelErr := s.terminal.cancelStopThread(projectID, threadID, lease)
+		if cancelErr != nil || resolveErr != nil {
+			return &deleteThreadFailure{status: http.StatusInternalServerError, message: "Could not resolve the thread deletion.", cause: errors.Join(err, resolveErr, cancelErr)}
 		}
 		switch {
-		case errors.Is(err, project.ErrThreadTreeChanged):
-			return &deleteThreadFailure{status: http.StatusConflict, message: "The thread tree changed while deletion was in progress. Try again.", cause: err}
 		case errors.Is(err, project.ErrThreadNotArchived):
 			return &deleteThreadFailure{status: http.StatusConflict, message: "The thread is no longer archived.", cause: err}
 		case errors.Is(err, project.ErrNotFound), errors.Is(err, project.ErrThreadNotFound):
 			return &deleteThreadFailure{status: http.StatusNotFound, message: "Thread not found.", cause: err}
 		default:
-			return &deleteThreadFailure{status: http.StatusInternalServerError, message: "Could not remove the thread tree.", cause: err}
+			return &deleteThreadFailure{status: http.StatusInternalServerError, message: "Could not remove the thread.", cause: err}
 		}
 	}
 
-	s.stopDeletedBrowserSessions(projectID, expectedThreadIDs)
-	var finishErrors []error
-	for _, stop := range stops {
-		finishErrors = append(finishErrors, s.terminal.finishStopThread(item, stop.threadID, stop.lease))
-		s.finishDeletedThreadRuntime(projectID, stop.threadID, "")
-	}
-	if finishErr := errors.Join(finishErrors...); finishErr != nil {
-		log.Printf("finish deleted thread tree terminal stop: project=%q thread=%q error=%v", projectID, threadID, finishErr)
-		return &deleteThreadFailure{status: http.StatusInternalServerError, message: "The thread tree was removed, but its terminal cleanup did not finish.", cause: finishErr}
+	s.stopDeletedBrowserSessions(projectID, []string{threadID})
+	finishErr := s.terminal.finishStopThread(item, threadID, lease)
+	s.finishDeletedThreadRuntime(projectID, threadID, "")
+	if finishErr != nil {
+		return &deleteThreadFailure{status: http.StatusInternalServerError, message: "The thread was removed, but its terminal cleanup did not finish.", cause: finishErr}
 	}
 	return nil
 }
 
 func (s *Server) finishDeletedThreadRuntime(projectID, threadID, context string) {
-	s.refreshWorkflowProcessWatch(projectID, threadID)
 	if err := s.terminal.removeCodingAgentExitMarkersForThread(projectID, threadID); err != nil {
 		description := "deleted"
 		if context != "" {
@@ -1081,19 +888,6 @@ func (s *Server) finishDeletedThreadRuntime(projectID, threadID, context string)
 		}
 	}
 	s.contextStatuses.removeThread(projectID, threadID)
-	if s.threadMessages != nil {
-		s.threadMessages.removeThread(projectID, threadID)
-	}
-	if s.workflows != nil {
-		if err := s.workflows.removeThread(projectID, threadID); err != nil {
-			log.Printf("remove deleted thread workflows: project=%q thread=%q error=%v", projectID, threadID, err)
-		}
-	}
-	if s.plans != nil {
-		if err := s.plans.removeThread(projectID, threadID); err != nil {
-			log.Printf("remove deleted thread plans: project=%q thread=%q error=%v", projectID, threadID, err)
-		}
-	}
 }
 
 func (s *Server) uploadPiImage(w http.ResponseWriter, r *http.Request) {

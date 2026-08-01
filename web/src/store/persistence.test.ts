@@ -3,7 +3,7 @@ import { memoryStorage } from '@/lib/memoryStorage'
 import { createAppStore } from './index'
 import { activeProfileSelected } from '@/store/slices/preferences'
 import {
-  bookmarksOnlyChanged,
+  moreThreadsToggled,
   projectCollapseToggled,
   sidebarViewChanged,
   sidebarWidthChanged,
@@ -24,7 +24,6 @@ describe('store persistence', () => {
         'kiwi-code.sidebar.view': 'tree',
         'kiwi-code.sidebar.width': '320',
         'kiwi-code.sidebar.collapsed-projects': '["project-1"]',
-        'kiwi-code.sidebar.web-servers-collapsed': 'true',
       }),
       persist: false,
     })
@@ -33,7 +32,6 @@ describe('store persistence', () => {
     expect(store.getState().sidebar.view).toBe('tree')
     expect(store.getState().sidebar.width).toBe(320)
     expect(store.getState().sidebar.collapsedProjectIds).toEqual(['project-1'])
-    expect(store.getState().sidebar.webServersCollapsed).toBe(true)
   })
 
   it('falls back for malformed values and clamps an out-of-range width', () => {
@@ -138,7 +136,7 @@ describe('store persistence', () => {
     // resetting the timer and the width would never reach storage.
     for (let tick = 0; tick < 40; tick += 1) {
       await vi.advanceTimersByTimeAsync(50)
-      store.dispatch(bookmarksOnlyChanged(tick % 2 === 0))
+      store.dispatch(moreThreadsToggled(`project-${tick}`))
     }
 
     expect(storage.values.get('kiwi-code.sidebar.width')).toBe('320')

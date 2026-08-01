@@ -5,7 +5,6 @@ import type { PromptPaste } from '@/prompt-pastes.mjs'
 // not be written to durable browser storage.
 const piNativeDrafts = new Map<string, string>()
 const piNativePastes = new Map<string, PromptPaste[]>()
-const piNativeWorkflowDismissals = new Set<string>()
 const claudeNativeDrafts = new Map<string, string>()
 const newThreadDrafts = new Map<string, string>()
 const newThreadPastes = new Map<string, PromptPaste[]>()
@@ -48,15 +47,6 @@ export function writePiNativePastes(projectId: string, threadId: string, pastes:
   writePastes(piNativePastes, draftKey(projectId, threadId), pastes)
 }
 
-export function readPiNativeWorkflowDismissed(projectId: string, threadId: string) {
-  return piNativeWorkflowDismissals.has(draftKey(projectId, threadId))
-}
-
-export function writePiNativeWorkflowDismissed(projectId: string, threadId: string, dismissed: boolean) {
-  const key = draftKey(projectId, threadId)
-  if (dismissed) piNativeWorkflowDismissals.add(key)
-  else piNativeWorkflowDismissals.delete(key)
-}
 
 export function readClaudeNativeDraft(projectId: string, threadId: string) {
   return readDraft(claudeNativeDrafts, draftKey(projectId, threadId))

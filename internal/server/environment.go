@@ -31,7 +31,6 @@ func (s *Server) runEnvironmentAction(w http.ResponseWriter, r *http.Request) {
 		action.Name,
 		command,
 		variables,
-		threadEndpointURL(r, item.ID, thread.ID),
 	)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

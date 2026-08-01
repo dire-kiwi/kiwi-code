@@ -11,48 +11,6 @@ import (
 	"github.com/dire-kiwi/kiwi-code/internal/wire"
 )
 
-const browserRecordingStatusTestJSON = `{
-	"recording":{
-		"id":"rec-active",
-		"state":"recording",
-		"targetId":"page-1",
-		"title":"Active recording",
-		"startedAt":"2026-07-26T00:00:00Z"
-	},
-	"recordings":[
-		{
-			"id":"rec-active",
-			"state":"recording",
-			"targetId":"page-1",
-			"title":"Active recording",
-			"startedAt":"2026-07-26T00:00:00Z"
-		},
-		{
-			"id":"rec-active",
-			"state":"recording",
-			"targetId":"page-1",
-			"title":"Duplicate active recording",
-			"startedAt":"2026-07-26T00:00:01Z"
-		},
-		{
-			"id":"rec-complete",
-			"state":"completed",
-			"targetId":"page-2",
-			"title":"Completed recording",
-			"startedAt":"2026-07-25T00:00:00Z",
-			"finishedAt":"2026-07-25T00:01:00Z"
-		},
-		{
-			"id":"rec-complete",
-			"state":"completed",
-			"targetId":"page-2",
-			"title":"Duplicate completed recording",
-			"startedAt":"2026-07-25T00:00:00Z",
-			"finishedAt":"2026-07-25T00:01:00Z"
-		}
-	]
-}`
-
 func TestNormalizeBrowserStateSnapshotNoSession(t *testing.T) {
 	snapshot := normalizeBrowserStateSnapshot(json.RawMessage(`{
 		"message":"Headless Chrome browser session is not running.",
@@ -62,16 +20,13 @@ func TestNormalizeBrowserStateSnapshotNoSession(t *testing.T) {
 			"capabilities":{
 				"nativeView":false,
 				"interactiveStream":true,
-				"preview":true,
-				"recording":true
+				"preview":true
 			}
 		},
 		"backend":"headless-chrome",
 		"running":false,
 		"pages":[],
-		"currentTargetId":null,
-		"recording":null,
-		"recordings":[]
+		"currentTargetId":null
 	}`))
 	if snapshot.Backend != "headless-chrome" || snapshot.Presentation != "stream" {
 		t.Fatalf("identity = backend %q presentation %q", snapshot.Backend, snapshot.Presentation)
@@ -79,8 +34,7 @@ func TestNormalizeBrowserStateSnapshotNoSession(t *testing.T) {
 	if snapshot.Reachable == nil || !*snapshot.Reachable || snapshot.Running == nil || *snapshot.Running {
 		t.Fatalf("reachability = reachable %#v running %#v", snapshot.Reachable, snapshot.Running)
 	}
-	if snapshot.CurrentTargetID != nil || snapshot.Current != nil || snapshot.Recording != nil ||
-		len(snapshot.Pages) != 0 || len(snapshot.Recordings) != 0 || snapshot.Error != "" {
+	if snapshot.CurrentTargetID != nil || snapshot.Current != nil || len(snapshot.Pages) != 0 || snapshot.Error != "" {
 		t.Fatalf("no-session snapshot = %#v", snapshot)
 	}
 	assertBrowserSnapshotShape(t, snapshot, true)
@@ -108,26 +62,22 @@ func TestBrowserStateSnapshotUnavailableProvider(t *testing.T) {
 	if snapshot.Error != "Browser provider is unavailable." {
 		t.Fatalf("unavailable error = %q", snapshot.Error)
 	}
-	if snapshot.Pages == nil || snapshot.Recordings == nil {
-		t.Fatalf("unavailable collections are nil: %#v", snapshot)
+	if snapshot.Pages == nil {
+		t.Fatalf("unavailable pages are nil: %#v", snapshot)
 	}
 	assertBrowserSnapshotShape(t, snapshot, false)
 }
 
-func TestNormalizeBrowserRecordingHistoryDeduplicatesProviderIDs(t *testing.T) {
-	snapshot := normalizeBrowserStateSnapshot(json.RawMessage(browserRecordingStatusTestJSON))
-	if snapshot.Recording == nil || snapshot.Recording.ID != "rec-active" {
-		t.Fatalf("active recording = %#v", snapshot.Recording)
-	}
-	if len(snapshot.Recordings) != 2 ||
-		snapshot.Recordings[0].ID != "rec-active" ||
-		snapshot.Recordings[1].ID != "rec-complete" {
-		t.Fatalf("recording history = %#v", snapshot.Recordings)
-	}
-}
-
-func TestBrowserStatusTopicIncludesActiveAndHistoricalRecordings(t *testing.T) {
-	status := json.RawMessage(browserRecordingStatusTestJSON)
+func TestBrowserStatusTopicPublishesNormalizedStatus(t *testing.T) {
+	status := json.RawMessage(`{
+		"backend":"headless-chrome",
+		"presentation":"stream",
+		"capabilities":{"nativeView":false,"interactiveStream":true,"preview":true},
+		"reachable":true,
+		"running":true,
+		"pages":[{"id":"page-1","title":"Example","url":"https://example.com"}],
+		"currentTargetId":"page-1"
+	}`)
 	provider := browserActionTestProvider{action: func(_ context.Context, request browsercontrol.Request) (json.RawMessage, error) {
 		if request.Operation != "session.status" {
 			return nil, browsercontrol.ErrProvider
@@ -159,53 +109,8 @@ func TestBrowserStatusTopicIncludesActiveAndHistoricalRecordings(t *testing.T) {
 	if err := json.Unmarshal(message.Data, &snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Recording == nil || snapshot.Recording.ID != "rec-active" {
-		t.Fatalf("active recording = %#v", snapshot.Recording)
-	}
-	if len(snapshot.Recordings) != 2 ||
-		snapshot.Recordings[0].ID != "rec-active" ||
-		snapshot.Recordings[1].ID != "rec-complete" {
-		t.Fatalf("browser.status recordings = %#v", snapshot.Recordings)
-	}
-}
-
-func TestLegacyBrowserRecordingsTopicProjectsStatusRecordings(t *testing.T) {
-	status := json.RawMessage(browserRecordingStatusTestJSON)
-	provider := browserActionTestProvider{action: func(_ context.Context, request browsercontrol.Request) (json.RawMessage, error) {
-		if request.Operation != "session.status" {
-			return nil, browsercontrol.ErrProvider
-		}
-		return status, nil
-	}}
-	application, item, thread := newBrowserServerTestFixture(t, provider)
-	connection, closeServer := openStateTestSocket(t, application)
-	defer closeServer()
-	defer connection.Close()
-	if ready := readStateTestMessage(t, connection); ready.Type != wire.ServerReady {
-		t.Fatalf("ready = %#v", ready)
-	}
-
-	writeStateTestMessage(t, connection, map[string]any{
-		"t":  wire.ClientSub,
-		"id": uint32(1),
-		"topic": map[string]any{
-			"tag":       stateTopicBrowserRecordings,
-			"projectId": item.ID,
-			"threadId":  thread.ID,
-		},
-	})
-	message := readStateTestMessage(t, connection)
-	if message.Type != wire.ServerSnap || message.ID != 1 || message.Seq != 1 {
-		t.Fatalf("browser recordings snapshot message = %#v", message)
-	}
-	var recordings []browserStateRecording
-	if err := json.Unmarshal(message.Data, &recordings); err != nil {
-		t.Fatal(err)
-	}
-	if len(recordings) != 2 ||
-		recordings[0].ID != "rec-active" ||
-		recordings[1].ID != "rec-complete" {
-		t.Fatalf("legacy browser.recordings snapshot = %#v", recordings)
+	if len(snapshot.Pages) != 1 || snapshot.Pages[0].ID != "page-1" {
+		t.Fatalf("browser.status pages = %#v", snapshot.Pages)
 	}
 }
 
@@ -217,12 +122,9 @@ func TestNormalizeBrowserStateSnapshotSanitizesProviderFields(t *testing.T) {
 			{"id":"","title":"invalid"},
 			{"id":"page-1","title":"Example","url":"https://example.com"}
 		],
-		"recording":{"id":"bad","state":"unexpected","targetId":"page-1","title":"Bad","startedAt":"now"},
-		"recordings":[{"id":"also-bad","state":"unexpected","targetId":"page-1","title":"Bad","startedAt":"now"}],
 		"unknown":{"secret":"not forwarded"}
 	}`))
-	if snapshot.Error != "" || len(snapshot.Pages) != 1 || snapshot.Pages[0].ID != "page-1" ||
-		snapshot.Recording != nil || len(snapshot.Recordings) != 0 {
+	if snapshot.Error != "" || len(snapshot.Pages) != 1 || snapshot.Pages[0].ID != "page-1" {
 		t.Fatalf("sanitized snapshot = %#v", snapshot)
 	}
 	payload, err := json.Marshal(snapshot)
@@ -249,16 +151,14 @@ func assertBrowserSnapshotShape(t *testing.T, snapshot browserStateSnapshot, exp
 		t.Fatal(err)
 	}
 	for _, required := range []string{
-		"backend", "presentation", "capabilities", "pages", "currentTargetId", "recording", "recordings",
+		"backend", "presentation", "capabilities", "pages", "currentTargetId",
 	} {
 		if _, exists := object[required]; !exists {
 			t.Fatalf("snapshot omitted %q: %s", required, payload)
 		}
 	}
-	for _, nullable := range []string{"currentTargetId", "recording"} {
-		if string(object[nullable]) != "null" {
-			t.Fatalf("%s = %s, want null", nullable, object[nullable])
-		}
+	if string(object["currentTargetId"]) != "null" {
+		t.Fatalf("currentTargetId = %s, want null", object["currentTargetId"])
 	}
 	_, reachable := object["reachable"]
 	_, running := object["running"]

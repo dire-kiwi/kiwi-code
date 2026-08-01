@@ -133,10 +133,6 @@ func (h *terminalHandler) serveClaudeNative(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusConflict, "The thread is being rolled back.")
 		return
 	}
-	if thread.ParentThreadID != "" {
-		writeError(w, http.StatusForbidden, "Subagent threads use native Pi.")
-		return
-	}
 	// Upgrade before starting Claude. A rejected WebSocket origin must not
 	// cause agent-side code to run.
 	connection, err := h.upgrader.Upgrade(w, r, nil)
@@ -493,8 +489,8 @@ func (m *claudeNativeManager) startProcess(
 	command := exec.Command(claudePath, arguments...)
 	command.Dir = thread.Cwd
 	threadEnvironment := kiwiCodeThreadEnvironment(threadEndpoint, key.ProjectID, key.ThreadID)
-	// Match the terminal Claude launch: no Kiwi Code agent token or child-thread
-	// metadata. The Claude browser MCP server reads its capability from the
+	// Match the terminal Claude launch: no Kiwi Code agent token. The Claude
+	// browser MCP server reads its capability from the
 	// protected data directory instead of the environment.
 	piPath := codingAgentPi
 	if resolvedPiPath, err := exec.LookPath(codingAgentPi); err == nil {

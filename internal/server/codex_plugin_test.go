@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,9 +17,26 @@ import (
 
 func TestMaterializeCodexPlugin(t *testing.T) {
 	dataDirectory := t.TempDir()
+	obsolete := []string{
+		filepath.Join(dataDirectory, "codex-marketplace", "plugins", codexPluginName, "servers", "kiwi-code-plans.mjs"),
+		filepath.Join(dataDirectory, "codex-marketplace", "plugins", codexPluginName, "skills", "kiwi-code-planner", "SKILL.md"),
+	}
+	for _, path := range obsolete {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("obsolete"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	installation, err := materializeCodexPlugin(dataDirectory)
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, path := range obsolete {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("obsolete plugin artifact still exists at %q: %v", path, err)
+		}
 	}
 	if installation.Version != codexPluginVersion || installation.PluginRoot == "" ||
 		installation.MarketplaceRoot == "" || installation.MarketplaceName != managedCodexMarketplaceName(dataDirectory) {
@@ -53,7 +71,7 @@ func TestMaterializeCodexPlugin(t *testing.T) {
 		manifest.Skills != "./skills/" || manifest.MCPServers != "./.mcp.json" {
 		t.Fatalf("Codex plugin manifest = %#v", manifest)
 	}
-	for _, capability := range []string{"activity", "browser", "process", "plan", "thread"} {
+	for _, capability := range []string{"activity", "browser", "process", "thread"} {
 		if !strings.Contains(strings.ToLower(manifest.Description), capability) {
 			t.Fatalf("Codex plugin description %q does not mention %q", manifest.Description, capability)
 		}
@@ -73,10 +91,10 @@ func TestMaterializeCodexPlugin(t *testing.T) {
 	if err := json.Unmarshal(codexPluginMCPConfig, &mcpConfig); err != nil {
 		t.Fatalf("parse Codex MCP config: %v", err)
 	}
-	if len(mcpConfig.MCPServers) != 2 {
+	if len(mcpConfig.MCPServers) != 1 {
 		t.Fatalf("Codex MCP servers = %#v", mcpConfig.MCPServers)
 	}
-	for _, name := range []string{"kiwi-code-browser", "kiwi-code-plans"} {
+	for _, name := range []string{"kiwi-code-browser"} {
 		server, ok := mcpConfig.MCPServers[name]
 		// Codex resolves a relative MCP cwd against the plugin root; it does not
 		// expand ${PLUGIN_ROOT} placeholders inside stdio argument strings.
@@ -100,13 +118,9 @@ func TestMaterializeCodexPlugin(t *testing.T) {
 		t.Fatal("Codex hooks do not use the plugin-owned lifecycle script")
 	}
 	browserServer := codexBrowserServerContents()
-	plansServer := codexPlansServerContents()
 	if bytes.Contains(bytes.ToLower(browserServer), []byte("claude")) ||
-		bytes.Contains(bytes.ToLower(browserServer), []byte("context: fork")) ||
-		bytes.Contains(bytes.ToLower(plansServer), []byte("claude")) ||
-		bytes.Contains(bytes.ToLower(plansServer), []byte("context: fork")) ||
-		!bytes.Contains(plansServer, []byte(`"codex-planner"`)) {
-		t.Fatal("Codex MCP servers retain Claude-specific runtime behavior")
+		bytes.Contains(bytes.ToLower(browserServer), []byte("context: fork")) {
+		t.Fatal("Codex browser MCP server retains Claude-specific runtime behavior")
 	}
 
 	marketplaceContents, err := os.ReadFile(filepath.Join(
@@ -128,7 +142,6 @@ func TestMaterializeCodexPlugin(t *testing.T) {
 	}{
 		{name: "kiwi-code-in-app-browser", contents: codexPluginBrowserSkill},
 		{name: "kiwi-code-processes", contents: codexPluginProcessSkill},
-		{name: "kiwi-code-planner", contents: codexPluginPlannerSkill},
 	} {
 		if !bytes.Contains(skill.contents, []byte("\nname: "+skill.name+"\n")) {
 			t.Fatalf("Codex skill %s has invalid frontmatter", skill.name)
@@ -136,13 +149,23 @@ func TestMaterializeCodexPlugin(t *testing.T) {
 	}
 	for _, script := range []string{
 		"common.mjs", "interrupt-process.mjs", "list-processes.mjs", "read-logs.mjs",
-		"send-input.mjs", "start-process.mjs", "stop-process.mjs", "update-process.mjs",
+		"send-input.mjs", "start-process.mjs", "stop-process.mjs",
 	} {
 		if _, err := os.Stat(filepath.Join(
 			installation.PluginRoot, "skills", "kiwi-code-processes", "scripts", script,
 		)); err != nil {
 			t.Fatalf("materialized Codex process helper %q: %v", script, err)
 		}
+	}
+	retiredHelper := filepath.Join(installation.PluginRoot, "skills", agentSkillName, "scripts", retiredProcessUpdateHelperName)
+	if err := os.WriteFile(retiredHelper, []byte("legacy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := materializeCodexPlugin(dataDirectory); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(retiredHelper); !os.IsNotExist(err) {
+		t.Fatalf("retired Codex process helper remains after materialization: %v", err)
 	}
 }
 

@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
@@ -26,67 +25,6 @@ func assertUsageTotals(t *testing.T, got, want threadUsageTotals) {
 	got.CostUSD, want.CostUSD = 0, 0
 	if got != want || math.Abs(gotCost-wantCost) > 1e-9 {
 		t.Fatalf("usage = %#v, want %#v", got, want)
-	}
-}
-
-func TestThreadUsageTrackerPersistsCumulativeSessionsAndRollsUpChildren(t *testing.T) {
-	directory := t.TempDir()
-	tracker, err := newThreadUsageTracker(directory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tracker.report("project", "root", "root-session", usageForTest(100, 20, 30, 0, .25)); err != nil {
-		t.Fatal(err)
-	}
-	if err := tracker.report("project", "child", "child-session", usageForTest(50, 10, 5, 1, .10)); err != nil {
-		t.Fatal(err)
-	}
-	// A duplicate and then a stale lower cumulative report must not double count
-	// or erase usage already attributed to the session.
-	if err := tracker.report("project", "child", "child-session", usageForTest(50, 10, 5, 1, .10)); err != nil {
-		t.Fatal(err)
-	}
-	if err := tracker.report("project", "child", "child-session", usageForTest(40, 8, 4, 0, .08)); err != nil {
-		t.Fatal(err)
-	}
-	if err := tracker.report("project", "child", "second-session", usageForTest(7, 3, 0, 0, .02)); err != nil {
-		t.Fatal(err)
-	}
-
-	reloaded, err := newThreadUsageTracker(directory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now().UTC()
-	item := project.Project{ID: "project", Threads: []project.Thread{
-		{ID: "root", TokenLimit: int64Pointer(220), CostLimitUSD: float64Pointer(.36)},
-		{ID: "child", ParentThreadID: "root", ClosedAt: &now},
-		{ID: "unrelated"},
-	}}
-	snapshots := reloaded.snapshots([]project.Project{item})
-	if len(snapshots) != 3 {
-		t.Fatalf("snapshots = %d, want 3", len(snapshots))
-	}
-	byID := make(map[string]threadUsageSnapshot)
-	for _, snapshot := range snapshots {
-		byID[snapshot.ThreadID] = snapshot
-	}
-	assertUsageTotals(t, byID["child"].Total, usageForTest(57, 13, 5, 1, .12))
-	if !byID["child"].LimitReached || byID["child"].LimitThreadID != "root" {
-		t.Fatalf("child did not inherit root limit: %#v", byID["child"])
-	}
-	root := byID["root"]
-	assertUsageTotals(t, root.Own, usageForTest(100, 20, 30, 0, .25))
-	assertUsageTotals(t, root.Children, usageForTest(57, 13, 5, 1, .12))
-	assertUsageTotals(t, root.Total, usageForTest(157, 33, 35, 1, .37))
-	if !root.LimitReached {
-		t.Fatal("root aggregate did not reach its limit")
-	}
-	if byID["unrelated"].Total.TotalTokens != 0 {
-		t.Fatal("unrelated usage was included")
-	}
-	if _, err := filepath.Abs(filepath.Join(directory, threadUsageFileName)); err != nil {
-		t.Fatal(err)
 	}
 }
 

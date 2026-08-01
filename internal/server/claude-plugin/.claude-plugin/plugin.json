@@ -2,7 +2,7 @@
   "name": "kiwi-code",
   "displayName": "Kiwi Code",
   "version": "1.5.0",
-  "description": "Integrates Claude Code with Kiwi Code activity, thread naming, process shells, retained implementation plans, and the in-app browser.",
+  "description": "Integrates Claude Code with Kiwi Code activity, thread naming, process shells, and the in-app browser.",
   "author": {
     "name": "Ivan Meredith"
   }

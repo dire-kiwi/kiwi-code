@@ -1,10 +1,9 @@
 ---
 name: kiwi-code-in-app-browser
-description: Controls and records Kiwi Code's in-app browser by dynamically loading browser_* tools with browser_tool_search. Invoke this skill BEFORE the first browser_* tool call in a task, and never load or call browser_* tools without it. Triggers whenever a task requires opening a URL or web page, browsing or checking a website, interacting with or verifying a running web app or dev server in the browser, inspecting rendered pages, filling forms, clicking UI, taking screenshots of a page, evaluating JavaScript in a page, managing tabs, recording the page, or sending raw CDP commands.
+description: Controls Kiwi Code's in-app browser by dynamically loading browser_* tools with browser_tool_search. Invoke this skill BEFORE the first browser_* tool call in a task, and never load or call browser_* tools without it. Triggers whenever a task requires opening a URL or web page, browsing or checking a website, interacting with or verifying a running web app or dev server in the browser, inspecting rendered pages, filling forms, clicking UI, taking screenshots of a page, evaluating JavaScript in a page, managing tabs, or sending raw CDP commands.
 license: MIT
 compatibility: Requires a Kiwi Code-managed Pi session and a configured Kiwi Code in-app browser provider (server-managed headless Chrome or Electron).
-context: fork
-allowed-tools: browser_tool_search browser_session browser_recording browser_tabs browser_navigate browser_snapshot browser_click browser_fill browser_key browser_wait browser_evaluate browser_screenshot browser_cdp
+allowed-tools: browser_tool_search browser_session browser_tabs browser_navigate browser_snapshot browser_click browser_fill browser_key browser_wait browser_evaluate browser_screenshot browser_cdp
 ---
 
 # Kiwi Code in-app browser control
@@ -17,8 +16,8 @@ Only `browser_tool_search` is initially active. Before using another browser too
 
 ```typescript
 browser_tool_search({
-  query: "record, open, and inspect a website",
-  toolNames: ["browser_recording", "browser_navigate", "browser_snapshot"]
+  query: "open and inspect a website",
+  toolNames: ["browser_navigate", "browser_snapshot"]
 })
 ```
 
@@ -40,16 +39,14 @@ If an action reports that the in-app provider is unavailable (HTTP 503), ask the
 
 ## Preferred workflow
 
-1. Use `browser_tool_search` to activate `browser_recording` together with only the other capabilities needed now.
-2. Call `browser_recording({ action: "status" })`. If no recording is active, start one with a concise 2–12 word `title` that explains the point of the task, and remember the returned recording ID.
-3. Open the destination with `browser_navigate`, or inspect/select existing pages with `browser_tabs`.
-4. Call `browser_snapshot` to read the rendered page's accessibility tree.
-5. Use snapshot refs such as `e1` with `browser_click` and `browser_fill`.
-6. After navigation or a substantial page update, take a fresh snapshot before using more refs.
-7. Use `browser_wait` when an action triggers asynchronous UI or navigation.
-8. Use `browser_screenshot` when visual layout matters or the accessibility tree is insufficient.
-9. Use `browser_evaluate` or `browser_cdp` only when the focused semantic tools cannot perform the task.
-10. Before the final response, stop only the recording this task started by passing its exact ID. Attempt this cleanup even when the browsing task fails.
+1. Use `browser_tool_search` to activate only the capabilities needed now.
+2. Open the destination with `browser_navigate`, or inspect/select existing pages with `browser_tabs`.
+3. Call `browser_snapshot` to read the rendered page's accessibility tree.
+4. Use snapshot refs such as `e1` with `browser_click` and `browser_fill`.
+5. After navigation or a substantial page update, take a fresh snapshot before using more refs.
+6. Use `browser_wait` when an action triggers asynchronous UI or navigation.
+7. Use `browser_screenshot` when visual layout matters or the accessibility tree is insufficient.
+8. Use `browser_evaluate` or `browser_cdp` only when the focused semantic tools cannot perform the task.
 
 Do not load or call `browser_session` before every task: all browsing tools connect or auto-launch lazily. Use it only for explicit status and lifecycle management.
 
@@ -59,7 +56,6 @@ Do not load or call `browser_session` before every task: all browsing tools conn
 |---|---|
 | `browser_tool_search` | Dynamically find and activate the browser tools needed for the task |
 | `browser_session` | Check status or start, disconnect, or stop the in-app browser session |
-| `browser_recording` | Check, start, or stop a titled page-only WebM recording with inactivity auto-finalization |
 | `browser_tabs` | List, create, select, or close page targets |
 | `browser_navigate` | Go to a URL, reload, go back, or go forward |
 | `browser_snapshot` | Inspect the page as a compact accessibility tree with actionable refs |
@@ -162,8 +158,6 @@ Only the selected page target is available. Browser-wide, target-management, hos
 
 ## Lifecycle and safety
 
-- A skill-started recording defaults to a 300-second inactivity timeout. Browser operations and recording status refresh its deadline; inactivity automatically finalizes it.
-- Give every recording a short purpose title, remember the returned ID, and never stop a recording that was already active when this task began.
 - `browser_session({ action: "disconnect" })` releases the current browser connection without asking Kiwi Code to destroy the in-app browser session.
 - `browser_session({ action: "stop" })` destroys the current thread's in-app browser session and its ephemeral profile; the next start uses fresh site data.
 - The in-app profile can contain authenticated sessions and private page data. Treat snapshots, screenshots, evaluated values, and raw CDP results as sensitive.

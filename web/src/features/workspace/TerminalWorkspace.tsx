@@ -25,7 +25,6 @@ import type {
   PiPresentation,
   Project,
   Thread,
-  ThreadPlan,
   WorkspaceTool,
   ThreadStatusSnapshot,
 } from '@/types'
@@ -44,19 +43,16 @@ import { threadUpdated } from '@/store/slices/projects'
 import {
   detailsSidebarExpandedChanged,
   selectDetailsSidebarExpanded,
-  selectProjectFinderOpen,
   selectSidebarOpen,
-  sidebarDismissed,
   sidebarOpened,
 } from '@/store/slices/ui'
-import { threadActivityAcknowledged } from '@/store/thunks/agentActivity'
 import { useThreadUsage } from '@/wire/serverData'
+import { threadActivityAcknowledged } from '@/store/thunks/agentActivity'
 import {
   claudeContextStatusReported,
   claudePresentationStatusReported,
   piContextStatusReported,
   piPresentationStatusReported,
-  planSelected,
   processStarted,
   selectBranchOverlayOpen,
   selectClaudeContextStatus,
@@ -65,7 +61,6 @@ import {
   selectPiPresentationStatuses,
   selectProcessWindows,
   selectRuntimeThreadKey,
-  selectSelectedPlan,
   selectSelectedProcessId,
   selectToolStatuses,
   threadRuntimeKey,
@@ -81,7 +76,6 @@ import { PiNativePane } from '@/features/workspace/panes/agent/PiNativePane'
 import { ProcessWindowTabs } from './ProcessWindowTabs'
 import { BrowserPane } from '@/features/workspace/panes/browser/BrowserPane'
 import { TerminalSession } from '@/features/workspace/panes/TerminalSession'
-import { ThreadPlanViewer } from '@/features/workspace/plans/ThreadPlanViewer'
 import { ThreadProjectSidebar } from '@/features/workspace/details/ThreadProjectSidebar'
 import { TmuxWindowTabs } from './TmuxWindowTabs'
 import { useLastReadySubscriptionData, useSubscription } from '@/wire/react'
@@ -118,7 +112,6 @@ const statusCopy: Record<ConnectionStatus, string> = {
 }
 
 // A different thread always opens on this tool, matching what App did before.
-const defaultWorkspaceTool: WorkspaceTool = 'pi'
 
 const fallbackWorkspaceCodingAgents: Array<{ id: CodingAgentSelection; label: string }> = [
   { id: 'pi', label: 'Pi' },
@@ -135,15 +128,9 @@ export function TerminalWorkspace({
   const dispatch = useAppDispatch()
   const activeTool = workspaceToolFromRoute(useMatch(WORKSPACE_ROUTE)?.params.tool) ?? 'pi'
   const detailsExpanded = useAppSelector(selectDetailsSidebarExpanded)
-  // The sidebar and the finder both float over the pane area, so the embedded
-  // browser surface has to stand down while either is up.
-  //
-  // Read into variables, never `useAppSelector(a) || useAppSelector(b)`: `||`
-  // short-circuits, which would skip the second hook whenever the first is true
-  // and change the hook count between renders.
-  const sidebarOpen = useAppSelector(selectSidebarOpen)
-  const projectFinderOpen = useAppSelector(selectProjectFinderOpen)
-  const nativeViewSuppressed = sidebarOpen || projectFinderOpen
+  // The sidebar floats over the pane area, so the embedded browser surface
+  // has to stand down while it is open.
+  const nativeViewSuppressed = useAppSelector(selectSidebarOpen)
   const usageSnapshots = useThreadUsage()
   const usage = usageSnapshots.find((snapshot) =>
     snapshot.projectId === project.id && snapshot.threadId === thread.id)
@@ -178,22 +165,9 @@ export function TerminalWorkspace({
   const onThreadUpdated = (updated: Thread) => {
     dispatch(threadUpdated({ projectId: project.id, thread: updated }))
   }
-  const onSelectThread = (next: Thread) => {
-    void dispatch(threadActivityAcknowledged({
-      projectId: project.id,
-      threadId: next.id,
-      retryFailed: true,
-    }))
-    // A different thread opens on the default tool. Only re-selecting the thread
-    // you are already on keeps the current one.
-    const tool = next.id === thread.id ? activeTool : defaultWorkspaceTool
-    navigate(workspacePath(project.id, next.id, tool))
-    dispatch(sidebarDismissed())
-  }
   const onOpenSidebar = () => dispatch(sidebarOpened())
   const onDetailsExpandedChange = (expanded: boolean) =>
     dispatch(detailsSidebarExpandedChanged(expanded))
-  const readOnlySubagent = Boolean(thread.parentThreadId)
   const statusSubscription = useSubscription(ThreadStatusTopic, {
     projectId: project.id,
     threadId: thread.id,
@@ -217,8 +191,8 @@ export function TerminalWorkspace({
   )
   const workspaceKey = threadWorkspaceKey(project.id, thread.id)
   const routing = useMemo<ThreadWorkspaceRouting>(
-    () => ({ readOnlySubagent, initialCodingAgent, initialPresentation }),
-    [initialCodingAgent, initialPresentation, readOnlySubagent],
+    () => ({ initialCodingAgent, initialPresentation }),
+    [initialCodingAgent, initialPresentation],
   )
   // Selecting through the same resolver the reducer uses keeps the first render
   // correct, so the panes below never seed themselves from the wrong presentation.
@@ -257,7 +231,6 @@ export function TerminalWorkspace({
   const claudeNativeContextStatus = useAppSelector(selectClaudeContextStatus)
   const processWindows = useAppSelector(selectProcessWindows)
   const selectedProcessId = useAppSelector(selectSelectedProcessId)
-  const selectedPlan = useAppSelector(selectSelectedPlan)
   const branchOverlayOpen = useAppSelector(selectBranchOverlayOpen)
 
   const [runningEnvironmentAction, setRunningEnvironmentAction] = useState<string | null>(null)
@@ -310,7 +283,6 @@ export function TerminalWorkspace({
   }, [])
 
   const activateTool = useCallback((tool: WorkspaceTool) => {
-    dispatch(planSelected(null))
     markToolOpened(tool)
     navigate(workspacePath(project.id, thread.id, tool))
   }, [dispatch, markToolOpened, navigate, project.id, thread.id])
@@ -331,7 +303,6 @@ export function TerminalWorkspace({
   }
 
   function selectCodingAgent(selection: CodingAgentSelection) {
-    if (readOnlySubagent) return
     const { agent, presentation } = codingAgentTargetForSelection(selection)
     const selectionUnchanged = agent === codingAgent
       && (agent !== 'pi' || presentation === piPresentation)
@@ -357,7 +328,6 @@ export function TerminalWorkspace({
 
   useEffect(() => {
     markToolOpened(activeTool)
-    dispatch(planSelected(null))
   }, [activeTool, dispatch, markToolOpened])
 
   useEffect(() => {
@@ -375,10 +345,7 @@ export function TerminalWorkspace({
   const processesError = statusError || statusSnapshot?.errors.processes || ''
   const branchesError = statusError || statusSnapshot?.errors.gitBranches || ''
   const shellWindowsError = statusError || statusSnapshot?.errors.shellWindows || ''
-  const workflowsError = statusError || statusSnapshot?.errors.workflows || ''
-  const plansError = statusError || statusSnapshot?.errors.plans || ''
   const contextStatuses = statusSnapshot?.contextStatuses ?? {}
-  const threadPlans = (statusSnapshot?.plans ?? []) as ThreadPlan[]
 
   useEffect(() => {
     let frame = 0
@@ -433,9 +400,7 @@ export function TerminalWorkspace({
   const sessionTools = openedTools.includes(activeTool)
     ? openedTools
     : [...openedTools, activeTool]
-  const availableCodingAgents = readOnlySubagent
-    ? codingAgentChoices.filter((agent) => agent.id === 'pi-native')
-    : codingAgentChoices
+  const availableCodingAgents = codingAgentChoices
   const codingAgentSelection = codingAgentSelectionForTarget(
     codingAgent,
     codingAgent === 'claude'
@@ -504,8 +469,7 @@ export function TerminalWorkspace({
                       aria-label={selectedCodingAgent.label}
                       aria-selected={active}
                       onClick={() => {
-                        dispatch(planSelected(null))
-                        markToolOpened(tool.id)
+                                            markToolOpened(tool.id)
                       }}
                       className="flex h-full items-center gap-2 pl-2.5 pr-1.5 lg:pl-3.5 lg:pr-2"
                     >
@@ -521,10 +485,9 @@ export function TerminalWorkspace({
                           value: agent.id,
                           label: agent.label,
                         }))}
-                        disabled={readOnlySubagent}
                         onChange={(agent) => selectCodingAgent(agent as CodingAgentSelection)}
                         aria-label="Coding agent"
-                        title={readOnlySubagent ? 'Subagents use read-only Pi Native' : 'Choose coding agent'}
+                        title="Choose coding agent"
                       />
                     </div>
                     {toolStatus === 'open' && !active && (
@@ -541,8 +504,7 @@ export function TerminalWorkspace({
                   role="tab"
                   aria-selected={active}
                   onClick={() => {
-                    dispatch(planSelected(null))
-                    markToolOpened(tool.id)
+                                    markToolOpened(tool.id)
                   }}
                   className={`group relative flex h-9 shrink-0 items-center gap-2 rounded-lg px-2.5 text-[11px] font-medium transition lg:px-3.5 ${
                     active
@@ -667,7 +629,7 @@ export function TerminalWorkspace({
                     threadId={thread.id}
                     threadTitle={thread.title}
                     active={activeTool === 'browser'}
-                    suppressed={nativeViewSuppressed || branchOverlayOpen || selectedPlan !== null}
+                    suppressed={nativeViewSuppressed || branchOverlayOpen}
                     onWorkspaceShortcut={(index) => {
                       const tool = tools[index - 1]
                       if (tool) activateTool(tool.id)
@@ -753,7 +715,6 @@ export function TerminalWorkspace({
                         initialPrompt={initialCodingAgent === 'pi' && initialPromptTargetsNative ? initialPrompt : undefined}
                         initialImagePaths={initialCodingAgent === 'pi' && initialPromptTargetsNative ? initialImagePaths : undefined}
                         onInitialPromptSent={initialCodingAgent === 'pi' && initialPromptTargetsNative ? onInitialPromptSent : undefined}
-                        readOnly={readOnlySubagent}
                         active={activeTool === 'pi' && piPresentation === 'native'}
                         onStatusChange={(status) => reportPiPresentationStatus('native', status)}
                         onContextStatusChange={(status) =>
@@ -814,13 +775,6 @@ export function TerminalWorkspace({
                 </div>
               </div>
             )}
-            {selectedPlan && (
-              <ThreadPlanViewer
-                projectId={project.id}
-                plan={selectedPlan}
-                onClose={() => dispatch(planSelected(null))}
-              />
-            )}
           </div>
         </div>
       </main>
@@ -840,13 +794,9 @@ export function TerminalWorkspace({
         project={project}
         thread={thread}
         usage={usage}
-        workflowsError={workflowsError}
-        plans={threadPlans}
-        plansError={plansError}
         expanded={detailsExpanded}
         onExpandedChange={onDetailsExpandedChange}
         onThreadUpdated={onThreadUpdated}
-        onSelectThread={onSelectThread}
       />
     </div>
   )

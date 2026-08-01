@@ -162,10 +162,6 @@ test('no-session status and preview preserve the provider compatibility contract
     apiOrigin: 'http://127.0.0.1:4000',
     onState() {},
   })
-  assert.deepEqual(manager.setRendererBackendOrigin('http://remote-host:4000'), {
-    origin: 'http://remote-host:4000',
-  })
-  assert.equal(manager.protectedOrigins.has('http://remote-host:4000'), true)
   assert.deepEqual(manager.show({
     projectId: 'p', threadId: 't', bounds: { x: 0, y: 0, width: 800, height: 600 },
   }), {
@@ -178,12 +174,11 @@ test('no-session status and preview preserve the provider compatibility contract
     status: {
       endpoint: '', reachable: false, product: '', protocolVersion: '', pages: 0,
       currentTargetId: null, owned: true, presentation: 'native',
-      capabilities: { nativeView: true, interactiveStream: false, preview: true, recording: true },
+      capabilities: { nativeView: true, interactiveStream: false, preview: true },
     },
     backend: 'electron', presentation: 'native',
-    capabilities: { nativeView: true, interactiveStream: false, preview: true, recording: true },
+    capabilities: { nativeView: true, interactiveStream: false, preview: true },
     running: false, pages: [], pageList: [], currentTargetId: null,
-    recording: null, recordings: [],
   })
   await assert.rejects(
     manager.perform({ projectId: 'p', threadId: 't', operation: 'preview', params: { format: 'jpeg', quality: 70 } }),

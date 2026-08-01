@@ -2,13 +2,11 @@ import { Schema } from 'effect'
 import {
   AgentSkillStatusSchema,
   AppSettingsSchema,
-  BrowserRecordingSchema,
   BrowserStatusResultSchema,
   CleanupOverviewSchema,
   CodingAgentConfigSchema,
   GitBranchStateSchema,
   PiThreadActivitySchema,
-  ProcessWebServerSchema,
   ProfileSchema,
   ProjectSchema,
   SessionClosureOverviewSchema,
@@ -63,7 +61,6 @@ export const ProjectsTopic = globalTopic('projects', MutableArray(ProjectSchema)
 export const ProfilesTopic = globalTopic('profiles', MutableArray(ProfileSchema))
 export const AgentActivityTopic = globalTopic('agentActivity', MutableArray(PiThreadActivitySchema))
 export const ThreadUsageTopic = globalTopic('threadUsage', MutableArray(ThreadUsageSnapshotSchema))
-export const ProcessWebServersTopic = globalTopic('processWebServers', MutableArray(ProcessWebServerSchema))
 export const SettingsTopic = globalTopic('settings', AppSettingsSchema)
 export const CleanupTopic = globalTopic('cleanup', CleanupOverviewSchema)
 export const SessionClosuresTopic = globalTopic('sessionClosures', SessionClosureOverviewSchema)
@@ -109,20 +106,12 @@ export const BrowserStatusTopic = parameterizedTopic(
   BrowserStatusResultSchema,
   ({ projectId, threadId }) => JSON.stringify([projectId, threadId]),
 )
-/** @deprecated Recordings are included in BrowserStatusTopic. */
-export const BrowserRecordingsTopic = parameterizedTopic(
-  'browser.recordings',
-  BrowserParamsSchema,
-  MutableArray(BrowserRecordingSchema),
-  ({ projectId, threadId }) => JSON.stringify([projectId, threadId]),
-)
 
 export const allTopics = [
   ProjectsTopic,
   ProfilesTopic,
   AgentActivityTopic,
   ThreadUsageTopic,
-  ProcessWebServersTopic,
   ThreadStatusTopic,
   SettingsTopic,
   CodingAgentsTopic,
@@ -130,7 +119,6 @@ export const allTopics = [
   SessionClosuresTopic,
   GitBranchesTopic,
   BrowserStatusTopic,
-  BrowserRecordingsTopic,
   TmuxSessionsTopic,
   AgentSkillsTopic,
 ] as const

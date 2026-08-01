@@ -164,7 +164,6 @@ test('every Kiwi Code page renders and real Pi follows the deterministic chat fi
       ['global worktree settings page', 'worktrees', 'Git worktrees'],
       ['global coding-agent settings page', 'profiles', 'Coding agents'],
       ['global cleanup settings page', 'cleanup', 'Automatic cleanup'],
-      ['global agents and workflows settings page', 'agents', 'Sub-agent nesting'],
       ['global appearance settings page', 'appearance', 'Appearance'],
       ['global sandbox settings page', 'sandbox', 'Configuration file'],
       ['global skills settings page', 'skills', 'Agent skills'],

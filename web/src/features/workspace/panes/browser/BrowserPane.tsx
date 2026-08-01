@@ -15,21 +15,17 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import { browserStreamUrl, getBrowserFrame, performBrowserAction } from '@/api'
-import { isDefaultBackendActive } from '@/backends'
-import { downloadBrowserRecording } from '@/lib/browserRecording'
 import { useDesktopSurfaceBounds } from '@/lib/useDesktopSurfaceBounds'
 import type {
   BrowserActionOperation,
   BrowserActionParams,
   ConnectionStatus,
 } from '@/types'
-import type { BrowserRecording, BrowserStatusResult } from '@/wire/domain'
+import type { BrowserStatusResult } from '@/wire/domain'
 import { useSubscription } from '@/wire/react'
 import { BrowserStatusTopic } from '@/wire/topics'
 import { Button } from '@/ui/buttons'
 import type { StatusBadgeTone } from '@/ui/feedback'
-import { BrowserPlaybackOverlay } from './BrowserPlaybackOverlay'
-import { BrowserRecordingsBar } from './BrowserRecordingsBar'
 import { BrowserStreamCanvas } from './BrowserStreamCanvas'
 import { BrowserTabStrip } from './BrowserTabStrip'
 import { BrowserToolbar } from './BrowserToolbar'
@@ -40,7 +36,6 @@ import {
   framePollIntervalMs,
   navigationOperation,
   navigationURL,
-  validRecordingTitle,
 } from './browserHelpers'
 
 export type BrowserPaneProps = {
@@ -63,11 +58,7 @@ export function BrowserPane({
   onStatusChange,
   onWorkspaceShortcut,
 }: BrowserPaneProps) {
-  // The native guest provider is paired with the backend that launched this
-  // desktop renderer. Remote backends use their own projected browser preview.
-  const desktopBridge = isDefaultBackendActive()
-    ? window.kiwiCodeDesktopBrowser ?? window.direMuxDesktopBrowser
-    : undefined
+  const desktopBridge = window.kiwiCodeDesktopBrowser ?? window.direMuxDesktopBrowser
   const guestRef = useRef<HTMLDivElement>(null)
   const streamCanvasRef = useRef<HTMLCanvasElement>(null)
   const streamSocketRef = useRef<WebSocket | null>(null)
@@ -113,10 +104,6 @@ export function BrowserPane({
   const [streamController, setStreamController] = useState(false)
   const [streamError, setStreamError] = useState('')
   const [streamFailed, setStreamFailed] = useState(false)
-  const [recordingClock, setRecordingClock] = useState(() => Date.now())
-  const [playbackRecording, setPlaybackRecording] = useState<BrowserRecording | null>(null)
-  const [playbackLoading, setPlaybackLoading] = useState(false)
-  const [playbackError, setPlaybackError] = useState('')
 
   const pages = useMemo(() => {
     const result = [...(status?.pages ?? [])]
@@ -128,12 +115,6 @@ export function BrowserPane({
   const currentPage = currentPageFor(status, pages)
   const currentURL = currentPage?.url?.trim() ?? ''
   const currentLoading = status?.current?.loading === true
-  const activeRecording = status?.recording ?? null
-  const completedRecordings = status?.recordings ?? []
-  const playbackOpen = Boolean(playbackRecording)
-  const recordingElapsedMs = activeRecording
-    ? Math.max(0, recordingClock - Date.parse(activeRecording.startedAt))
-    : 0
   const nativeAdvertised = status?.capabilities?.nativeView
   const usesNativeView = Boolean(desktopBridge) && !nativeViewError && (
     nativeAdvertised === true || (!status?.capabilities && status?.backend === 'electron')
@@ -161,27 +142,6 @@ export function BrowserPane({
     if (!active) return
     onStatusChange?.(connectionStatus)
   }, [active, connectionStatus, onStatusChange])
-
-  useEffect(() => {
-    if (!activeRecording) return
-    setRecordingClock(Date.now())
-    const timer = window.setInterval(() => setRecordingClock(Date.now()), 1_000)
-    return () => window.clearInterval(timer)
-  }, [activeRecording?.id])
-
-  useEffect(() => {
-    setPlaybackRecording(null)
-    setPlaybackLoading(false)
-    setPlaybackError('')
-  }, [projectId, threadId])
-
-  useEffect(() => {
-    if (!playbackRecording || !status?.recordings) return
-    if (status.recordings.some((recording) => recording.id === playbackRecording.id)) return
-    setPlaybackRecording(null)
-    setPlaybackLoading(false)
-    setPlaybackError('')
-  }, [playbackRecording, status?.recordings])
 
   useEffect(() => {
     if (!currentURL || addressDirty || document.activeElement === addressRef.current) return
@@ -404,7 +364,6 @@ export function BrowserPane({
       && usesNativeView
       && active
       && !suppressed
-      && !playbackOpen
       && !providerUnavailable
       && status?.running === true
     ),
@@ -458,39 +417,6 @@ export function BrowserPane({
     void runAction(navigationOperation(status?.running === true, Boolean(currentPage)), { url })
   }
 
-  function startRecording() {
-    const suggested = currentPage?.title?.trim() && currentPage.title !== 'about:blank'
-      ? `Demonstrate ${currentPage.title.trim()}`
-      : 'Demonstrate browser task'
-    const response = window.prompt(
-      'Name the point of this recording in 2–12 words:',
-      suggested.slice(0, 80),
-    )
-    if (response === null) return
-    const title = validRecordingTitle(response)
-    if (!title) {
-      setActionError('Recording titles must be 2–12 words and at most 80 characters.')
-      return
-    }
-    void runAction('recording.start', { targetId: currentPage?.id, title })
-  }
-
-  function downloadRecording(recording: BrowserRecording) {
-    downloadBrowserRecording(projectId, threadId, recording)
-  }
-
-  function playRecording(recording: BrowserRecording) {
-    setPlaybackError('')
-    setPlaybackLoading(true)
-    setPlaybackRecording(recording)
-  }
-
-  function closePlayback() {
-    setPlaybackRecording(null)
-    setPlaybackLoading(false)
-    setPlaybackError('')
-  }
-
   function retryAll() {
     setActionError('')
     if (nativeViewError) {
@@ -531,11 +457,9 @@ export function BrowserPane({
       <BrowserTabStrip
         pages={pages}
         selectedTargetId={status?.currentTargetId ?? currentPage?.id}
-        recordingTargetId={activeRecording?.targetId}
         busy={Boolean(busyOperation)}
         statusLoading={statusLoading}
         providerUnavailable={providerUnavailable}
-        sessionRunning={status?.running === true}
         onSelectTab={(targetId) => void runAction('tabs.select', { targetId })}
         onCloseTab={(targetId) => void runAction('tabs.close', { targetId })}
         onNewTab={() => void runAction(status?.running === true ? 'tabs.new' : 'session.start')}
@@ -561,10 +485,6 @@ export function BrowserPane({
           setAddressDirty(false)
         }}
         onSubmitAddress={handleNavigate}
-        activeRecording={activeRecording}
-        recordingElapsedMs={recordingElapsedMs}
-        recordingSupported={status?.capabilities?.recording === true}
-        onStartRecording={startRecording}
         backendTone={backendTone}
         backendLabel={backendLabel}
         viewModeLabel={viewModeLabel}
@@ -604,39 +524,12 @@ export function BrowserPane({
         </div>
       )}
 
-      <BrowserRecordingsBar
-        recordings={completedRecordings}
-        playingRecordingId={playbackRecording?.id}
-        busy={Boolean(busyOperation)}
-        onPlay={playRecording}
-        onDownload={downloadRecording}
-        onDelete={(recording) => {
-          if (!window.confirm(`Delete “${recording.title}”?`)) return
-          if (playbackRecording?.id === recording.id) closePlayback()
-          void runAction('recording.delete', { recordingId: recording.id })
-        }}
-      />
-
       <div
         ref={guestRef}
         id="browser-guest-rectangle"
         className="relative min-h-0 flex-1 overflow-hidden bg-ghost-black"
         aria-label={usesNativeView ? 'Native browser content' : usesStream ? 'Interactive browser stream' : 'Browser preview'}
       >
-        {playbackRecording && (
-          <BrowserPlaybackOverlay
-            projectId={projectId}
-            threadId={threadId}
-            recording={playbackRecording}
-            loading={playbackLoading}
-            error={playbackError}
-            onLoadingChange={setPlaybackLoading}
-            onError={setPlaybackError}
-            onDownload={downloadRecording}
-            onClose={closePlayback}
-          />
-        )}
-
         {usesStream && (
           <BrowserStreamCanvas
             canvasRef={streamCanvasRef}

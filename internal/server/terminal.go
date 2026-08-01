@@ -62,7 +62,6 @@ type terminalHandler struct {
 	cliProxyAPIErr        error
 	cliProxyAPIHTTPClient *http.Client
 	envPath               string
-	curlPath              string
 	sessionMu             sync.Mutex
 	terminalStops         *terminalStopManager
 	terminalMutations     *terminalMutationManager
@@ -85,7 +84,6 @@ type terminalHandler struct {
 	agentExitMarkerMu     sync.Mutex
 	agentExitDirectory    string
 	threadStatusChanged   func(projectID, threadID string)
-	workflowChanged       func(projectID, threadID string)
 	budgetReached         func(projectID, threadID string) (bool, string, error)
 	upgrader              websocket.Upgrader
 }
@@ -226,7 +224,6 @@ func newTerminalHandlerUnreconciledWithOriginPolicy(projects *project.Store, pol
 func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy originPolicy, tmuxSocket string) *terminalHandler {
 	tmuxPath, _ := exec.LookPath("tmux")
 	envPath, _ := exec.LookPath("env")
-	curlPath, _ := exec.LookPath("curl")
 	extensionPaths, extensionErr := materializePiExtensions(projects.DataDirectory())
 	// The Figma bridge is materialized separately from the always-on extensions
 	// so it only loads for projects that enabled Figma MCP support.
@@ -279,7 +276,6 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 		cliProxyAPIKey:       cliProxyAPIKey,
 		cliProxyAPIErr:       cliProxyAPIErr,
 		envPath:              envPath,
-		curlPath:             curlPath,
 		terminalStops:        newTerminalStopManager(projects.DataDirectory()),
 		terminalMutations:    newTerminalMutationManager(projects.DataDirectory()),
 		agentExitDirectory: filepath.Join(
@@ -305,10 +301,6 @@ func (h *terminalHandler) startCodingAgent(w http.ResponseWriter, r *http.Reques
 	}
 	if thread.RollbackPending {
 		writeError(w, http.StatusConflict, "The thread is being rolled back.")
-		return
-	}
-	if thread.ParentThreadID != "" {
-		writeError(w, http.StatusForbidden, "Subagent coding agents are managed by their parent thread.")
 		return
 	}
 	if project.EnvironmentSetupBlocksAgent(thread) {
@@ -589,10 +581,6 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if tool == "pi" && project.EnvironmentSetupBlocksAgent(thread) {
 		writeError(w, http.StatusConflict, "Wait for the environment setup to finish before starting a coding agent.")
-		return
-	}
-	if tool == "pi" && thread.ParentThreadID != "" {
-		writeError(w, http.StatusForbidden, "Subagents use the read-only Pi Native conversation.")
 		return
 	}
 	codingAgent := codingAgentPi
@@ -3467,18 +3455,12 @@ func (h *terminalHandler) commandForTmuxTarget(
 	if isTerminalCodingAgent(tool) && threadEndpoint != "" {
 		environment = append(environment, kiwiCodeThreadEnvironment(threadEndpoint, item.ID, thread.ID)...)
 	}
-	// Kiwi Code child and workflow execution is deliberately Pi Native. Do not
-	// pass relationship metadata to other coding harnesses. Their managed browser
-	// and plan MCP servers receive only the capability-file location they need.
 	if tool == codingAgentPi && figmaMCPURL != "" && notice == "" {
 		environment = append(environment, figmaMCPEnvironmentName+"="+figmaMCPURL)
 	}
 	if tool == codingAgentPi && threadEndpoint != "" {
 		if h.agentToken != "" {
 			environment = append(environment, "KIWI_CODE_AGENT_TOKEN="+h.agentToken)
-		}
-		if thread.ParentThreadID != "" {
-			environment = append(environment, "KIWI_CODE_PARENT_THREAD_ID="+thread.ParentThreadID)
 		}
 	}
 	if tool == codingAgentCodex && notice == "" {

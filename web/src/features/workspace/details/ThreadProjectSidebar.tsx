@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  Bot,
   Check,
-  CornerUpLeft,
   Folder,
   FolderGit2,
   GitBranch,
@@ -17,95 +15,36 @@ import {
   X,
 } from 'lucide-react'
 import { setThreadTitleLocked, updateThreadTitle } from '@/api'
-import { formatWhen } from '@/lib/formatWhen'
 import { projectSettingsPath } from '@/app/routes'
-import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { planSelected, selectWorkflowRuns } from '@/store/slices/threadWorkspaceRuntime'
-import type { Project, Thread, ThreadPlan, ThreadUsageSnapshot, WorkflowRun } from '@/types'
+import type { Project, Thread, ThreadUsageSnapshot } from '@/types'
 import { Button, GhostButton, IconButton, PrimaryButton } from '@/ui/buttons'
 import { TextInput } from '@/ui/inputs'
 import { ThreadUsageLimits } from './ThreadUsageLimits'
-import { ThreadPlansPanel } from './ThreadPlansPanel'
-import { ThreadRecordingsPanel } from './ThreadRecordingsPanel'
-import { WorkflowRunsPanel } from './WorkflowRunsPanel'
-
-type SidebarTab = 'thread' | 'activity' | 'recordings'
-
-const sidebarTabs: ReadonlyArray<{ id: SidebarTab; label: string }> = [
-  { id: 'thread', label: 'Thread' },
-  { id: 'activity', label: 'Activity' },
-  { id: 'recordings', label: 'Recordings' },
-]
-
-const liveWorkflowStates: ReadonlySet<WorkflowRun['state']> = new Set(['queued', 'running'])
 
 type ThreadProjectSidebarProps = {
   project: Project
   thread: Thread
   usage?: ThreadUsageSnapshot
-  workflowsError: string
-  plans: ThreadPlan[]
-  plansError: string
   expanded: boolean
   onExpandedChange: (expanded: boolean) => void
   onThreadUpdated: (thread: Thread) => void
-  onSelectThread: (thread: Thread) => void
 }
 
 export function ThreadProjectSidebar({
   project,
   thread,
   usage,
-  workflowsError,
-  plans,
-  plansError,
   expanded,
   onExpandedChange,
   onThreadUpdated,
-  onSelectThread,
 }: ThreadProjectSidebarProps) {
-  const dispatch = useAppDispatch()
-  // Read only for the live-workflow badge on the activity tab; the panel below
-  // selects its own ordered copy.
-  const workflowRuns = useAppSelector(selectWorkflowRuns)
   const inputRef = useRef<HTMLInputElement>(null)
-  const tabRefs = useRef<Partial<Record<SidebarTab, HTMLButtonElement | null>>>({})
-  const [tab, setTab] = useState<SidebarTab>('thread')
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(thread.title)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [locking, setLocking] = useState(false)
   const [lockError, setLockError] = useState('')
-  const threadsById = new Map(project.threads.map((candidate) => [candidate.id, candidate]))
-  let mainThread = thread
-  const visitedAncestors = new Set<string>()
-  while (mainThread.parentThreadId && !visitedAncestors.has(mainThread.id)) {
-    visitedAncestors.add(mainThread.id)
-    const parent = threadsById.get(mainThread.parentThreadId)
-    if (!parent) break
-    mainThread = parent
-  }
-  const descendantIds = new Set<string>()
-  let foundDescendant = true
-  while (foundDescendant) {
-    foundDescendant = false
-    for (const candidate of project.threads) {
-      if (!candidate.parentThreadId || descendantIds.has(candidate.id)) continue
-      if (candidate.parentThreadId === mainThread.id || descendantIds.has(candidate.parentThreadId)) {
-        descendantIds.add(candidate.id)
-        foundDescendant = true
-      }
-    }
-  }
-  const completedAgentThreads = project.threads
-    .filter((candidate) => descendantIds.has(candidate.id) && candidate.closedAt)
-    .sort((left, right) => Date.parse(right.closedAt!) - Date.parse(left.closedAt!))
-
-  const hasLiveWorkflow = workflowRuns.some((run) => liveWorkflowStates.has(run.state))
-  const showWorkflows = !thread.parentThreadId
-  const showPlans = !thread.parentThreadId || plans.length > 0 || Boolean(plansError)
-  const showAgents = Boolean(thread.parentThreadId) || completedAgentThreads.length > 0
 
   useEffect(() => {
     if (!editing) setTitle(thread.title)
@@ -117,10 +56,10 @@ export function ThreadProjectSidebar({
   }, [thread.id, thread.titleLocked])
 
   useEffect(() => {
-    if (!editing || !expanded || tab !== 'thread') return
+    if (!editing || !expanded) return
     const frame = requestAnimationFrame(() => inputRef.current?.select())
     return () => cancelAnimationFrame(frame)
-  }, [editing, expanded, tab])
+  }, [editing, expanded])
 
   function beginEditing() {
     if (thread.titleLocked) return
@@ -181,20 +120,6 @@ export function ThreadProjectSidebar({
     }
   }
 
-  function handleTabListKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-    event.preventDefault()
-    const index = sidebarTabs.findIndex((candidate) => candidate.id === tab)
-    const nextIndex = event.key === 'ArrowLeft'
-      ? (index + sidebarTabs.length - 1) % sidebarTabs.length
-      : event.key === 'ArrowRight'
-        ? (index + 1) % sidebarTabs.length
-        : event.key === 'Home' ? 0 : sidebarTabs.length - 1
-    const next = sidebarTabs[nextIndex]!
-    setTab(next.id)
-    tabRefs.current[next.id]?.focus()
-  }
-
   const sectionDivider = <div className="my-5 h-px bg-ghost-border/55" />
 
   return (
@@ -231,7 +156,7 @@ export function ThreadProjectSidebar({
               {thread.title}
             </p>
             <p className="mt-1 truncate font-mono text-[8px] uppercase tracking-[0.14em] text-ghost-faint" title={project.name}>
-              {project.name} · {thread.parentThreadId ? 'agent thread' : 'main thread'}
+              {project.name} · thread
             </p>
           </div>
         )}
@@ -251,55 +176,8 @@ export function ThreadProjectSidebar({
 
         {expanded && (
           <div id="thread-project-details" className="flex min-h-0 w-[19rem] flex-1 flex-col">
-            <div
-              role="tablist"
-              aria-label="Thread detail sections"
-              className="mx-3 mt-3 flex shrink-0 gap-1 rounded-lg bg-ghost-black/40 p-1"
-              onKeyDown={handleTabListKeyDown}
-            >
-              {sidebarTabs.map(({ id, label }) => {
-                const selected = tab === id
-                const showBadge = id === 'activity' && hasLiveWorkflow
-                return (
-                  <button
-                    key={id}
-                    ref={(node) => { tabRefs.current[id] = node }}
-                    type="button"
-                    role="tab"
-                    id={`sidebar-tab-${id}`}
-                    aria-selected={selected}
-                    aria-controls={`sidebar-panel-${id}`}
-                    tabIndex={selected ? 0 : -1}
-                    onClick={() => setTab(id)}
-                    className={`relative flex-1 rounded-md px-2 py-1.5 font-mono text-[9px] font-semibold uppercase tracking-[0.08em] transition ${
-                      selected
-                        ? 'bg-ghost-raised text-ghost-bright-white'
-                        : 'text-ghost-dim hover:text-ghost-bright-white'
-                    }`}
-                  >
-                    {label}
-                    {showBadge && (
-                      <>
-                        <span
-                          aria-hidden="true"
-                          className="absolute right-1.5 top-1 size-1.5 rounded-full bg-ghost-green motion-safe:animate-pulse"
-                        />
-                        <span className="sr-only">workflow running</span>
-                      </>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <div
-                role="tabpanel"
-                id="sidebar-panel-thread"
-                aria-labelledby="sidebar-tab-thread"
-                hidden={tab !== 'thread'}
-                className="px-4 py-4"
-              >
+              <div className="px-4 py-4">
                 <section>
                   <div className="flex items-center justify-between gap-2">
                     <p className="font-mono text-[8px] font-semibold uppercase tracking-[0.16em] text-ghost-faint">
@@ -436,123 +314,7 @@ export function ThreadProjectSidebar({
                   projectId={project.id}
                   thread={thread}
                   usage={usage}
-                  showAllThreads={project.threads.some((candidate) => candidate.parentThreadId === thread.id)}
                   onThreadUpdated={onThreadUpdated}
-                />
-              </div>
-
-              <div
-                role="tabpanel"
-                id="sidebar-panel-activity"
-                aria-labelledby="sidebar-tab-activity"
-                hidden={tab !== 'activity'}
-                className="px-4 py-4"
-              >
-                {showWorkflows && (
-                  <WorkflowRunsPanel
-                    projectId={project.id}
-                    threadId={thread.id}
-                    threads={project.threads}
-                    error={workflowsError}
-                    onSelectThread={onSelectThread}
-                  />
-                )}
-
-                {showPlans && (
-                  <>
-                    {showWorkflows && sectionDivider}
-                    <ThreadPlansPanel
-                      projectId={project.id}
-                      plans={plans}
-                      error={plansError}
-                      onViewPlan={(plan) => dispatch(planSelected(plan))}
-                    />
-                  </>
-                )}
-
-                {showAgents && (
-                  <>
-                    {(showWorkflows || showPlans) && sectionDivider}
-                    <section aria-labelledby="completed-agent-threads-heading">
-                      <div className="flex items-center justify-between gap-2">
-                        <p
-                          id="completed-agent-threads-heading"
-                          className="flex items-center gap-1.5 font-mono text-[8px] font-semibold uppercase tracking-[0.16em] text-ghost-faint"
-                          title="Completed delegated runs stay available for review until the main thread is deleted."
-                        >
-                          <Bot size={10} />
-                          Agent threads
-                        </p>
-                        {completedAgentThreads.length > 0 && (
-                          <span className="rounded-full border border-ghost-border/65 px-1.5 py-0.5 font-mono text-[8px] text-ghost-faint">
-                            {completedAgentThreads.length}
-                          </span>
-                        )}
-                      </div>
-
-                      {thread.parentThreadId && mainThread.id !== thread.id && (
-                        <Button
-                          type="button"
-                          onClick={() => onSelectThread(mainThread)}
-                          className="mt-2 flex w-full items-center gap-2 rounded-lg border border-ghost-border/55 bg-ghost-black/20 px-2.5 py-2 text-left transition hover:border-ghost-green/35 hover:bg-ghost-green/[0.06]"
-                          aria-label={`Return to main thread ${mainThread.title}`}
-                        >
-                          <CornerUpLeft size={12} className="shrink-0 text-ghost-green" />
-                          <span className="min-w-0 flex-1">
-                            <span className="block font-mono text-[8px] uppercase tracking-[0.1em] text-ghost-faint">Main thread</span>
-                            <span className="mt-0.5 block truncate text-[10px] font-medium text-ghost-white">{mainThread.title}</span>
-                          </span>
-                        </Button>
-                      )}
-
-                      {completedAgentThreads.length > 0 && (
-                        <ul className="mt-1.5 space-y-0.5" aria-label="Completed agent threads">
-                          {completedAgentThreads.map((agentThread) => {
-                            const selected = agentThread.id === thread.id
-                            const finishedAt = new Date(agentThread.closedAt!)
-                            const finishedLabel = Number.isNaN(finishedAt.getTime())
-                              ? 'Completed'
-                              : `Completed ${finishedAt.toLocaleString()}`
-                            return (
-                              <li key={agentThread.id}>
-                                <Button
-                                  type="button"
-                                  onClick={() => onSelectThread(agentThread)}
-                                  aria-current={selected ? 'page' : undefined}
-                                  className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition ${
-                                    selected ? 'bg-ghost-green/[0.09]' : 'hover:bg-ghost-raised/55'
-                                  }`}
-                                  title={`${agentThread.title}\n${finishedLabel}${agentThread.branch ? `\n${agentThread.branch}` : ''}`}
-                                >
-                                  <Bot size={12} className={`shrink-0 ${selected ? 'text-ghost-green' : 'text-ghost-cyan'}`} />
-                                  <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-ghost-white">
-                                    {agentThread.title}
-                                  </span>
-                                  <span className="shrink-0 font-mono text-[8px] text-ghost-faint">
-                                    {formatWhen(agentThread.closedAt!)}
-                                  </span>
-                                </Button>
-                              </li>
-                            )
-                          })}
-                        </ul>
-                      )}
-                    </section>
-                  </>
-                )}
-              </div>
-
-              <div
-                role="tabpanel"
-                id="sidebar-panel-recordings"
-                aria-labelledby="sidebar-tab-recordings"
-                hidden={tab !== 'recordings'}
-                className="px-4 py-4"
-              >
-                <ThreadRecordingsPanel
-                  projectId={project.id}
-                  threadId={thread.id}
-                  active={tab === 'recordings'}
                 />
               </div>
 

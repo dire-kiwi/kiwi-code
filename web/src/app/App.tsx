@@ -3,7 +3,6 @@ import { Navigate, Route, Routes, useMatch, useNavigate } from 'react-router-dom
 import { piActivityKey } from '@/pi-activity-reconciliation.mjs'
 import { WorkspaceLoadingState } from './WorkspaceLoadingState'
 import { ProjectSidebar } from '@/features/project-sidebar/ProjectSidebar'
-import { ProjectThreadFinder } from '@/features/thread-finder/ProjectThreadFinder'
 import { CleanupScreen } from '@/features/screens/CleanupScreen'
 import { EmptyWorkspace } from '@/features/screens/EmptyWorkspace'
 import { NewThreadScreen } from '@/features/new-thread/NewThreadScreen'
@@ -52,9 +51,6 @@ import {
 import { threadActivityAcknowledged } from '@/store/thunks/agentActivity'
 import { activeProfileSelected, selectActiveProfileId } from '@/store/slices/preferences'
 import {
-  projectFinderClosed,
-  projectFinderOpened,
-  selectProjectFinderOpen,
   sidebarClosed,
   sidebarDismissed,
   sidebarOpened,
@@ -74,7 +70,6 @@ import {
 } from '@/wire/react'
 import {
   AgentActivityTopic,
-  ProcessWebServersTopic,
   ProfilesTopic,
   ProjectsTopic,
   SettingsTopic,
@@ -95,13 +90,13 @@ function firstWorkspacePath(projects: Project[], preferredProjectId?: string): s
   const preferredProject = preferredProjectId
     ? projects.find((project) => project.id === preferredProjectId)
     : undefined
-  const preferredActiveThread = preferredProject?.threads.find((thread) => !thread.parentThreadId && !thread.archivedAt)
+  const preferredActiveThread = preferredProject?.threads.find((thread) => !thread.archivedAt)
   if (preferredProject && preferredActiveThread) {
     return workspacePath(preferredProject.id, preferredActiveThread.id, defaultWorkspaceTool)
   }
 
-  const activeProject = projects.find((project) => project.threads.some((thread) => !thread.parentThreadId && !thread.archivedAt))
-  const activeThread = activeProject?.threads.find((thread) => !thread.parentThreadId && !thread.archivedAt)
+  const activeProject = projects.find((project) => project.threads.some((thread) => !thread.archivedAt))
+  const activeThread = activeProject?.threads.find((thread) => !thread.archivedAt)
   if (activeProject && activeThread) {
     return workspacePath(activeProject.id, activeThread.id, defaultWorkspaceTool)
   }
@@ -109,7 +104,7 @@ function firstWorkspacePath(projects: Project[], preferredProjectId?: string): s
   const project = preferredProject?.threads.length
     ? preferredProject
     : projects.find((item) => item.threads.length > 0)
-  const thread = project?.threads.find((candidate) => !candidate.parentThreadId) ?? project?.threads[0]
+  const thread = project?.threads[0]
   return project && thread ? workspacePath(project.id, thread.id, defaultWorkspaceTool) : null
 }
 
@@ -143,7 +138,6 @@ export default function App() {
   const profileSubscription = useSubscription(ProfilesTopic, undefined)
   const activitySubscription = useSubscription(AgentActivityTopic, undefined)
   const usageSubscription = useSubscription(ThreadUsageTopic, undefined)
-  const processSubscription = useSubscription(ProcessWebServersTopic, undefined)
   const settingsSubscription = useSubscription(SettingsTopic, undefined)
   const stateConnection = useConnectionStatus()
   const reloadForNewInstance = useCallback((current: string, previous?: string) => {
@@ -161,7 +155,6 @@ export default function App() {
   const projects = useAppSelector(selectProjects)
   const projectsHydrated = useAppSelector(selectProjectsHydrated)
   const activeProfileId = useAppSelector(selectActiveProfileId)
-  const projectFinderOpen = useAppSelector(selectProjectFinderOpen)
   const threadIndex = useAppSelector(selectThreadIndex)
   const deletingId = useAppSelector(selectDeletingProjectId)
   const deletingThreadId = useAppSelector(selectDeletingThreadId)
@@ -180,18 +173,6 @@ export default function App() {
   ) => {
     void dispatch(threadActivityAcknowledged({ projectId, threadId, retryFailed }))
   }, [dispatch])
-
-  useEffect(() => {
-    function handleProjectFinderShortcut(event: KeyboardEvent) {
-      if (!event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'f') return
-      event.preventDefault()
-      event.stopPropagation()
-      dispatch(projectFinderOpened())
-    }
-
-    window.addEventListener('keydown', handleProjectFinderShortcut, true)
-    return () => window.removeEventListener('keydown', handleProjectFinderShortcut, true)
-  }, [])
 
   const selectedProject = useMemo(
     () => workspaceProjectId ? threadIndex.projectById.get(workspaceProjectId) ?? null : null,
@@ -267,7 +248,6 @@ export default function App() {
     profileSubscription,
     activitySubscription,
     usageSubscription,
-    processSubscription,
     settingsSubscription,
   ].flatMap((subscription) =>
     subscription.state === 'error' ? [subscription.error.message] : [])[0] ?? ''
@@ -277,7 +257,6 @@ export default function App() {
     if (profileSubscription.state === 'error') profileSubscription.retry()
     if (activitySubscription.state === 'error') activitySubscription.retry()
     if (usageSubscription.state === 'error') usageSubscription.retry()
-    if (processSubscription.state === 'error') processSubscription.retry()
     if (settingsSubscription.state === 'error') settingsSubscription.retry()
   }
   const connectionBanner = stateConnectionBanner(stateConnection, stateTopicError)
@@ -344,18 +323,6 @@ export default function App() {
     dispatch(sidebarDismissed())
   }
 
-  function handleFinderProjectSelected(project: Project) {
-    const thread = project.threads.find((item) => !item.parentThreadId && !item.archivedAt)
-      ?? project.threads.find((item) => !item.parentThreadId)
-      ?? project.threads[0]
-    if (thread) {
-      handleThreadSelected(project.id, thread.id)
-      return
-    }
-    navigate(newThreadPath(project.id))
-    dispatch(sidebarDismissed())
-  }
-
   function handleProfileSelected(profileId: string) {
     if (!profiles.some((profile) => profile.id === profileId)) return
     dispatch(activeProfileSelected(profileId))
@@ -379,7 +346,7 @@ export default function App() {
   function handleCreated(project: Project) {
     dispatch(projectCreated(project))
     dispatch(sidebarClosed())
-    const thread = project.threads.find((item) => !item.parentThreadId) ?? project.threads[0]
+    const thread = project.threads[0]
     navigate(thread ? workspacePath(project.id, thread.id, defaultWorkspaceTool) : newThreadPath(project.id))
   }
 
@@ -433,7 +400,7 @@ export default function App() {
     }
     // Archiving the thread you are looking at has to move you somewhere real.
     if (archived && selectedProject?.id === project.id && selectedThread?.id === thread.id) {
-      const nextThread = project.threads.find((candidate) => candidate.id !== thread.id && !candidate.parentThreadId && !candidate.archivedAt)
+      const nextThread = project.threads.find((candidate) => candidate.id !== thread.id && !candidate.archivedAt)
       navigate(nextThread
         ? workspacePath(project.id, nextThread.id, defaultWorkspaceTool)
         : newThreadPath(project.id))
@@ -441,27 +408,14 @@ export default function App() {
   }
 
   async function handleDeleteThread(project: Project, thread: Thread) {
-    const descendantIds = new Set(
-      threadIndex.tree(project.id)?.descendants(thread.id).map((candidate) => candidate.id) ?? [],
-    )
-    const childNotice = descendantIds.size > 0
-      ? `\n${descendantIds.size} agent ${descendantIds.size === 1 ? 'thread' : 'threads'} will also be deleted.`
-      : ''
-    const deletedThreadIds = new Set(descendantIds).add(thread.id)
-    const worktreeCount = project.threads.filter((candidate) =>
-      deletedThreadIds.has(candidate.id) && candidate.worktree,
-    ).length
-    const worktreeNotice = worktreeCount === 1
+    const worktreeNotice = thread.worktree
       ? '\nIts managed worktree will become unattached. If it stays clean, automatic cleanup may remove it later; its Git branch will remain.'
-      : worktreeCount > 1
-        ? `\n${worktreeCount} managed worktrees will become unattached. Clean worktrees may be removed later; their Git branches will remain.`
-        : ''
-    if (deletingThreadId || !window.confirm(`Delete “${thread.title}”?\n\nIts tmux sessions and running tools will be stopped.${childNotice}${worktreeNotice}`)) return
+      : ''
+    if (deletingThreadId || !window.confirm(`Delete “${thread.title}”?\n\nIts tmux sessions and running tools will be stopped.${worktreeNotice}`)) return
 
     const result = await dispatch(threadRemoved({
       projectId: project.id,
       threadId: thread.id,
-      descendantIds: [...descendantIds],
     }))
     if (threadRemoved.rejected.match(result)) window.alert(result.payload)
   }
@@ -472,8 +426,7 @@ export default function App() {
   const legacyDestination = legacyProject && legacyThread
     ? workspacePath(legacyProject.id, legacyThread.id, defaultWorkspaceTool)
     : defaultWorkspacePath ?? '/'
-  const landingThread = landingProject?.threads.find((thread) => !thread.parentThreadId && !thread.archivedAt)
-    ?? landingProject?.threads.find((thread) => !thread.parentThreadId)
+  const landingThread = landingProject?.threads.find((thread) => !thread.archivedAt)
     ?? landingProject?.threads[0]
   const projectDestination = landingProject
     ? landingThread
@@ -630,17 +583,6 @@ export default function App() {
         )}
       </div>
 
-      {projectFinderOpen && (
-        <ProjectThreadFinder
-          profiles={profiles}
-          projects={projects}
-          currentProjectId={selectedProject?.id ?? null}
-          currentThreadId={selectedThread?.id ?? null}
-          onClose={() => dispatch(projectFinderClosed())}
-          onSelectProject={handleFinderProjectSelected}
-          onSelectThread={(project, thread) => handleThreadSelected(project.id, thread.id)}
-        />
-      )}
     </div>
   )
 }

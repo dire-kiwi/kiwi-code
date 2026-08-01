@@ -9,9 +9,6 @@ export type ThreadWorkspaceEntry = {
   codingAgent?: CodingAgent
   piPresentation?: PiPresentation
   claudePresentation?: PiPresentation
-  // Subagent threads are read-only views of someone else's workspace, so their
-  // choices must never be written back.
-  persist: boolean
 }
 
 export type ThreadWorkspaceState = {
@@ -78,7 +75,7 @@ export function hydrateThreadWorkspace(storage: EnumerableStorage | null): Threa
     for (const field of persistedFields) {
       if (!key.startsWith(field.prefix)) continue
       const threadKey = key.slice(field.prefix.length)
-      const entry = byThread[threadKey] ?? { persist: true }
+      const entry = byThread[threadKey] ?? {}
       field.hydrate(entry, raw)
       byThread[threadKey] = entry
       return
@@ -88,7 +85,6 @@ export function hydrateThreadWorkspace(storage: EnumerableStorage | null): Threa
 }
 
 export type ThreadWorkspaceRouting = {
-  readOnlySubagent: boolean
   initialCodingAgent?: CodingAgent
   initialPresentation?: PiPresentation
 }
@@ -97,13 +93,11 @@ export type ResolvedThreadWorkspace = {
   codingAgent: CodingAgent
   piPresentation: PiPresentation
   claudePresentation: PiPresentation
-  persist: boolean
 }
 
 // One resolver shared by the reducer and the selector, so what a thread renders
 // and what it commits can never drift apart. Each branch mirrors a load/save
-// gate the hook used to carry at its call site: a routed value beats a stored
-// one, and a subagent stores nothing.
+// gate the hook used to carry at its call site: a routed value beats a stored one.
 export function resolveThreadWorkspace(
   stored: ThreadWorkspaceEntry | undefined,
   routing: ThreadWorkspaceRouting,
@@ -113,15 +107,8 @@ export function resolveThreadWorkspace(
     ? routing.initialPresentation
     : undefined
   return {
-    persist: !routing.readOnlySubagent,
-    codingAgent: routing.readOnlySubagent
-      ? 'pi'
-      : routing.initialCodingAgent ?? stored?.codingAgent ?? 'pi',
-    piPresentation: routing.readOnlySubagent
-      ? 'native'
-      : routedPi ?? stored?.piPresentation ?? 'native',
-    // Unlike the other two, this one is still read for subagents; only an
-    // explicitly routed Claude presentation suppresses the stored value.
+    codingAgent: routing.initialCodingAgent ?? stored?.codingAgent ?? 'pi',
+    piPresentation: routedPi ?? stored?.piPresentation ?? 'native',
     claudePresentation: routedClaude ?? stored?.claudePresentation ?? 'terminal',
   }
 }
@@ -141,18 +128,14 @@ export function mergeThreadWorkspace(
     ? routing.initialPresentation
     : undefined
   return {
-    persist: !routing.readOnlySubagent,
-    codingAgent: routing.readOnlySubagent
-      ? undefined
-      : routing.initialCodingAgent ?? stored?.codingAgent,
-    piPresentation: routing.readOnlySubagent ? undefined : routedPi ?? stored?.piPresentation,
+    codingAgent: routing.initialCodingAgent ?? stored?.codingAgent,
+    piPresentation: routedPi ?? stored?.piPresentation,
     claudePresentation: routedClaude ?? stored?.claudePresentation,
   }
 }
 
 function sameEntry(entry: ThreadWorkspaceEntry | undefined, next: ThreadWorkspaceEntry) {
   return entry !== undefined
-    && entry.persist === next.persist
     && entry.codingAgent === next.codingAgent
     && entry.piPresentation === next.piPresentation
     && entry.claudePresentation === next.claudePresentation
@@ -164,7 +147,7 @@ function sameEntry(entry: ThreadWorkspaceEntry | undefined, next: ThreadWorkspac
 // not been through the mount gate is assumed persistable, which is the only
 // state a thread reaches without one.
 function entryFor(state: ThreadWorkspaceState, key: string): ThreadWorkspaceEntry {
-  state.byThread[key] ??= { persist: true }
+  state.byThread[key] ??= {}
   return state.byThread[key]
 }
 
@@ -218,7 +201,6 @@ export const selectThreadWorkspaceEntry = (state: RootState, key: string) =>
 export function threadWorkspaceWriters(state: RootState): PersistWriter[] {
   const writers: PersistWriter[] = []
   for (const [key, entry] of Object.entries(state.threadWorkspace.byThread)) {
-    if (!entry.persist) continue
     for (const field of persistedFields) {
       const encoded = field.encode(entry)
       if (encoded === undefined) continue

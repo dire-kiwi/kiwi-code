@@ -22,8 +22,6 @@ type threadStatusErrors struct {
 	GitBranches  string `json:"gitBranches,omitempty"`
 	Processes    string `json:"processes,omitempty"`
 	ShellWindows string `json:"shellWindows,omitempty"`
-	Workflows    string `json:"workflows,omitempty"`
-	Plans        string `json:"plans,omitempty"`
 }
 
 type threadStatusSnapshot struct {
@@ -31,57 +29,26 @@ type threadStatusSnapshot struct {
 	ContextStatuses map[string]agentContextStatus `json:"contextStatuses"`
 	Processes       []processWindow               `json:"processes"`
 	ShellWindows    []tmuxWindow                  `json:"shellWindows"`
-	Workflows       []workflowRunSnapshot         `json:"workflows"`
-	Plans           []threadPlanSnapshot          `json:"plans"`
 	Errors          threadStatusErrors            `json:"errors"`
 }
 
 // notifyThreadStatusChanged wakes active state channels after a mutation made
 // through Kiwi Code or a tmux control-mode notification. Git changes made
 // outside Kiwi Code are handled by a separate repository reconciliation.
-// Process-session notifications also queue workflow runner reconciliation;
-// any resulting state transition publishes a follow-up invalidation.
 func (s *Server) notifyThreadStatusChanged(projectID, threadID string) {
 	s.notifyStateChanged(stateTopicThreadStatus, projectID, threadID)
-	// Keep the global sidebar projection cached per thread. The topic still has
-	// one latest-state wakeup, while the durable dirty set prevents a burst from
-	// losing which thread projections need to be refreshed.
-	s.processWebServerCache.markDirty(threadStatusKey{projectID: projectID, threadID: threadID})
-	s.notifyStateChanged(stateTopicProcessWebServers, "", "")
 }
 
 func (s *Server) readThreadStatusSnapshot(ctx context.Context, item project.Project, thread project.Thread) threadStatusSnapshot {
 	if s.terminal != nil {
-		s.terminal.yieldToInteractiveTerminalSetup(ctx, processProjectionInteractiveYieldLimit)
+		s.terminal.yieldToInteractiveTerminalSetup(ctx, interactiveTerminalSetupYieldLimit)
 	}
 	snapshot := threadStatusSnapshot{
 		ContextStatuses: s.contextStatuses.forThread(item.ID, thread.ID),
 		Processes:       []processWindow{},
 		ShellWindows:    []tmuxWindow{},
-		Workflows:       []workflowRunSnapshot{},
-		Plans:           []threadPlanSnapshot{},
 	}
 	snapshot.GitBranches, snapshot.Errors.GitBranches = readThreadGitStatus(ctx, thread)
-	if s.workflows != nil {
-		if records, err := s.workflows.list(item.ID, thread.ID); err != nil {
-			snapshot.Errors.Workflows = "Could not load workflows."
-		} else {
-			for _, record := range records {
-				snapshot.Workflows = append(snapshot.Workflows, workflowSummarySnapshot(record))
-			}
-		}
-	}
-	if s.plans != nil {
-		owner, err := threadPlanOwner(item, thread)
-		if err != nil {
-			snapshot.Errors.Plans = "Could not resolve the thread's plans."
-		} else if plans, err := s.plans.list(item.ID, owner.ID); err != nil {
-			snapshot.Errors.Plans = "Could not load the thread's plans."
-		} else {
-			snapshot.Plans = plans
-		}
-	}
-
 	if s.terminal == nil || s.terminal.tmuxPath == "" {
 		snapshot.Errors.Processes = "tmux is required for process shells."
 		snapshot.Errors.ShellWindows = "tmux is required for shell tabs."

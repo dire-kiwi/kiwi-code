@@ -45,12 +45,6 @@ var codexPluginProcessSkill []byte
 //go:embed codex-plugin/skills/kiwi-code-processes/agents/openai.yaml
 var codexPluginProcessAgent []byte
 
-//go:embed codex-plugin/skills/kiwi-code-planner/SKILL.md
-var codexPluginPlannerSkill []byte
-
-//go:embed codex-plugin/skills/kiwi-code-planner/agents/openai.yaml
-var codexPluginPlannerAgent []byte
-
 //go:embed codex-plugin/LICENSE
 var codexPluginLicense []byte
 
@@ -73,13 +67,10 @@ func codexPluginFiles() ([]codexPluginFile, error) {
 		{path: "hooks.json", contents: codexPluginHooks},
 		{path: filepath.Join("scripts", "kiwi-code-hook.mjs"), contents: claudePluginHookScript},
 		{path: filepath.Join("servers", "kiwi-code-browser.mjs"), contents: codexBrowserServerContents()},
-		{path: filepath.Join("servers", "kiwi-code-plans.mjs"), contents: codexPlansServerContents()},
 		{path: filepath.Join("skills", "kiwi-code-in-app-browser", "SKILL.md"), contents: codexPluginBrowserSkill},
 		{path: filepath.Join("skills", "kiwi-code-in-app-browser", "agents", "openai.yaml"), contents: codexPluginBrowserAgent},
 		{path: filepath.Join("skills", "kiwi-code-processes", "SKILL.md"), contents: codexPluginProcessSkill},
 		{path: filepath.Join("skills", "kiwi-code-processes", "agents", "openai.yaml"), contents: codexPluginProcessAgent},
-		{path: filepath.Join("skills", "kiwi-code-planner", "SKILL.md"), contents: codexPluginPlannerSkill},
-		{path: filepath.Join("skills", "kiwi-code-planner", "agents", "openai.yaml"), contents: codexPluginPlannerAgent},
 		{path: "LICENSE", contents: codexPluginLicense},
 	}
 
@@ -116,25 +107,8 @@ func codexBrowserServerContents() []byte {
 		{"Kiwi Code-managed Claude Code session", "Kiwi Code-managed Codex session"},
 		{"kiwi-code-claude-browser-", "kiwi-code-codex-browser-"},
 		{"Claude Code accepts at most", "Codex accepts at most"},
-		{"bundled context: fork skill so it runs in its own\n// agent context", "bundled browser skill so its workflow is loaded before\n// browser tools are used"},
-		{"Requires the kiwi-code-in-app-browser skill: invoke that skill first and call this tool from inside it, not from the main conversation.", "Requires the kiwi-code-in-app-browser skill: load that skill before calling this tool and follow its workflow."},
-		{"Do not call these tools directly from the main conversation: invoke the kiwi-code-in-app-browser context: fork skill first and drive the browser from there.", "Load the kiwi-code-in-app-browser skill before calling these tools and follow its browser workflow."},
 	}
 	contents := append([]byte(nil), claudePluginBrowserServer...)
-	for _, replacement := range replacements {
-		contents = bytes.ReplaceAll(contents, []byte(replacement.old), []byte(replacement.new))
-	}
-	return contents
-}
-
-func codexPlansServerContents() []byte {
-	replacements := []struct{ old, new string }{
-		{`const PLAN_CONTEXT = "claude-context-fork";`, `const PLAN_CONTEXT = "codex-planner";`},
-		{"Kiwi Code-managed Claude Code session", "Kiwi Code-managed Codex session"},
-		{"kiwi-code-planner context: fork child", "kiwi-code-planner skill"},
-		{"kiwi-code-planner context: fork skill", "kiwi-code-planner skill"},
-	}
-	contents := append([]byte(nil), claudePluginPlansServer...)
 	for _, replacement := range replacements {
 		contents = bytes.ReplaceAll(contents, []byte(replacement.old), []byte(replacement.new))
 	}
@@ -147,6 +121,9 @@ func materializeCodexPlugin(dataDirectory string) (codexPluginInstallation, erro
 		return codexPluginInstallation{}, fmt.Errorf("resolve Codex marketplace path: %w", err)
 	}
 	pluginRoot := filepath.Join(marketplaceRoot, "plugins", codexPluginName)
+	if err := removeObsoletePluginOrchestration(pluginRoot); err != nil {
+		return codexPluginInstallation{}, err
+	}
 	files, err := codexPluginFiles()
 	if err != nil {
 		return codexPluginInstallation{}, err
@@ -155,6 +132,9 @@ func materializeCodexPlugin(dataDirectory string) (codexPluginInstallation, erro
 		if err := materializeCodexPluginFile(pluginRoot, file); err != nil {
 			return codexPluginInstallation{}, err
 		}
+	}
+	if err := removeRetiredProcessUpdateHelper(filepath.Join(pluginRoot, "skills", agentSkillName)); err != nil {
+		return codexPluginInstallation{}, fmt.Errorf("remove retired Codex process helper: %w", err)
 	}
 	marketplaceName := managedCodexMarketplaceName(dataDirectory)
 	marketplaceContents, err := codexMarketplaceContents(marketplaceName)
@@ -262,6 +242,9 @@ func prepareCodexPluginProfile(configDirectory, profileName string, installation
 		configDirectory,
 		"plugins", "cache", installation.MarketplaceName, codexPluginName, installation.Version,
 	)
+	if err := removeObsoletePluginOrchestration(cacheRoot); err != nil {
+		return err
+	}
 	for _, file := range files {
 		if err := materializeCodexPluginFile(cacheRoot, file); err != nil {
 			return err

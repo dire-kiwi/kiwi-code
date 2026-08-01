@@ -5,7 +5,6 @@ import {
   Settings2,
   Sparkles,
   UserRound,
-  Workflow,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -23,7 +22,6 @@ export type GlobalSettingsSectionId =
   | 'worktrees'
   | 'profiles'
   | 'cleanup'
-  | 'agents'
   | 'appearance'
   | 'skills'
 
@@ -52,13 +50,6 @@ export const GLOBAL_SETTINGS_SECTIONS: Array<SettingsSectionMeta<GlobalSettingsS
     tone: 'yellow',
   },
   {
-    id: 'agents',
-    label: 'Agents & workflows',
-    keywords: ['sub-agent', 'nesting depth', 'dynamic workflows', 'pi', 'ultracode', 'size guidance'],
-    icon: Workflow,
-    tone: 'green',
-  },
-  {
     id: 'appearance',
     label: 'Appearance',
     keywords: ['theme', 'font', 'colors', 'palette', 'ansi', 'terminal', 'canvas'],
@@ -78,7 +69,7 @@ export const PROJECT_SETTINGS_SECTIONS: Array<SettingsSectionMeta<ProjectSetting
   {
     id: 'profile',
     label: 'Profile & agents',
-    keywords: ['profile', 'sub-agent', 'nesting depth', 'figma', 'mcp'],
+    keywords: ['profile', 'figma', 'mcp'],
     icon: UserRound,
     tone: 'blue',
   },

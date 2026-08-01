@@ -1,5 +1,5 @@
 import { createSelector, createSlice, type PayloadAction } from '@reduxjs/toolkit'
-import { booleanStoredState, guardedStoredStateCodec } from '@/lib/storedState'
+import { guardedStoredStateCodec } from '@/lib/storedState'
 import { fieldWriters, type PersistedFields } from '@/store/persistence'
 import type { RootState } from '@/store/rootReducer'
 
@@ -18,22 +18,16 @@ export type SidebarState = {
   view: SidebarViewMode
   width: number
   collapsedProjectIds: string[]
-  collapsedChildThreadIds: string[]
-  webServersCollapsed: boolean
   // Ephemeral: the same "which rows are open" concern as the fields above, but
   // deliberately not persisted, matching the behaviour before the migration.
   expandedMoreProjectIds: string[]
-  bookmarksOnly: boolean
 }
 
 export const initialSidebarState: SidebarState = {
   view: 'activity',
   width: defaultSidebarWidth,
   collapsedProjectIds: [],
-  collapsedChildThreadIds: [],
-  webServersCollapsed: false,
   expandedMoreProjectIds: [],
-  bookmarksOnly: false,
 }
 
 const sidebarViewCodec = guardedStoredStateCodec(
@@ -66,14 +60,6 @@ export const sidebarPersistence: PersistedFields<SidebarState> = {
     key: 'kiwi-code.sidebar.collapsed-projects',
     codec: storedIdListCodec,
   },
-  collapsedChildThreadIds: {
-    key: 'kiwi-code.sidebar.collapsed-child-threads',
-    codec: storedIdListCodec,
-  },
-  webServersCollapsed: {
-    key: 'kiwi-code.sidebar.web-servers-collapsed',
-    codec: booleanStoredState,
-  },
 }
 
 function toggleId(ids: string[], id: string) {
@@ -103,34 +89,14 @@ export const sidebarSlice = createSlice({
     projectCollapseToggled(state, action: PayloadAction<string>) {
       toggleId(state.collapsedProjectIds, action.payload)
     },
-    childThreadsCollapseToggled(state, action: PayloadAction<string>) {
-      toggleId(state.collapsedChildThreadIds, action.payload)
-    },
-    webServersCollapseToggled(state) {
-      state.webServersCollapsed = !state.webServersCollapsed
-    },
     moreThreadsToggled(state, action: PayloadAction<string>) {
       toggleId(state.expandedMoreProjectIds, action.payload)
     },
-    bookmarksOnlyChanged(state, action: PayloadAction<boolean>) {
-      state.bookmarksOnly = action.payload
-    },
-    // Selecting a nested thread expands whatever hides it. This fires on every
-    // selection change, so each field is only reassigned when it truly changed;
-    // an unconditional filter would hand the memoised Set selectors a fresh
-    // array every time and re-render the whole sidebar.
     threadRevealed(state, action: PayloadAction<{
       projectId: string
-      ancestorIds: string[]
       expandArchived: boolean
     }>) {
-      const { projectId, ancestorIds, expandArchived } = action.payload
-      if (ancestorIds.length > 0) {
-        const threads = state.collapsedChildThreadIds.filter((id) => !ancestorIds.includes(id))
-        if (threads.length !== state.collapsedChildThreadIds.length) {
-          state.collapsedChildThreadIds = threads
-        }
-      }
+      const { projectId, expandArchived } = action.payload
       if (expandArchived && !state.expandedMoreProjectIds.includes(projectId)) {
         state.expandedMoreProjectIds.push(projectId)
       }
@@ -143,8 +109,6 @@ export const sidebarSlice = createSlice({
 })
 
 export const {
-  bookmarksOnlyChanged,
-  childThreadsCollapseToggled,
   moreThreadsToggled,
   projectCollapseToggled,
   sidebarViewChanged,
@@ -152,22 +116,15 @@ export const {
   sidebarWidthNudged,
   sidebarWidthReset,
   threadRevealed,
-  webServersCollapseToggled,
 } = sidebarSlice.actions
 
 export const selectSidebarView = (state: RootState) => state.sidebar.view
 export const selectSidebarWidth = (state: RootState) => state.sidebar.width
-export const selectWebServersCollapsed = (state: RootState) => state.sidebar.webServersCollapsed
-export const selectBookmarksOnly = (state: RootState) => state.sidebar.bookmarksOnly
 
 // Call sites test membership, so hand them a Set. Reducers keep the source
 // array's identity stable, so these rebuild only on a real membership change.
 export const selectCollapsedProjectIds = createSelector(
   [(state: RootState) => state.sidebar.collapsedProjectIds],
-  (ids): ReadonlySet<string> => new Set(ids),
-)
-export const selectCollapsedChildThreadIds = createSelector(
-  [(state: RootState) => state.sidebar.collapsedChildThreadIds],
   (ids): ReadonlySet<string> => new Set(ids),
 )
 export const selectExpandedMoreProjectIds = createSelector(
