@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,7 +20,16 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/dire-kiwi/kiwi-code/internal/agent"
+	"github.com/dire-kiwi/kiwi-code/internal/agent/tmuxpane"
+	"github.com/dire-kiwi/kiwi-code/internal/datadir"
+	"github.com/dire-kiwi/kiwi-code/internal/durable"
+	"github.com/dire-kiwi/kiwi-code/internal/events"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/thread"
+	"github.com/dire-kiwi/kiwi-code/internal/tmux"
+	"github.com/dire-kiwi/kiwi-code/internal/usage"
+	"github.com/dire-kiwi/kiwi-code/internal/workspace"
 	"github.com/gorilla/websocket"
 )
 
@@ -83,17 +91,16 @@ type terminalHandler struct {
 	agentExitSuppressed   map[codingAgentExitKey]tmuxPaneExitState
 	agentExitMarkerMu     sync.Mutex
 	agentExitDirectory    string
-	threadStatusChanged   func(projectID, threadID string)
-	budgetReached         func(projectID, threadID string) (bool, string, error)
+	exitStoreOnce         sync.Once
+	exitStoreValue        *tmuxpane.ExitStore
+	stateChanges          *events.Bus
+	usage                 *usage.Tracker
 	upgrader              websocket.Upgrader
 }
 
 const (
-	tmuxSocketName                    = "kiwi-code"
-	tmuxSessionNamePrefix             = "kiwi-code-"
-	terminalWriteTimeout              = 10 * time.Second
-	terminalPongTimeout               = 45 * time.Second
-	terminalPingInterval              = 15 * time.Second
+	tmuxSocketName                    = workspace.SocketName
+	tmuxSessionNamePrefix             = workspace.SessionPrefix
 	terminalAgentPollInterval         = time.Second
 	terminalViewCreationGrace         = 2 * time.Second
 	codingAgentPi                     = "pi"
@@ -107,55 +114,17 @@ const (
 
 var threadSessionTools = [...]string{"terminal", "nvim", "lazygit", "pi"}
 
-type clientMessage struct {
-	Type  string `json:"type"`
-	Data  string `json:"data,omitempty"`
-	Cols  uint16 `json:"cols,omitempty"`
-	Rows  uint16 `json:"rows,omitempty"`
-	Bytes uint32 `json:"bytes,omitempty"`
-}
+type tmuxWindow = workspace.Window
 
-type tmuxWindow struct {
-	Index  int    `json:"index"`
-	Name   string `json:"name"`
-	Active bool   `json:"active"`
-}
+type tmuxWindowTarget = tmux.WindowTarget
 
-type tmuxWindowTarget struct {
-	Index     int
-	ID        string
-	ServerPID string
-	ProcessID string
-	Tagged    bool
-}
+type tmuxAgentPane = workspace.AgentPane
 
-type tmuxAgentPane struct {
-	ID     string
-	Agent  string
-	Active bool
-}
+type tmuxViewSession = workspace.ViewSession
 
-type tmuxViewSession struct {
-	Name          string
-	Attached      bool
-	SourceSession string
-}
+type tmuxDetailedWindow = workspace.DetailedWindow
 
-type tmuxDetailedWindow struct {
-	Target       tmuxWindowTarget
-	Name         string
-	Tool         string
-	StartCommand string
-}
-
-type tmuxPaneExitState struct {
-	ServerPID string
-	Dead      bool
-	Status    string
-	Signal    string
-	ExitedAt  string
-	Found     bool
-}
+type tmuxPaneExitState = workspace.PaneExitState
 
 type codingAgentExitKey struct {
 	ProjectID string
@@ -170,21 +139,9 @@ type codingAgentWatchKey struct {
 	PaneID    string
 }
 
-type terminalThreadKey struct {
-	ProjectID string
-	ThreadID  string
-}
+type terminalThreadKey = thread.Key
 
-type codingAgentExitMarker struct {
-	ProjectID string `json:"projectId"`
-	ThreadID  string `json:"threadId"`
-	Agent     string `json:"agent"`
-	PaneID    string `json:"paneId,omitempty"`
-	ServerPID string `json:"serverPid,omitempty"`
-	Status    string `json:"status,omitempty"`
-	Signal    string `json:"signal,omitempty"`
-	ExitedAt  string `json:"exitedAt,omitempty"`
-}
+type codingAgentExitMarker = tmuxpane.ExitMarker
 
 type codingAgentPaneIncarnation struct {
 	PaneID    string
@@ -194,7 +151,7 @@ type codingAgentPaneIncarnation struct {
 var (
 	errCodingAgentEnded        = errors.New("coding agent ended")
 	errEnvironmentSetupPending = errors.New("environment setup has not completed")
-	errTerminalStopping        = errors.New("terminal sessions are stopping")
+	errTerminalStopping        = durable.ErrStopping
 )
 
 func newTerminalHandler(projects *project.Store) *terminalHandler {
@@ -222,6 +179,20 @@ func newTerminalHandlerUnreconciledWithOriginPolicy(projects *project.Store, pol
 }
 
 func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy originPolicy, tmuxSocket string) *terminalHandler {
+	return newTerminalHandlerUnreconciledWithDependencies(projects, policy, tmuxSocket, nil, nil)
+}
+
+// newTerminalHandlerUnreconciledWithDependencies wires the handler's outward
+// dependencies at construction: bus carries state invalidations to the HTTP
+// layer's topics, usageTracker records agent usage and answers budget checks.
+// Both may be nil in tests that exercise tmux behavior only.
+func newTerminalHandlerUnreconciledWithDependencies(
+	projects *project.Store,
+	policy originPolicy,
+	tmuxSocket string,
+	bus *events.Bus,
+	usageTracker *usage.Tracker,
+) *terminalHandler {
 	tmuxPath, _ := exec.LookPath("tmux")
 	envPath, _ := exec.LookPath("env")
 	extensionPaths, extensionErr := materializePiExtensions(projects.DataDirectory())
@@ -280,8 +251,10 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 		terminalMutations:    newTerminalMutationManager(projects.DataDirectory()),
 		agentExitDirectory: filepath.Join(
 			projects.DataDirectory(),
-			"coding-agent-exits",
+			datadir.CodingAgentExitsDirectoryName,
 		),
+		stateChanges: bus,
+		usage:        usageTracker,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
@@ -290,7 +263,33 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 	}
 	handler.nativePi.figmaMCPURL = handler.figmaMCPURLForProject
 	handler.nativeClaude.figmaMCPURL = handler.figmaMCPURLForProject
+	if usageTracker != nil {
+		handler.nativePi.usageReporter = func(key piNativeProcessKey, sessionID string, totals threadUsageTotals) {
+			if err := usageTracker.Report(key.ProjectID, key.ThreadID, sessionID, totals); err != nil {
+				log.Printf("record native Pi usage: project=%q thread=%q error=%v", key.ProjectID, key.ThreadID, err)
+			}
+		}
+		handler.nativeClaude.usageReporter = func(key piNativeProcessKey, sessionID string, totals threadUsageTotals) {
+			if err := usageTracker.Report(key.ProjectID, key.ThreadID, sessionID, totals); err != nil {
+				log.Printf("record native Claude usage: project=%q thread=%q error=%v", key.ProjectID, key.ThreadID, err)
+			}
+		}
+	}
 	return handler
+}
+
+// budgetReached reports whether the thread's usage budget is exhausted. With
+// no usage tracker wired (tmux-only tests) budgets never trip.
+func (h *terminalHandler) budgetReached(projectID, threadID string) (bool, string, error) {
+	if h.usage == nil || h.projects == nil {
+		return false, "", nil
+	}
+	item, thread, err := h.projects.GetThread(projectID, threadID)
+	if err != nil {
+		return false, "", err
+	}
+	reached, sourceID := h.usage.BudgetReached(item, thread.ID)
+	return reached, sourceID, nil
 }
 
 func (h *terminalHandler) startCodingAgent(w http.ResponseWriter, r *http.Request) {
@@ -547,9 +546,9 @@ func (h *terminalHandler) serveEnvironmentSetupTerminal(w http.ResponseWriter, r
 			h.notifyThreadStatusChanged(item.ID, thread.ID)
 			_ = writer.Close(websocket.CloseNormalClosure, closeReason)
 			return
-		case <-bridge.terminalDone:
+		case <-bridge.Done:
 			return
-		case <-bridge.peer.done:
+		case <-bridge.Peer.Done:
 			return
 		}
 	}
@@ -867,7 +866,7 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	for {
 		select {
-		case <-bridge.terminalDone:
+		case <-bridge.Done:
 			reason := "Terminal session ended"
 			if agentPaneID != "" {
 				state, stateErr := h.tmuxPaneExitState(agentPaneID)
@@ -880,10 +879,10 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 			}
 			_ = writer.Close(websocket.CloseNormalClosure, reason)
 			return
-		case <-bridge.peer.done:
+		case <-bridge.Peer.Done:
 			return
-		case <-bridge.peer.ping.C:
-			if err := bridge.peer.WritePing(); err != nil {
+		case <-bridge.Peer.Ping.C:
+			if err := bridge.Peer.WritePing(); err != nil {
 				return
 			}
 		case <-agentPoll:
@@ -901,7 +900,7 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 				closeCodingAgentEnded()
 				return
 			}
-		case message := <-bridge.peer.messages:
+		case message := <-bridge.Peer.Messages:
 			if err := bridge.Handle(message); err != nil {
 				return
 			}
@@ -1488,7 +1487,7 @@ func (h *terminalHandler) terminalThreadStopStateLocked(projectID, threadID stri
 	if manager == nil {
 		return false, nil
 	}
-	stopped, err := manager.threadStopped(projectID, threadID)
+	stopped, err := manager.ThreadStopped(projectID, threadID)
 	if err != nil {
 		return false, err
 	}
@@ -1526,8 +1525,8 @@ func (h *terminalHandler) finishTerminalThreadMutationLocked(item project.Projec
 		return nil
 	}
 
-	projectMarker, projectFound, projectErr := manager.readProject(item.ID)
-	threadMarker, threadFound, threadErr := manager.readThread(item.ID, thread.ID)
+	projectMarker, projectFound, projectErr := manager.ReadProject(item.ID)
+	threadMarker, threadFound, threadErr := manager.ReadThread(item.ID, thread.ID)
 	if projectErr != nil || threadErr != nil {
 		// Unknown marker state is not permission to destroy a process. Preserve
 		// everything while still failing the mutation closed.
@@ -1813,87 +1812,19 @@ func (h *terminalHandler) removeStaleTmuxView(viewSession, canonicalSession, win
 }
 
 func (h *terminalHandler) tmuxViewSessions() ([]tmuxViewSession, error) {
-	output, err := h.tmuxCommand(
-		"list-sessions",
-		"-F", "#{session_name}\t#{session_attached}\t#{@kiwi-code-source-session}",
-	).CombinedOutput()
-	if err != nil {
-		var exitError *exec.ExitError
-		if errors.As(err, &exitError) {
-			return []tmuxViewSession{}, nil
-		}
-		return nil, tmuxCommandError("list tmux terminal views", output, err)
-	}
-	var views []tmuxViewSession
-	for _, line := range strings.FieldsFunc(string(output), func(r rune) bool { return r == '\n' || r == '\r' }) {
-		parts := strings.SplitN(line, "\t", 3)
-		if len(parts) != 3 || !strings.HasPrefix(parts[0], "kiwi-code-view-") {
-			continue
-		}
-		if parts[1] != "0" && parts[1] != "1" {
-			return nil, fmt.Errorf("parse tmux terminal view: %q", line)
-		}
-		views = append(views, tmuxViewSession{Name: parts[0], Attached: parts[1] == "1", SourceSession: parts[2]})
-	}
-	return views, nil
+	return h.workspaceManager().ViewSessions()
 }
 
 func (h *terminalHandler) tmuxDetailedWindows(sessionName string) ([]tmuxDetailedWindow, error) {
-	output, err := h.tmuxCommand(
-		"list-windows",
-		"-t", exactTmuxSessionTarget(sessionName),
-		"-F", "#{window_index}\t#{window_id}\t#{window_name}\t#{@kiwi-code-tool}\t#{pane_start_command}",
-	).CombinedOutput()
-	if err != nil {
-		return nil, tmuxCommandError("list detailed tmux windows", output, err)
-	}
-	var windows []tmuxDetailedWindow
-	for _, line := range strings.FieldsFunc(string(output), func(r rune) bool { return r == '\n' || r == '\r' }) {
-		parts := strings.SplitN(line, "\t", 5)
-		if len(parts) != 5 {
-			return nil, fmt.Errorf("parse detailed tmux window: %q", line)
-		}
-		index, parseErr := strconv.Atoi(parts[0])
-		if parseErr != nil || parts[1] == "" {
-			return nil, fmt.Errorf("parse detailed tmux window target: %q", line)
-		}
-		windows = append(windows, tmuxDetailedWindow{
-			Target:       tmuxWindowTarget{Index: index, ID: parts[1]},
-			Name:         parts[2],
-			Tool:         parts[3],
-			StartCommand: parts[4],
-		})
-	}
-	return windows, nil
+	return h.workspaceManager().DetailedWindows(sessionName)
 }
 
 func (h *terminalHandler) tmuxWindowSession(windowID string) (string, error) {
-	output, err := h.tmuxCommand("list-windows", "-a", "-F", "#{session_name}\t#{window_id}").CombinedOutput()
-	if err != nil {
-		return "", tmuxCommandError("find tmux window session", output, err)
-	}
-	fallback := ""
-	for _, line := range strings.FieldsFunc(string(output), func(r rune) bool { return r == '\n' || r == '\r' }) {
-		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) != 2 || parts[1] != windowID || strings.HasPrefix(parts[0], tmuxViewSessionPrefix) {
-			continue
-		}
-		if strings.HasPrefix(parts[0], tmuxSessionNamePrefix) {
-			return parts[0], nil
-		}
-		if fallback == "" {
-			fallback = parts[0]
-		}
-	}
-	return fallback, nil
+	return h.workspaceManager().WindowSession(windowID)
 }
 
 func (h *terminalHandler) tmuxCanonicalSessionLinkedToWindow(windowID string) (string, error) {
-	sessionName, err := h.tmuxWindowSession(windowID)
-	if err != nil || strings.HasSuffix(sessionName, "-tools") {
-		return sessionName, err
-	}
-	return "", nil
+	return h.workspaceManager().CanonicalSessionLinkedToWindow(windowID)
 }
 
 func (h *terminalHandler) tmuxFixedToolWindowConflict(sessionName, tool, windowID string) (bool, error) {
@@ -1924,52 +1855,15 @@ func (h *terminalHandler) nextTmuxWindowIndex(sessionName string) (int, error) {
 }
 
 func fixedTmuxTool(window tmuxDetailedWindow) string {
-	for _, tool := range []string{"nvim", "lazygit", "pi"} {
-		if window.Tool == tool || (window.Tool == "" && window.Name == tool) {
-			return tool
-		}
-	}
-	return ""
+	return workspace.FixedTool(window)
 }
 
 func tmuxSessionFromStartCommand(command string) string {
-	const marker = "KIWI_CODE_TMUX_SESSION="
-	index := strings.Index(command, marker)
-	if index < 0 {
-		return ""
-	}
-	value := command[index+len(marker):]
-	end := 0
-	for end < len(value) {
-		character := value[end]
-		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || character == '-' || character == '_' || character == '.' {
-			end++
-			continue
-		}
-		break
-	}
-	return value[:end]
+	return workspace.SessionFromStartCommand(command)
 }
 
 func tmuxViewIdentity(sessionName string) (int, time.Time, bool) {
-	remainder := strings.TrimPrefix(sessionName, "kiwi-code-view-")
-	rawPID, remainder, ok := strings.Cut(remainder, "-")
-	if !ok {
-		return 0, time.Time{}, false
-	}
-	pid, err := strconv.Atoi(rawPID)
-	if err != nil || pid <= 0 {
-		return 0, time.Time{}, false
-	}
-	rawCreatedAt, _, ok := strings.Cut(remainder, "-")
-	if !ok {
-		return 0, time.Time{}, false
-	}
-	createdAtUnixNano, err := strconv.ParseInt(rawCreatedAt, 16, 64)
-	if err != nil || createdAtUnixNano <= 0 {
-		return 0, time.Time{}, false
-	}
-	return pid, time.Unix(0, createdAtUnixNano), true
+	return workspace.ParseViewIdentity(sessionName)
 }
 
 func tmuxViewHasLiveCreationGrace(sessionName string, now time.Time) bool {
@@ -2441,15 +2335,23 @@ func (h *terminalHandler) clearCodingAgentExits(projectID, threadID, agent strin
 	}
 }
 
+func (h *terminalHandler) exitStore() *tmuxpane.ExitStore {
+	h.exitStoreOnce.Do(func() {
+		h.exitStoreValue = tmuxpane.NewExitStore(func() string {
+			if h.agentExitDirectory != "" {
+				return h.agentExitDirectory
+			}
+			if h.projects != nil {
+				return filepath.Join(h.projects.DataDirectory(), datadir.CodingAgentExitsDirectoryName)
+			}
+			return ""
+		})
+	})
+	return h.exitStoreValue
+}
+
 func (h *terminalHandler) codingAgentExitMarkerPath(projectID, threadID, agent string) string {
-	root := h.agentExitDirectory
-	if root == "" && h.projects != nil {
-		root = filepath.Join(h.projects.DataDirectory(), "coding-agent-exits")
-	}
-	component := func(value string) string {
-		return base64.RawURLEncoding.EncodeToString([]byte(value))
-	}
-	return filepath.Join(root, component(projectID), component(threadID), component(agent)+".json")
+	return h.exitStore().MarkerPath(projectID, threadID, agent)
 }
 
 func (h *terminalHandler) recordCodingAgentExit(projectID, threadID, agent, paneID string, state tmuxPaneExitState) (bool, error) {
@@ -2481,106 +2383,23 @@ func (h *terminalHandler) persistCodingAgentExitMarkerLocked(path, projectID, th
 }
 
 func codingAgentExitMarkerFromState(projectID, threadID, agent, paneID string, state tmuxPaneExitState) codingAgentExitMarker {
-	return codingAgentExitMarker{
-		ProjectID: projectID,
-		ThreadID:  threadID,
-		Agent:     agent,
-		PaneID:    paneID,
-		ServerPID: state.ServerPID,
-		Status:    state.Status,
-		Signal:    state.Signal,
-		ExitedAt:  state.ExitedAt,
-	}
+	return tmuxpane.ExitMarkerFromState(projectID, threadID, agent, paneID, state)
 }
 
 func (h *terminalHandler) withCodingAgentExitMarkerLock(projectID, threadID, agent string, operation func(path string) error) error {
-	path := h.codingAgentExitMarkerPath(projectID, threadID, agent)
-	if path == "" {
-		return errors.New("coding agent exit marker directory is unavailable")
-	}
-	directory := filepath.Dir(path)
-	h.agentExitMarkerMu.Lock()
-	defer h.agentExitMarkerMu.Unlock()
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return fmt.Errorf("create marker directory: %w", err)
-	}
-	if err := os.Chmod(directory, 0o700); err != nil {
-		return fmt.Errorf("secure marker directory: %w", err)
-	}
-	lockFile, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return fmt.Errorf("open marker lock: %w", err)
-	}
-	defer lockFile.Close()
-	if err := lockFile.Chmod(0o600); err != nil {
-		return fmt.Errorf("secure marker lock: %w", err)
-	}
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-		return fmt.Errorf("lock marker: %w", err)
-	}
-	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-	return operation(path)
+	return h.exitStore().WithLock(projectID, threadID, agent, operation)
 }
 
 func writeCodingAgentExitMarker(path string, marker codingAgentExitMarker) error {
-	contents, err := json.Marshal(marker)
-	if err != nil {
-		return fmt.Errorf("encode marker: %w", err)
-	}
-	contents = append(contents, '\n')
-	directory := filepath.Dir(path)
-	temporary, err := os.CreateTemp(directory, ".coding-agent-exit-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temporary marker: %w", err)
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(0o600); err != nil {
-		_ = temporary.Close()
-		return fmt.Errorf("secure temporary marker: %w", err)
-	}
-	if _, err := temporary.Write(contents); err != nil {
-		_ = temporary.Close()
-		return fmt.Errorf("write temporary marker: %w", err)
-	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return fmt.Errorf("sync temporary marker: %w", err)
-	}
-	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close temporary marker: %w", err)
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return fmt.Errorf("replace marker: %w", err)
-	}
-	return nil
+	return tmuxpane.WriteMarker(path, marker)
 }
 
 func syncDirectory(path string) error {
-	directory, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer directory.Close()
-	return directory.Sync()
+	return tmuxpane.SyncDirectory(path)
 }
 
 func readCodingAgentExitMarkerFile(path, projectID, threadID, agent string) (codingAgentExitMarker, bool, error) {
-	contents, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return codingAgentExitMarker{}, false, nil
-	}
-	if err != nil {
-		return codingAgentExitMarker{}, false, err
-	}
-	var marker codingAgentExitMarker
-	if err := json.Unmarshal(contents, &marker); err != nil {
-		return codingAgentExitMarker{}, false, fmt.Errorf("decode marker: %w", err)
-	}
-	if marker.ProjectID != projectID || marker.ThreadID != threadID || marker.Agent != agent {
-		return codingAgentExitMarker{}, false, errors.New("marker identity does not match its path")
-	}
-	return marker, true, nil
+	return tmuxpane.ReadMarkerFile(path, projectID, threadID, agent)
 }
 
 func (h *terminalHandler) readCodingAgentExitMarker(projectID, threadID, agent string) (codingAgentExitMarker, bool, error) {
@@ -2749,93 +2568,19 @@ func (h *terminalHandler) stopCodingAgentPaneIfExitMarked(projectID, threadID, a
 }
 
 func (h *terminalHandler) killTmuxPaneIncarnation(paneID, serverPID string, requireDead bool) error {
-	if pid, err := strconv.Atoi(serverPID); err != nil || pid <= 0 {
-		return fmt.Errorf("invalid tmux server pid %q", serverPID)
-	}
-	condition := fmt.Sprintf("#{==:#{pid},%s}", serverPID)
-	if requireDead {
-		condition = fmt.Sprintf("#{&&:%s,#{pane_dead}}", condition)
-	}
-	command := "kill-pane -t " + shellQuote(paneID)
-	output, err := h.tmuxCommand("if-shell", "-t", paneID, "-F", condition, command, "").CombinedOutput()
-	if err != nil {
-		state, stateErr := h.tmuxPaneExitState(paneID)
-		if stateErr == nil && (!state.Found || state.ServerPID != serverPID) {
-			return nil
-		}
-		return tmuxCommandError("remove exact coding agent pane", output, err)
-	}
-	return nil
+	return h.workspaceManager().KillPaneIncarnation(paneID, serverPID, requireDead)
 }
 
 func (h *terminalHandler) killTmuxWindowIncarnation(windowID, serverPID string) error {
-	return h.killTmuxTargetIncarnation(
-		windowID,
-		serverPID,
-		"kill-window -t "+shellQuote(windowID),
-		"remove exact tmux window",
-	)
+	return h.workspaceManager().KillWindowIncarnation(windowID, serverPID)
 }
 
 func (h *terminalHandler) killTmuxSessionIncarnation(sessionName, serverPID string) error {
-	target := "=" + sessionName
-	return h.killTmuxTargetIncarnation(
-		target,
-		serverPID,
-		"kill-session -t "+shellQuote(target),
-		"remove exact tmux session",
-	)
-}
-
-func (h *terminalHandler) killTmuxTargetIncarnation(target, serverPID, command, action string) error {
-	if pid, err := strconv.Atoi(serverPID); err != nil || pid <= 0 {
-		return fmt.Errorf("invalid tmux server pid %q", serverPID)
-	}
-	condition := fmt.Sprintf("#{==:#{pid},%s}", serverPID)
-	output, err := h.tmuxCommand("if-shell", "-t", target, "-F", condition, command, "").CombinedOutput()
-	if err == nil {
-		return nil
-	}
-	observedPID, found, stateErr := h.tmuxTargetServerPID(target)
-	if stateErr == nil && (!found || observedPID != serverPID) {
-		return nil
-	}
-	return tmuxCommandError(action, output, err)
+	return h.workspaceManager().KillSessionIncarnation(sessionName, serverPID)
 }
 
 func (h *terminalHandler) tmuxTargetServerPID(target string) (string, bool, error) {
-	identityFormat := "#{window_id}"
-	expectedIdentity := target
-	if strings.HasPrefix(target, "%") {
-		identityFormat = "#{pane_id}"
-	} else if strings.HasPrefix(target, "=") {
-		identityFormat = "#{session_name}"
-		expectedIdentity = strings.TrimPrefix(target, "=")
-	}
-	output, err := h.tmuxCommand("display-message", "-p", "-t", target, "#{pid}\t"+identityFormat).CombinedOutput()
-	if err != nil {
-		var exitError *exec.ExitError
-		if errors.As(err, &exitError) {
-			return "", false, nil
-		}
-		return "", false, tmuxCommandError("inspect tmux target incarnation", output, err)
-	}
-	parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), "\t", 2)
-	if len(parts) != 2 || parts[1] == "" {
-		return "", false, nil
-	}
-	if parts[1] != expectedIdentity {
-		return "", false, fmt.Errorf("tmux target identity changed: got %q, want %q", parts[1], expectedIdentity)
-	}
-	serverPID := parts[0]
-	pid, err := strconv.Atoi(serverPID)
-	if err != nil {
-		return "", false, fmt.Errorf("parse tmux target server pid %q: %w", serverPID, err)
-	}
-	if pid <= 0 {
-		return "", false, fmt.Errorf("parse tmux target server pid: invalid value %q", serverPID)
-	}
-	return serverPID, true, nil
+	return h.workspaceManager().TargetServerPID(target)
 }
 
 func (h *terminalHandler) removeCodingAgentExitMarkersForThread(projectID, threadID string) error {
@@ -2875,40 +2620,7 @@ func (h *terminalHandler) removeCodingAgentExitMarker(projectID, threadID, agent
 }
 
 func (h *terminalHandler) tmuxPaneExitState(paneID string) (tmuxPaneExitState, error) {
-	output, err := h.tmuxCommand(
-		"display-message", "-p",
-		"-t", paneID,
-		"#{pid}\t#{pane_id}\t#{pane_dead}\t#{pane_dead_status}\t#{pane_dead_signal}\t#{pane_dead_time}",
-	).CombinedOutput()
-	if err != nil {
-		var exitError *exec.ExitError
-		if errors.As(err, &exitError) {
-			return tmuxPaneExitState{}, nil
-		}
-		return tmuxPaneExitState{}, tmuxCommandError("inspect coding agent exit", output, err)
-	}
-	line := strings.TrimRight(string(output), "\r\n")
-	if line == "" {
-		return tmuxPaneExitState{}, nil
-	}
-	parts := strings.SplitN(line, "\t", 6)
-	if len(parts) == 6 && parts[1] == "" {
-		// With no matching pane, some tmux versions still expand server-wide
-		// formats such as #{pid} and exit successfully. An empty pane id is the
-		// authoritative indication that the requested incarnation is gone.
-		return tmuxPaneExitState{}, nil
-	}
-	if len(parts) != 6 || parts[0] == "" || parts[1] != paneID || (parts[2] != "0" && parts[2] != "1") {
-		return tmuxPaneExitState{}, fmt.Errorf("parse coding agent exit: %q", line)
-	}
-	return tmuxPaneExitState{
-		ServerPID: parts[0],
-		Dead:      parts[2] == "1",
-		Status:    parts[3],
-		Signal:    parts[4],
-		ExitedAt:  parts[5],
-		Found:     true,
-	}, nil
+	return h.workspaceManager().PaneExitState(paneID)
 }
 
 // Coding agents are panes inside the fixed `pi` window. Keeping that window
@@ -3115,119 +2827,27 @@ func (h *terminalHandler) ensureCodingAgentPaneWithOptions(
 }
 
 func (h *terminalHandler) tmuxAgentPanes(windowID string) ([]tmuxAgentPane, error) {
-	output, err := h.tmuxCommand(
-		"list-panes",
-		"-t", windowID,
-		"-F", "#{pane_id}\t#{@kiwi-code-agent}\t#{pane_active}",
-	).CombinedOutput()
-	if err != nil {
-		return nil, tmuxCommandError("list coding agent panes", output, err)
-	}
-
-	lines := strings.FieldsFunc(string(output), func(r rune) bool { return r == '\n' || r == '\r' })
-	panes := make([]tmuxAgentPane, 0, len(lines))
-	for _, line := range lines {
-		parts := strings.SplitN(line, "\t", 3)
-		if len(parts) != 3 || parts[0] == "" || (parts[2] != "0" && parts[2] != "1") {
-			return nil, fmt.Errorf("parse coding agent pane: %q", line)
-		}
-		panes = append(panes, tmuxAgentPane{
-			ID:     parts[0],
-			Agent:  parts[1],
-			Active: parts[2] == "1",
-		})
-	}
-	if len(panes) == 0 {
-		return nil, errors.New("Pi window has no panes")
-	}
-	return panes, nil
+	return h.workspaceManager().AgentPanes(windowID)
 }
 
 func (h *terminalHandler) activateCodingAgentPane(windowID, paneID string, panes []tmuxAgentPane) error {
-	zoomed, err := h.tmuxWindowZoomed(windowID)
-	if err != nil {
-		return err
-	}
-	if zoomed {
-		for _, pane := range panes {
-			if pane.Active && pane.ID == paneID {
-				return nil
-			}
-		}
-		if err := h.unzoomTmuxWindow(windowID, panes); err != nil {
-			return err
-		}
-	}
-
-	output, err := h.tmuxCommand("select-pane", "-t", paneID).CombinedOutput()
-	if err != nil {
-		return tmuxCommandError("select coding agent pane", output, err)
-	}
-	if len(panes) == 1 {
-		return nil
-	}
-	output, err = h.tmuxCommand("resize-pane", "-Z", "-t", paneID).CombinedOutput()
-	if err != nil {
-		return tmuxCommandError("zoom coding agent pane", output, err)
-	}
-	return nil
+	return h.workspaceManager().ActivateAgentPane(windowID, paneID, panes)
 }
 
 func (h *terminalHandler) unzoomTmuxWindow(windowID string, panes []tmuxAgentPane) error {
-	zoomed, err := h.tmuxWindowZoomed(windowID)
-	if err != nil || !zoomed {
-		return err
-	}
-	paneID := ""
-	for _, pane := range panes {
-		if pane.Active {
-			paneID = pane.ID
-			break
-		}
-	}
-	if paneID == "" && len(panes) > 0 {
-		paneID = panes[0].ID
-	}
-	output, err := h.tmuxCommand("resize-pane", "-Z", "-t", paneID).CombinedOutput()
-	if err != nil {
-		return tmuxCommandError("unzoom coding agent pane", output, err)
-	}
-	return nil
+	return h.workspaceManager().UnzoomWindow(windowID, panes)
 }
 
 func (h *terminalHandler) tmuxWindowZoomed(windowID string) (bool, error) {
-	output, err := h.tmuxCommand("display-message", "-p", "-t", windowID, "#{window_zoomed_flag}").CombinedOutput()
-	if err != nil {
-		return false, tmuxCommandError("read coding agent layout", output, err)
-	}
-	switch strings.TrimSpace(string(output)) {
-	case "0":
-		return false, nil
-	case "1":
-		return true, nil
-	default:
-		return false, fmt.Errorf("parse coding agent layout: %q", strings.TrimSpace(string(output)))
-	}
+	return h.workspaceManager().WindowZoomed(windowID)
 }
 
 func (h *terminalHandler) setTmuxPaneOption(paneID, option, value string) error {
-	output, err := h.tmuxCommand("set-option", "-p", "-t", paneID, option, value).CombinedOutput()
-	if err != nil {
-		return tmuxCommandError("configure coding agent pane", output, err)
-	}
-	return nil
+	return h.workspaceManager().SetPaneOption(paneID, option, value)
 }
 
 func (h *terminalHandler) tmuxPaneAlive(paneID string) (bool, error) {
-	output, err := h.tmuxCommand("display-message", "-p", "-t", paneID, "#{pane_dead}").CombinedOutput()
-	if err != nil {
-		var exitError *exec.ExitError
-		if errors.As(err, &exitError) {
-			return false, nil
-		}
-		return false, tmuxCommandError("check coding agent pane", output, err)
-	}
-	return strings.TrimSpace(string(output)) == "0", nil
+	return h.workspaceManager().PaneAlive(paneID)
 }
 
 func (h *terminalHandler) commandForTmuxWindow(item project.Project, thread project.Thread, tool, threadEndpoint, sessionName string) (string, []string, string, error) {
@@ -3266,7 +2886,7 @@ func (h *terminalHandler) commandForCodingAgentPaneWithOptions(
 		}
 	}
 
-	command, args, notice, err := h.commandForTmuxTarget(
+	return h.commandForTmuxTarget(
 		item,
 		thread,
 		agent,
@@ -3275,29 +2895,6 @@ func (h *terminalHandler) commandForCodingAgentPaneWithOptions(
 		sessionName,
 		launchOptions,
 	)
-	if err != nil || notice != "" {
-		return command, args, notice, err
-	}
-	if launchOptions.Model != "" {
-		args = append(args, "--model", launchOptions.Model)
-	}
-	if launchOptions.ThinkingLevel != "" {
-		switch {
-		case agent == codingAgentCodex:
-			args = append(args, "--config", `model_reasoning_effort="`+launchOptions.ThinkingLevel+`"`)
-		case isClaudeCodingAgent(agent):
-			args = append(args, "--effort", launchOptions.ThinkingLevel)
-		default:
-			args = append(args, "--thinking", launchOptions.ThinkingLevel)
-		}
-	}
-	if isTerminalCodingAgent(agent) && launchOptions.InitialPrompt != "" {
-		// Terminal agents treat a positional message as the first interactive
-		// turn. Passing it at launch avoids racing a TUI that is not ready to
-		// receive synthetic paste and Enter input yet.
-		args = append(args, launchOptions.InitialPrompt)
-	}
-	return command, args, notice, nil
 }
 
 func (h *terminalHandler) prepareManagedCodexPlugin() error {
@@ -3331,195 +2928,113 @@ func (h *terminalHandler) commandForTmuxTarget(
 	sessionName string,
 	launchOptions codingAgentLaunchOptions,
 ) (string, []string, string, error) {
-	claudeProfile, profileAgent := h.claudeCodeProfile(tool)
-	if validConfiguredClaudeAgent(tool) && !profileAgent {
-		return "", nil, "", errors.New("Claude Code agent is not configured")
+	if resolved, ok := h.codingAgentRegistry().Resolve(tool); ok {
+		launchContext := agent.LaunchContext{
+			ProjectID:      item.ID,
+			ThreadID:       thread.ID,
+			ThreadEndpoint: threadEndpoint,
+			SessionName:    sessionName,
+			WindowName:     windowName,
+			FigmaMCPURL:    h.figmaMCPURLForProject(item),
+			RelatedDirectories: func() ([]string, error) {
+				return codingAgentRelatedProjectDirectories(item, thread)
+			},
+		}
+		command, err := resolved.TerminalCommand(launchContext, launchOptions)
+		if err != nil {
+			return "", nil, "", err
+		}
+		args := make([]string, 0, len(command.Unset)*2+len(command.Env)+len(command.Prefix)+len(command.BaseArgs)+len(command.Suffix)+8)
+		for _, name := range command.Unset {
+			args = append(args, "-u", name)
+		}
+		args = append(args,
+			"KIWI_CODE_TMUX_SESSION="+sessionName,
+			"KIWI_CODE_TMUX_WINDOW="+windowName,
+		)
+		if threadEndpoint != "" {
+			args = append(args, kiwiCodeThreadEnvironment(threadEndpoint, item.ID, thread.ID)...)
+		}
+		args = append(args, command.Env...)
+		args = append(args, command.Program)
+		args = append(args, command.Prefix...)
+		args = append(args, command.BaseArgs...)
+		if command.Notice == "" {
+			// Option arguments never follow a fallback shell: the historic code
+			// returned before appending them when the agent binary was missing.
+			args = append(args, command.Suffix...)
+		}
+		return h.envProgram(), args, command.Notice, nil
 	}
-	gptAgent := isClaudeGPTCodingAgent(tool)
+
 	command, args, notice, err := commandFor(tool)
 	if err != nil {
 		return "", nil, "", err
 	}
-	figmaMCPURL := h.figmaMCPURLForProject(item)
-	if tool == "pi" && notice == "" {
-		if h.piExtensionErr != nil {
-			return "", nil, "", h.piExtensionErr
-		}
-		extensionPaths := h.piExtensionPaths
-		if figmaMCPURL != "" {
-			if h.piFigmaExtensionErr != nil {
-				return "", nil, "", h.piFigmaExtensionErr
-			}
-			extensionPaths = append(append([]string(nil), extensionPaths...), h.piFigmaExtensionPath)
-		}
-		extensionArgs := make([]string, 0, len(extensionPaths)*2+len(args))
-		for _, extensionPath := range extensionPaths {
-			extensionArgs = append(extensionArgs, "--extension", extensionPath)
-		}
-		args = append(extensionArgs, args...)
-	}
-	if tool == codingAgentCodex && notice == "" {
-		if h.agentTokenErr != nil {
-			return "", nil, "", h.agentTokenErr
-		}
-		if h.agentToken == "" || h.agentTokenPath == "" {
-			return "", nil, "", errors.New("Codex plugin capability is unavailable")
-		}
-		if err := h.prepareManagedCodexPlugin(); err != nil {
-			return "", nil, "", err
-		}
-		pluginArguments := []string{
-			"--profile", h.codexProfileName,
-			"--dangerously-bypass-approvals-and-sandbox",
-			"--dangerously-bypass-hook-trust",
-		}
-		relatedDirectories, err := codingAgentRelatedProjectDirectories(item, thread)
-		if err != nil {
-			return "", nil, "", err
-		}
-		for _, directory := range relatedDirectories {
-			pluginArguments = append(pluginArguments, "--add-dir", directory)
-		}
-		if figmaMCPURL != "" {
-			pluginArguments = append(
-				pluginArguments,
-				"--config", "mcp_servers.kiwi-code-figma.url="+strconv.Quote(figmaMCPURL),
-			)
-		}
-		args = append(pluginArguments, args...)
-	}
-	if isClaudeCodingAgent(tool) && notice == "" {
-		if h.claudePluginErr != nil {
-			return "", nil, "", h.claudePluginErr
-		}
-		if h.claudePluginPath == "" {
-			return "", nil, "", errors.New("Claude plugin path is unavailable")
-		}
-		if gptAgent || profileAgent {
-			if h.claudePluginRootErr != nil {
-				return "", nil, "", h.claudePluginRootErr
-			}
-			if h.claudePluginRootPath == "" {
-				return "", nil, "", errors.New("Claude plugin root is unavailable")
-			}
-		}
-		if profileAgent && !gptAgent {
-			// A named profile isolates Claude's account and session state, not its
-			// launch configuration. Mirror the default settings and use the default
-			// plugin registry below so installed-plugin skills and MCP servers load
-			// exactly as they do for the default Claude profile.
-			if h.claudeConfigErr != nil {
-				return "", nil, "", h.claudeConfigErr
-			}
-			if h.claudeConfigPath == "" {
-				return "", nil, "", errors.New("Claude config directory is unavailable")
-			}
-			if err := syncClaudeCodeProfileSettings(claudeProfile.ConfigDirectory, h.claudeConfigPath); err != nil {
-				return "", nil, "", err
-			}
-		}
-		pluginArguments := []string{"--plugin-dir", h.claudePluginPath}
-		relatedDirectories, err := codingAgentRelatedProjectDirectories(item, thread)
-		if err != nil {
-			return "", nil, "", err
-		}
-		if len(relatedDirectories) > 0 {
-			pluginArguments = append(pluginArguments, "--add-dir")
-			pluginArguments = append(pluginArguments, relatedDirectories...)
-		}
-		if gptAgent {
-			if launchOptions.Model == "" || !isCLIProxyAPIGPTModel(launchOptions.Model) {
-				return "", nil, "", errors.New("Claude Code (with gpt) requires a CLIProxyAPI GPT model")
-			}
-		}
-		if figmaMCPURL != "" {
-			figmaConfig, err := figmaMCPConfigArgument(figmaMCPURL)
-			if err != nil {
-				return "", nil, "", err
-			}
-			// --mcp-config is variadic, so it must stay ahead of another flag and
-			// never trail the positional initial prompt appended by the caller.
-			pluginArguments = append(pluginArguments, "--mcp-config", figmaConfig)
-		}
-		pluginArguments = append(pluginArguments,
-			"--dangerously-skip-permissions",
-			"--settings", claudeLaunchSettings,
-		)
-		args = append(pluginArguments, args...)
-	}
-
 	environment := []string{
 		"KIWI_CODE_TMUX_SESSION=" + sessionName,
 		"KIWI_CODE_TMUX_WINDOW=" + windowName,
 	}
-	if isTerminalCodingAgent(tool) && threadEndpoint != "" {
-		environment = append(environment, kiwiCodeThreadEnvironment(threadEndpoint, item.ID, thread.ID)...)
-	}
-	if tool == codingAgentPi && figmaMCPURL != "" && notice == "" {
-		environment = append(environment, figmaMCPEnvironmentName+"="+figmaMCPURL)
-	}
-	if tool == codingAgentPi && threadEndpoint != "" {
-		if h.agentToken != "" {
-			environment = append(environment, "KIWI_CODE_AGENT_TOKEN="+h.agentToken)
-		}
-	}
-	if tool == codingAgentCodex && notice == "" {
-		piPath := codingAgentPi
-		if resolvedPiPath, err := exec.LookPath(codingAgentPi); err == nil {
-			piPath = resolvedPiPath
-		}
-		environment = append(environment,
-			"CODEX_HOME="+h.codexConfigPath,
-			"KIWI_CODE_AGENT_TOKEN_FILE="+h.agentTokenPath,
-			"KIWI_CODE_CODING_AGENT="+codingAgentCodex,
-			"KIWI_CODE_PI_PATH="+piPath,
-		)
-	}
-	if isClaudeCodingAgent(tool) && notice == "" {
-		if profileAgent && !gptAgent {
-			environment = append(environment,
-				"CLAUDE_CONFIG_DIR="+claudeProfile.ConfigDirectory,
-				"CLAUDE_CODE_PLUGIN_CACHE_DIR="+h.claudePluginRootPath,
-			)
-		}
-		piPath := codingAgentPi
-		if resolvedPiPath, err := exec.LookPath(codingAgentPi); err == nil {
-			piPath = resolvedPiPath
-		}
-		environment = append(environment,
-			"KIWI_CODE_PI_PATH="+piPath,
-			"KIWI_CODE_CODING_AGENT="+tool,
-		)
-	}
-	if gptAgent && notice == "" {
-		profilePath, err := h.claudeGPTProfileDirectory()
-		if err != nil {
-			return "", nil, "", err
-		}
-		baseURL, apiKey, err := h.cliProxyAPIConfiguration()
-		if err != nil {
-			return "", nil, "", err
-		}
-		unsetArguments := make([]string, 0, len(claudeGPTUnsetEnvironment)*2+len(environment))
-		for _, name := range claudeGPTUnsetEnvironment {
-			unsetArguments = append(unsetArguments, "-u", name)
-		}
-		environment = append(unsetArguments, environment...)
-		environment = append(environment, claudeGPTProxyEnvironment(
-			profilePath,
-			h.claudePluginRootPath,
-			baseURL,
-			apiKey,
-			launchOptions.Model,
-		)...)
-	}
 	environment = append(environment, command)
 	args = append(environment, args...)
-	envPath := h.envPath
-	if envPath == "" {
-		envPath = "env"
+	return h.envProgram(), args, notice, nil
+}
+
+func (h *terminalHandler) envProgram() string {
+	if h.envPath == "" {
+		return "env"
 	}
-	return envPath, args, notice, nil
+	return h.envPath
+}
+
+// codingAgentRegistry assembles the pluggable-agent registry over the
+// handler's materialized assets and live settings.
+func (h *terminalHandler) codingAgentRegistry() *agent.Registry {
+	pi := agent.Pi{
+		ExtensionPaths:       h.piExtensionPaths,
+		ExtensionErr:         h.piExtensionErr,
+		FigmaExtensionPath:   h.piFigmaExtensionPath,
+		FigmaExtensionErr:    h.piFigmaExtensionErr,
+		AgentToken:           h.agentToken,
+		FigmaEnvironmentName: figmaMCPEnvironmentName,
+	}
+	codex := agent.Codex{
+		AgentToken:     h.agentToken,
+		AgentTokenPath: h.agentTokenPath,
+		AgentTokenErr:  h.agentTokenErr,
+		ProfileName:    h.codexProfileName,
+		ConfigPath:     h.codexConfigPath,
+		Prepare:        h.prepareManagedCodexPlugin,
+	}
+	claudeFactory := func(id string, profile project.CodingAgentSetting, configured, gpt bool) agent.Agent {
+		return agent.Claude{
+			AgentID:             id,
+			GPT:                 gpt,
+			Configured:          configured,
+			Profile:             profile,
+			PluginPath:          h.claudePluginPath,
+			PluginErr:           h.claudePluginErr,
+			PluginRootPath:      h.claudePluginRootPath,
+			PluginRootErr:       h.claudePluginRootErr,
+			ConfigPath:          h.claudeConfigPath,
+			ConfigErr:           h.claudeConfigErr,
+			LaunchSettings:      claudeLaunchSettings,
+			SyncProfileSettings: syncClaudeCodeProfileSettings,
+			FigmaConfigArgument: figmaMCPConfigArgument,
+			UnsetEnvironment:    claudeGPTUnsetEnvironment,
+			GPTProfileDirectory: h.claudeGPTProfileDirectory,
+			ProxyConfiguration:  h.cliProxyAPIConfiguration,
+			ProxyEnvironment:    claudeGPTProxyEnvironment,
+			IsGPTModel:          isCLIProxyAPIGPTModel,
+		}
+	}
+	settings := func() project.Settings {
+		if h.projects == nil {
+			return project.Settings{}
+		}
+		return h.projects.GetSettings()
+	}
+	return agent.NewRegistry(pi, codex, claudeFactory, settings)
 }
 
 func (h *terminalHandler) shellWindows(item project.Project, thread project.Thread) ([]tmuxWindow, error) {
@@ -3609,93 +3124,19 @@ func (h *terminalHandler) newTmuxWindow(cwd, sessionName, tool, windowName strin
 }
 
 func (h *terminalHandler) createTmuxWindow(cwd, sessionName, windowName, command string, args []string, selectWindow bool) (tmuxWindowTarget, error) {
-	arguments := []string{"new-window"}
-	if !selectWindow {
-		arguments = append(arguments, "-d")
-	}
-	arguments = append(
-		arguments,
-		"-P", "-F", "#{window_index}\t#{window_id}\t#{pid}",
-		"-t", exactTmuxCurrentWindowTarget(sessionName),
-		"-c", cwd,
-		"-n", windowName,
-		shellCommand(command, args),
-	)
-	output, err := h.tmuxCommand(arguments...).CombinedOutput()
-	if err != nil {
-		return tmuxWindowTarget{}, tmuxCommandError("create tmux window", output, err)
-	}
-	return parseTmuxWindowTarget(output)
+	return h.workspaceManager().CreateWindow(cwd, sessionName, windowName, command, args, selectWindow)
 }
 
 func (h *terminalHandler) activateTmuxWindow(sessionName string, index int) ([]tmuxWindow, error) {
-	if index < 0 {
-		return nil, errors.New("invalid tmux window index")
-	}
-	target := exactTmuxWindowTarget(sessionName, index)
-	output, err := h.tmuxCommand("select-window", "-t", target).CombinedOutput()
-	if err != nil {
-		return nil, tmuxCommandError("select tmux window", output, err)
-	}
-	return h.tmuxWindows(sessionName)
+	return h.workspaceManager().ActivateWindow(sessionName, index)
 }
 
 func (h *terminalHandler) configureSharedToolWindow(sessionName string, target tmuxWindowTarget, tool string) error {
-	targetName := target.ID
-	options := [][2]string{
-		{"remain-on-exit", "off"},
-		{"automatic-rename", "off"},
-		{"allow-rename", "off"},
-		{"@kiwi-code-tool", tool},
-	}
-	arguments := make([]string, 0, len(options)*7+5)
-	for index, option := range options {
-		if index > 0 {
-			arguments = append(arguments, ";")
-		}
-		arguments = append(arguments, "set-option", "-w", "-t", targetName, option[0], option[1])
-	}
-	arguments = append(arguments, ";", "rename-window", "-t", targetName, tool)
-	output, err := h.tmuxCommand(arguments...).CombinedOutput()
-	if err != nil {
-		return tmuxCommandError("configure shared tmux window", output, err)
-	}
-	return nil
+	return h.workspaceManager().ConfigureSharedToolWindow(sessionName, target, tool)
 }
 
 func (h *terminalHandler) tmuxToolWindow(sessionName, tool string) (tmuxWindowTarget, bool, error) {
-	output, err := h.tmuxCommand(
-		"list-windows",
-		"-t", exactTmuxSessionTarget(sessionName),
-		"-F", "#{window_index}\t#{window_id}\t#{window_name}\t#{@kiwi-code-tool}\t#{pid}",
-	).CombinedOutput()
-	if err != nil {
-		return tmuxWindowTarget{}, false, tmuxCommandError("find tmux window", output, err)
-	}
-
-	var namedTarget tmuxWindowTarget
-	hasNamedTarget := false
-	lines := strings.FieldsFunc(string(output), func(r rune) bool { return r == '\n' || r == '\r' })
-	for _, line := range lines {
-		parts := strings.SplitN(line, "\t", 5)
-		if len(parts) != 5 {
-			return tmuxWindowTarget{}, false, fmt.Errorf("parse tmux tool window: %q", line)
-		}
-		index, err := strconv.Atoi(parts[0])
-		if err != nil {
-			return tmuxWindowTarget{}, false, fmt.Errorf("parse tmux tool window index: %w", err)
-		}
-		target := tmuxWindowTarget{Index: index, ID: parts[1], ServerPID: parts[4]}
-		if parts[3] == tool {
-			target.Tagged = true
-			return target, true, nil
-		}
-		if !hasNamedTarget && parts[3] == "" && parts[2] == tool {
-			namedTarget = target
-			hasNamedTarget = true
-		}
-	}
-	return namedTarget, hasNamedTarget, nil
+	return h.workspaceManager().ToolWindow(sessionName, tool)
 }
 
 func (h *terminalHandler) createTmuxViewSession(item project.Project, thread project.Thread, sourceSession string, sourceWindow tmuxWindowTarget) (viewSessionName string, err error) {
@@ -3744,7 +3185,7 @@ func (h *terminalHandler) createTmuxViewSessionLocked(sourceSession string, sour
 	// When that tool exits, tmux removes the linked window and closes the view,
 	// while closing the browser merely removes the extra link.
 	for attempt := 0; attempt < 5; attempt++ {
-		viewName := fmt.Sprintf(tmuxViewSessionPrefix+"%d-%x-%d", os.Getpid(), time.Now().UnixNano(), h.viewCounter.Add(1))
+		viewName := workspace.ViewSessionName(os.Getpid(), time.Now(), h.viewCounter.Add(1))
 		h.registerTmuxViewLocked(viewName)
 		dummy, err := h.createTmuxSession(viewName, "/", "view", "/bin/sleep", []string{"60"})
 		if err != nil {
@@ -3839,55 +3280,15 @@ func (h *terminalHandler) tmuxViewIsActiveLocked(viewName string) bool {
 }
 
 func (h *terminalHandler) setTmuxWindowOption(target, option, value string) error {
-	output, err := h.tmuxCommand("set-option", "-w", "-t", target, option, value).CombinedOutput()
-	if err != nil {
-		return tmuxCommandError("configure tmux window", output, err)
-	}
-	return nil
+	return h.workspaceManager().SetWindowOption(target, option, value)
 }
 
 func (h *terminalHandler) tmuxWindows(sessionName string) ([]tmuxWindow, error) {
-	return h.tmuxWindowsContext(context.Background(), sessionName)
+	return h.workspaceManager().Windows(sessionName)
 }
 
 func (h *terminalHandler) tmuxWindowsContext(ctx context.Context, sessionName string) ([]tmuxWindow, error) {
-	output, err := h.tmuxCommandContext(
-		ctx,
-		"list-windows",
-		"-t", exactTmuxSessionTarget(sessionName),
-		"-F", "#{window_index}\t#{window_name}\t#{window_active}",
-	).CombinedOutput()
-	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
-		}
-		return nil, tmuxCommandError("list tmux windows", output, err)
-	}
-
-	lines := strings.FieldsFunc(string(output), func(r rune) bool { return r == '\n' || r == '\r' })
-	windows := make([]tmuxWindow, 0, len(lines))
-	for _, line := range lines {
-		parts := strings.SplitN(line, "\t", 3)
-		if len(parts) != 3 {
-			return nil, fmt.Errorf("parse tmux window: %q", line)
-		}
-		index, err := strconv.Atoi(parts[0])
-		if err != nil {
-			return nil, fmt.Errorf("parse tmux window index: %w", err)
-		}
-		if parts[2] != "0" && parts[2] != "1" {
-			return nil, fmt.Errorf("parse tmux window active state: %q", parts[2])
-		}
-		name := strings.TrimSpace(parts[1])
-		if name == "" {
-			name = "shell"
-		}
-		windows = append(windows, tmuxWindow{Index: index, Name: name, Active: parts[2] == "1"})
-	}
-	if len(windows) == 0 {
-		return nil, errors.New("tmux session has no windows")
-	}
-	return windows, nil
+	return h.workspaceManager().WindowsContext(ctx, sessionName)
 }
 
 func threadTmuxSessionNameSet(item project.Project, threadID string) map[string]struct{} {
@@ -3946,7 +3347,7 @@ func (h *terminalHandler) stopThreadSessions(item project.Project, threadID stri
 		return nil, errors.New("terminal stop marker manager is unavailable")
 	}
 	sessionNames := threadTmuxSessionNameSet(item, threadID)
-	lease, err := manager.beginThread(item.ID, threadID, exactTmuxSessionNames(sessionNames))
+	lease, err := manager.BeginThread(item.ID, threadID, exactTmuxSessionNames(sessionNames))
 	if err != nil {
 		return nil, err
 	}
@@ -4079,7 +3480,7 @@ func (h *terminalHandler) stopProjectSessions(item project.Project) (project.Pro
 	if manager == nil {
 		return project.Project{}, nil, errors.New("terminal stop marker manager is unavailable")
 	}
-	lease, err := manager.beginProject(
+	lease, err := manager.BeginProject(
 		item.ID,
 		projectThreadIDs(item),
 		exactTmuxSessionNames(projectTmuxSessionNameSet(item)),
@@ -4274,7 +3675,7 @@ func (h *terminalHandler) reconcileTerminalStops() error {
 	if manager == nil {
 		return errors.New("terminal stop marker manager is unavailable")
 	}
-	refs, listErr := manager.listMarkers()
+	refs, listErr := manager.ListMarkers()
 	reconcileErrors := []error{listErr}
 	for _, ref := range refs {
 		_, err := h.reconcileTerminalStop(ref)
@@ -4302,13 +3703,13 @@ func (h *terminalHandler) terminalStopBrowserThreadIDs(ref terminalStopMarkerRef
 		return nil, false, errors.New("terminal stop marker manager is unavailable")
 	}
 	if ref.Scope == terminalStopScopeThread {
-		marker, found, err := manager.readThread(ref.ProjectID, ref.ThreadID)
+		marker, found, err := manager.ReadThread(ref.ProjectID, ref.ThreadID)
 		if err != nil || !found {
 			return nil, found, err
 		}
 		return []string{marker.ThreadID}, true, nil
 	}
-	marker, found, err := manager.readProject(ref.ProjectID)
+	marker, found, err := manager.ReadProject(ref.ProjectID)
 	if err != nil || !found {
 		return nil, found, err
 	}
@@ -4326,7 +3727,7 @@ func (h *terminalHandler) reconcileTerminalStop(ref terminalStopMarkerRef) (foun
 	if manager == nil {
 		return false, errors.New("terminal stop marker manager is unavailable")
 	}
-	lease, found, err := manager.acquireExisting(ref)
+	lease, found, err := manager.AcquireExisting(ref)
 	if err != nil || !found {
 		return found, err
 	}
@@ -4377,106 +3778,64 @@ func (h *terminalHandler) clearLocalTerminalStopLocked(ref terminalStopMarkerRef
 }
 
 func (h *terminalHandler) tmuxSessionExists(sessionName string) (bool, error) {
-	return h.tmuxSessionExistsContext(context.Background(), sessionName)
+	return h.workspaceManager().SessionExists(sessionName)
 }
 
 func (h *terminalHandler) tmuxSessionExistsContext(ctx context.Context, sessionName string) (bool, error) {
-	err := h.tmuxCommandContext(ctx, "has-session", "-t", exactTmuxSessionTarget(sessionName)).Run()
-	if err == nil {
-		return true, nil
-	}
-
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return false, ctxErr
-	}
-	var exitError *exec.ExitError
-	if errors.As(err, &exitError) {
-		return false, nil
-	}
-	return false, fmt.Errorf("check tmux session: %w", err)
+	return h.workspaceManager().SessionExistsContext(ctx, sessionName)
 }
 
 func (h *terminalHandler) tmuxExactSessionExists(sessionName string) (bool, error) {
-	err := h.tmuxCommand("has-session", "-t", exactTmuxSessionTarget(sessionName)).Run()
-	if err == nil {
-		return true, nil
-	}
-	var exitError *exec.ExitError
-	if errors.As(err, &exitError) {
-		return false, nil
-	}
-	return false, fmt.Errorf("check exact tmux session: %w", err)
+	return h.workspaceManager().ExactSessionExists(sessionName)
 }
 
 func (h *terminalHandler) createTmuxSession(sessionName, directory, windowName, command string, args []string) (tmuxWindowTarget, error) {
-	output, err := h.tmuxCommand(
-		"new-session",
-		"-d",
-		"-P", "-F", "#{window_index}\t#{window_id}\t#{pid}",
-		"-s", sessionName,
-		"-c", directory,
-		"-n", windowName,
-		shellCommand(command, args),
-	).CombinedOutput()
-	if err != nil {
-		return tmuxWindowTarget{}, tmuxCommandError("create tmux session", output, err)
-	}
-	target, err := parseTmuxWindowTarget(output)
-	if err != nil {
-		// The creation output is the only atomic proof of this incarnation. If
-		// it cannot be parsed, a name-based cleanup could kill a replacement.
-		return tmuxWindowTarget{}, err
-	}
-
-	output, err = h.tmuxCommand("set-option", "-t", exactTmuxCurrentWindowTarget(sessionName), "status", "off").CombinedOutput()
-	if err == nil {
-		return target, nil
-	}
-	_ = h.killTmuxSessionIncarnation(sessionName, target.ServerPID)
-	return tmuxWindowTarget{}, tmuxCommandError("configure tmux session", output, err)
+	return h.workspaceManager().CreateSession(sessionName, directory, windowName, command, args)
 }
 
 func (h *terminalHandler) notifyThreadStatusChanged(projectID, threadID string) {
 	h.publishThreadStatusChanged(projectID, threadID)
 }
 
+// workspaceManager builds the typed tmux operation layer over the handler's
+// current client configuration.
+func (h *terminalHandler) workspaceManager() *workspace.Manager {
+	return workspace.NewManager(h.tmuxClient)
+}
+
+// tmuxClient builds a client from the handler's current binary path and
+// socket. It is constructed per call because tests adjust tmuxPath after the
+// handler exists; the client itself is a cheap immutable value.
+func (h *terminalHandler) tmuxClient() *tmux.Client {
+	return tmux.NewClient(h.tmuxPath, h.tmuxSocket, terminalEnvironment)
+}
+
 func (h *terminalHandler) tmuxCommand(args ...string) *exec.Cmd {
-	command := exec.Command(h.tmuxPath, h.tmuxCommandArguments(args...)...)
-	command.Env = tmuxEnvironment()
-	return command
+	return h.tmuxClient().Command(args...)
 }
 
 func (h *terminalHandler) tmuxCommandArguments(args ...string) []string {
-	arguments := make([]string, 0, len(args)+2)
-	arguments = append(arguments, "-L", h.tmuxSocket)
-	return append(arguments, args...)
+	return h.tmuxClient().Arguments(args...)
 }
 
 func exactTmuxSessionTarget(sessionName string) string {
-	return "=" + sessionName
+	return tmux.ExactSessionTarget(sessionName)
 }
 
 func exactTmuxCurrentWindowTarget(sessionName string) string {
-	return exactTmuxSessionTarget(sessionName) + ":"
+	return tmux.ExactCurrentWindowTarget(sessionName)
 }
 
 func exactTmuxWindowTarget(sessionName string, index int) string {
-	return exactTmuxSessionTarget(sessionName) + ":" + strconv.Itoa(index)
+	return tmux.ExactWindowTarget(sessionName, index)
 }
 
 func tmuxSessionName(projectID, threadID, tool string) string {
-	return tmuxSessionNamePrefix + projectID + "-" + threadID + "-" + tmuxSessionSuffix(tool)
+	return workspace.SessionName(projectID, threadID, tool)
 }
 
 func tmuxSessionSuffix(tool string) string {
-	switch tool {
-	case "", "terminal":
-		return "terminal"
-	case "nvim", "lazygit", "pi", "process":
-		return "tools"
-	default:
-		return tool
-	}
+	return workspace.SessionSuffix(tool)
 }
 
 func threadEndpointURL(r *http.Request, projectID, threadID string) string {
@@ -4522,23 +3881,7 @@ func kiwiCodeThreadEnvironment(threadEndpoint, projectID, threadID string) []str
 }
 
 func parseTmuxWindowTarget(output []byte) (tmuxWindowTarget, error) {
-	line := strings.TrimSpace(string(output))
-	parts := strings.SplitN(line, "\t", 3)
-	if len(parts) != 3 || parts[1] == "" {
-		return tmuxWindowTarget{}, fmt.Errorf("parse tmux window target: %q", line)
-	}
-	index, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return tmuxWindowTarget{}, fmt.Errorf("parse tmux window target index: %w", err)
-	}
-	pid, err := strconv.Atoi(parts[2])
-	if err != nil {
-		return tmuxWindowTarget{}, fmt.Errorf("parse tmux window target server pid: %w", err)
-	}
-	if pid <= 0 {
-		return tmuxWindowTarget{}, fmt.Errorf("parse tmux window target server pid: invalid value %q", parts[2])
-	}
-	return tmuxWindowTarget{Index: index, ID: parts[1], ServerPID: parts[2]}, nil
+	return tmux.ParseWindowTarget(output)
 }
 
 func parseTmuxPaneIncarnation(output []byte) (codingAgentPaneIncarnation, error) {
@@ -4558,24 +3901,15 @@ func parseTmuxPaneIncarnation(output []byte) (codingAgentPaneIncarnation, error)
 }
 
 func tmuxCommandError(action string, output []byte, err error) error {
-	message := strings.TrimSpace(string(output))
-	if message == "" {
-		return fmt.Errorf("%s: %w", action, err)
-	}
-	return fmt.Errorf("%s: %s", action, message)
+	return tmux.CommandError(action, output, err)
 }
 
 func shellCommand(command string, args []string) string {
-	parts := make([]string, 0, len(args)+1)
-	parts = append(parts, shellQuote(command))
-	for _, arg := range args {
-		parts = append(parts, shellQuote(arg))
-	}
-	return strings.Join(parts, " ")
+	return tmux.ShellCommand(command, args)
 }
 
 func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+	return tmux.ShellQuote(value)
 }
 
 func normalizeTerminalTool(tool string) (string, error) {
@@ -4615,51 +3949,32 @@ func claudeCodeGPTProfileAgentID(profileID string) string {
 	return codingAgentClaudeGPTProfilePrefix + profileID
 }
 
-func configuredCodingAgentID(agent project.CodingAgentSetting) string {
-	if agent.Kind == project.CodingAgentKindClaudeGPT {
-		return claudeCodeGPTProfileAgentID(agent.ID)
-	}
-	return claudeCodeProfileAgentID(agent.ID)
+func configuredCodingAgentID(setting project.CodingAgentSetting) string {
+	return agent.ProfileAgentID(setting)
 }
 
-func validClaudeAgentWithPrefix(agent, prefix string) bool {
-	profileID := strings.TrimPrefix(agent, prefix)
-	if profileID == agent || profileID == "" || len(profileID) > maxClaudeCodeProfileAgentIDLength {
-		return false
-	}
-	for _, character := range profileID {
-		if (character >= 'a' && character <= 'z') ||
-			(character >= 'A' && character <= 'Z') ||
-			(character >= '0' && character <= '9') || character == '-' || character == '_' {
-			continue
-		}
-		return false
-	}
-	return true
+func validClaudeCodeProfileAgent(agentID string) bool {
+	return agent.ValidClaudeProfileID(agentID)
 }
 
-func validClaudeCodeProfileAgent(agent string) bool {
-	return validClaudeAgentWithPrefix(agent, codingAgentClaudeProfilePrefix)
+func validClaudeCodeGPTProfileAgent(agentID string) bool {
+	return agent.ValidClaudeGPTProfileID(agentID)
 }
 
-func validClaudeCodeGPTProfileAgent(agent string) bool {
-	return validClaudeAgentWithPrefix(agent, codingAgentClaudeGPTProfilePrefix)
+func validConfiguredClaudeAgent(agentID string) bool {
+	return agent.ValidConfiguredClaudeID(agentID)
 }
 
-func validConfiguredClaudeAgent(agent string) bool {
-	return validClaudeCodeProfileAgent(agent) || validClaudeCodeGPTProfileAgent(agent)
+func isClaudeGPTCodingAgent(agentID string) bool {
+	return agent.IsClaudeGPT(agentID)
 }
 
-func isClaudeGPTCodingAgent(agent string) bool {
-	return agent == codingAgentClaudeGPT || validClaudeCodeGPTProfileAgent(agent)
+func isClaudeCodingAgent(agentID string) bool {
+	return agent.IsClaude(agentID)
 }
 
-func isClaudeCodingAgent(agent string) bool {
-	return agent == codingAgentClaude || isClaudeGPTCodingAgent(agent) || validClaudeCodeProfileAgent(agent)
-}
-
-func isTerminalCodingAgent(agent string) bool {
-	return agent == codingAgentPi || agent == codingAgentCodex || isClaudeCodingAgent(agent)
+func isTerminalCodingAgent(agentID string) bool {
+	return agent.IsTerminalAgent(agentID)
 }
 
 func (h *terminalHandler) claudeCodeProfile(agent string) (project.CodingAgentSetting, bool) {
@@ -4760,13 +4075,5 @@ func terminalEnvironment() []string {
 }
 
 func tmuxEnvironment() []string {
-	environment := terminalEnvironment()
-	filtered := make([]string, 0, len(environment))
-	for _, entry := range environment {
-		key, _, _ := strings.Cut(entry, "=")
-		if key != "TMUX" {
-			filtered = append(filtered, entry)
-		}
-	}
-	return filtered
+	return tmux.NewClient("", "", terminalEnvironment).Environment()
 }

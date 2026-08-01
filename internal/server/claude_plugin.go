@@ -1,11 +1,10 @@
 package server
 
 import (
-	"bytes"
 	_ "embed"
 	"fmt"
+	"github.com/dire-kiwi/kiwi-code/internal/agent/assets"
 	"io/fs"
-	"os"
 	"path/filepath"
 )
 
@@ -59,15 +58,11 @@ func materializeClaudePlugin(dataDirectory string) (string, error) {
 }
 
 func removeObsoletePluginOrchestration(root string) error {
-	for _, path := range []string{
+	return assets.RemoveObsolete(
+		"plugin orchestration",
 		filepath.Join(root, "servers", "kiwi-code-plans.mjs"),
 		filepath.Join(root, "skills", "kiwi-code-planner"),
-	} {
-		if err := os.RemoveAll(path); err != nil {
-			return fmt.Errorf("remove obsolete plugin orchestration %q: %w", filepath.Base(path), err)
-		}
-	}
-	return nil
+	)
 }
 
 func claudePluginFiles() ([]claudePluginFile, error) {
@@ -111,19 +106,6 @@ func claudePluginFiles() ([]claudePluginFile, error) {
 }
 
 func materializeClaudePluginFile(root string, file claudePluginFile) error {
-	path := filepath.Join(root, file.path)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("create Claude plugin directory: %w", err)
-	}
-	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, file.contents) {
-		return nil
-	}
-
-	if err := writeFileAtomically(path, file.contents, serverAtomicFileOptions{
-		Mode:     0o600,
-		SyncFile: true,
-	}); err != nil {
-		return fmt.Errorf("write Claude plugin file: %w", err)
-	}
-	return nil
+	_, err := assets.EnsureFile(root, file.path, file.contents, "Claude plugin file")
+	return err
 }

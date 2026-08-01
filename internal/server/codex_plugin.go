@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"github.com/dire-kiwi/kiwi-code/internal/agent/assets"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -165,20 +166,8 @@ func codexMarketplaceContents(marketplaceName string) ([]byte, error) {
 }
 
 func materializeCodexPluginFile(root string, file codexPluginFile) error {
-	path := filepath.Join(root, file.path)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("create Codex plugin directory: %w", err)
-	}
-	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, file.contents) {
-		return nil
-	}
-	if err := writeFileAtomically(path, file.contents, serverAtomicFileOptions{
-		Mode:     0o600,
-		SyncFile: true,
-	}); err != nil {
-		return fmt.Errorf("write Codex plugin file: %w", err)
-	}
-	return nil
+	_, err := assets.EnsureFile(root, file.path, file.contents, "Codex plugin file")
+	return err
 }
 
 func defaultCodexConfigDirectory() (string, error) {

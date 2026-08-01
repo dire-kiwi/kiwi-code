@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/dire-kiwi/kiwi-code/internal/workspace"
 	"net"
 	"os"
 	"os/exec"
@@ -17,7 +18,7 @@ const (
 	productionGitBranch    = "main"
 	productionHTTPAddress  = "0.0.0.0:4000"
 	productionHTTPPort     = 4000
-	productionTmuxSocket   = "kiwi-code"
+	productionTmuxSocket   = workspace.SocketName
 )
 
 type runtimeConfiguration struct {

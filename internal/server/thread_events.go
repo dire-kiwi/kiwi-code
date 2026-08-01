@@ -7,16 +7,14 @@ import (
 	"time"
 
 	"github.com/dire-kiwi/kiwi-code/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/thread"
 )
 
 const (
 	gitStatusReconcileInterval = 2 * time.Second
 )
 
-type threadStatusKey struct {
-	projectID string
-	threadID  string
-}
+type threadStatusKey = thread.Key
 
 type threadStatusErrors struct {
 	GitBranches  string `json:"gitBranches,omitempty"`

@@ -14,10 +14,11 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/workspace"
 	"github.com/gorilla/websocket"
 )
 
-const tmuxViewSessionPrefix = "kiwi-code-view-"
+const tmuxViewSessionPrefix = workspace.ViewSessionPrefix
 
 type tmuxBrowserWindow struct {
 	ID             string `json:"id"`
@@ -230,16 +231,16 @@ func (h *terminalHandler) tmuxBrowserSessionInStopRecipe(sessionName string) (bo
 	if manager == nil {
 		return false, nil
 	}
-	refs, listErr := manager.listMarkers()
+	refs, listErr := manager.ListMarkers()
 	for _, ref := range refs {
 		var marker terminalStopMarker
 		var found bool
 		var err error
 		switch ref.Scope {
 		case terminalStopScopeProject:
-			marker, found, err = manager.readProject(ref.ProjectID)
+			marker, found, err = manager.ReadProject(ref.ProjectID)
 		case terminalStopScopeThread:
-			marker, found, err = manager.readThread(ref.ProjectID, ref.ThreadID)
+			marker, found, err = manager.ReadThread(ref.ProjectID, ref.ThreadID)
 		default:
 			err = errors.New("terminal stop marker ref has an invalid scope")
 		}
@@ -399,16 +400,16 @@ func (h *terminalHandler) serveTmuxBrowserTerminal(w http.ResponseWriter, r *htt
 	}
 	for {
 		select {
-		case <-bridge.terminalDone:
+		case <-bridge.Done:
 			_ = writer.Close(websocket.CloseNormalClosure, "Tmux window ended")
 			return
-		case <-bridge.peer.done:
+		case <-bridge.Peer.Done:
 			return
-		case <-bridge.peer.ping.C:
-			if err := bridge.peer.WritePing(); err != nil {
+		case <-bridge.Peer.Ping.C:
+			if err := bridge.Peer.WritePing(); err != nil {
 				return
 			}
-		case message := <-bridge.peer.messages:
+		case message := <-bridge.Peer.Messages:
 			if err := bridge.Handle(message); err != nil {
 				return
 			}

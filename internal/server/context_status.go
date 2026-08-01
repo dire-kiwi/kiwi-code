@@ -11,7 +11,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/dire-kiwi/kiwi-code/internal/agent"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
+	"slices"
 )
 
 const (
@@ -143,7 +145,7 @@ func cloneAgentContextStatus(status agentContextStatus) agentContextStatus {
 }
 
 func normalizeAgentContextStatus(input agentContextStatusUpdate, now time.Time) (agentContextStatus, bool) {
-	if input.Source != contextStatusSourcePiTerminal && input.Source != contextStatusSourcePiNative {
+	if !slices.Contains(agent.ContextStatusSources(), input.Source) {
 		return agentContextStatus{}, false
 	}
 	if input.ContextWindow <= 0 || input.ContextWindow > maxContextStatusTokens {

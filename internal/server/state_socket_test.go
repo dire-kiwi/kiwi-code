@@ -219,15 +219,15 @@ func TestStateSocketUnsubscribeAndConnectionCloseReleaseTmuxWatches(t *testing.T
 	if socketName == "" || socketName == tmuxSocketName {
 		t.Fatalf("unsafe tmux socket name %q", socketName)
 	}
-	terminal := newTerminalHandlerUnreconciledWithOptions(store, originPolicy{}, socketName)
+	stateChanges := newStateChangeBroker()
+	terminal := newTerminalHandlerUnreconciledWithDependencies(store, originPolicy{}, socketName, stateChanges, nil)
 	terminal.tmuxPath = falsePath
 	application := &Server{
 		projects:        store,
 		terminal:        terminal,
 		contextStatuses: newContextStatusTracker(),
-		stateChanges:    newStateChangeBroker(),
+		stateChanges:    stateChanges,
 	}
-	terminal.threadStatusChanged = application.notifyThreadStatusChanged
 
 	connection, closeServer := openStateTestSocket(t, application)
 	defer closeServer()
@@ -357,7 +357,7 @@ func TestAgentActivityTopicCoalescesPendingSnapshotsToCurrentState(t *testing.T)
 	})
 
 	now := time.Now().UTC()
-	tracker.update(item.ID, thread.ID, piActivityWorking, now)
+	tracker.Update(item.ID, thread.ID, piActivityWorking, now)
 	var workingSeq uint64
 	eventuallyStateTest(t, func() bool {
 		seq, activities, queued := pending()
@@ -368,7 +368,7 @@ func TestAgentActivityTopicCoalescesPendingSnapshotsToCurrentState(t *testing.T)
 		return true
 	})
 
-	tracker.update(item.ID, thread.ID, piActivityFinished, now.Add(time.Millisecond))
+	tracker.Update(item.ID, thread.ID, piActivityFinished, now.Add(time.Millisecond))
 	eventuallyStateTest(t, func() bool {
 		seq, activities, queued := pending()
 		return seq > workingSeq &&
@@ -478,14 +478,15 @@ func TestThreadStatusTopicReleasesTmuxWatchesOnCancellation(t *testing.T) {
 	if socketName == "" || socketName == tmuxSocketName {
 		t.Fatalf("unsafe tmux socket name %q", socketName)
 	}
-	terminal := newTerminalHandlerUnreconciledWithOptions(store, originPolicy{}, socketName)
+	stateChanges := newStateChangeBroker()
+	terminal := newTerminalHandlerUnreconciledWithDependencies(store, originPolicy{}, socketName, stateChanges, nil)
 	terminal.tmuxPath = falsePath
 	application := &Server{
 		projects:        store,
 		terminal:        terminal,
 		contextStatuses: newContextStatusTracker(),
+		stateChanges:    stateChanges,
 	}
-	terminal.threadStatusChanged = application.notifyThreadStatusChanged
 
 	connectionContext, cancelConnection := context.WithCancel(context.Background())
 	defer cancelConnection()
@@ -575,14 +576,15 @@ func TestThreadStatusTopicEndsAndReleasesTmuxWatchesWhenThreadIsDeleted(t *testi
 	if socketName == "" || socketName == tmuxSocketName {
 		t.Fatalf("unsafe tmux socket name %q", socketName)
 	}
-	terminal := newTerminalHandlerUnreconciledWithOptions(store, originPolicy{}, socketName)
+	stateChanges := newStateChangeBroker()
+	terminal := newTerminalHandlerUnreconciledWithDependencies(store, originPolicy{}, socketName, stateChanges, nil)
 	terminal.tmuxPath = falsePath
 	application := &Server{
 		projects:        store,
 		terminal:        terminal,
 		contextStatuses: newContextStatusTracker(),
+		stateChanges:    stateChanges,
 	}
-	terminal.threadStatusChanged = application.notifyThreadStatusChanged
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dire-kiwi/kiwi-code/internal/agent/native"
 	"github.com/dire-kiwi/kiwi-code/internal/broadcast"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
 	"github.com/gorilla/websocket"
@@ -148,10 +149,7 @@ func TestPiNativeGetStateRemembersTheActiveSession(t *testing.T) {
 	sessionDirectory := t.TempDir()
 	sessionFile := writePiNativeTestSession(t, sessionDirectory, "active.jsonl", "active", t.TempDir())
 	process := &piNativeProcess{
-		nativeProcessCore: &nativeProcessCore{
-			key:    piNativeProcessKey{ProjectID: "project", ThreadID: "thread"},
-			events: broadcast.NewBroker[[]byte](4),
-		},
+		Core:             native.NewCore(piNativeProcessKey{ProjectID: "project", ThreadID: "thread"}, piProcessSpec, nil, broadcast.NewBroker[[]byte](4)),
 		sessionDirectory: sessionDirectory,
 		runs:             make(map[uint64]piNativeRunSnapshot),
 	}
@@ -517,12 +515,7 @@ func TestPiNativeRunTrackingMarksAssistantErrorsFailed(t *testing.T) {
 func TestPiNativeAutomaticCompactionRefreshesDisplayHistory(t *testing.T) {
 	writer := &piNativeTestWriteCloser{}
 	process := &piNativeProcess{
-		nativeProcessCore: &nativeProcessCore{
-			spec:   piProcessSpec,
-			stdin:  writer,
-			done:   make(chan struct{}),
-			events: broadcast.NewBroker[[]byte](1),
-		},
+		Core: native.NewCore(piNativeProcessKey{}, piProcessSpec, writer, broadcast.NewBroker[[]byte](1)),
 	}
 	process.publishPiEvent([]byte(`{"type":"compaction_end","reason":"threshold","aborted":false}`))
 
@@ -543,11 +536,7 @@ func TestPiNativeAutomaticCompactionRefreshesDisplayHistory(t *testing.T) {
 
 func TestPiNativeClientCommandsReceiveRequestIDs(t *testing.T) {
 	writer := &piNativeTestWriteCloser{}
-	process := &piNativeProcess{nativeProcessCore: &nativeProcessCore{
-		spec:  piProcessSpec,
-		stdin: writer,
-		done:  make(chan struct{}),
-	}}
+	process := &piNativeProcess{Core: native.NewCore(piNativeProcessKey{}, piProcessSpec, writer, nil)}
 	if err := process.sendClientCommand(piNativeRPCCommand{Type: "get_commands"}); err != nil {
 		t.Fatal(err)
 	}
@@ -636,7 +625,7 @@ done
 		t.Fatalf("native Pi session directory was not created: info=%v error=%v", info, err)
 	}
 
-	subscription := process.events.Subscribe()
+	subscription := process.Events.Subscribe()
 	defer subscription.Close()
 	if err := process.refresh(); err != nil {
 		t.Fatal(err)
@@ -684,7 +673,7 @@ done
 		t.Fatal("native Pi restart reused the stopped process")
 	}
 	select {
-	case <-original.done:
+	case <-original.Done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("original native Pi process did not stop during restart")
 	}
@@ -705,7 +694,7 @@ done
 		t.Fatal("a stale restart request replaced the current native Pi process")
 	}
 	process = restarted
-	restartedSubscription := process.events.Subscribe()
+	restartedSubscription := process.Events.Subscribe()
 	defer restartedSubscription.Close()
 	if err := process.refresh(); err != nil {
 		t.Fatal(err)
@@ -720,7 +709,7 @@ done
 	if err := manager.stopThread(item.ID, thread.ID); err != nil {
 		t.Fatal(err)
 	}
-	if !channelClosed(process.done) {
+	if !channelClosed(process.Done) {
 		t.Fatal("native Pi process remained running")
 	}
 	process, err = manager.getOrStart(item, thread, "http://127.0.0.1:1", codingAgentLaunchOptions{})
@@ -732,7 +721,7 @@ done
 		t.Fatal(err)
 	}
 	select {
-	case <-process.done:
+	case <-process.Done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("native Pi process did not stop with its thread")
 	}
@@ -826,7 +815,7 @@ done
 	}
 	// Keep the production behavior but make the bounded backlog tiny so this
 	// characterization test does not depend on kernel socket buffer sizes.
-	process.events = broadcast.NewBroker[[]byte](1)
+	process.Events = broadcast.NewBroker[[]byte](1)
 
 	connection, _, err := websocket.DefaultDialer.Dial(harness.websocketURL(), nil)
 	if err != nil {
@@ -836,7 +825,7 @@ done
 	readPiNativeWebSocketEvent(t, connection, "pi_native_ready", "")
 
 	for index := 0; index < 64; index++ {
-		process.events.Publish([]byte(fmt.Sprintf(`{"type":"burst","index":%d}`, index)))
+		process.Events.Publish([]byte(fmt.Sprintf(`{"type":"burst","index":%d}`, index)))
 	}
 
 	if err := connection.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
@@ -857,7 +846,7 @@ done
 		break
 	}
 
-	if channelClosed(process.done) {
+	if channelClosed(process.Done) {
 		t.Fatal("slow WebSocket subscriber stopped the native Pi process")
 	}
 	current, err := harness.handler.nativePi.getOrStart(
@@ -870,10 +859,10 @@ done
 		t.Fatalf("native Pi process after slow subscriber = %p, %v; want %p", current, err, process)
 	}
 
-	fast := process.events.Subscribe()
+	fast := process.Events.Subscribe()
 	defer fast.Close()
 	marker := []byte(`{"type":"after_overflow"}`)
-	process.events.Publish(marker)
+	process.Events.Publish(marker)
 	select {
 	case payload, open := <-fast.Events():
 		if !open || !bytes.Equal(payload, marker) {

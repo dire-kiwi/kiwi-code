@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dire-kiwi/kiwi-code/internal/activity"
+	"github.com/dire-kiwi/kiwi-code/internal/agent"
 	"github.com/dire-kiwi/kiwi-code/internal/browsercontrol"
 	"github.com/dire-kiwi/kiwi-code/internal/browserhost"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
@@ -79,7 +81,8 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	if err != nil {
 		return nil, err
 	}
-	terminal := newTerminalHandlerUnreconciledWithOptions(projects, originPolicy, tmuxSocket)
+	stateChanges := newStateChangeBroker()
+	terminal := newTerminalHandlerUnreconciledWithDependencies(projects, originPolicy, tmuxSocket, stateChanges, usage)
 	if err := terminal.reconcileTerminalStops(); err != nil {
 		log.Printf("reconcile durable terminal stops: error=%v", err)
 	}
@@ -104,29 +107,16 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 		browser:             browserProvider,
 		browserOriginPolicy: originPolicy,
 		terminal:            terminal,
-		piActivity:          newPiActivityTracker(),
+		piActivity:          activity.NewTracker(terminal.markThreadTmuxStatusChanged),
 		threadUsage:         usage,
 		contextStatuses:     newContextStatusTracker(),
-		stateChanges:        newStateChangeBroker(),
+		stateChanges:        stateChanges,
 		sessionClosures:     sessionClosures,
 		agentSkills:         newAgentSkillInstaller(agentSkillsDirectory),
 		instanceID:          newServerInstanceID(),
 		restart:             options.Restart,
 		assets:              assets,
 		static:              http.FileServer(http.FS(assets)),
-	}
-	terminal.threadStatusChanged = server.notifyThreadStatusChanged
-	server.piActivity.stateChanged = terminal.markThreadTmuxStatusChanged
-	terminal.budgetReached = server.threadBudgetReached
-	terminal.nativePi.usageReporter = func(key piNativeProcessKey, sessionID string, totals threadUsageTotals) {
-		if err := server.threadUsage.report(key.ProjectID, key.ThreadID, sessionID, totals); err != nil {
-			log.Printf("record native Pi usage: project=%q thread=%q error=%v", key.ProjectID, key.ThreadID, err)
-		}
-	}
-	terminal.nativeClaude.usageReporter = func(key piNativeProcessKey, sessionID string, totals threadUsageTotals) {
-		if err := server.threadUsage.report(key.ProjectID, key.ThreadID, sessionID, totals); err != nil {
-			log.Printf("record native Claude usage: project=%q thread=%q error=%v", key.ProjectID, key.ThreadID, err)
-		}
 	}
 	if err := server.recoverPendingThreadCreationRollbacks(); err != nil {
 		return nil, fmt.Errorf("recover pending thread creation rollbacks: %w", err)
@@ -170,9 +160,12 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/browser/actions", server.browserAction)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/frame", server.browserFrame)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/browser/stream", server.browserStream)
-	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/pi/activity", server.updatePiActivity)
-	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/codex/activity", server.updateCodexActivity)
-	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/claude/activity", server.updateClaudeActivity)
+	// One shared handler serves every agent's activity route; the patterns
+	// stay literal for the API route contract test. agent.ActivityRoutes is
+	// the source of truth for the segments (asserted by a server test).
+	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/pi/activity", server.agentActivityHandler(agent.ActivityRoutes()[0]))
+	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/codex/activity", server.agentActivityHandler(agent.ActivityRoutes()[1]))
+	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/claude/activity", server.agentActivityHandler(agent.ActivityRoutes()[2]))
 	mux.HandleFunc("DELETE /api/projects/{id}/threads/{threadId}/pi/activity", server.acknowledgePiActivity)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/context/status", server.updateContextStatus)
 	mux.HandleFunc("PUT /api/projects/{id}/threads/{threadId}/tmux/activity", server.touchThreadTmuxActivity)
@@ -295,7 +288,7 @@ func (s *Server) recoverPendingThreadCreationRollbacks() error {
 			}
 			usageErr := error(nil)
 			if s.threadUsage != nil {
-				usageErr = s.threadUsage.remove(item.ID, thread.ID)
+				usageErr = s.threadUsage.Remove(item.ID, thread.ID)
 			}
 			if nativeErr != nil || usageErr != nil {
 				recoveryErrors = append(recoveryErrors, fmt.Errorf("prepare project %q thread %q: %w", item.ID, thread.ID, errors.Join(nativeErr, usageErr)))
@@ -471,9 +464,9 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			s.stopDeletedBrowserSessions(projectID, threadIDs)
-			s.piActivity.removeProject(projectID)
+			s.piActivity.RemoveProject(projectID)
 			if s.threadUsage != nil {
-				_ = s.threadUsage.remove(projectID, "")
+				_ = s.threadUsage.Remove(projectID, "")
 			}
 			s.contextStatuses.removeProject(projectID)
 			w.WriteHeader(http.StatusNoContent)
@@ -508,9 +501,9 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 			if markerErr := s.terminal.removeCodingAgentExitMarkersForProject(item); markerErr != nil {
 				log.Printf("remove published deleted project coding agent exit markers: project=%q error=%v", projectID, markerErr)
 			}
-			s.piActivity.removeProject(projectID)
+			s.piActivity.RemoveProject(projectID)
 			if s.threadUsage != nil {
-				_ = s.threadUsage.remove(projectID, "")
+				_ = s.threadUsage.Remove(projectID, "")
 			}
 			s.contextStatuses.removeProject(projectID)
 			if resolveErr != nil {
@@ -534,9 +527,9 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 	if err := s.terminal.removeCodingAgentExitMarkersForProject(item); err != nil {
 		log.Printf("remove deleted project coding agent exit markers: project=%q error=%v", projectID, err)
 	}
-	s.piActivity.removeProject(projectID)
+	s.piActivity.RemoveProject(projectID)
 	if s.threadUsage != nil {
-		if err := s.threadUsage.remove(projectID, ""); err != nil {
+		if err := s.threadUsage.Remove(projectID, ""); err != nil {
 			log.Printf("remove deleted project usage: project=%q error=%v", projectID, err)
 		}
 	}
@@ -753,7 +746,7 @@ func (s *Server) updateThreadLimits(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.threadUsage.notify()
+	s.threadUsage.Notify()
 	writeJSON(w, http.StatusOK, thread)
 }
 
@@ -770,7 +763,7 @@ func (s *Server) reconcileDeletedThreadMarkers(projectID, requestedThreadID stri
 	if manager == nil {
 		return false, errors.New("terminal stop marker manager is unavailable")
 	}
-	refs, listErr := manager.listMarkers()
+	refs, listErr := manager.ListMarkers()
 	reconcileErrors := []error{listErr}
 	requestedFound := false
 	for _, ref := range refs {
@@ -881,9 +874,9 @@ func (s *Server) finishDeletedThreadRuntime(projectID, threadID, context string)
 		}
 		log.Printf("remove %s thread coding agent exit markers: project=%q thread=%q error=%v", description, projectID, threadID, err)
 	}
-	s.piActivity.removeThread(projectID, threadID)
+	s.piActivity.RemoveThread(projectID, threadID)
 	if s.threadUsage != nil {
-		if err := s.threadUsage.remove(projectID, threadID); err != nil {
+		if err := s.threadUsage.Remove(projectID, threadID); err != nil {
 			log.Printf("remove deleted thread usage: project=%q thread=%q error=%v", projectID, threadID, err)
 		}
 	}

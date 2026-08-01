@@ -89,9 +89,9 @@ func TestAgentStateTransitionKeepsSessionsAlive(t *testing.T) {
 	// A transition stamps the sessions; repeating the same state must not, so a
 	// stalled agent cannot hold its sessions open with heartbeats alone.
 	stampedAt := time.Now().UTC().Add(30 * time.Hour)
-	application.piActivity.updateAgent(item.ID, thread.ID, codingAgentPi, piActivityWorking, stampedAt)
-	application.piActivity.updateAgent(item.ID, thread.ID, codingAgentPi, piActivityWorking, stampedAt.Add(20*time.Hour))
-	application.piActivity.updateAgent(item.ID, thread.ID, codingAgentPi, piActivityIdle, stampedAt)
+	application.piActivity.UpdateAgent(item.ID, thread.ID, codingAgentPi, piActivityWorking, stampedAt)
+	application.piActivity.UpdateAgent(item.ID, thread.ID, codingAgentPi, piActivityWorking, stampedAt.Add(20*time.Hour))
+	application.piActivity.UpdateAgent(item.ID, thread.ID, codingAgentPi, piActivityIdle, stampedAt)
 
 	activities, err := application.terminal.tmuxSessionActivities()
 	if err != nil {
