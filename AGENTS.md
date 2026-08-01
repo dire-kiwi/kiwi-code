@@ -16,7 +16,7 @@ The terminal tool mapping must remain:
 - `terminal` -> the `-terminal` session
 - `nvim`, `lazygit`, `pi`, and `process` -> the `-tools` session
 
-The canonical implementation is in `internal/server/terminal.go`, especially `tmuxSocketName`, `tmuxSessionName`, and the shared-window setup. Tests asserting the exact names belong in `internal/server/terminal_test.go`.
+The canonical implementation is in `internal/workspace/naming.go` (`workspace.SocketName`, `workspace.SessionName`, `workspace.SessionSuffix`); `internal/server/terminal.go` consumes it for the shared-window setup. Tests asserting the exact names belong in `internal/server/terminal_test.go`, with a duplicate contract test in `internal/workspace/naming_test.go` — both must agree.
 
 ## Runtime environment safety
 

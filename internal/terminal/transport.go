@@ -1,4 +1,4 @@
-package server
+package terminal
 
 import (
 	"encoding/json"
@@ -13,55 +13,72 @@ import (
 )
 
 const (
-	terminalProtocolV2          = 2
-	terminalOutputReadSize      = 32 * 1024
-	terminalOutputFrameSize     = 64 * 1024
-	terminalInteractiveFlush    = 4 * 1024
-	terminalOutputCreditBytes   = 384 * 1024
-	terminalOutputBatchDelay    = 750 * time.Microsecond
-	terminalOutputQueueCapacity = 16
+	ProtocolV2          = 2
+	outputReadSize      = 32 * 1024
+	outputFrameSize     = 64 * 1024
+	interactiveFlush    = 4 * 1024
+	OutputCreditBytes   = 384 * 1024
+	outputBatchDelay    = 750 * time.Microsecond
+	outputQueueCapacity = 16
 )
 
-type webSocketMessageWriter interface {
+// Keepalive and write deadlines shared by every websocket the backend serves.
+const (
+	WriteTimeout = 10 * time.Second
+	PongTimeout  = 45 * time.Second
+	PingInterval = 15 * time.Second
+)
+
+// ClientMessage is a client-to-server terminal frame (v1 JSON protocol; v2
+// wraps raw binary input in the same struct).
+type ClientMessage struct {
+	Type  string `json:"type"`
+	Data  string `json:"data,omitempty"`
+	Cols  uint16 `json:"cols,omitempty"`
+	Rows  uint16 `json:"rows,omitempty"`
+	Bytes uint32 `json:"bytes,omitempty"`
+}
+
+type MessageWriter interface {
 	Write(messageType int, payload []byte) error
 }
 
-type websocketWriter struct {
+type WebSocketWriter struct {
 	connection *websocket.Conn
 	mu         sync.Mutex
 }
 
-func newWebSocketWriter(connection *websocket.Conn) *websocketWriter {
-	return &websocketWriter{connection: connection}
+func NewWebSocketWriter(connection *websocket.Conn) *WebSocketWriter {
+	return &WebSocketWriter{connection: connection}
 }
 
-func (w *websocketWriter) Write(messageType int, payload []byte) error {
+func (w *WebSocketWriter) Write(messageType int, payload []byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	_ = w.connection.SetWriteDeadline(time.Now().Add(terminalWriteTimeout))
+	_ = w.connection.SetWriteDeadline(time.Now().Add(WriteTimeout))
 	return w.connection.WriteMessage(messageType, payload)
 }
 
-func (w *websocketWriter) Close(code int, reason string) error {
+func (w *WebSocketWriter) Close(code int, reason string) error {
 	return w.Write(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason))
 }
 
-type websocketPeer[T any] struct {
-	writer   *websocketWriter
-	messages <-chan T
-	done     <-chan error
-	ping     *time.Ticker
+type Peer[T any] struct {
+	writer   *WebSocketWriter
+	Messages <-chan T
+	Done     <-chan error
+	Ping     *time.Ticker
 }
 
-func startWebSocketPeer[T any](
+func StartPeer[T any](
 	connection *websocket.Conn,
-	writer *websocketWriter,
+	writer *WebSocketWriter,
 	decode func(int, []byte) (T, bool),
 	stalledMessage string,
-) *websocketPeer[T] {
-	_ = connection.SetReadDeadline(time.Now().Add(terminalPongTimeout))
+) *Peer[T] {
+	_ = connection.SetReadDeadline(time.Now().Add(PongTimeout))
 	connection.SetPongHandler(func(string) error {
-		return connection.SetReadDeadline(time.Now().Add(terminalPongTimeout))
+		return connection.SetReadDeadline(time.Now().Add(PongTimeout))
 	})
 
 	messages := make(chan T, 16)
@@ -86,37 +103,37 @@ func startWebSocketPeer[T any](
 		}
 	}()
 
-	return &websocketPeer[T]{
+	return &Peer[T]{
 		writer:   writer,
-		messages: messages,
-		done:     done,
-		ping:     time.NewTicker(terminalPingInterval),
+		Messages: messages,
+		Done:     done,
+		Ping:     time.NewTicker(PingInterval),
 	}
 }
 
-func (p *websocketPeer[T]) Stop() {
-	p.ping.Stop()
+func (p *Peer[T]) Stop() {
+	p.Ping.Stop()
 }
 
-func (p *websocketPeer[T]) WritePing() error {
+func (p *Peer[T]) WritePing() error {
 	return p.writer.Write(websocket.PingMessage, nil)
 }
 
-// terminalOutputCredit bounds bytes accepted by the browser WebSocket but not
+// OutputCredit bounds bytes accepted by the browser WebSocket but not
 // yet parsed by xterm. Network-level backpressure alone is insufficient because
 // browsers can queue WebSocket messages much faster than xterm can render them.
-type terminalOutputCredit struct {
+type OutputCredit struct {
 	mu          sync.Mutex
 	outstanding int
 	limit       int
 	wake        chan struct{}
 }
 
-func newTerminalOutputCredit(limit int) *terminalOutputCredit {
-	return &terminalOutputCredit{limit: limit, wake: make(chan struct{}, 1)}
+func NewOutputCredit(limit int) *OutputCredit {
+	return &OutputCredit{limit: limit, wake: make(chan struct{}, 1)}
 }
 
-func (c *terminalOutputCredit) reserve(count int, stop <-chan struct{}) bool {
+func (c *OutputCredit) Reserve(count int, stop <-chan struct{}) bool {
 	if count <= 0 {
 		return true
 	}
@@ -137,7 +154,7 @@ func (c *terminalOutputCredit) reserve(count int, stop <-chan struct{}) bool {
 	}
 }
 
-func (c *terminalOutputCredit) acknowledge(count int) {
+func (c *OutputCredit) Acknowledge(count int) {
 	if count <= 0 {
 		return
 	}
@@ -154,51 +171,51 @@ func (c *terminalOutputCredit) acknowledge(count int) {
 	}
 }
 
-func (c *terminalOutputCredit) pending() int {
+func (c *OutputCredit) Pending() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.outstanding
 }
 
-type ptyWebSocketBridge struct {
-	peer         *websocketPeer[clientMessage]
-	terminalDone <-chan error
-	ptmx         *os.File
-	protocol     int
-	credit       *terminalOutputCredit
-	stop         chan struct{}
-	stopOnce     sync.Once
+type PTYBridge struct {
+	Peer     *Peer[ClientMessage]
+	Done     <-chan error
+	ptmx     *os.File
+	protocol int
+	credit   *OutputCredit
+	stop     chan struct{}
+	stopOnce sync.Once
 }
 
-func startPTYWebSocketBridge(
+func StartPTYBridge(
 	connection *websocket.Conn,
-	writer *websocketWriter,
+	writer *WebSocketWriter,
 	ptmx *os.File,
 	protocol int,
 	onFirstOutput func(),
-) *ptyWebSocketBridge {
-	decode := func(messageType int, payload []byte) (clientMessage, bool) {
-		return decodeTerminalClientMessage(protocol, messageType, payload)
+) *PTYBridge {
+	decode := func(messageType int, payload []byte) (ClientMessage, bool) {
+		return DecodeClientMessage(protocol, messageType, payload)
 	}
-	peer := startWebSocketPeer(connection, writer, decode, "terminal input stalled")
-	terminalDone := make(chan error, 1)
+	peer := StartPeer(connection, writer, decode, "terminal input stalled")
+	Done := make(chan error, 1)
 	stop := make(chan struct{})
-	bridge := &ptyWebSocketBridge{
-		peer:         peer,
-		terminalDone: terminalDone,
-		ptmx:         ptmx,
-		protocol:     protocol,
-		stop:         stop,
+	bridge := &PTYBridge{
+		Peer:     peer,
+		Done:     Done,
+		ptmx:     ptmx,
+		protocol: protocol,
+		stop:     stop,
 	}
-	if protocol >= terminalProtocolV2 {
-		bridge.credit = newTerminalOutputCredit(terminalOutputCreditBytes)
+	if protocol >= ProtocolV2 {
+		bridge.credit = NewOutputCredit(OutputCreditBytes)
 	}
 
-	chunks := make(chan []byte, terminalOutputQueueCapacity)
+	chunks := make(chan []byte, outputQueueCapacity)
 	readDone := make(chan error, 1)
 	go func() {
 		defer close(chunks)
-		buffer := make([]byte, terminalOutputReadSize)
+		buffer := make([]byte, outputReadSize)
 		for {
 			count, readErr := ptmx.Read(buffer)
 			if count > 0 {
@@ -216,15 +233,15 @@ func startPTYWebSocketBridge(
 		}
 	}()
 
-	go bridge.writePTYOutput(writer, chunks, readDone, terminalDone, onFirstOutput)
+	go bridge.writePTYOutput(writer, chunks, readDone, Done, onFirstOutput)
 	return bridge
 }
 
-func (b *ptyWebSocketBridge) writePTYOutput(
-	writer webSocketMessageWriter,
+func (b *PTYBridge) writePTYOutput(
+	writer MessageWriter,
 	chunks <-chan []byte,
 	readDone <-chan error,
-	terminalDone chan<- error,
+	Done chan<- error,
 	onFirstOutput func(),
 ) {
 	var pending []byte
@@ -246,15 +263,15 @@ func (b *ptyWebSocketBridge) writePTYOutput(
 	}
 	armTimer := func() {
 		if timer == nil {
-			timer = time.NewTimer(terminalOutputBatchDelay)
+			timer = time.NewTimer(outputBatchDelay)
 		} else {
-			timer.Reset(terminalOutputBatchDelay)
+			timer.Reset(outputBatchDelay)
 		}
 		timerC = timer.C
 	}
 	reportDone := func(err error) {
 		select {
-		case terminalDone <- err:
+		case Done <- err:
 		default:
 		}
 	}
@@ -263,7 +280,7 @@ func (b *ptyWebSocketBridge) writePTYOutput(
 			return true
 		}
 		stopTimer()
-		if b.credit != nil && !b.credit.reserve(len(pending), b.stop) {
+		if b.credit != nil && !b.credit.Reserve(len(pending), b.stop) {
 			return false
 		}
 		if err := writer.Write(websocket.BinaryMessage, pending); err != nil {
@@ -281,17 +298,17 @@ func (b *ptyWebSocketBridge) writePTYOutput(
 	}
 	appendChunk := func(chunk []byte) bool {
 		for len(chunk) > 0 {
-			space := terminalOutputFrameSize - len(pending)
+			space := outputFrameSize - len(pending)
 			if space > len(chunk) {
 				space = len(chunk)
 			}
 			pending = append(pending, chunk[:space]...)
 			chunk = chunk[space:]
-			if len(pending) == terminalOutputFrameSize && !flush() {
+			if len(pending) == outputFrameSize && !flush() {
 				return false
 			}
 		}
-		if len(pending) > 0 && len(pending) <= terminalInteractiveFlush {
+		if len(pending) > 0 && len(pending) <= interactiveFlush {
 			return flush()
 		}
 		if len(pending) > 0 && timerC == nil {
@@ -330,12 +347,12 @@ func (b *ptyWebSocketBridge) writePTYOutput(
 	}
 }
 
-func (b *ptyWebSocketBridge) Stop() {
+func (b *PTYBridge) Stop() {
 	b.stopOnce.Do(func() { close(b.stop) })
-	b.peer.Stop()
+	b.Peer.Stop()
 }
 
-func (b *ptyWebSocketBridge) Handle(message clientMessage) error {
+func (b *PTYBridge) Handle(message ClientMessage) error {
 	switch message.Type {
 	case "input":
 		_, err := io.WriteString(b.ptmx, message.Data)
@@ -346,26 +363,26 @@ func (b *ptyWebSocketBridge) Handle(message clientMessage) error {
 		}
 	case "ack":
 		if b.credit != nil {
-			b.credit.acknowledge(int(message.Bytes))
+			b.credit.Acknowledge(int(message.Bytes))
 		}
 	}
 	return nil
 }
 
-func decodeTerminalClientMessage(protocol, messageType int, payload []byte) (clientMessage, bool) {
-	if protocol >= terminalProtocolV2 && messageType == websocket.BinaryMessage {
-		return clientMessage{Type: "input", Data: string(payload)}, true
+func DecodeClientMessage(protocol, messageType int, payload []byte) (ClientMessage, bool) {
+	if protocol >= ProtocolV2 && messageType == websocket.BinaryMessage {
+		return ClientMessage{Type: "input", Data: string(payload)}, true
 	}
 	if messageType != websocket.TextMessage {
-		return clientMessage{}, false
+		return ClientMessage{}, false
 	}
-	var message clientMessage
+	var message ClientMessage
 	if err := json.Unmarshal(payload, &message); err != nil {
-		return clientMessage{}, false
+		return ClientMessage{}, false
 	}
 	return message, true
 }
 
-func rawWebSocketMessage(_ int, payload []byte) ([]byte, bool) {
+func RawMessage(_ int, payload []byte) ([]byte, bool) {
 	return payload, true
 }

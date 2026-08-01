@@ -528,7 +528,7 @@ export function ClaudeNativePane({
     if (initialModelRef.current) params.set('model', initialModelRef.current)
     if (initialThinkingRef.current) params.set('thinking', initialThinkingRef.current)
     const url = apiWebSocketUrl(
-      `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/claude/native`,
+      `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/agents/claude/native`,
     )
     url.search = params.toString()
     return url.toString()

@@ -1,4 +1,4 @@
-package server
+package native
 
 import (
 	"bytes"
@@ -9,15 +9,15 @@ import (
 )
 
 func TestNativeProcessRunPreservesExitOrdering(t *testing.T) {
-	spec := nativeProcessSpec{
-		displayName:         "Test",
-		endedMessage:        "ended",
-		unexpectedMessage:   "unexpected",
-		writeAfterExitError: "closed",
-		stopTimeout:         time.Second,
+	spec := Spec{
+		DisplayName:         "Test",
+		EndedMessage:        "ended",
+		UnexpectedMessage:   "unexpected",
+		WriteAfterExitError: "closed",
+		StopTimeout:         time.Second,
 	}
-	core, stdout, stderr, err := startNativeCommand(
-		nativeProcessKey{ProjectID: "project", ThreadID: "thread"},
+	core, stdout, stderr, err := StartCommand(
+		Key{ProjectID: "project", ThreadID: "thread"},
 		spec,
 		exec.Command("sh", "-c", "exit 7"),
 	)
@@ -33,15 +33,15 @@ func TestNativeProcessRunPreservesExitOrdering(t *testing.T) {
 		exitText   string
 		doneClosed bool
 	}, 1)
-	core.run(func(message string) {
+	core.Run(func(message string) {
 		order = append(order, "provider:"+message)
-		providerExitText = core.exitMessage()
+		providerExitText = core.ExitMessage()
 	}, func() {
 		order = append(order, "manager")
 		result <- struct {
 			exitText   string
 			doneClosed bool
-		}{exitText: core.exitMessage(), doneClosed: channelClosed(core.done)}
+		}{exitText: core.ExitMessage(), doneClosed: channelClosed(core.Done)}
 	})
 
 	select {
@@ -62,13 +62,13 @@ func TestNativeProcessRunPreservesExitOrdering(t *testing.T) {
 
 func TestNativeProcessWriteLineFramesAndRejectsAfterExit(t *testing.T) {
 	stdin := &nativeProcessTestWriter{}
-	core := nativeProcessCore{
-		spec:  nativeProcessSpec{writeAfterExitError: "closed"},
+	core := Core{
+		Spec:  Spec{WriteAfterExitError: "closed"},
 		stdin: stdin,
-		done:  make(chan struct{}),
+		Done:  make(chan struct{}),
 	}
 	payload := []byte(`{"type":"prompt"}`)
-	if err := core.writeLine(payload); err != nil {
+	if err := core.WriteLine(payload); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdin.String(), string(payload)+"\n"; got != want {
@@ -78,8 +78,8 @@ func TestNativeProcessWriteLineFramesAndRejectsAfterExit(t *testing.T) {
 		t.Fatal("writeLine mutated the caller's payload")
 	}
 
-	close(core.done)
-	if err := core.writeLine(payload); err == nil || err.Error() != "closed" {
+	close(core.Done)
+	if err := core.WriteLine(payload); err == nil || err.Error() != "closed" {
 		t.Fatalf("write after exit error = %v, want closed", err)
 	}
 }

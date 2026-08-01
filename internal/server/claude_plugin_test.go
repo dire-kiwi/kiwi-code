@@ -271,7 +271,7 @@ func TestClaudePluginHeartbeatReportsPromptStart(t *testing.T) {
 	}
 	updates := make(chan activityUpdate, 8)
 	activityServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut || r.URL.Path != "/claude/activity" {
+		if r.Method != http.MethodPut || r.URL.Path != "/agents/claude/activity" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -743,7 +743,7 @@ func TestClaudePluginNamesThreadWithPiFromFirstPrompt(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if activityState != "finished" || activityAgent != codingAgentClaudeGPT || activityPath != "/claude/activity" {
+	if activityState != "finished" || activityAgent != codingAgentClaudeGPT || activityPath != "/agents/claude/activity" {
 		t.Fatalf("activity update = %q for %q at %q", activityState, activityAgent, activityPath)
 	}
 }

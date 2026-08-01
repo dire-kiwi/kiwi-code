@@ -22,9 +22,10 @@ func TestWithTerminalThreadMutationCleansUpAfterBothLocksRelease(t *testing.T) {
 			t.Fatal("action ran while holding the session lock")
 		}
 		handler.sessionMu.Unlock()
-		local := terminalMutationLocalLock(handler.terminalMutations.threadPath(item.ID, thread.ID))
-		if local.TryLock() {
-			local.Unlock()
+		if lease, ok, tryErr := handler.terminalMutations.TryLockThread(item.ID, thread.ID); tryErr != nil {
+			t.Fatalf("probe mutation lease: %v", tryErr)
+		} else if ok {
+			_ = lease.Release()
 			t.Fatal("action ran without the mutation lease")
 		}
 		return "partial", actionErr

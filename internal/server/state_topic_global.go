@@ -35,13 +35,13 @@ func (s *Server) openAgentActivityTopic(ctx context.Context, channel *stateChann
 	if s.piActivity == nil {
 		return stateTopicFailure("Agent activity is unavailable.")
 	}
-	updates, unsubscribe := s.piActivity.subscribeLatest()
+	updates, unsubscribe := s.piActivity.SubscribeLatest()
 	defer unsubscribe()
 	return runSnapshotTopic(ctx, channel, updates, snapshotTopicOptions{
 		updatesEnded:      "Agent activity updates ended.",
 		reconcileInterval: stateActivityReconcileInterval,
 	}, func() error {
-		return channel.Snapshot(s.clientPiActivities(s.piActivity.list(time.Now())))
+		return channel.Snapshot(s.clientPiActivities(s.piActivity.List(time.Now())))
 	})
 }
 
@@ -49,12 +49,12 @@ func (s *Server) openThreadUsageTopic(ctx context.Context, channel *stateChannel
 	if s.threadUsage == nil {
 		return stateTopicFailure("Thread usage is unavailable.")
 	}
-	usageSubscription, unsubscribeUsage := s.threadUsage.subscribeLatest()
+	usageSubscription, unsubscribeUsage := s.threadUsage.SubscribeLatest()
 	defer unsubscribeUsage()
 	projectUpdates, unsubscribeProjects := s.projects.SubscribeLatestChanges()
 	defer unsubscribeProjects()
 	snapshot := func() error {
-		return channel.Snapshot(s.threadUsage.snapshots(clientProjects(s.projects.List())))
+		return channel.Snapshot(s.threadUsage.Snapshots(clientProjects(s.projects.List())))
 	}
 	if err := snapshot(); err != nil {
 		return err

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/dire-kiwi/kiwi-code/internal/agent/native"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
@@ -102,8 +103,8 @@ func TestPiNativeProcessReportsValidSessionStats(t *testing.T) {
 	var sessionID string
 	var totals threadUsageTotals
 	process := &piNativeProcess{
-		nativeProcessCore: &nativeProcessCore{
-			key: piNativeProcessKey{ProjectID: "project", ThreadID: "thread"},
+		Core: &native.Core{
+			Key: piNativeProcessKey{ProjectID: "project", ThreadID: "thread"},
 		},
 		usageReporter: func(_ piNativeProcessKey, reportedSessionID string, reported threadUsageTotals) {
 			sessionID, totals = reportedSessionID, reported
@@ -129,7 +130,7 @@ func TestThreadUsageTrackerRejectsInconsistentTotals(t *testing.T) {
 	}
 	invalid := usageForTest(1, 2, 3, 4, .1)
 	invalid.TotalTokens++
-	if err := tracker.report("project", "thread", "session", invalid); err == nil {
+	if err := tracker.Report("project", "thread", "session", invalid); err == nil {
 		t.Fatal("inconsistent total was accepted")
 	}
 }

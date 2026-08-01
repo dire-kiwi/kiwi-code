@@ -3,6 +3,8 @@ package server
 import (
 	"bufio"
 	"context"
+	"github.com/dire-kiwi/kiwi-code/internal/events"
+	"github.com/dire-kiwi/kiwi-code/internal/thread"
 	"io"
 	"os/exec"
 	"strings"
@@ -364,9 +366,10 @@ func tmuxWatchStopped(watch *tmuxSessionWatch) bool {
 }
 
 func (h *terminalHandler) publishThreadStatusChanged(projectID, threadID string) {
-	if h.threadStatusChanged != nil {
-		h.threadStatusChanged(projectID, threadID)
-	}
+	h.stateChanges.Publish(events.Invalidation{
+		Topic: stateTopicThreadStatus,
+		Key:   thread.Key{ProjectID: projectID, ThreadID: threadID},
+	})
 }
 
 // publishTmuxSessionChanged invalidates thread status after a tmux event.
@@ -378,7 +381,5 @@ func (h *terminalHandler) publishTmuxSessionChanged(watch *tmuxSessionWatch) {
 }
 
 func (h *terminalHandler) tmuxCommandContext(ctx context.Context, args ...string) *exec.Cmd {
-	command := exec.CommandContext(ctx, h.tmuxPath, h.tmuxCommandArguments(args...)...)
-	command.Env = tmuxEnvironment()
-	return command
+	return h.tmuxClient().CommandContext(ctx, args...)
 }

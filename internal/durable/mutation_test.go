@@ -1,4 +1,4 @@
-package server
+package durable
 
 import (
 	"errors"
@@ -11,8 +11,8 @@ import (
 
 func TestTerminalMutationLockSerializesSameThreadAcrossManagers(t *testing.T) {
 	dataDirectory := t.TempDir()
-	firstManager := newTerminalMutationManager(dataDirectory)
-	secondManager := newTerminalMutationManager(dataDirectory)
+	firstManager := NewMutationManager(dataDirectory)
+	secondManager := NewMutationManager(dataDirectory)
 
 	firstLease, err := firstManager.LockThread("project", "thread")
 	if err != nil {
@@ -20,7 +20,7 @@ func TestTerminalMutationLockSerializesSameThreadAcrossManagers(t *testing.T) {
 	}
 
 	attempted := make(chan struct{})
-	acquired := make(chan *terminalMutationLease, 1)
+	acquired := make(chan *MutationLease, 1)
 	errs := make(chan error, 1)
 	go func() {
 		close(attempted)
@@ -60,8 +60,8 @@ func TestTerminalMutationLockSerializesSameThreadAcrossManagers(t *testing.T) {
 
 func TestTerminalMutationLockAllowsDifferentThreads(t *testing.T) {
 	dataDirectory := t.TempDir()
-	firstManager := newTerminalMutationManager(dataDirectory)
-	secondManager := newTerminalMutationManager(dataDirectory)
+	firstManager := NewMutationManager(dataDirectory)
+	secondManager := NewMutationManager(dataDirectory)
 
 	firstLease, err := firstManager.LockThread("project", "thread-one")
 	if err != nil {
@@ -74,7 +74,7 @@ func TestTerminalMutationLockAllowsDifferentThreads(t *testing.T) {
 	}()
 
 	type lockResult struct {
-		lease *terminalMutationLease
+		lease *MutationLease
 		err   error
 	}
 	result := make(chan lockResult, 1)
@@ -97,7 +97,7 @@ func TestTerminalMutationLockAllowsDifferentThreads(t *testing.T) {
 }
 
 func TestTerminalMutationLockUsesSafePersistentPath(t *testing.T) {
-	manager := newTerminalMutationManager(t.TempDir())
+	manager := NewMutationManager(t.TempDir())
 	projectID := "../../project/with/slashes"
 	threadID := "../thread/with/slashes"
 
@@ -134,7 +134,7 @@ func TestTerminalMutationLockUsesSafePersistentPath(t *testing.T) {
 }
 
 func TestTerminalMutationLockValidatesIdentities(t *testing.T) {
-	manager := newTerminalMutationManager(t.TempDir())
+	manager := NewMutationManager(t.TempDir())
 
 	if _, err := manager.LockThread("", "thread"); err == nil {
 		t.Fatal("expected an empty project ID to be rejected")
@@ -145,7 +145,7 @@ func TestTerminalMutationLockValidatesIdentities(t *testing.T) {
 }
 
 func TestTerminalMutationLockPermissionsAndDoubleRelease(t *testing.T) {
-	manager := newTerminalMutationManager(t.TempDir())
+	manager := NewMutationManager(t.TempDir())
 	path := manager.threadPath("project", "thread")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("create permissive mutation directory: %v", err)
@@ -182,8 +182,8 @@ func TestTerminalMutationLockPermissionsAndDoubleRelease(t *testing.T) {
 	if err := lease.Release(); err != nil {
 		t.Fatalf("release mutation lease: %v", err)
 	}
-	if err := lease.Release(); !errors.Is(err, errTerminalMutationLeaseReleased) {
-		t.Fatalf("second release error = %v, want %v", err, errTerminalMutationLeaseReleased)
+	if err := lease.Release(); !errors.Is(err, errMutationLeaseReleased) {
+		t.Fatalf("second release error = %v, want %v", err, errMutationLeaseReleased)
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("mutation lock was removed on release: %v", err)

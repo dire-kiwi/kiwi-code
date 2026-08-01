@@ -259,7 +259,7 @@ done
 		t.Fatal("a second native Claude process was started for the same thread")
 	}
 
-	subscription := process.events.Subscribe()
+	subscription := process.Events.Subscribe()
 	defer subscription.Close()
 
 	// The init event may already have been published before this subscription
@@ -342,7 +342,7 @@ done
 		t.Fatal("native Claude restart reused the stopped process")
 	}
 	select {
-	case <-original.done:
+	case <-original.Done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("original native Claude process did not stop during restart")
 	}
@@ -388,7 +388,7 @@ done
 		t.Fatal(err)
 	}
 	select {
-	case <-process.done:
+	case <-process.Done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("native Claude process did not stop with its thread")
 	}

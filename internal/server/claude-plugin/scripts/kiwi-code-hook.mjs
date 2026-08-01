@@ -37,7 +37,7 @@ function codingAgent() {
 }
 
 function activityEndpoint() {
-  return codingAgent() === 'codex' ? 'codex' : 'claude'
+  return `agents/${codingAgent() === 'codex' ? 'codex' : 'claude'}`
 }
 
 function stateDirectory() {

@@ -20,6 +20,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/dire-kiwi/kiwi-code/internal/agent/native"
+	"github.com/dire-kiwi/kiwi-code/internal/datadir"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
 	"github.com/gorilla/websocket"
 )
@@ -27,7 +29,7 @@ import (
 var piNativeWebSocketSequence atomic.Uint64
 
 const (
-	piNativeSessionDirectoryName    = "pi-native-sessions"
+	piNativeSessionDirectoryName    = datadir.PiNativeSessionsDirectoryName
 	piNativeActiveSessionMarkerName = ".active-session"
 	piNativeMaxClientMessage        = 1 << 20
 	piNativeMaxCompactPrompt        = 64 << 10
@@ -37,7 +39,7 @@ const (
 )
 
 type piNativeManager struct {
-	mu               sync.Mutex
+	native.ManagerCore[*piNativeProcess]
 	dataDirectory    string
 	piPath           string
 	extensionPaths   []string
@@ -45,7 +47,6 @@ type piNativeManager struct {
 	figmaExtension   string
 	figmaMCPURL      func(project.Project) string
 	agentToken       string
-	processes        map[piNativeProcessKey]*piNativeProcess
 	history          map[piNativeProcessKey]*piNativeProcess
 	contextWatchOnce sync.Once
 	usageReporter    func(piNativeProcessKey, string, threadUsageTotals)
@@ -53,7 +54,7 @@ type piNativeManager struct {
 }
 
 type piNativeProcess struct {
-	*nativeProcessCore
+	*native.Core
 	launchOptions    codingAgentLaunchOptions
 	sessionDirectory string
 	runMu            sync.RWMutex
@@ -63,12 +64,12 @@ type piNativeProcess struct {
 	usageReporter    func(piNativeProcessKey, string, threadUsageTotals)
 }
 
-var piProcessSpec = nativeProcessSpec{
-	displayName:         "Pi",
-	endedMessage:        "Pi session ended.",
-	unexpectedMessage:   "Pi exited unexpectedly. Reconnect to resume the saved conversation.",
-	writeAfterExitError: "native Pi process ended",
-	stopTimeout:         piNativeStopTimeout,
+var piProcessSpec = native.Spec{
+	DisplayName:         "Pi",
+	EndedMessage:        "Pi session ended.",
+	UnexpectedMessage:   "Pi exited unexpectedly. Reconnect to resume the saved conversation.",
+	WriteAfterExitError: "native Pi process ended",
+	StopTimeout:         piNativeStopTimeout,
 }
 
 type piNativeRPCImage struct {
@@ -160,7 +161,7 @@ func newPiNativeManager(
 		extensionErr:   extensionErr,
 		figmaExtension: figmaExtension,
 		agentToken:     agentToken,
-		processes:      make(map[piNativeProcessKey]*piNativeProcess),
+		ManagerCore:    native.NewManagerCore[*piNativeProcess](),
 		history:        make(map[piNativeProcessKey]*piNativeProcess),
 	}
 }
@@ -176,7 +177,7 @@ func (m *piNativeManager) stopOnContext(ctx context.Context) {
 	if m == nil {
 		return
 	}
-	stopNativeProcessesOnContext(ctx, &m.contextWatchOnce, m.stopAll)
+	native.StopOnContext(ctx, &m.contextWatchOnce, m.stopAll)
 }
 
 func piNativeBrowserEventCoalesceKey(payload []byte) string {
@@ -269,7 +270,7 @@ func (h *terminalHandler) servePiNative(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	subscription := process.events.SubscribeCoalesced(piNativeBrowserEventCoalesceKey)
+	subscription := process.Events.SubscribeCoalesced(piNativeBrowserEventCoalesceKey)
 	defer func() { subscription.Close() }()
 	if err := writeStatus("pi_native_ready", "Pi is ready."); err != nil {
 		logSocketEnd("ready-write-failed", err)
@@ -292,7 +293,7 @@ func (h *terminalHandler) servePiNative(w http.ResponseWriter, r *http.Request) 
 				logSocketEnd("event-write-failed", err)
 				return
 			}
-		case payload := <-peer.messages:
+		case payload := <-peer.Messages:
 			command, action, commandErr := normalizePiNativeClientMessage(payload)
 			if commandErr != nil {
 				_ = writeStatus("pi_native_error", commandErr.Error())
@@ -329,14 +330,14 @@ func (h *terminalHandler) servePiNative(w http.ResponseWriter, r *http.Request) 
 				subscription.Close()
 				process = replacement
 				launchOptions = restartOptions
-				subscription = process.events.SubscribeCoalesced(piNativeBrowserEventCoalesceKey)
+				subscription = process.Events.SubscribeCoalesced(piNativeBrowserEventCoalesceKey)
 				if err := writeStatus("pi_native_reloaded", "Pi restarted and extensions reloaded."); err != nil {
 					return
 				}
 				_ = process.refresh()
 				continue
 			}
-			if command.Type == "prompt" && h.budgetReached != nil {
+			if command.Type == "prompt" {
 				reached, _, budgetErr := h.budgetReached(item.ID, thread.ID)
 				if budgetErr != nil {
 					_ = writeStatus("pi_native_error", "Could not verify the thread usage limit.")
@@ -350,16 +351,16 @@ func (h *terminalHandler) servePiNative(w http.ResponseWriter, r *http.Request) 
 			if err := process.sendClientCommand(command); err != nil {
 				_ = writeStatus("pi_native_error", "Could not send the message to Pi.")
 			}
-		case <-process.done:
-			message := process.exitMessage()
+		case <-process.Done:
+			message := process.ExitMessage()
 			_ = writeStatus("pi_native_exit", message)
 			_ = write(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Pi native process ended"))
 			logSocketEnd("process-ended", errors.New(message))
 			return
-		case peerErr := <-peer.done:
+		case peerErr := <-peer.Done:
 			logSocketEnd("peer-ended", peerErr)
 			return
-		case <-peer.ping.C:
+		case <-peer.Ping.C:
 			if err := peer.WritePing(); err != nil {
 				logSocketEnd("ping-write-failed", err)
 				return
@@ -429,28 +430,28 @@ func (m *piNativeManager) getOrStart(
 	launchOptions.FigmaMCPURL = m.resolveFigmaMCPURL(item)
 	key := piNativeProcessKey{ProjectID: item.ID, ThreadID: thread.ID}
 
-	m.mu.Lock()
-	if current := m.processes[key]; current != nil && !channelClosed(current.done) {
-		m.mu.Unlock()
+	m.Mu.Lock()
+	if current := m.Processes[key]; current != nil && !channelClosed(current.Done) {
+		m.Mu.Unlock()
 		return current, nil
 	}
 
 	process, err := m.startProcess(key, thread, threadEndpoint, launchOptions)
 	if err != nil {
-		m.mu.Unlock()
+		m.Mu.Unlock()
 		return nil, err
 	}
-	m.processes[key] = process
+	m.Processes[key] = process
 	delete(m.history, key)
 	process.run(func() {
-		m.mu.Lock()
-		if m.processes[key] == process {
-			delete(m.processes, key)
+		m.Mu.Lock()
+		if m.Processes[key] == process {
+			delete(m.Processes, key)
 			m.history[key] = process
 		}
-		m.mu.Unlock()
+		m.Mu.Unlock()
 	})
-	m.mu.Unlock()
+	m.Mu.Unlock()
 	return process, nil
 }
 
@@ -470,23 +471,23 @@ func (m *piNativeManager) restart(
 	launchOptions.FigmaMCPURL = m.resolveFigmaMCPURL(item)
 	key := piNativeProcessKey{ProjectID: item.ID, ThreadID: thread.ID}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	current := m.processes[key]
-	if current != nil && current != expected && !channelClosed(current.done) {
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
+	current := m.Processes[key]
+	if current != nil && current != expected && !channelClosed(current.Done) {
 		// Another client already replaced the process. Reuse that replacement
 		// rather than immediately restarting it again.
 		return current, nil
 	}
-	if current == nil && expected != nil && !channelClosed(expected.done) {
+	if current == nil && expected != nil && !channelClosed(expected.Done) {
 		current = expected
 	}
 	if current != nil {
 		if err := current.stop(); err != nil {
 			return nil, fmt.Errorf("stop native Pi before restart: %w", err)
 		}
-		if m.processes[key] == current {
-			delete(m.processes, key)
+		if m.Processes[key] == current {
+			delete(m.Processes, key)
 		}
 	}
 
@@ -494,13 +495,13 @@ func (m *piNativeManager) restart(
 	if err != nil {
 		return nil, err
 	}
-	m.processes[key] = process
+	m.Processes[key] = process
 	process.run(func() {
-		m.mu.Lock()
-		if m.processes[key] == process {
-			delete(m.processes, key)
+		m.Mu.Lock()
+		if m.Processes[key] == process {
+			delete(m.Processes, key)
 		}
-		m.mu.Unlock()
+		m.Mu.Unlock()
 	})
 	return process, nil
 }
@@ -582,20 +583,20 @@ func (m *piNativeManager) startProcess(
 			"PI_SKIP_VERSION_CHECK=1",
 		)...,
 	)
-	core, stdout, stderr, err := startNativeCommand(key, piProcessSpec, command)
+	core, stdout, stderr, err := native.StartCommand(key, piProcessSpec, command)
 	if err != nil {
 		return nil, err
 	}
 
 	process := &piNativeProcess{
-		nativeProcessCore: core,
-		launchOptions:     launchOptions,
-		sessionDirectory:  sessionDirectory,
-		runs:              make(map[uint64]piNativeRunSnapshot),
-		usageReporter:     m.usageReporter,
+		Core:             core,
+		launchOptions:    launchOptions,
+		sessionDirectory: sessionDirectory,
+		runs:             make(map[uint64]piNativeRunSnapshot),
+		usageReporter:    m.usageReporter,
 	}
-	process.readOutput(stdout, process.publishPiEvent)
-	process.readDiagnostics(stderr)
+	process.ReadOutput(stdout, process.publishPiEvent)
+	process.ReadDiagnostics(stderr)
 	return process, nil
 }
 
@@ -866,7 +867,7 @@ func validPiNativePathSegment(value string) error {
 
 func (p *piNativeProcess) publishPiEvent(payload []byte) {
 	if !json.Valid(payload) {
-		log.Printf("ignore malformed native Pi event: project=%q thread=%q", p.key.ProjectID, p.key.ThreadID)
+		log.Printf("ignore malformed native Pi event: project=%q thread=%q", p.Key.ProjectID, p.Key.ThreadID)
 		return
 	}
 	p.trackRunEvent(payload)
@@ -889,7 +890,7 @@ func (p *piNativeProcess) publishPiEvent(payload []byte) {
 		}
 		if json.Unmarshal(event.Data, &session) == nil && session.SessionFile != "" {
 			if err := rememberPiNativeActiveSession(p.sessionDirectory, session.SessionFile); err != nil {
-				log.Printf("remember native Pi session: project=%q thread=%q error=%v", p.key.ProjectID, p.key.ThreadID, err)
+				log.Printf("remember native Pi session: project=%q thread=%q error=%v", p.Key.ProjectID, p.Key.ThreadID, err)
 			}
 		}
 	}
@@ -901,9 +902,9 @@ func (p *piNativeProcess) publishPiEvent(payload []byte) {
 		if event.Success {
 			history, err := piNativeDisplayHistoryEvent(event.Data)
 			if err != nil {
-				log.Printf("build native Pi display history: project=%q thread=%q error=%v", p.key.ProjectID, p.key.ThreadID, err)
+				log.Printf("build native Pi display history: project=%q thread=%q error=%v", p.Key.ProjectID, p.Key.ThreadID, err)
 			} else {
-				p.events.Publish(history)
+				p.Events.Publish(history)
 			}
 		}
 		// Older Pi versions may reject get_entries. Suppress that private probe
@@ -911,7 +912,7 @@ func (p *piNativeProcess) publishPiEvent(payload []byte) {
 		return
 	}
 
-	p.events.Publish(bytes.Clone(payload))
+	p.Events.Publish(bytes.Clone(payload))
 	switch event.Type {
 	case "message_end":
 		_ = errors.Join(
@@ -1087,7 +1088,7 @@ func (p *piNativeProcess) reportSessionUsage(data json.RawMessage) {
 	if !validThreadUsageTotals(totals) {
 		return
 	}
-	p.usageReporter(p.key, stats.SessionID, totals)
+	p.usageReporter(p.Key, stats.SessionID, totals)
 }
 
 func (p *piNativeProcess) startPrompt(message string) (piNativeRunSnapshot, error) {
@@ -1287,7 +1288,7 @@ func (p *piNativeProcess) pruneRunsLocked() {
 }
 
 func (p *piNativeProcess) run(onExit func()) {
-	p.nativeProcessCore.run(p.failActiveRun, onExit)
+	p.Core.Run(p.failActiveRun, onExit)
 }
 
 func (p *piNativeProcess) send(command piNativeRPCCommand) error {
@@ -1295,16 +1296,16 @@ func (p *piNativeProcess) send(command piNativeRPCCommand) error {
 	if err != nil {
 		return err
 	}
-	return p.writeLine(payload)
+	return p.WriteLine(payload)
 }
 
 func (p *piNativeProcess) requestSnapshot(command string) error {
-	id := fmt.Sprintf("kiwi-code-%s-%d", strings.TrimPrefix(command, "get_"), p.request.Add(1))
+	id := fmt.Sprintf("kiwi-code-%s-%d", strings.TrimPrefix(command, "get_"), p.Request.Add(1))
 	return p.send(piNativeRPCCommand{ID: id, Type: command})
 }
 
 func (p *piNativeProcess) sendClientCommand(command piNativeRPCCommand) error {
-	command.ID = fmt.Sprintf("kiwi-code-client-%s-%d", strings.ReplaceAll(command.Type, "_", "-"), p.request.Add(1))
+	command.ID = fmt.Sprintf("kiwi-code-client-%s-%d", strings.ReplaceAll(command.Type, "_", "-"), p.Request.Add(1))
 	return p.send(command)
 }
 
@@ -1319,42 +1320,30 @@ func (p *piNativeProcess) refresh() error {
 
 func (p *piNativeProcess) exitMessage() string {
 	if p == nil {
-		return piProcessSpec.endedMessage
+		return piProcessSpec.EndedMessage
 	}
-	return p.nativeProcessCore.exitMessage()
+	return p.Core.ExitMessage()
 }
 
 func (p *piNativeProcess) stop() error {
 	if p == nil {
 		return nil
 	}
-	return p.nativeProcessCore.stop()
+	return p.Core.Stop()
 }
 
 func (m *piNativeManager) stopThread(projectID, threadID string) error {
 	if m == nil {
 		return nil
 	}
-	key := piNativeProcessKey{ProjectID: projectID, ThreadID: threadID}
-	m.mu.Lock()
-	process := m.processes[key]
-	m.mu.Unlock()
-	if process == nil {
-		return nil
-	}
-	return process.stop()
+	return m.StopThread(piNativeProcessKey{ProjectID: projectID, ThreadID: threadID}, (*piNativeProcess).Stop)
 }
 
 func (m *piNativeManager) stopProject(projectID string) error {
 	if m == nil {
 		return nil
 	}
-	m.mu.Lock()
-	processes := collectNativeProcesses(m.processes, func(key nativeProcessKey) bool {
-		return key.ProjectID == projectID
-	})
-	m.mu.Unlock()
-	return stopNativeProcessSet(processes, (*piNativeProcess).stop)
+	return m.StopProject(projectID, (*piNativeProcess).Stop)
 }
 
 func (m *piNativeManager) removeThread(projectID, threadID string) error {
@@ -1370,18 +1359,13 @@ func (m *piNativeManager) removeThread(projectID, threadID string) error {
 	if err := validPiNativePathSegment(threadID); err != nil {
 		return err
 	}
-	stopErr := m.stopThread(projectID, threadID)
-	m.mu.Lock()
-	delete(m.processes, piNativeProcessKey{ProjectID: projectID, ThreadID: threadID})
-	delete(m.history, piNativeProcessKey{ProjectID: projectID, ThreadID: threadID})
-	m.mu.Unlock()
-	removeErr := os.RemoveAll(filepath.Join(
-		m.dataDirectory,
-		piNativeSessionDirectoryName,
-		projectID,
-		threadID,
-	))
-	return errors.Join(stopErr, removeErr)
+	key := piNativeProcessKey{ProjectID: projectID, ThreadID: threadID}
+	return m.Remove(
+		key,
+		filepath.Join(m.dataDirectory, piNativeSessionDirectoryName),
+		(*piNativeProcess).Stop,
+		func() { delete(m.history, key) },
+	)
 }
 
 func (m *piNativeManager) removeProject(projectID string) error {
@@ -1391,34 +1375,25 @@ func (m *piNativeManager) removeProject(projectID string) error {
 	if err := validPiNativePathSegment(projectID); err != nil {
 		return err
 	}
-	stopErr := m.stopProject(projectID)
-	m.mu.Lock()
-	for key := range m.history {
-		if key.ProjectID == projectID {
-			delete(m.history, key)
-		}
-	}
-	m.mu.Unlock()
-	removeErr := os.RemoveAll(filepath.Join(
-		m.dataDirectory,
-		piNativeSessionDirectoryName,
+	return m.RemoveProject(
 		projectID,
-	))
-	return errors.Join(stopErr, removeErr)
+		filepath.Join(m.dataDirectory, piNativeSessionDirectoryName),
+		(*piNativeProcess).Stop,
+		func() {
+			for key := range m.history {
+				if key.ProjectID == projectID {
+					delete(m.history, key)
+				}
+			}
+		},
+	)
 }
 
 func (m *piNativeManager) stopAll() {
 	if m == nil {
 		return
 	}
-	m.mu.Lock()
-	processes := collectNativeProcesses(m.processes, func(nativeProcessKey) bool { return true })
-	m.mu.Unlock()
-	for _, process := range processes {
-		if err := process.stop(); err != nil {
-			log.Printf("stop native Pi: project=%q thread=%q error=%v", process.key.ProjectID, process.key.ThreadID, err)
-		}
-	}
+	m.StopAll("Pi", (*piNativeProcess).Stop, func(p *piNativeProcess) native.Key { return p.Key })
 }
 
 func normalizePiNativeClientMessage(payload []byte) (piNativeRPCCommand, piNativeClientAction, error) {

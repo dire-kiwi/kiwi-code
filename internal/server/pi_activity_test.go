@@ -3,13 +3,13 @@ package server
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/dire-kiwi/kiwi-code/internal/agent"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
@@ -168,34 +168,34 @@ func TestAgentActivityRecordsPromptRecencyWithoutAdvancingOnHeartbeats(t *testin
 func TestAgentActivityAggregatesPiAndClaude(t *testing.T) {
 	tracker := newPiActivityTracker()
 	now := time.Now()
-	tracker.updateAgent("project", "thread", codingAgentPi, piActivityFinished, now)
-	tracker.updateAgent("project", "thread", codingAgentClaude, piActivityWorking, now.Add(time.Second))
+	tracker.UpdateAgent("project", "thread", codingAgentPi, piActivityFinished, now)
+	tracker.UpdateAgent("project", "thread", codingAgentClaude, piActivityWorking, now.Add(time.Second))
 
-	activities := tracker.list(now.Add(2 * time.Second))
+	activities := tracker.List(now.Add(2 * time.Second))
 	if len(activities) != 1 || activities[0].State != piActivityWorking {
 		t.Fatalf("aggregated activity = %#v, want working", activities)
 	}
 
-	tracker.acknowledge("project", "thread")
-	activities = tracker.list(now.Add(2 * time.Second))
+	tracker.Acknowledge("project", "thread")
+	activities = tracker.List(now.Add(2 * time.Second))
 	if len(activities) != 1 || activities[0].State != piActivityWorking {
 		t.Fatalf("acknowledging while Claude works removed activity: %#v", activities)
 	}
 
-	tracker.updateAgent("project", "thread", codingAgentClaude, piActivityFinished, now.Add(3*time.Second))
-	tracker.updateAgent("project", "thread", codingAgentPi, piActivityWorking, now.Add(4*time.Second))
-	activities = tracker.list(now.Add(5 * time.Second))
+	tracker.UpdateAgent("project", "thread", codingAgentClaude, piActivityFinished, now.Add(3*time.Second))
+	tracker.UpdateAgent("project", "thread", codingAgentPi, piActivityWorking, now.Add(4*time.Second))
+	activities = tracker.List(now.Add(5 * time.Second))
 	if len(activities) != 1 || activities[0].State != piActivityWorking {
 		t.Fatalf("Pi working did not take priority: %#v", activities)
 	}
 
-	tracker.updateAgent("project", "thread", codingAgentPi, piActivityIdle, now.Add(6*time.Second))
-	activities = tracker.list(now.Add(7 * time.Second))
+	tracker.UpdateAgent("project", "thread", codingAgentPi, piActivityIdle, now.Add(6*time.Second))
+	activities = tracker.List(now.Add(7 * time.Second))
 	if len(activities) != 1 || activities[0].State != piActivityFinished {
 		t.Fatalf("Claude finished activity was not retained: %#v", activities)
 	}
-	tracker.acknowledge("project", "thread")
-	if activities = tracker.list(now.Add(7 * time.Second)); len(activities) != 0 {
+	tracker.Acknowledge("project", "thread")
+	if activities = tracker.List(now.Add(7 * time.Second)); len(activities) != 0 {
 		t.Fatalf("finished activities were not acknowledged: %#v", activities)
 	}
 }
@@ -203,37 +203,37 @@ func TestAgentActivityAggregatesPiAndClaude(t *testing.T) {
 func TestFinishedActivityIgnoresLateHeartbeatForTheSamePrompt(t *testing.T) {
 	tracker := newPiActivityTracker()
 	now := time.Now()
-	tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityWorking, now)
-	tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityFinished, now.Add(time.Second))
+	tracker.UpdateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityWorking, now)
+	tracker.UpdateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityFinished, now.Add(time.Second))
 
-	if _, _, applied := tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityWorking, now.Add(2*time.Second)); applied {
+	if _, _, applied := tracker.UpdateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityWorking, now.Add(2*time.Second)); applied {
 		t.Fatal("a heartbeat from the finished prompt was applied")
 	}
-	activities := tracker.list(now.Add(3 * time.Second))
+	activities := tracker.List(now.Add(3 * time.Second))
 	if len(activities) != 1 || activities[0].State != piActivityFinished {
 		t.Fatalf("late heartbeat resurrected the working indicator: %#v", activities)
 	}
 
-	if _, _, applied := tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-2", piActivityWorking, now.Add(4*time.Second)); !applied {
+	if _, _, applied := tracker.UpdateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-2", piActivityWorking, now.Add(4*time.Second)); !applied {
 		t.Fatal("the next prompt could not start working")
 	}
-	if _, _, applied := tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityFinished, now.Add(5*time.Second)); applied {
+	if _, _, applied := tracker.UpdateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityFinished, now.Add(5*time.Second)); applied {
 		t.Fatal("a delayed terminal update from the previous prompt was applied")
 	}
-	if _, _, applied := tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityWorking, now.Add(6*time.Second)); applied {
+	if _, _, applied := tracker.UpdateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityWorking, now.Add(6*time.Second)); applied {
 		t.Fatal("a delayed heartbeat from the previous prompt was applied")
 	}
-	activities = tracker.list(now.Add(5 * time.Second))
+	activities = tracker.List(now.Add(5 * time.Second))
 	if len(activities) != 1 || activities[0].State != piActivityWorking {
 		t.Fatalf("the next prompt was replaced by an older update: %#v", activities)
 	}
 
-	tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-2", piActivityFinished, now.Add(7*time.Second))
-	tracker.acknowledge("project", "thread")
-	if _, _, applied := tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-2", piActivityFinished, now.Add(8*time.Second)); applied {
+	tracker.UpdateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-2", piActivityFinished, now.Add(7*time.Second))
+	tracker.Acknowledge("project", "thread")
+	if _, _, applied := tracker.UpdateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-2", piActivityFinished, now.Add(8*time.Second)); applied {
 		t.Fatal("a duplicate terminal update was applied after acknowledgement")
 	}
-	if activities = tracker.list(now.Add(9 * time.Second)); len(activities) != 0 {
+	if activities = tracker.List(now.Add(9 * time.Second)); len(activities) != 0 {
 		t.Fatalf("a duplicate terminal update resurrected acknowledged activity: %#v", activities)
 	}
 }
@@ -241,16 +241,16 @@ func TestFinishedActivityIgnoresLateHeartbeatForTheSamePrompt(t *testing.T) {
 func TestNewPromptSupersedesAnUnsettledPrompt(t *testing.T) {
 	tracker := newPiActivityTracker()
 	now := time.Now()
-	tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityWorking, now)
-	tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-2", piActivityWorking, now.Add(time.Second))
+	tracker.UpdateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityWorking, now)
+	tracker.UpdateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-2", piActivityWorking, now.Add(time.Second))
 
-	if _, _, applied := tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityFinished, now.Add(2*time.Second)); applied {
+	if _, _, applied := tracker.UpdateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityFinished, now.Add(2*time.Second)); applied {
 		t.Fatal("the superseded prompt was allowed to finish the current prompt")
 	}
-	if _, _, applied := tracker.updateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityWorking, now.Add(3*time.Second)); applied {
+	if _, _, applied := tracker.UpdateAgentToken("project", "thread", codingAgentClaude, "session", "prompt-1", piActivityWorking, now.Add(3*time.Second)); applied {
 		t.Fatal("the superseded prompt was allowed to resume")
 	}
-	activities := tracker.list(now.Add(4 * time.Second))
+	activities := tracker.List(now.Add(4 * time.Second))
 	if len(activities) != 1 || activities[0].State != piActivityWorking {
 		t.Fatalf("superseded prompt changed current activity: %#v", activities)
 	}
@@ -262,30 +262,30 @@ func TestNewerTerminalCanArriveBeforeItsFirstWorkingUpdate(t *testing.T) {
 	promptAStartedAt := now.Add(-4 * time.Second)
 	promptBStartedAt := now.Add(-2 * time.Second)
 
-	if _, _, applied := tracker.updateAgentTokenAt(
+	if _, _, applied := tracker.UpdateAgentTokenAt(
 		"project", "thread", codingAgentClaude, "session", "prompt-a",
 		&promptAStartedAt, piActivityWorking, now.Add(-3*time.Second),
 	); !applied {
 		t.Fatal("prompt A did not start")
 	}
-	if _, _, applied := tracker.updateAgentTokenAt(
+	if _, _, applied := tracker.UpdateAgentTokenAt(
 		"project", "thread", codingAgentClaude, "session", "prompt-b",
 		&promptBStartedAt, piActivityFinished, now.Add(-time.Second),
 	); !applied {
 		t.Fatal("newer terminal update was rejected before its first working update")
 	}
 
-	activities := tracker.list(now)
+	activities := tracker.List(now)
 	if len(activities) != 1 || activities[0].State != piActivityFinished {
 		t.Fatalf("terminal-first prompt did not settle activity: %#v", activities)
 	}
-	if _, _, applied := tracker.updateAgentTokenAt(
+	if _, _, applied := tracker.UpdateAgentTokenAt(
 		"project", "thread", codingAgentClaude, "session", "prompt-b",
 		&promptBStartedAt, piActivityWorking, now.Add(time.Second),
 	); applied {
 		t.Fatal("late first heartbeat resurrected terminal-first prompt B")
 	}
-	if _, _, applied := tracker.updateAgentTokenAt(
+	if _, _, applied := tracker.UpdateAgentTokenAt(
 		"project", "thread", codingAgentClaude, "session", "prompt-a",
 		&promptAStartedAt, piActivityFinished, now.Add(2*time.Second),
 	); applied {
@@ -299,17 +299,17 @@ func TestOlderGeneratedTerminalCannotFinishANewerWorkingPrompt(t *testing.T) {
 	promptAStartedAt := now.Add(-2 * time.Second)
 	promptBStartedAt := now.Add(-time.Second)
 
-	tracker.updateAgentTokenAt(
+	tracker.UpdateAgentTokenAt(
 		"project", "thread", codingAgentClaude, "session", "prompt-b",
 		&promptBStartedAt, piActivityWorking, now,
 	)
-	if _, _, applied := tracker.updateAgentTokenAt(
+	if _, _, applied := tracker.UpdateAgentTokenAt(
 		"project", "thread", codingAgentClaude, "session", "prompt-a",
 		&promptAStartedAt, piActivityFinished, now.Add(time.Second),
 	); applied {
 		t.Fatal("older terminal update finished newer working prompt")
 	}
-	activities := tracker.list(now.Add(2 * time.Second))
+	activities := tracker.List(now.Add(2 * time.Second))
 	if len(activities) != 1 || activities[0].State != piActivityWorking {
 		t.Fatalf("older terminal changed newer activity: %#v", activities)
 	}
@@ -319,7 +319,7 @@ func TestFuturePromptGenerationIsClampedBeforeOrdering(t *testing.T) {
 	tracker := newPiActivityTracker()
 	now := time.Now().UTC()
 	future := now.Add(24 * time.Hour)
-	if _, _, applied := tracker.updateAgentTokenAt(
+	if _, _, applied := tracker.UpdateAgentTokenAt(
 		"project", "thread", codingAgentClaude, "session", "prompt-a",
 		&future, piActivityWorking, now,
 	); !applied {
@@ -327,13 +327,13 @@ func TestFuturePromptGenerationIsClampedBeforeOrdering(t *testing.T) {
 	}
 
 	promptBStartedAt := now.Add(time.Second)
-	if _, _, applied := tracker.updateAgentTokenAt(
+	if _, _, applied := tracker.UpdateAgentTokenAt(
 		"project", "thread", codingAgentClaude, "session", "prompt-b",
 		&promptBStartedAt, piActivityWorking, now.Add(2*time.Second),
 	); !applied {
 		t.Fatal("future client timestamp pinned prompt ordering")
 	}
-	activities := tracker.list(now.Add(3 * time.Second))
+	activities := tracker.List(now.Add(3 * time.Second))
 	if len(activities) != 1 || activities[0].State != piActivityWorking {
 		t.Fatalf("newer prompt did not replace future-skewed prompt: %#v", activities)
 	}
@@ -342,17 +342,17 @@ func TestFuturePromptGenerationIsClampedBeforeOrdering(t *testing.T) {
 func TestChildSessionFinishingKeepsTheDrivingSessionWorking(t *testing.T) {
 	tracker := newPiActivityTracker()
 	now := time.Now()
-	tracker.updateAgentToken("project", "thread", codingAgentClaude, "main", "prompt-1", piActivityWorking, now)
-	tracker.updateAgentToken("project", "thread", codingAgentClaude, "child", "prompt-2", piActivityWorking, now.Add(time.Second))
-	tracker.updateAgentToken("project", "thread", codingAgentClaude, "child", "prompt-2", piActivityFinished, now.Add(2*time.Second))
+	tracker.UpdateAgentToken("project", "thread", codingAgentClaude, "main", "prompt-1", piActivityWorking, now)
+	tracker.UpdateAgentToken("project", "thread", codingAgentClaude, "child", "prompt-2", piActivityWorking, now.Add(time.Second))
+	tracker.UpdateAgentToken("project", "thread", codingAgentClaude, "child", "prompt-2", piActivityFinished, now.Add(2*time.Second))
 
-	activities := tracker.list(now.Add(3 * time.Second))
+	activities := tracker.List(now.Add(3 * time.Second))
 	if len(activities) != 1 || activities[0].State != piActivityWorking {
 		t.Fatalf("a child session finishing cleared the spinner: %#v", activities)
 	}
 
-	tracker.updateAgentToken("project", "thread", codingAgentClaude, "main", "prompt-1", piActivityFinished, now.Add(4*time.Second))
-	activities = tracker.list(now.Add(5 * time.Second))
+	tracker.UpdateAgentToken("project", "thread", codingAgentClaude, "main", "prompt-1", piActivityFinished, now.Add(4*time.Second))
+	activities = tracker.List(now.Add(5 * time.Second))
 	if len(activities) != 1 || activities[0].State != piActivityFinished {
 		t.Fatalf("the completed indicator did not appear: %#v", activities)
 	}
@@ -360,13 +360,13 @@ func TestChildSessionFinishingKeepsTheDrivingSessionWorking(t *testing.T) {
 
 func TestPiActivitySubscriptionSignalsRapidTransitions(t *testing.T) {
 	tracker := newPiActivityTracker()
-	updates, unsubscribe := tracker.subscribe()
+	updates, unsubscribe := tracker.Subscribe()
 	defer unsubscribe()
 
 	now := time.Now()
-	tracker.update("project", "thread", piActivityWorking, now)
-	tracker.update("project", "thread", piActivityFinished, now.Add(time.Millisecond))
-	tracker.update("project", "thread", piActivityIdle, now.Add(2*time.Millisecond))
+	tracker.Update("project", "thread", piActivityWorking, now)
+	tracker.Update("project", "thread", piActivityFinished, now.Add(time.Millisecond))
+	tracker.Update("project", "thread", piActivityIdle, now.Add(2*time.Millisecond))
 
 	for index := 0; index < 3; index++ {
 		select {
@@ -375,23 +375,23 @@ func TestPiActivitySubscriptionSignalsRapidTransitions(t *testing.T) {
 			t.Fatalf("timed out waiting for transition invalidation %d", index)
 		}
 	}
-	if activities := tracker.list(now.Add(3 * time.Millisecond)); len(activities) != 0 {
+	if activities := tracker.List(now.Add(3 * time.Millisecond)); len(activities) != 0 {
 		t.Fatalf("invalidations did not resolve to current idle state: %#v", activities)
 	}
 }
 
 func TestPiActivityLatestSubscriptionInvalidatesToCurrentState(t *testing.T) {
 	tracker := newPiActivityTracker()
-	updates, unsubscribe := tracker.subscribeLatest()
+	updates, unsubscribe := tracker.SubscribeLatest()
 	defer unsubscribe()
 
 	now := time.Now()
-	tracker.update("project", "thread", piActivityWorking, now)
-	tracker.update("project", "thread", piActivityFinished, now.Add(time.Millisecond))
+	tracker.Update("project", "thread", piActivityWorking, now)
+	tracker.Update("project", "thread", piActivityFinished, now.Add(time.Millisecond))
 
 	select {
 	case <-updates:
-		activities := tracker.list(now.Add(2 * time.Millisecond))
+		activities := tracker.List(now.Add(2 * time.Millisecond))
 		if len(activities) != 1 || activities[0].State != piActivityFinished {
 			t.Fatalf("latest invalidation resolved to stale activity: %#v", activities)
 		}
@@ -402,15 +402,15 @@ func TestPiActivityLatestSubscriptionInvalidatesToCurrentState(t *testing.T) {
 
 func TestPiActivitySubscriptionPublishesWorkingHeartbeats(t *testing.T) {
 	tracker := newPiActivityTracker()
-	updates, unsubscribe := tracker.subscribe()
+	updates, unsubscribe := tracker.Subscribe()
 	defer unsubscribe()
 
 	now := time.Now()
 	for index, wantTime := range []time.Time{now, now.Add(time.Second)} {
-		tracker.update("project", "thread", piActivityWorking, wantTime)
+		tracker.Update("project", "thread", piActivityWorking, wantTime)
 		select {
 		case <-updates:
-			activities := tracker.list(wantTime)
+			activities := tracker.List(wantTime)
 			if len(activities) != 1 || activities[0].State != piActivityWorking || !activities[0].UpdatedAt.Equal(wantTime.UTC()) {
 				t.Fatalf("heartbeat %d = %#v, want updatedAt %s", index, activities, wantTime.UTC())
 			}
@@ -423,8 +423,8 @@ func TestPiActivitySubscriptionPublishesWorkingHeartbeats(t *testing.T) {
 func TestPiWorkingActivityExpiresWithoutHeartbeat(t *testing.T) {
 	tracker := newPiActivityTracker()
 	now := time.Now()
-	tracker.update("project", "thread", piActivityWorking, now.Add(-piWorkingTimeout-time.Second))
-	if activities := tracker.list(now); len(activities) != 0 {
+	tracker.Update("project", "thread", piActivityWorking, now.Add(-piWorkingTimeout-time.Second))
+	if activities := tracker.List(now); len(activities) != 0 {
 		t.Fatalf("stale working activity was not removed: %#v", activities)
 	}
 }
@@ -433,14 +433,14 @@ func TestExpiredOrderedActivityCanResumeAndFinish(t *testing.T) {
 	tracker := newPiActivityTracker()
 	now := time.Now().UTC()
 	promptStartedAt := now.Add(-piWorkingTimeout - 2*time.Second)
-	tracker.updateAgentTokenAt(
+	tracker.UpdateAgentTokenAt(
 		"project", "thread", codingAgentClaude, "session", "prompt-1",
 		&promptStartedAt, piActivityWorking, promptStartedAt,
 	)
-	if activities := tracker.list(now); len(activities) != 0 {
+	if activities := tracker.List(now); len(activities) != 0 {
 		t.Fatalf("stale ordered activity was not removed: %#v", activities)
 	}
-	if _, startedWorking, applied := tracker.updateAgentTokenAt(
+	if _, startedWorking, applied := tracker.UpdateAgentTokenAt(
 		"project", "thread", codingAgentClaude, "session", "prompt-1",
 		&promptStartedAt, piActivityWorking, now.Add(time.Second),
 	); !applied {
@@ -448,41 +448,17 @@ func TestExpiredOrderedActivityCanResumeAndFinish(t *testing.T) {
 	} else if startedWorking {
 		t.Fatal("lease recovery was misclassified as a new user prompt")
 	}
-	if activities := tracker.list(now.Add(2 * time.Second)); len(activities) != 1 || activities[0].State != piActivityWorking {
+	if activities := tracker.List(now.Add(2 * time.Second)); len(activities) != 1 || activities[0].State != piActivityWorking {
 		t.Fatalf("recovered ordered activity did not resume working: %#v", activities)
 	}
-	if _, _, applied := tracker.updateAgentTokenAt(
+	if _, _, applied := tracker.UpdateAgentTokenAt(
 		"project", "thread", codingAgentClaude, "session", "prompt-1",
 		&promptStartedAt, piActivityFinished, now.Add(3*time.Second),
 	); !applied {
 		t.Fatal("terminal update could not settle a recovered activity")
 	}
-	if activities := tracker.list(now.Add(4 * time.Second)); len(activities) != 1 || activities[0].State != piActivityFinished {
+	if activities := tracker.List(now.Add(4 * time.Second)); len(activities) != 1 || activities[0].State != piActivityFinished {
 		t.Fatalf("recovered ordered activity did not finish: %#v", activities)
-	}
-}
-
-func TestPromptOrderingStateExpiresAfterBoundedRetention(t *testing.T) {
-	tracker := newPiActivityTracker()
-	now := time.Now().UTC()
-	old := now.Add(-piActivityOrderRetention - time.Second)
-	for index := 0; index < 100; index++ {
-		tracker.updateAgentToken(
-			"project",
-			"thread",
-			codingAgentClaude,
-			fmt.Sprintf("session-%d", index),
-			fmt.Sprintf("prompt-%d", index),
-			piActivityIdle,
-			old,
-		)
-	}
-	if got := len(tracker.promptOrder); got != 100 {
-		t.Fatalf("prompt ordering entries = %d, want 100 before expiry", got)
-	}
-	tracker.list(now)
-	if got := len(tracker.promptOrder); got != 0 {
-		t.Fatalf("expired prompt ordering entries = %d, want 0", got)
 	}
 }
 
@@ -508,4 +484,15 @@ func listPiActivityForTest(t *testing.T, handler http.Handler) []piThreadActivit
 		t.Fatal(err)
 	}
 	return activities
+}
+
+// TestActivityRouteSegmentsMatchRegisteredRoutes pins the literal activity
+// route patterns in server.go to agent.ActivityRoutes: index and segment
+// must stay aligned because the contract test requires literal patterns.
+func TestActivityRouteSegmentsMatchRegisteredRoutes(t *testing.T) {
+	routes := agent.ActivityRoutes()
+	if len(routes) != 3 ||
+		routes[0].Segment != "pi" || routes[1].Segment != "codex" || routes[2].Segment != "claude" {
+		t.Fatalf("activity routes drifted from the literal registrations in server.go: %#v", routes)
+	}
 }

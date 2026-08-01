@@ -595,7 +595,7 @@ func TestDeletedProjectRetryUsesDurableBrowserThreadRecipe(t *testing.T) {
 		t.Fatal(err)
 	}
 	threadIDs := []string{first.ID, second.ID}
-	lease, err := newTerminalStopManager(store.DataDirectory()).beginProject(item.ID, threadIDs, []string{"exact-session"})
+	lease, err := newTerminalStopManager(store.DataDirectory()).BeginProject(item.ID, threadIDs, []string{"exact-session"})
 	if err != nil {
 		t.Fatal(err)
 	}

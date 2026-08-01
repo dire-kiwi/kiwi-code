@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,7 +11,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -21,6 +19,7 @@ import (
 	"time"
 
 	"github.com/dire-kiwi/kiwi-code/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/tmux/tmuxtest"
 	"github.com/gorilla/websocket"
 )
 
@@ -2271,7 +2270,7 @@ func TestDurableThreadStopBlocksIndependentHandlersAndSurvivesRestart(t *testing
 	if _, _, _, err := third.ensureTmuxSession(item, thread, "terminal"); !errors.Is(err, errTerminalStopping) {
 		t.Fatalf("new handler ignored retained marker: %v", err)
 	}
-	stopped, err := third.terminalStops.threadStopped(item.ID, thread.ID)
+	stopped, err := third.terminalStops.ThreadStopped(item.ID, thread.ID)
 	if err != nil || !stopped {
 		t.Fatalf("retained durable stop: stopped=%t err=%v", stopped, err)
 	}
@@ -2419,7 +2418,7 @@ func TestDeleteThreadStoreFailureRollsBackDurableStop(t *testing.T) {
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("delete status = %d, body = %s", response.Code, response.Body.String())
 	}
-	if stopped, err := second.terminalStops.threadStopped(item.ID, thread.ID); err != nil || stopped {
+	if stopped, err := second.terminalStops.ThreadStopped(item.ID, thread.ID); err != nil || stopped {
 		t.Fatalf("failed Store delete retained stop marker: stopped=%t err=%v", stopped, err)
 	}
 	if exists, err := second.tmuxExactSessionExists(sessionName); err != nil || !exists {
@@ -2467,7 +2466,7 @@ func TestDeleteProjectStoreFailureRollsBackWithoutChangingPID(t *testing.T) {
 	if _, err := first.projects.Get(item.ID); err != nil {
 		t.Fatalf("failed Store delete removed project: %v", err)
 	}
-	if stopped, err := second.terminalStops.projectStopped(item.ID); err != nil || stopped {
+	if stopped, err := second.terminalStops.ProjectStopped(item.ID); err != nil || stopped {
 		t.Fatalf("failed Store project delete retained stop marker: stopped=%t err=%v", stopped, err)
 	}
 	if exists, err := second.tmuxExactSessionExists(sessionName); err != nil || !exists {
@@ -2504,7 +2503,7 @@ func TestReconcileTerminalStopsRetainsAmbiguousPrecommitWithoutChangingPID(t *te
 	if err := restarted.reconcileTerminalStops(); err != nil {
 		t.Fatal(err)
 	}
-	if marker, found, err := restarted.terminalStops.readThread(item.ID, thread.ID); err != nil || !found || marker.Committed {
+	if marker, found, err := restarted.terminalStops.ReadThread(item.ID, thread.ID); err != nil || !found || marker.Committed {
 		t.Fatalf("precommit recovery marker state: found=%t err=%v", found, err)
 	}
 	if exists, err := restarted.tmuxExactSessionExists(sessionName); err != nil || !exists {
@@ -2539,7 +2538,7 @@ func TestReconcileTerminalStopsSkipsActiveMarker(t *testing.T) {
 	if err := restarted.reconcileTerminalStops(); err != nil {
 		t.Fatalf("active stop should be skipped: %v", err)
 	}
-	if stopped, err := restarted.terminalStops.threadStopped(item.ID, thread.ID); err != nil || !stopped {
+	if stopped, err := restarted.terminalStops.ThreadStopped(item.ID, thread.ID); err != nil || !stopped {
 		t.Fatalf("active marker changed during reconciliation: stopped=%t err=%v", stopped, err)
 	}
 	if afterPID := tmuxPanePID(t, restarted, windows[0].Target.ID); afterPID != beforePID {
@@ -2603,7 +2602,7 @@ func TestReconcileTerminalStopsCleansCommittedExactRecipeAndPreservesDecoys(t *t
 			t.Fatalf("committed recovery removed decoy %q: exists=%t err=%v", preserved, exists, err)
 		}
 	}
-	if stopped, err := restarted.terminalStops.threadStopped(item.ID, thread.ID); err != nil || !stopped {
+	if stopped, err := restarted.terminalStops.ThreadStopped(item.ID, thread.ID); err != nil || !stopped {
 		t.Fatalf("committed recovery did not retain marker: stopped=%t err=%v", stopped, err)
 	}
 	_ = restarted.tmuxCommand("kill-session", "-t", "="+decoyView).Run()
@@ -2657,10 +2656,10 @@ func TestTerminalStopFenceAndRecoveryResolveDualMarkersPerScope(t *testing.T) {
 	if err := handler.reconcileTerminalStops(); err != nil {
 		t.Fatal(err)
 	}
-	if marker, found, err := handler.terminalStops.readProject(item.ID); err != nil || !found || marker.Committed {
+	if marker, found, err := handler.terminalStops.ReadProject(item.ID); err != nil || !found || marker.Committed {
 		t.Fatalf("ambiguous project marker was not retained pending: found=%t marker=%#v err=%v", found, marker, err)
 	}
-	if _, found, err := handler.terminalStops.readThread(item.ID, missingThread.ID); err != nil || !found {
+	if _, found, err := handler.terminalStops.ReadThread(item.ID, missingThread.ID); err != nil || !found {
 		t.Fatalf("committed thread marker was not retained: found=%t err=%v", found, err)
 	}
 	if afterPID := tmuxPanePID(t, handler, liveWindows[0].Target.ID); afterPID != livePID {
@@ -2700,7 +2699,7 @@ func TestDeleteThreadRetryFinishesRetainedCommittedMarker(t *testing.T) {
 	if exists, err := handler.tmuxExactSessionExists(sessionName); err != nil || exists {
 		t.Fatalf("delete retry left committed session: exists=%t err=%v", exists, err)
 	}
-	if stopped, err := handler.terminalStops.threadStopped(item.ID, thread.ID); err != nil || !stopped {
+	if stopped, err := handler.terminalStops.ThreadStopped(item.ID, thread.ID); err != nil || !stopped {
 		t.Fatalf("delete retry did not retain committed marker: stopped=%t err=%v", stopped, err)
 	}
 }
@@ -2737,7 +2736,7 @@ func TestDeleteProjectRetryFinishesRetainedCommittedMarker(t *testing.T) {
 	if exists, err := handler.tmuxExactSessionExists(sessionName); err != nil || exists {
 		t.Fatalf("delete project retry left committed session: exists=%t err=%v", exists, err)
 	}
-	if stopped, err := handler.terminalStops.projectStopped(stoppedItem.ID); err != nil || !stopped {
+	if stopped, err := handler.terminalStops.ProjectStopped(stoppedItem.ID); err != nil || !stopped {
 		t.Fatalf("delete project retry did not retain committed marker: stopped=%t err=%v", stopped, err)
 	}
 }
@@ -3066,44 +3065,7 @@ func overlappingTerminalHandler(source *terminalHandler) *terminalHandler {
 
 func isolatedTmuxServer(t *testing.T) (string, string) {
 	t.Helper()
-	tmuxPath, err := exec.LookPath("tmux")
-	if err != nil {
-		t.Skip("tmux is not installed")
-	}
-
-	t.Setenv("SHELL", "/bin/sh")
-	// Keep the platform-limited tmux socket path short and verify tmux can run
-	// before treating a capability restriction as a product test failure.
-	t.Setenv("TMUX_TMPDIR", os.TempDir())
-	var socketID [8]byte
-	if _, err := rand.Read(socketID[:]); err != nil {
-		t.Fatal(err)
-	}
-	socketName := fmt.Sprintf("d%x", socketID)
-	probe := exec.Command(
-		tmuxPath,
-		"-L", socketName,
-		"new-session", "-d",
-		"-s", "capability-probe",
-		shellCommand("/bin/sh", []string{"-c", "sleep 30"}),
-	)
-	probe.Env = tmuxEnvironment()
-	t.Cleanup(func() {
-		command := exec.Command(tmuxPath, "-L", socketName, "kill-server")
-		command.Env = tmuxEnvironment()
-		_ = command.Run()
-	})
-	output, probeErr := probe.CombinedOutput()
-	if message := strings.TrimSpace(string(output)); probeErr != nil || message != "" {
-		t.Skipf("tmux cannot start cleanly in this test environment: %v: %s", probeErr, message)
-	}
-	verify := exec.Command(tmuxPath, "-L", socketName, "has-session", "-t", "=capability-probe")
-	verify.Env = tmuxEnvironment()
-	output, verifyErr := verify.CombinedOutput()
-	if message := strings.TrimSpace(string(output)); verifyErr != nil || message != "" {
-		t.Skipf("tmux capability probe did not establish its exact session: %v: %s", verifyErr, message)
-	}
-	return tmuxPath, socketName
+	return tmuxtest.Isolated(t)
 }
 
 func setMockPi(t *testing.T, script string) {

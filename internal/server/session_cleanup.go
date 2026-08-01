@@ -17,15 +17,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dire-kiwi/kiwi-code/internal/datadir"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
+	"github.com/dire-kiwi/kiwi-code/internal/workspace"
 )
 
 const (
 	tmuxSessionInactivityLimit = 24 * time.Hour
-	sessionClosureLogFileName  = "tmux-session-closures.json"
+	sessionClosureLogFileName  = datadir.SessionClosuresFileName
 	maxSessionClosureEvents    = 500
-	tmuxLastUsedOption         = "@kiwi-code-last-used"
-	tmuxStatusChangedOption    = "@kiwi-code-last-status-change"
+	tmuxLastUsedOption         = workspace.OptionLastUsed
+	tmuxStatusChangedOption    = workspace.OptionLastStatusChange
 )
 
 // tmuxSessionActivity deliberately ignores tmux's own session_activity,
@@ -249,7 +251,7 @@ func (s *Server) closeInactiveTmuxSessions(now time.Time) error {
 		return err
 	}
 	working := make(map[terminalThreadKey]bool)
-	for _, activity := range s.piActivity.list(now) {
+	for _, activity := range s.piActivity.List(now) {
 		if activity.State == piActivityWorking {
 			working[terminalThreadKey{ProjectID: activity.ProjectID, ThreadID: activity.ThreadID}] = true
 		}

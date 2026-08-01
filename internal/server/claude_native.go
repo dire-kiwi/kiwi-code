@@ -16,12 +16,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dire-kiwi/kiwi-code/internal/agent/native"
+	"github.com/dire-kiwi/kiwi-code/internal/datadir"
 	"github.com/dire-kiwi/kiwi-code/internal/project"
 	"github.com/gorilla/websocket"
 )
 
 const (
-	claudeNativeSessionDirectoryName = "claude-native-sessions"
+	claudeNativeSessionDirectoryName = datadir.ClaudeNativeSessionsDirectoryName
 	claudeNativeSessionFileName      = "session-id"
 	claudeNativeHistoryFileName      = "events.jsonl"
 	claudeNativeMaxClientMessage     = 1 << 20
@@ -31,19 +33,18 @@ const (
 )
 
 type claudeNativeManager struct {
-	mu               sync.Mutex
+	native.ManagerCore[*claudeNativeProcess]
 	dataDirectory    string
 	claudePath       string
 	pluginPath       string
 	pluginErr        error
 	figmaMCPURL      func(project.Project) string
-	processes        map[piNativeProcessKey]*claudeNativeProcess
 	contextWatchOnce sync.Once
 	usageReporter    func(piNativeProcessKey, string, threadUsageTotals)
 }
 
 type claudeNativeProcess struct {
-	*nativeProcessCore
+	*native.Core
 	launchOptions    codingAgentLaunchOptions
 	sessionDirectory string
 
@@ -60,12 +61,12 @@ type claudeNativeProcess struct {
 	usageReporter func(piNativeProcessKey, string, threadUsageTotals)
 }
 
-var claudeProcessSpec = nativeProcessSpec{
-	displayName:         "Claude",
-	endedMessage:        "Claude session ended.",
-	unexpectedMessage:   "Claude exited unexpectedly. Reconnect to resume the saved conversation.",
-	writeAfterExitError: "native Claude process ended",
-	stopTimeout:         claudeNativeStopTimeout,
+var claudeProcessSpec = native.Spec{
+	DisplayName:         "Claude",
+	EndedMessage:        "Claude session ended.",
+	UnexpectedMessage:   "Claude exited unexpectedly. Reconnect to resume the saved conversation.",
+	WriteAfterExitError: "native Claude process ended",
+	StopTimeout:         claudeNativeStopTimeout,
 }
 
 type claudeNativeClientMessage struct {
@@ -100,7 +101,7 @@ func newClaudeNativeManager(
 		dataDirectory: dataDirectory,
 		pluginPath:    pluginPath,
 		pluginErr:     pluginErr,
-		processes:     make(map[piNativeProcessKey]*claudeNativeProcess),
+		ManagerCore:   native.NewManagerCore[*claudeNativeProcess](),
 	}
 }
 
@@ -115,7 +116,7 @@ func (m *claudeNativeManager) stopOnContext(ctx context.Context) {
 	if m == nil {
 		return
 	}
-	stopNativeProcessesOnContext(ctx, &m.contextWatchOnce, m.stopAll)
+	native.StopOnContext(ctx, &m.contextWatchOnce, m.stopAll)
 }
 
 func (h *terminalHandler) serveClaudeNative(w http.ResponseWriter, r *http.Request) {
@@ -177,7 +178,7 @@ func (h *terminalHandler) serveClaudeNative(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	subscription := process.events.Subscribe()
+	subscription := process.Events.Subscribe()
 	defer func() { subscription.Close() }()
 	if err := writeStatus("claude_native_ready", "Claude is ready."); err != nil {
 		return
@@ -215,7 +216,7 @@ func (h *terminalHandler) serveClaudeNative(w http.ResponseWriter, r *http.Reque
 			if err := write(websocket.TextMessage, payload); err != nil {
 				return
 			}
-		case payload := <-peer.messages:
+		case payload := <-peer.Messages:
 			message, action, commandErr := normalizeClaudeNativeClientMessage(payload)
 			if commandErr != nil {
 				_ = writeStatus("claude_native_error", commandErr.Error())
@@ -258,7 +259,7 @@ func (h *terminalHandler) serveClaudeNative(w http.ResponseWriter, r *http.Reque
 				subscription.Close()
 				process = replacement
 				launchOptions = restartOptions
-				subscription = process.events.Subscribe()
+				subscription = process.Events.Subscribe()
 				reloadedMessage := "Claude restarted and resumed this conversation."
 				if action == claudeNativeClientNewSession {
 					reloadedMessage = "Started a new Claude session."
@@ -276,7 +277,7 @@ func (h *terminalHandler) serveClaudeNative(w http.ResponseWriter, r *http.Reque
 				}
 				continue
 			}
-			if h.budgetReached != nil {
+			{
 				reached, _, budgetErr := h.budgetReached(item.ID, thread.ID)
 				if budgetErr != nil {
 					_ = writeStatus("claude_native_error", "Could not verify the thread usage limit.")
@@ -290,14 +291,14 @@ func (h *terminalHandler) serveClaudeNative(w http.ResponseWriter, r *http.Reque
 			if err := process.sendPrompt(message.Message, message.Images); err != nil {
 				_ = writeStatus("claude_native_error", "Could not send the message to Claude.")
 			}
-		case <-process.done:
-			message := process.exitMessage()
+		case <-process.Done:
+			message := process.ExitMessage()
 			_ = writeStatus("claude_native_exit", message)
 			_ = write(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Claude native process ended"))
 			return
-		case <-peer.done:
+		case <-peer.Done:
 			return
-		case <-peer.ping.C:
+		case <-peer.Ping.C:
 			if err := peer.WritePing(); err != nil {
 				return
 			}
@@ -369,9 +370,9 @@ func (m *claudeNativeManager) getOrStart(
 	launchOptions.FigmaMCPURL = m.resolveFigmaMCPURL(item)
 	key := piNativeProcessKey{ProjectID: item.ID, ThreadID: thread.ID}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if current := m.processes[key]; current != nil && !channelClosed(current.done) {
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
+	if current := m.Processes[key]; current != nil && !channelClosed(current.Done) {
 		return current, nil
 	}
 
@@ -379,13 +380,13 @@ func (m *claudeNativeManager) getOrStart(
 	if err != nil {
 		return nil, err
 	}
-	m.processes[key] = process
+	m.Processes[key] = process
 	process.run(func() {
-		m.mu.Lock()
-		if m.processes[key] == process {
-			delete(m.processes, key)
+		m.Mu.Lock()
+		if m.Processes[key] == process {
+			delete(m.Processes, key)
 		}
-		m.mu.Unlock()
+		m.Mu.Unlock()
 	})
 	return process, nil
 }
@@ -407,23 +408,23 @@ func (m *claudeNativeManager) restart(
 	launchOptions.FigmaMCPURL = m.resolveFigmaMCPURL(item)
 	key := piNativeProcessKey{ProjectID: item.ID, ThreadID: thread.ID}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	current := m.processes[key]
-	if current != nil && current != expected && !channelClosed(current.done) {
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
+	current := m.Processes[key]
+	if current != nil && current != expected && !channelClosed(current.Done) {
 		// Another client already replaced the process. Reuse that replacement
 		// rather than immediately restarting it again.
 		return current, nil
 	}
-	if current == nil && expected != nil && !channelClosed(expected.done) {
+	if current == nil && expected != nil && !channelClosed(expected.Done) {
 		current = expected
 	}
 	if current != nil {
 		if err := current.stop(); err != nil {
 			return nil, fmt.Errorf("stop native Claude before restart: %w", err)
 		}
-		if m.processes[key] == current {
-			delete(m.processes, key)
+		if m.Processes[key] == current {
+			delete(m.Processes, key)
 		}
 	}
 
@@ -431,13 +432,13 @@ func (m *claudeNativeManager) restart(
 	if err != nil {
 		return nil, err
 	}
-	m.processes[key] = process
+	m.Processes[key] = process
 	process.run(func() {
-		m.mu.Lock()
-		if m.processes[key] == process {
-			delete(m.processes, key)
+		m.Mu.Lock()
+		if m.Processes[key] == process {
+			delete(m.Processes, key)
 		}
-		m.mu.Unlock()
+		m.Mu.Unlock()
 	})
 	return process, nil
 }
@@ -504,20 +505,20 @@ func (m *claudeNativeManager) startProcess(
 			"KIWI_CODE_CODING_AGENT="+codingAgentClaude,
 		)...,
 	)
-	core, stdout, stderr, err := startNativeCommand(key, claudeProcessSpec, command)
+	core, stdout, stderr, err := native.StartCommand(key, claudeProcessSpec, command)
 	if err != nil {
 		return nil, err
 	}
 
 	process := &claudeNativeProcess{
-		nativeProcessCore: core,
-		launchOptions:     launchOptions,
-		sessionDirectory:  sessionDirectory,
-		sessionID:         resumeSessionID,
-		usageReporter:     m.usageReporter,
+		Core:             core,
+		launchOptions:    launchOptions,
+		sessionDirectory: sessionDirectory,
+		sessionID:        resumeSessionID,
+		usageReporter:    m.usageReporter,
 	}
-	process.readOutput(stdout, process.publishClaudeEvent)
-	process.readDiagnostics(stderr)
+	process.ReadOutput(stdout, process.publishClaudeEvent)
+	process.ReadDiagnostics(stderr)
 	return process, nil
 }
 
@@ -590,7 +591,7 @@ func removeIfExists(path string) error {
 
 func (p *claudeNativeProcess) publishClaudeEvent(payload []byte) {
 	if !json.Valid(payload) {
-		log.Printf("ignore malformed native Claude event: project=%q thread=%q", p.key.ProjectID, p.key.ThreadID)
+		log.Printf("ignore malformed native Claude event: project=%q thread=%q", p.Key.ProjectID, p.Key.ThreadID)
 		return
 	}
 	var event struct {
@@ -609,7 +610,7 @@ func (p *claudeNativeProcess) publishClaudeEvent(payload []byte) {
 		RequestID    string   `json:"request_id"`
 	}
 	if json.Unmarshal(payload, &event) != nil {
-		p.events.Publish(bytes.Clone(payload))
+		p.Events.Publish(bytes.Clone(payload))
 		return
 	}
 
@@ -652,9 +653,9 @@ func (p *claudeNativeProcess) publishClaudeEvent(payload []byte) {
 	if claudeNativeHistoryEventType(event.Type, event.Subtype) {
 		p.appendHistory(payload)
 	}
-	p.events.Publish(bytes.Clone(payload))
+	p.Events.Publish(bytes.Clone(payload))
 	if stateChanged {
-		p.events.Publish(p.statePayload())
+		p.Events.Publish(p.statePayload())
 	}
 }
 
@@ -679,7 +680,7 @@ func (p *claudeNativeProcess) adoptSessionID(sessionID string) {
 	}
 	path := filepath.Join(p.sessionDirectory, claudeNativeSessionFileName)
 	if err := os.WriteFile(path, []byte(sessionID+"\n"), 0o600); err != nil {
-		log.Printf("save native Claude session id: project=%q thread=%q error=%v", p.key.ProjectID, p.key.ThreadID, err)
+		log.Printf("save native Claude session id: project=%q thread=%q error=%v", p.Key.ProjectID, p.Key.ThreadID, err)
 	}
 }
 
@@ -746,7 +747,7 @@ func (p *claudeNativeProcess) reportResultUsage(
 	if !validThreadUsageTotals(totals) {
 		return
 	}
-	p.usageReporter(p.key, sessionID, totals)
+	p.usageReporter(p.Key, sessionID, totals)
 }
 
 func (p *claudeNativeProcess) appendHistory(payload []byte) {
@@ -766,12 +767,12 @@ func (p *claudeNativeProcess) appendHistory(payload []byte) {
 		0o600,
 	)
 	if err != nil {
-		log.Printf("append native Claude history: project=%q thread=%q error=%v", p.key.ProjectID, p.key.ThreadID, err)
+		log.Printf("append native Claude history: project=%q thread=%q error=%v", p.Key.ProjectID, p.Key.ThreadID, err)
 		return
 	}
 	defer file.Close()
 	if _, err := file.Write(entry); err != nil {
-		log.Printf("append native Claude history: project=%q thread=%q error=%v", p.key.ProjectID, p.key.ThreadID, err)
+		log.Printf("append native Claude history: project=%q thread=%q error=%v", p.Key.ProjectID, p.Key.ThreadID, err)
 	}
 }
 
@@ -807,13 +808,13 @@ func (p *claudeNativeProcess) historySnapshot() ([]claudeNativeHistoryEntry, err
 }
 
 func (p *claudeNativeProcess) run(onExit func()) {
-	p.nativeProcessCore.run(func(string) {
+	p.Core.Run(func(string) {
 		p.setStreaming(false)
 	}, onExit)
 }
 
 func (p *claudeNativeProcess) send(payload []byte) error {
-	return p.writeLine(payload)
+	return p.WriteLine(payload)
 }
 
 func (p *claudeNativeProcess) sendPrompt(message string, images []piNativeClientImage) error {
@@ -835,7 +836,7 @@ func (p *claudeNativeProcess) sendPrompt(message string, images []piNativeClient
 		return err
 	}
 	if p.setStreaming(true) {
-		p.events.Publish(p.statePayload())
+		p.Events.Publish(p.statePayload())
 	}
 	return nil
 }
@@ -843,7 +844,7 @@ func (p *claudeNativeProcess) sendPrompt(message string, images []piNativeClient
 func (p *claudeNativeProcess) sendInterrupt() error {
 	payload, err := json.Marshal(map[string]any{
 		"type":       "control_request",
-		"request_id": fmt.Sprintf("kiwi-code-interrupt-%d", p.request.Add(1)),
+		"request_id": fmt.Sprintf("kiwi-code-interrupt-%d", p.Request.Add(1)),
 		"request":    map[string]any{"subtype": "interrupt"},
 	})
 	if err != nil {
@@ -888,42 +889,30 @@ func claudeNativePromptContent(message string, references []piNativeClientImage)
 
 func (p *claudeNativeProcess) exitMessage() string {
 	if p == nil {
-		return claudeProcessSpec.endedMessage
+		return claudeProcessSpec.EndedMessage
 	}
-	return p.nativeProcessCore.exitMessage()
+	return p.Core.ExitMessage()
 }
 
 func (p *claudeNativeProcess) stop() error {
 	if p == nil {
 		return nil
 	}
-	return p.nativeProcessCore.stop()
+	return p.Core.Stop()
 }
 
 func (m *claudeNativeManager) stopThread(projectID, threadID string) error {
 	if m == nil {
 		return nil
 	}
-	key := piNativeProcessKey{ProjectID: projectID, ThreadID: threadID}
-	m.mu.Lock()
-	process := m.processes[key]
-	m.mu.Unlock()
-	if process == nil {
-		return nil
-	}
-	return process.stop()
+	return m.StopThread(piNativeProcessKey{ProjectID: projectID, ThreadID: threadID}, (*claudeNativeProcess).Stop)
 }
 
 func (m *claudeNativeManager) stopProject(projectID string) error {
 	if m == nil {
 		return nil
 	}
-	m.mu.Lock()
-	processes := collectNativeProcesses(m.processes, func(key nativeProcessKey) bool {
-		return key.ProjectID == projectID
-	})
-	m.mu.Unlock()
-	return stopNativeProcessSet(processes, (*claudeNativeProcess).stop)
+	return m.StopProject(projectID, (*claudeNativeProcess).Stop)
 }
 
 func (m *claudeNativeManager) removeThread(projectID, threadID string) error {
@@ -936,17 +925,12 @@ func (m *claudeNativeManager) removeThread(projectID, threadID string) error {
 	if err := validPiNativePathSegment(threadID); err != nil {
 		return err
 	}
-	stopErr := m.stopThread(projectID, threadID)
-	m.mu.Lock()
-	delete(m.processes, piNativeProcessKey{ProjectID: projectID, ThreadID: threadID})
-	m.mu.Unlock()
-	removeErr := os.RemoveAll(filepath.Join(
-		m.dataDirectory,
-		claudeNativeSessionDirectoryName,
-		projectID,
-		threadID,
-	))
-	return errors.Join(stopErr, removeErr)
+	return m.Remove(
+		piNativeProcessKey{ProjectID: projectID, ThreadID: threadID},
+		filepath.Join(m.dataDirectory, claudeNativeSessionDirectoryName),
+		(*claudeNativeProcess).Stop,
+		nil,
+	)
 }
 
 func (m *claudeNativeManager) removeProject(projectID string) error {
@@ -956,27 +940,19 @@ func (m *claudeNativeManager) removeProject(projectID string) error {
 	if err := validPiNativePathSegment(projectID); err != nil {
 		return err
 	}
-	stopErr := m.stopProject(projectID)
-	removeErr := os.RemoveAll(filepath.Join(
-		m.dataDirectory,
-		claudeNativeSessionDirectoryName,
+	return m.RemoveProject(
 		projectID,
-	))
-	return errors.Join(stopErr, removeErr)
+		filepath.Join(m.dataDirectory, claudeNativeSessionDirectoryName),
+		(*claudeNativeProcess).Stop,
+		nil,
+	)
 }
 
 func (m *claudeNativeManager) stopAll() {
 	if m == nil {
 		return
 	}
-	m.mu.Lock()
-	processes := collectNativeProcesses(m.processes, func(nativeProcessKey) bool { return true })
-	m.mu.Unlock()
-	for _, process := range processes {
-		if err := process.stop(); err != nil {
-			log.Printf("stop native Claude: project=%q thread=%q error=%v", process.key.ProjectID, process.key.ThreadID, err)
-		}
-	}
+	m.StopAll("Claude", (*claudeNativeProcess).Stop, func(p *claudeNativeProcess) native.Key { return p.Key })
 }
 
 func normalizeClaudeNativeClientMessage(payload []byte) (claudeNativeClientMessage, claudeNativeClientAction, error) {

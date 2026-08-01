@@ -3,33 +3,35 @@ package server
 import (
 	"testing"
 	"time"
+
+	"github.com/dire-kiwi/kiwi-code/internal/events"
+	"github.com/dire-kiwi/kiwi-code/internal/thread"
 )
 
 func TestStateChangeBrokerCoalescesMutationBursts(t *testing.T) {
 	broker := newStateChangeBroker()
-	subscription := broker.subscribe(
-		"project",
-		"thread",
+	subscription := broker.Subscribe(
+		thread.Key{ProjectID: "project", ThreadID: "thread"},
 		stateTopicBrowserStatus,
 	)
 	defer subscription.Close()
 
 	for range 10_000 {
-		broker.publish(stateInvalidation{
-			topic: stateTopicBrowserStatus, projectID: "project", threadID: "thread",
+		broker.Publish(events.Invalidation{
+			Topic: stateTopicBrowserStatus,
+			Key:   thread.Key{ProjectID: "project", ThreadID: "thread"},
 		})
 	}
-	if got := len(subscription.wake); got != 1 {
+	if got := len(subscription.Events()); got != 1 {
 		t.Fatalf("coalesced wake depth = %d, want 1", got)
 	}
 	<-subscription.Events()
 
-	broker.publish(stateInvalidation{
-		topic: stateTopicBrowserStatus, projectID: "other-project", threadID: "thread",
+	broker.Publish(events.Invalidation{
+		Topic: stateTopicBrowserStatus,
+		Key:   thread.Key{ProjectID: "other-project", ThreadID: "thread"},
 	})
-	broker.publish(stateInvalidation{
-		topic: stateTopicSettings,
-	})
+	broker.Publish(events.Invalidation{Topic: stateTopicSettings})
 	select {
 	case <-subscription.Events():
 		t.Fatal("unrelated mutation woke the subscription")
@@ -37,7 +39,7 @@ func TestStateChangeBrokerCoalescesMutationBursts(t *testing.T) {
 	}
 
 	// An unscoped invalidation reaches every matching scoped subscriber.
-	broker.publish(stateInvalidation{topic: stateTopicBrowserStatus})
+	broker.Publish(events.Invalidation{Topic: stateTopicBrowserStatus})
 	select {
 	case <-subscription.Events():
 	case <-time.After(time.Second):
@@ -47,42 +49,40 @@ func TestStateChangeBrokerCoalescesMutationBursts(t *testing.T) {
 
 func TestNotifyBrowserStateChangedPublishesStatusInvalidation(t *testing.T) {
 	server := &Server{stateChanges: newStateChangeBroker()}
-	subscription := server.stateChanges.subscribe(
-		"project",
-		"thread",
+	subscription := server.stateChanges.Subscribe(
+		thread.Key{ProjectID: "project", ThreadID: "thread"},
 		stateTopicBrowserStatus,
 	)
 	defer subscription.Close()
 	server.notifyBrowserStateChanged("project", "thread")
-	if got := len(subscription.wake); got != 1 {
+	if got := len(subscription.Events()); got != 1 {
 		t.Fatalf("browser mutation queued %d wakes, want 1", got)
 	}
 }
 
 func TestThreadStateInvalidationsCoalescePerKey(t *testing.T) {
 	server := &Server{stateChanges: newStateChangeBroker()}
-	first := server.stateChanges.subscribe("project", "first", stateTopicThreadStatus)
+	first := server.stateChanges.Subscribe(thread.Key{ProjectID: "project", ThreadID: "first"}, stateTopicThreadStatus)
 	defer first.Close()
-	second := server.stateChanges.subscribe("project", "second", stateTopicThreadStatus)
+	second := server.stateChanges.Subscribe(thread.Key{ProjectID: "project", ThreadID: "second"}, stateTopicThreadStatus)
 	defer second.Close()
 
 	for range 1_000 {
 		server.notifyThreadStatusChanged("project", "first")
 		server.notifyThreadStatusChanged("project", "second")
 	}
-	if got := len(first.wake); got != 1 {
+	if got := len(first.Events()); got != 1 {
 		t.Fatalf("first thread wake depth = %d, want 1", got)
 	}
-	if got := len(second.wake); got != 1 {
+	if got := len(second.Events()); got != 1 {
 		t.Fatalf("second thread wake depth = %d, want 1", got)
 	}
 }
 
 func TestBrowserStreamStateInvalidationsAreThrottledPerThread(t *testing.T) {
 	server := &Server{stateChanges: newStateChangeBroker()}
-	subscription := server.stateChanges.subscribe(
-		"project",
-		"thread",
+	subscription := server.stateChanges.Subscribe(
+		thread.Key{ProjectID: "project", ThreadID: "thread"},
 		stateTopicBrowserStatus,
 	)
 	defer subscription.Close()

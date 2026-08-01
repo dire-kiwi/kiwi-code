@@ -321,7 +321,7 @@ func TestCodexPluginHookReportsActivityAndNamesTheThread(t *testing.T) {
 			mu.Unlock()
 			writeJSON(w, http.StatusOK, map[string]any{"title": input.Title, "autoNamed": true})
 		case http.MethodPut:
-			if r.URL.Path != "/codex/activity" {
+			if r.URL.Path != "/agents/codex/activity" {
 				t.Errorf("Codex activity path = %q", r.URL.Path)
 			}
 			var input activityUpdate

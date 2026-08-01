@@ -22,7 +22,7 @@ export default function (pi: ExtensionAPI) {
 		const controller = new AbortController();
 		const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
 		try {
-			const response = await fetch(`${threadEndpoint}/pi/activity`, {
+			const response = await fetch(`${threadEndpoint}/agents/pi/activity`, {
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ state, ...(promptStartedAt ? { promptStartedAt } : {}) }),

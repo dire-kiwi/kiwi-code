@@ -1,6 +1,7 @@
 /
 DELETE /api/projects/{id}
 DELETE /api/projects/{id}/threads/{threadId}
+DELETE /api/projects/{id}/threads/{threadId}/agents/{agent}/activity
 DELETE /api/projects/{id}/threads/{threadId}/pi/activity
 DELETE /api/projects/{id}/threads/{threadId}/processes/{processId}
 GET /api/cleanup
@@ -12,6 +13,7 @@ GET /api/profiles
 GET /api/projects
 GET /api/projects/{id}/git/branches
 GET /api/projects/{id}/threads/{threadId}
+GET /api/projects/{id}/threads/{threadId}/agents/{agent}/native
 GET /api/projects/{id}/threads/{threadId}/browser
 GET /api/projects/{id}/threads/{threadId}/browser/frame
 GET /api/projects/{id}/threads/{threadId}/browser/stream
@@ -51,6 +53,7 @@ POST /api/restart
 POST /api/settings/agent-skills
 PUT /api/projects/order
 PUT /api/projects/{id}/threads/order
+PUT /api/projects/{id}/threads/{threadId}/agents/{agent}/activity
 PUT /api/projects/{id}/threads/{threadId}/claude/activity
 PUT /api/projects/{id}/threads/{threadId}/codex/activity
 PUT /api/projects/{id}/threads/{threadId}/context/status

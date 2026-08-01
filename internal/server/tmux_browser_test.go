@@ -111,7 +111,7 @@ func TestTmuxBrowserOwnerUsesFreshStoreAndDurableStopRecipe(t *testing.T) {
 	}
 
 	canonicalSession := tmuxSessionName(item.ID, thread.ID, "terminal")
-	lease, err := handler.terminalStops.beginThread(item.ID, thread.ID, []string{canonicalSession})
+	lease, err := handler.terminalStops.BeginThread(item.ID, thread.ID, []string{canonicalSession})
 	if err != nil {
 		t.Fatal(err)
 	}
