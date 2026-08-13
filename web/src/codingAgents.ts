@@ -17,7 +17,9 @@ export function configuredCodingAgentId(agent: CodingAgentSetting): ConfiguredCl
 }
 
 export function codingAgentSelectionForSetting(agent: CodingAgentSetting): CodingAgentSelection {
-  if (agent.kind === 'pi' || agent.kind === 'pi-native' || agent.kind === 'codex') return agent.kind
+  if (agent.kind === 'pi' || agent.kind === 'pi-native' || agent.kind === 'codex' || agent.kind === 'grok') {
+    return agent.kind
+  }
   return configuredCodingAgentId(agent)
 }
 
@@ -29,6 +31,7 @@ export function defaultCodingAgentSelection(agents: CodingAgentSetting[]): Codin
 export function isCodingAgent(value: unknown): value is CodingAgent {
   return value === 'pi'
     || value === 'codex'
+    || value === 'grok'
     || value === 'claude'
     || value === 'claude-gpt'
     || (typeof value === 'string' && configuredClaudeAgentPattern.test(value))
@@ -98,6 +101,13 @@ export const codexThinkingLevelIds = [
   'xhigh',
 ] as const
 
+export const grokThinkingLevelIds = [
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+] as const
+
 export const claudeThinkingLevelIds = [
   'low',
   'medium',
@@ -149,5 +159,11 @@ export const fallbackCodingAgentConfigs: CodingAgentConfig[] = [
     label: 'Codex CLI',
     models: [{ id: '', label: 'Use Codex default' }],
     thinkingLevels: thinkingLevels('Use Codex default', codexThinkingLevelIds),
+  },
+  {
+    id: 'grok',
+    label: 'Grok CLI',
+    models: [{ id: '', label: 'Use Grok default' }],
+    thinkingLevels: thinkingLevels('Use Grok default', grokThinkingLevelIds),
   },
 ]

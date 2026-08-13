@@ -29,8 +29,8 @@ run(async () => {
     usage("--model, --thinking, and --prompt require --agent.");
     return;
   }
-  if (agent && !new Set(["pi-native", "pi", "codex", "claude-native", "claude", "claude-gpt"]).has(agent)) {
-    usage("--agent must be pi-native, pi, codex, claude-native, claude, or claude-gpt.");
+  if (agent && !new Set(["pi-native", "pi", "codex", "grok", "claude-native", "claude", "claude-gpt"]).has(agent)) {
+    usage("--agent must be pi-native, pi, codex, grok, claude-native, claude, or claude-gpt.");
     return;
   }
 

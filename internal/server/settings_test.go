@@ -42,11 +42,12 @@ func TestSettingsAPIUpdatesCodingAgents(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&settings); err != nil {
 		t.Fatal(err)
 	}
-	if len(settings.CodingAgents) != 5 || settings.CodingAgents[0].Kind != project.CodingAgentKindPiNative ||
+	if len(settings.CodingAgents) != 6 || settings.CodingAgents[0].Kind != project.CodingAgentKindPiNative ||
 		settings.CodingAgents[1].Name != "Work" || settings.CodingAgents[1].ConfigDirectory != workDirectory || !settings.CodingAgents[1].IsDefault ||
 		settings.CodingAgents[2].Kind != project.CodingAgentKindClaudeGPT ||
 		settings.CodingAgents[3].Kind != project.CodingAgentKindPi ||
-		settings.CodingAgents[4].Kind != project.CodingAgentKindCodex {
+		settings.CodingAgents[4].Kind != project.CodingAgentKindCodex ||
+		settings.CodingAgents[5].Kind != project.CodingAgentKindGrok {
 		t.Fatalf("coding agents = %#v", settings.CodingAgents)
 	}
 	if info, err := os.Stat(workDirectory); err != nil || !info.IsDir() {

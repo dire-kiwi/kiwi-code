@@ -31,7 +31,17 @@ function newCodingAgentId() {
 }
 
 function isBuiltInAgent(agent: CodingAgentSetting) {
-  return agent.kind === 'pi' || agent.kind === 'pi-native' || agent.kind === 'codex'
+  return agent.kind === 'pi' || agent.kind === 'pi-native' || agent.kind === 'codex' || agent.kind === 'grok'
+}
+
+function builtInAgentName(agent: CodingAgentSetting) {
+  switch (agent.kind) {
+    case 'pi': return 'Pi'
+    case 'pi-native': return 'Pi Native'
+    case 'codex': return 'Codex CLI'
+    case 'grok': return 'Grok CLI'
+    default: return agent.name
+  }
 }
 
 function agentTypeLabel(agent: CodingAgentSetting) {
@@ -39,6 +49,7 @@ function agentTypeLabel(agent: CodingAgentSetting) {
     case 'pi': return 'Pi (terminal)'
     case 'pi-native': return 'Pi Native'
     case 'codex': return 'Codex CLI (terminal)'
+    case 'grok': return 'Grok CLI (terminal)'
     case 'claude-gpt': return 'Claude Code with GPT'
     default: return 'Claude Code'
   }
@@ -52,9 +63,7 @@ export function ClaudeProfilesSection({ settings }: ClaudeProfilesSectionProps) 
 
   const normalizedAgents = codingAgents.map((agent) => ({
     ...agent,
-    name: isBuiltInAgent(agent)
-      ? agent.kind === 'pi' ? 'Pi' : agent.kind === 'pi-native' ? 'Pi Native' : 'Codex CLI'
-      : agent.name.trim(),
+    name: isBuiltInAgent(agent) ? builtInAgentName(agent) : agent.name.trim(),
     configDirectory: agent.kind === 'claude' ? (agent.configDirectory ?? '').trim() : undefined,
   }))
   const customAgents = normalizedAgents.filter((agent) => !isBuiltInAgent(agent))
@@ -71,6 +80,7 @@ export function ClaudeProfilesSection({ settings }: ClaudeProfilesSectionProps) 
     && normalizedAgents.filter((agent) => agent.kind === 'pi').length === 1
     && normalizedAgents.filter((agent) => agent.kind === 'pi-native').length === 1
     && normalizedAgents.filter((agent) => agent.kind === 'codex').length === 1
+    && normalizedAgents.filter((agent) => agent.kind === 'grok').length === 1
     && normalizedAgents.filter((agent) => agent.isDefault).length === 1
   const agentsDirty = JSON.stringify(normalizedAgents) !== JSON.stringify(settings.codingAgents)
 
@@ -291,7 +301,7 @@ export function ClaudeProfilesSection({ settings }: ClaudeProfilesSectionProps) 
         </GhostButton>
 
         <InfoCallout>
-          Pi, Pi Native, and Codex CLI are always available and can be reordered or selected as the default.
+          Pi, Pi Native, Codex CLI, and Grok CLI are always available and can be reordered or selected as the default.
           Standard Claude Code instances use their selected <span className="font-mono text-ghost-blue">CLAUDE_CONFIG_DIR</span>;
           GPT instances use Kiwi Code&apos;s managed CLIProxyAPI profile. Missing standard directories are created on save.
         </InfoCallout>

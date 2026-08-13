@@ -12,6 +12,7 @@ describe('native coding-agent selection mappings', () => {
     ['claude-native', 'claude', 'native'],
     ['pi', 'pi', 'terminal'],
     ['claude', 'claude', 'terminal'],
+    ['grok', 'grok', 'terminal'],
     ['claude-profile-work', 'claude-profile-work', 'terminal'],
   ] as const)('maps %s to its runtime target', (selection, agent, presentation) => {
     expect(codingAgentTargetForSelection(selection)).toEqual({ agent, presentation })

@@ -117,6 +117,7 @@ const fallbackWorkspaceCodingAgents: Array<{ id: CodingAgentSelection; label: st
   { id: 'pi', label: 'Pi' },
   { id: 'pi-native', label: 'Pi Native' },
   { id: 'codex', label: 'Codex CLI' },
+  { id: 'grok', label: 'Grok CLI' },
 ]
 
 export function TerminalWorkspace({
@@ -179,7 +180,7 @@ export function TerminalWorkspace({
       return fallbackWorkspaceCodingAgents
     }
     return [
-      { id: initialCodingAgent, label: initialCodingAgent === 'codex' ? 'Codex CLI' : 'Claude Code' },
+      { id: initialCodingAgent, label: initialCodingAgent === 'codex' ? 'Codex CLI' : initialCodingAgent === 'grok' ? 'Grok CLI' : 'Claude Code' },
       ...fallbackWorkspaceCodingAgents,
     ]
   }, [initialCodingAgent])

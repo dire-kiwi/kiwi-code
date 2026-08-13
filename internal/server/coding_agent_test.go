@@ -133,6 +133,62 @@ func configureTestClaudeGPTUserConfiguration(t *testing.T, handler *terminalHand
 	return pluginDirectory
 }
 
+func TestParseGrokModels(t *testing.T) {
+	output := []byte(`You are logged in with grok.com.
+
+Default model: grok-4.6
+
+Available models:
+  * grok-4.6 (default)
+  - grok-4.5
+  - grok-4.6
+  - --invalid
+warning this line should be ignored
+`)
+	got := parseGrokModels(output)
+	want := []codingAgentChoice{
+		{ID: "grok-4.6", Label: "grok-4.6 (default)"},
+		{ID: "grok-4.5", Label: "grok-4.5"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseGrokModels() = %#v, want %#v", got, want)
+	}
+}
+
+func TestDiscoverGrokModels(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, codingAgentGrok)
+	script := `#!/bin/sh
+if [ "$1" != "models" ]; then
+  echo "unexpected args: $*" >&2
+  exit 2
+fi
+printf '%s\n' 'You are logged in with grok.com.'
+printf '%s\n' ''
+printf '%s\n' 'Default model: grok-4.6'
+printf '%s\n' ''
+printf '%s\n' 'Available models:'
+printf '%s\n' '  * grok-4.6 (default)'
+printf '%s\n' '  - grok-4.5'
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", directory)
+
+	models, err := discoverGrokModels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []codingAgentChoice{
+		{ID: "grok-4.6", Label: "grok-4.6 (default)"},
+		{ID: "grok-4.5", Label: "grok-4.5"},
+	}
+	if !reflect.DeepEqual(models, want) {
+		t.Fatalf("discoverGrokModels() = %#v, want %#v", models, want)
+	}
+}
+
 func TestParsePiModels(t *testing.T) {
 	output := []byte(`provider      model                context  max-out  thinking  images
 openai-codex  gpt-5.6-sol          372K     128K     yes       yes
@@ -463,6 +519,15 @@ done
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	grokPath := filepath.Join(directory, codingAgentGrok)
+	grokScript := `#!/bin/sh
+printf '%s\n' 'Available models:'
+printf '%s\n' '  * grok-4.6 (default)'
+printf '%s\n' '  - grok-4.5'
+`
+	if err := os.WriteFile(grokPath, []byte(grokScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("PATH", directory)
 
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -503,7 +568,7 @@ done
 	if err := json.NewDecoder(response.Body).Decode(&configs); err != nil {
 		t.Fatal(err)
 	}
-	if len(configs) != 4 || configs[0].ID != codingAgentPi || configs[1].ID != codingAgentCodex || configs[2].ID != claudeCodeProfileAgentID("work") || configs[3].ID != claudeCodeGPTProfileAgentID("gpt") {
+	if len(configs) != 5 || configs[0].ID != codingAgentPi || configs[1].ID != codingAgentCodex || configs[2].ID != codingAgentGrok || configs[3].ID != claudeCodeProfileAgentID("work") || configs[4].ID != claudeCodeGPTProfileAgentID("gpt") {
 		t.Fatalf("coding agent configs = %#v", configs)
 	}
 	if len(configs[0].Models) != 3 || configs[0].Models[1].ID != "custom/model-a" || configs[0].Models[2].ID != "custom/model-b" {
@@ -512,13 +577,19 @@ done
 	if !codingAgentChoiceExists(configs[1].ThinkingLevels, "minimal") || codingAgentChoiceExists(configs[1].ThinkingLevels, "max") {
 		t.Fatalf("Codex thinking levels = %#v", configs[1].ThinkingLevels)
 	}
-	if codingAgentChoiceExists(configs[2].ThinkingLevels, "minimal") {
-		t.Fatalf("Claude thinking levels include Codex minimal: %#v", configs[2].ThinkingLevels)
+	if codingAgentChoiceExists(configs[2].ThinkingLevels, "minimal") || codingAgentChoiceExists(configs[2].ThinkingLevels, "max") {
+		t.Fatalf("Grok thinking levels = %#v", configs[2].ThinkingLevels)
 	}
-	if !codingAgentChoiceExists(configs[2].ThinkingLevels, "ultracode") || !codingAgentChoiceExists(configs[3].ThinkingLevels, "ultracode") {
-		t.Fatalf("Claude thinking levels do not expose built-in ultracode: %#v / %#v", configs[2].ThinkingLevels, configs[3].ThinkingLevels)
+	if !codingAgentChoiceExists(configs[2].Models, "grok-4.6") || !codingAgentChoiceExists(configs[2].Models, "grok-4.5") {
+		t.Fatalf("Grok models = %#v", configs[2].Models)
 	}
-	for _, config := range configs[2:] {
+	if codingAgentChoiceExists(configs[3].ThinkingLevels, "minimal") {
+		t.Fatalf("Claude thinking levels include Codex minimal: %#v", configs[3].ThinkingLevels)
+	}
+	if !codingAgentChoiceExists(configs[3].ThinkingLevels, "ultracode") || !codingAgentChoiceExists(configs[4].ThinkingLevels, "ultracode") {
+		t.Fatalf("Claude thinking levels do not expose built-in ultracode: %#v / %#v", configs[3].ThinkingLevels, configs[4].ThinkingLevels)
+	}
+	for _, config := range configs[3:] {
 		for _, level := range config.ThinkingLevels {
 			if level.ID == "ultracode" && level.Label != "Ultracode (Claude built-in)" {
 				t.Fatalf("%s ultracode label = %q", config.ID, level.Label)
@@ -526,20 +597,20 @@ done
 		}
 	}
 	for _, model := range []string{"sonnet", "opus", "haiku", "fable"} {
-		if !codingAgentChoiceExists(configs[2].Models, model) {
-			t.Fatalf("Claude models = %#v, missing %q", configs[2].Models, model)
+		if !codingAgentChoiceExists(configs[3].Models, model) {
+			t.Fatalf("Claude models = %#v, missing %q", configs[3].Models, model)
 		}
 	}
-	if !reflect.DeepEqual(configs[3].Models, []codingAgentChoice{
+	if !reflect.DeepEqual(configs[4].Models, []codingAgentChoice{
 		{ID: "gpt-5.4", Label: "gpt-5.4"},
 		{ID: "gpt-5.3-codex", Label: "gpt-5.3-codex"},
 	}) {
-		t.Fatalf("Claude GPT models = %#v", configs[3].Models)
+		t.Fatalf("Claude GPT models = %#v", configs[4].Models)
 	}
-	if codingAgentChoiceExists(configs[3].Models, "opus") {
-		t.Fatalf("Claude GPT models unexpectedly contain Claude aliases: %#v", configs[3].Models)
+	if codingAgentChoiceExists(configs[4].Models, "opus") {
+		t.Fatalf("Claude GPT models unexpectedly contain Claude aliases: %#v", configs[4].Models)
 	}
-	if configs[1].Label != "Codex CLI" || configs[2].Label != "Claude Work" || configs[3].Label != "Claude GPT" {
+	if configs[1].Label != "Codex CLI" || configs[2].Label != "Grok CLI" || configs[3].Label != "Claude Work" || configs[4].Label != "Claude GPT" {
 		t.Fatalf("configured coding agent labels = %#v", configs)
 	}
 }
@@ -575,6 +646,12 @@ func TestNormalizeCodingAgentLaunchOptions(t *testing.T) {
 			want: codingAgentLaunchOptions{Model: "gpt-5-codex", ThinkingLevel: "xhigh"},
 		},
 		{name: "Codex rejects unsupported maximum", agent: codingAgentCodex, thinking: "max", wantErr: true},
+		{
+			name: "Grok selection", agent: codingAgentGrok, model: "grok-4.6", thinking: "high",
+			want: codingAgentLaunchOptions{Model: "grok-4.6", ThinkingLevel: "high"},
+		},
+		{name: "Grok rejects unsupported maximum", agent: codingAgentGrok, thinking: "max", wantErr: true},
+		{name: "Grok rejects Codex-only minimal", agent: codingAgentGrok, thinking: "minimal", wantErr: true},
 		{
 			name: "Claude selection", agent: codingAgentClaude, model: "sonnet", thinking: "xhigh",
 			want: codingAgentLaunchOptions{Model: "sonnet", ThinkingLevel: "xhigh"},
@@ -783,7 +860,7 @@ func TestConfiguredClaudeCodeProfileUsesTheDefaultClaudeLaunchConfiguration(t *t
 
 func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) {
 	directory := t.TempDir()
-	for _, name := range []string{codingAgentPi, codingAgentCodex, codingAgentClaude} {
+	for _, name := range []string{codingAgentPi, codingAgentCodex, codingAgentGrok, codingAgentClaude} {
 		if err := os.WriteFile(filepath.Join(directory, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -840,6 +917,14 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 			},
 			wantCommand: filepath.Join(directory, codingAgentCodex),
 			wantTail:    []string{"--model", "gpt-5-codex", "--config", `model_reasoning_effort="xhigh"`, "Inspect with Codex"},
+		},
+		{
+			agent: codingAgentGrok,
+			options: codingAgentLaunchOptions{
+				Model: "grok-4.6", ThinkingLevel: "high", InitialPrompt: "Inspect with Grok",
+			},
+			wantCommand: filepath.Join(directory, codingAgentGrok),
+			wantTail:    []string{"--model", "grok-4.6", "--effort", "high", "Inspect with Grok"},
 		},
 		{
 			agent: codingAgentClaude,
@@ -899,6 +984,16 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 				} {
 					if !strings.Contains(joined, expected) {
 						t.Fatalf("Codex args %#v do not contain %q", args, expected)
+					}
+				}
+			}
+			if test.agent == codingAgentGrok {
+				for _, expected := range []string{
+					"--always-approve",
+					"KIWI_CODE_CODING_AGENT=grok",
+				} {
+					if !strings.Contains(joined, expected) {
+						t.Fatalf("Grok args %#v do not contain %q", args, expected)
 					}
 				}
 			}
