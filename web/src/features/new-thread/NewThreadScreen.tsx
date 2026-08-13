@@ -359,6 +359,7 @@ export function NewThreadScreen({
     { value: 'pi' as CodingAgentSelection, label: 'Pi' },
     { value: 'pi-native' as CodingAgentSelection, label: 'Pi Native' },
     { value: 'codex' as CodingAgentSelection, label: 'Codex CLI' },
+    { value: 'grok' as CodingAgentSelection, label: 'Grok CLI' },
   ]
   const selectedAgentId = codingAgentTargetForSelection(codingAgent).agent
   const selectedAgent = codingAgents.find((agent) => agent.id === selectedAgentId)
@@ -367,7 +368,7 @@ export function NewThreadScreen({
   const startsAgent = Boolean(initialPrompt.trim() || initialPromptImages.length > 0)
   const selectedAgentModelsUnavailable = isClaudeGPTCodingAgent(selectedAgentId)
     && selectedAgent.models.length === 0
-  const agentNamesThread = selectedAgentId !== 'codex'
+  const agentNamesThread = selectedAgentId !== 'codex' && selectedAgentId !== 'grok'
   const submitDisabled = submitting
     || selectedAgentModelsUnavailable
     || (location === 'worktree' && (branchesLoading || Boolean(branchLoadError) || !baseBranch))

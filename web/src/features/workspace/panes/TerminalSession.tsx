@@ -148,7 +148,9 @@ export function TerminalSession({
         ? 'Claude Code (with gpt)'
         : codingAgent === 'codex'
           ? 'Codex CLI'
-          : 'Pi'
+          : codingAgent === 'grok'
+            ? 'Grok CLI'
+            : 'Pi'
     : tool === 'terminal' ? 'shell' : tool)
 
   activeRef.current = active

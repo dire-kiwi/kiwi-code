@@ -92,6 +92,13 @@ var codexThinkingLevels = []codingAgentChoice{
 	{ID: "high", Label: "High"},
 	{ID: "xhigh", Label: "Extra high"},
 }
+var grokThinkingLevels = []codingAgentChoice{
+	{ID: "", Label: "Use Grok default"},
+	{ID: "low", Label: "Low"},
+	{ID: "medium", Label: "Medium"},
+	{ID: "high", Label: "High"},
+	{ID: "xhigh", Label: "Extra high"},
+}
 
 // Claude's ultracode effort is passed through to Claude Code itself.
 var claudeThinkingLevels = append(codingAgentThinkingLevels("Use Claude default", false), codingAgentChoice{ID: "ultracode", Label: "Ultracode (Claude built-in)"})
@@ -160,14 +167,20 @@ func (h *terminalHandler) codingAgentConfigs(parent context.Context, projectID s
 	}
 
 	type modelDiscoveryResult struct {
-		piModels  []piModelCapability
-		gptModels []codingAgentChoice
+		piModels   []piModelCapability
+		gptModels  []codingAgentChoice
+		grokModels []codingAgentChoice
 	}
 	piResult := make(chan []piModelCapability, 1)
 	claudeGPTResult := make(chan []codingAgentChoice, 1)
+	grokResult := make(chan []codingAgentChoice, 1)
 	go func() {
 		discovered, _ := h.availablePiModelCapabilities(ctx, discoveryCwd, false)
 		piResult <- discovered
+	}()
+	go func() {
+		discovered, _ := discoverGrokModels(ctx)
+		grokResult <- discovered
 	}()
 	if needsGPTModels {
 		go func() {
@@ -178,8 +191,9 @@ func (h *terminalHandler) codingAgentConfigs(parent context.Context, projectID s
 		claudeGPTResult <- nil
 	}
 	result := modelDiscoveryResult{
-		piModels:  <-piResult,
-		gptModels: <-claudeGPTResult,
+		piModels:   <-piResult,
+		gptModels:  <-claudeGPTResult,
+		grokModels: <-grokResult,
 	}
 
 	piModels := []codingAgentChoice{{ID: "", Label: "Use Pi default"}}
@@ -189,6 +203,10 @@ func (h *terminalHandler) codingAgentConfigs(parent context.Context, projectID s
 	claudeGPTModels := result.gptModels
 	if claudeGPTModels == nil {
 		claudeGPTModels = []codingAgentChoice{}
+	}
+	grokModels := []codingAgentChoice{{ID: "", Label: "Use Grok default"}}
+	for _, model := range result.grokModels {
+		grokModels = append(grokModels, model)
 	}
 
 	configs := []codingAgentConfig{
@@ -203,6 +221,12 @@ func (h *terminalHandler) codingAgentConfigs(parent context.Context, projectID s
 			Label:          "Codex CLI",
 			Models:         []codingAgentChoice{{ID: "", Label: "Use Codex default"}},
 			ThinkingLevels: codexThinkingLevels,
+		},
+		{
+			ID:             codingAgentGrok,
+			Label:          "Grok CLI",
+			Models:         grokModels,
+			ThinkingLevels: grokThinkingLevels,
 		},
 	}
 	if h != nil && h.projects != nil {
@@ -449,6 +473,55 @@ func piRPCReasoningLevels(reasoning bool, levelMap map[string]*string) []string 
 	return levels
 }
 
+func discoverGrokModels(ctx context.Context) ([]codingAgentChoice, error) {
+	path, err := exec.LookPath(codingAgentGrok)
+	if err != nil {
+		return nil, err
+	}
+	command := exec.CommandContext(ctx, path, "models")
+	command.Env = append(command.Environ(), "NO_COLOR=1")
+	output, err := command.Output()
+	if err != nil {
+		return nil, err
+	}
+	models := parseGrokModels(output)
+	if len(models) == 0 {
+		return nil, errors.New("Grok CLI reported no available models")
+	}
+	return models, nil
+}
+
+func parseGrokModels(output []byte) []codingAgentChoice {
+	models := make([]codingAgentChoice, 0)
+	seen := make(map[string]struct{})
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || (line[0] != '*' && line[0] != '-') {
+			continue
+		}
+		rest := strings.TrimSpace(line[1:])
+		fields := strings.Fields(rest)
+		if len(fields) == 0 {
+			continue
+		}
+		id := fields[0]
+		if !validCodingAgentModel(id) {
+			continue
+		}
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		label := id
+		if strings.Contains(strings.ToLower(rest), "(default)") {
+			label = id + " (default)"
+		}
+		models = append(models, codingAgentChoice{ID: id, Label: label})
+	}
+	return models
+}
+
 func parsePiModels(output []byte) []codingAgentChoice {
 	capabilities := parsePiModelCapabilities(output)
 	models := make([]codingAgentChoice, 0, len(capabilities))
@@ -533,6 +606,9 @@ func normalizeCodingAgentLaunchOptions(agent, model, thinkingLevel string) (codi
 	levels := piThinkingLevels
 	if agent == codingAgentCodex {
 		levels = codexThinkingLevels
+	}
+	if agent == codingAgentGrok {
+		levels = grokThinkingLevels
 	}
 	if isClaudeCodingAgent(agent) {
 		levels = claudeThinkingLevels

@@ -98,6 +98,7 @@ const (
 	terminalViewCreationGrace         = 2 * time.Second
 	codingAgentPi                     = "pi"
 	codingAgentCodex                  = "codex"
+	codingAgentGrok                   = "grok"
 	codingAgentClaude                 = "claude"
 	codingAgentClaudeGPT              = "claude-gpt"
 	codingAgentClaudeProfilePrefix    = "claude-profile-"
@@ -2839,7 +2840,7 @@ func (h *terminalHandler) tmuxTargetServerPID(target string) (string, bool, erro
 }
 
 func (h *terminalHandler) removeCodingAgentExitMarkersForThread(projectID, threadID string) error {
-	agents := []string{codingAgentPi, codingAgentCodex, codingAgentClaude, codingAgentClaudeGPT}
+	agents := []string{codingAgentPi, codingAgentCodex, codingAgentGrok, codingAgentClaude, codingAgentClaudeGPT}
 	if h.projects != nil {
 		for _, configured := range h.projects.GetSettings().CodingAgents {
 			if configured.Kind == project.CodingAgentKindClaude || configured.Kind == project.CodingAgentKindClaudeGPT {
@@ -3285,7 +3286,7 @@ func (h *terminalHandler) commandForCodingAgentPaneWithOptions(
 		switch {
 		case agent == codingAgentCodex:
 			args = append(args, "--config", `model_reasoning_effort="`+launchOptions.ThinkingLevel+`"`)
-		case isClaudeCodingAgent(agent):
+		case agent == codingAgentGrok, isClaudeCodingAgent(agent):
 			args = append(args, "--effort", launchOptions.ThinkingLevel)
 		default:
 			args = append(args, "--thinking", launchOptions.ThinkingLevel)
@@ -3357,6 +3358,9 @@ func (h *terminalHandler) commandForTmuxTarget(
 			extensionArgs = append(extensionArgs, "--extension", extensionPath)
 		}
 		args = append(extensionArgs, args...)
+	}
+	if tool == codingAgentGrok && notice == "" {
+		args = append([]string{"--always-approve"}, args...)
 	}
 	if tool == codingAgentCodex && notice == "" {
 		if h.agentTokenErr != nil {
@@ -3474,6 +3478,9 @@ func (h *terminalHandler) commandForTmuxTarget(
 			"KIWI_CODE_CODING_AGENT="+codingAgentCodex,
 			"KIWI_CODE_PI_PATH="+piPath,
 		)
+	}
+	if tool == codingAgentGrok && notice == "" {
+		environment = append(environment, "KIWI_CODE_CODING_AGENT="+codingAgentGrok)
 	}
 	if isClaudeCodingAgent(tool) && notice == "" {
 		if profileAgent && !gptAgent {
@@ -4595,6 +4602,8 @@ func normalizeCodingAgent(agent string) (string, error) {
 		return codingAgentPi, nil
 	case codingAgentCodex:
 		return codingAgentCodex, nil
+	case codingAgentGrok:
+		return codingAgentGrok, nil
 	case codingAgentClaude:
 		return codingAgentClaude, nil
 	case codingAgentClaudeGPT:
@@ -4659,7 +4668,7 @@ func isClaudeCodingAgent(agent string) bool {
 }
 
 func isTerminalCodingAgent(agent string) bool {
-	return agent == codingAgentPi || agent == codingAgentCodex || isClaudeCodingAgent(agent)
+	return agent == codingAgentPi || agent == codingAgentCodex || agent == codingAgentGrok || isClaudeCodingAgent(agent)
 }
 
 func (h *terminalHandler) claudeCodeProfile(agent string) (project.CodingAgentSetting, bool) {
@@ -4697,6 +4706,15 @@ func commandFor(tool string) (string, []string, string, error) {
 			return path, nil, "", nil
 		}
 		notice := "\r\n\x1b[38;5;214mCodex CLI is not installed or not on PATH. Opened a shell instead.\x1b[0m\r\n\r\n"
+		return shell, []string{"-l"}, notice, nil
+	}
+
+	if tool == codingAgentGrok {
+		path, err := exec.LookPath(codingAgentGrok)
+		if err == nil {
+			return path, nil, "", nil
+		}
+		notice := "\r\n\x1b[38;5;214mGrok CLI is not installed or not on PATH. Opened a shell instead.\x1b[0m\r\n\r\n"
 		return shell, []string{"-l"}, notice, nil
 	}
 

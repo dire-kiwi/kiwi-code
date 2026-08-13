@@ -237,6 +237,7 @@ func TestNormalizeCodingAgent(t *testing.T) {
 		"":                        codingAgentPi,
 		"pi":                      codingAgentPi,
 		"codex":                   codingAgentCodex,
+		"grok":                    codingAgentGrok,
 		"claude":                  codingAgentClaude,
 		"claude-gpt":              codingAgentClaudeGPT,
 		"claude-profile-work":     claudeCodeProfileAgentID("work"),

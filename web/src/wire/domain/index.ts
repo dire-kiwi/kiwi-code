@@ -143,7 +143,7 @@ export type ThemeSettings = Schema.Schema.Type<typeof ThemeSettingsSchema>
 export const CodingAgentSettingSchema = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
-  kind: Schema.Literal('pi', 'pi-native', 'codex', 'claude', 'claude-gpt'),
+  kind: Schema.Literal('pi', 'pi-native', 'codex', 'grok', 'claude', 'claude-gpt'),
   configDirectory: Schema.optional(Schema.String),
   isDefault: Schema.Boolean,
 })
@@ -283,7 +283,7 @@ export const BrowserStatusResultSchema = Schema.Struct({
 })
 export type BrowserStatusResult = Schema.Schema.Type<typeof BrowserStatusResultSchema>
 
-export const BuiltInCodingAgentSchema = Schema.Literal('pi', 'codex', 'claude', 'claude-gpt')
+export const BuiltInCodingAgentSchema = Schema.Literal('pi', 'codex', 'grok', 'claude', 'claude-gpt')
 export type BuiltInCodingAgent = Schema.Schema.Type<typeof BuiltInCodingAgentSchema>
 
 export const ConfiguredClaudeAgentSchema = Schema.Union(
