@@ -15,6 +15,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/dire-kiwi/kiwi-code/internal/broadcast"
@@ -151,6 +152,31 @@ const (
 	CodingAgentKindClaudeGPT = "claude-gpt"
 )
 
+// DefaultTitleModel is the pi model registry entry (provider/model) used to
+// auto-generate thread titles when no explicit model is configured. It must
+// stay in sync with the fallbacks in internal/server/pi-thread-title.ts and
+// internal/server/claude-plugin/scripts/kiwi-code-hook.mjs.
+const DefaultTitleModel = "openai-codex/gpt-5.6-luna"
+
+// DefaultTitleThinking is the pi thinking level used to auto-generate thread
+// titles when no explicit level is configured. It must stay in sync with the
+// fallbacks in internal/server/pi-thread-title.ts and
+// internal/server/claude-plugin/scripts/kiwi-code-hook.mjs.
+const DefaultTitleThinking = "low"
+
+const maxTitleModelLength = 256
+
+// titleThinkingLevels mirrors pi's --thinking levels.
+var titleThinkingLevels = map[string]bool{
+	"off":     true,
+	"minimal": true,
+	"low":     true,
+	"medium":  true,
+	"high":    true,
+	"xhigh":   true,
+	"max":     true,
+}
+
 type CodingAgentSetting struct {
 	ID              string `json:"id"`
 	Name            string `json:"name"`
@@ -183,9 +209,16 @@ type Settings struct {
 	ArchivedThreadRetentionDays   int                  `json:"archivedThreadRetentionDays"`
 	OrphanedWorktreeRetentionDays int                  `json:"orphanedWorktreeRetentionDays"`
 	CodingAgents                  []CodingAgentSetting `json:"codingAgents"`
-	Theme                         Theme                `json:"theme"`
-	DefaultTheme                  Theme                `json:"defaultTheme"`
-	UsingDefaultTheme             bool                 `json:"usingDefaultTheme"`
+	// TitleModel is the pi provider/model used to auto-generate thread
+	// titles, and TitleThinking the pi thinking level it runs at. Empty means
+	// the corresponding default.
+	TitleModel           string `json:"titleModel"`
+	DefaultTitleModel    string `json:"defaultTitleModel"`
+	TitleThinking        string `json:"titleThinking"`
+	DefaultTitleThinking string `json:"defaultTitleThinking"`
+	Theme                Theme  `json:"theme"`
+	DefaultTheme         Theme  `json:"defaultTheme"`
+	UsingDefaultTheme    bool   `json:"usingDefaultTheme"`
 }
 
 type SettingsUpdate struct {
@@ -193,6 +226,8 @@ type SettingsUpdate struct {
 	ArchivedThreadRetentionDays   *int
 	OrphanedWorktreeRetentionDays *int
 	CodingAgents                  *[]CodingAgentSetting
+	TitleModel                    *string
+	TitleThinking                 *string
 	Theme                         *Theme
 }
 
@@ -202,6 +237,8 @@ type persistedSettings struct {
 	OrphanedWorktreeRetentionDays *int                  `json:"orphanedWorktreeRetentionDays,omitempty"`
 	CodingAgents                  *[]CodingAgentSetting `json:"codingAgents,omitempty"`
 	LegacyClaudeCodeProfiles      *[]ClaudeCodeProfile  `json:"claudeCodeProfiles,omitempty"`
+	TitleModel                    string                `json:"titleModel,omitempty"`
+	TitleThinking                 string                `json:"titleThinking,omitempty"`
 	Theme                         *Theme                `json:"theme,omitempty"`
 }
 
@@ -232,6 +269,8 @@ type Store struct {
 	archivedThreadRetentionDays   int
 	orphanedWorktreeRetentionDays int
 	codingAgents                  []CodingAgentSetting
+	titleModel                    string
+	titleThinking                 string
 	theme                         Theme
 	usingDefaultTheme             bool
 	profiles                      []Profile
@@ -874,7 +913,8 @@ func (s *Store) UpdateSettingsValues(update SettingsUpdate) (Settings, error) {
 
 func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 	if update.WorktreeBasePath == nil && update.ArchivedThreadRetentionDays == nil &&
-		update.OrphanedWorktreeRetentionDays == nil && update.CodingAgents == nil && update.Theme == nil {
+		update.OrphanedWorktreeRetentionDays == nil && update.CodingAgents == nil &&
+		update.TitleModel == nil && update.TitleThinking == nil && update.Theme == nil {
 		return Settings{}, errors.New("at least one setting is required")
 	}
 
@@ -932,6 +972,24 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 		normalizedCodingAgents = &agents
 	}
 
+	var normalizedTitleModel *string
+	if update.TitleModel != nil {
+		value, err := normalizeTitleModel(*update.TitleModel)
+		if err != nil {
+			return Settings{}, err
+		}
+		normalizedTitleModel = &value
+	}
+
+	var normalizedTitleThinking *string
+	if update.TitleThinking != nil {
+		value, err := normalizeTitleThinking(*update.TitleThinking)
+		if err != nil {
+			return Settings{}, err
+		}
+		normalizedTitleThinking = &value
+	}
+
 	var normalizedTheme *Theme
 	if update.Theme != nil {
 		value, err := normalizeTheme(*update.Theme)
@@ -947,6 +1005,8 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 	previousArchivedDays := s.archivedThreadRetentionDays
 	previousOrphanedDays := s.orphanedWorktreeRetentionDays
 	previousCodingAgents := s.codingAgents
+	previousTitleModel := s.titleModel
+	previousTitleThinking := s.titleThinking
 	previousTheme := s.theme
 	previousUsingDefaultTheme := s.usingDefaultTheme
 	if normalizedPath != nil {
@@ -965,6 +1025,12 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 	if normalizedCodingAgents != nil {
 		s.codingAgents = append([]CodingAgentSetting{}, (*normalizedCodingAgents)...)
 	}
+	if normalizedTitleModel != nil {
+		s.titleModel = *normalizedTitleModel
+	}
+	if normalizedTitleThinking != nil {
+		s.titleThinking = *normalizedTitleThinking
+	}
 	if normalizedTheme != nil {
 		s.theme = *normalizedTheme
 		s.usingDefaultTheme = s.theme == DefaultTheme()
@@ -974,6 +1040,8 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 		s.archivedThreadRetentionDays = previousArchivedDays
 		s.orphanedWorktreeRetentionDays = previousOrphanedDays
 		s.codingAgents = previousCodingAgents
+		s.titleModel = previousTitleModel
+		s.titleThinking = previousTitleThinking
 		s.theme = previousTheme
 		s.usingDefaultTheme = previousUsingDefaultTheme
 		return Settings{}, err
@@ -1002,10 +1070,73 @@ func (s *Store) settingsLocked() Settings {
 		ArchivedThreadRetentionDays:   s.archivedThreadRetentionDays,
 		OrphanedWorktreeRetentionDays: s.orphanedWorktreeRetentionDays,
 		CodingAgents:                  append([]CodingAgentSetting{}, s.codingAgents...),
+		TitleModel:                    s.titleModel,
+		DefaultTitleModel:             DefaultTitleModel,
+		TitleThinking:                 s.titleThinking,
+		DefaultTitleThinking:          DefaultTitleThinking,
 		Theme:                         s.theme,
 		DefaultTheme:                  DefaultTheme(),
 		UsingDefaultTheme:             s.usingDefaultTheme,
 	}
+}
+
+// TitleModel returns the effective provider/model for thread title
+// generation, falling back to the built-in default.
+func (s *Store) TitleModel() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.titleModel != "" {
+		return s.titleModel
+	}
+	return DefaultTitleModel
+}
+
+// TitleThinking returns the effective pi thinking level for thread title
+// generation, falling back to the built-in default.
+func (s *Store) TitleThinking() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.titleThinking != "" {
+		return s.titleThinking
+	}
+	return DefaultTitleThinking
+}
+
+// normalizeTitleThinking validates a pi thinking level. Empty means the
+// built-in default; picking the default explicitly is stored as empty so
+// future default changes apply.
+func normalizeTitleThinking(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || value == DefaultTitleThinking {
+		return "", nil
+	}
+	if !titleThinkingLevels[value] {
+		return "", errors.New("title thinking level is not a pi thinking level")
+	}
+	return value, nil
+}
+
+// normalizeTitleModel validates a pi model registry identifier in
+// provider/model form. Empty means the built-in default; picking the default
+// explicitly is stored as empty so future default changes apply.
+func normalizeTitleModel(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || value == DefaultTitleModel {
+		return "", nil
+	}
+	if len(value) > maxTitleModelLength || !utf8.ValidString(value) || strings.HasPrefix(value, "-") {
+		return "", errors.New("title model must be a provider/model identifier")
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) || unicode.IsSpace(character) {
+			return "", errors.New("title model must be a provider/model identifier")
+		}
+	}
+	separator := strings.Index(value, "/")
+	if separator <= 0 || separator == len(value)-1 {
+		return "", errors.New("title model must be in provider/model form")
+	}
+	return value, nil
 }
 
 func (s *Store) effectiveWorktreeBasePathLocked() string {
@@ -2512,6 +2643,20 @@ func (s *Store) loadSettings() error {
 		}
 		s.codingAgents = normalized
 	}
+	if settings.TitleModel != "" {
+		titleModel, err := normalizeTitleModel(settings.TitleModel)
+		if err != nil {
+			return fmt.Errorf("decode title model: %w", err)
+		}
+		s.titleModel = titleModel
+	}
+	if settings.TitleThinking != "" {
+		titleThinking, err := normalizeTitleThinking(settings.TitleThinking)
+		if err != nil {
+			return fmt.Errorf("decode title thinking level: %w", err)
+		}
+		s.titleThinking = titleThinking
+	}
 	if settings.Theme != nil {
 		normalizedTheme, err := normalizeTheme(*settings.Theme)
 		if err != nil {
@@ -2679,6 +2824,8 @@ func (s *Store) saveSettingsLocked() error {
 		ArchivedThreadRetentionDays:   &archivedDays,
 		OrphanedWorktreeRetentionDays: &orphanedDays,
 		CodingAgents:                  &codingAgents,
+		TitleModel:                    s.titleModel,
+		TitleThinking:                 s.titleThinking,
 	}
 	if !s.usingDefaultTheme {
 		theme := s.theme

@@ -24,6 +24,9 @@ const (
 type codingAgentChoice struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
+	// ReasoningLevels lists the thinking levels the model supports. It is only
+	// populated for pi models; empty means the levels are not known.
+	ReasoningLevels []string `json:"reasoningLevels,omitempty"`
 }
 
 type codingAgentConfig struct {
@@ -198,7 +201,11 @@ func (h *terminalHandler) codingAgentConfigs(parent context.Context, projectID s
 
 	piModels := []codingAgentChoice{{ID: "", Label: "Use Pi default"}}
 	for _, model := range result.piModels {
-		piModels = append(piModels, codingAgentChoice{ID: model.ID, Label: model.Label})
+		piModels = append(piModels, codingAgentChoice{
+			ID:              model.ID,
+			Label:           model.Label,
+			ReasoningLevels: append([]string(nil), model.ReasoningLevels...),
+		})
 	}
 	claudeGPTModels := result.gptModels
 	if claudeGPTModels == nil {

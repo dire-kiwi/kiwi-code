@@ -31,6 +31,7 @@ import { CleanupSection } from '@/features/settings/sections/CleanupSection'
 import { ProjectBranchesSection } from '@/features/settings/sections/ProjectBranchesSection'
 import { ProjectGeneralSection } from '@/features/settings/sections/ProjectGeneralSection'
 import { SkillsSection } from '@/features/settings/sections/SkillsSection'
+import { ThreadTitlesSection } from '@/features/settings/sections/ThreadTitlesSection'
 import { WorktreesSection } from '@/features/settings/sections/WorktreesSection'
 
 type SettingsShellProps = {
@@ -170,6 +171,8 @@ export function SettingsShell({
         return <WorktreesSection settings={settings} />
       case 'profiles':
         return <ClaudeProfilesSection settings={settings} />
+      case 'titles':
+        return <ThreadTitlesSection settings={settings} />
       case 'cleanup':
         return <CleanupSection settings={settings} />
       case 'appearance':

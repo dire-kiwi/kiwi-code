@@ -2,9 +2,35 @@ import { complete } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const markerType = "kiwi-code-thread-title";
-const provider = "openai-codex";
-const modelId = "gpt-5.6-luna";
+const defaultProvider = "openai-codex";
+const defaultModelId = "gpt-5.6-luna";
+const defaultThinking = "low";
+const supportedThinking = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const timeoutMs = 60_000;
+
+// KIWI_CODE_TITLE_MODEL carries the "provider/modelId" configured in Kiwi
+// Code's settings. The model id may itself contain slashes, so only the first
+// slash separates the provider.
+function titleModelSelection(): { provider: string; modelId: string } {
+	const configured = (process.env.KIWI_CODE_TITLE_MODEL ?? "").trim();
+	const separator = configured.indexOf("/");
+	if (separator > 0 && separator < configured.length - 1) {
+		return { provider: configured.slice(0, separator), modelId: configured.slice(separator + 1) };
+	}
+	return { provider: defaultProvider, modelId: defaultModelId };
+}
+
+type TitleReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
+// KIWI_CODE_TITLE_THINKING carries the thinking level configured in Kiwi
+// Code's settings. Reasoning effort is omitted entirely for "off" and for
+// models that do not support reasoning.
+function titleReasoningEffort(model: { reasoning?: boolean }): TitleReasoningEffort | undefined {
+	if (model.reasoning === false) return undefined;
+	const configured = (process.env.KIWI_CODE_TITLE_THINKING ?? "").trim();
+	const level = supportedThinking.has(configured) ? configured : defaultThinking;
+	return level === "off" ? undefined : (level as TitleReasoningEffort);
+}
 
 type UpdatedThread = {
 	title?: unknown;
@@ -62,6 +88,7 @@ export default function (pi: ExtensionAPI) {
 		controller = requestController;
 		const timeout = setTimeout(() => requestController.abort(), timeoutMs);
 		void (async () => {
+			const { provider, modelId } = titleModelSelection();
 			const model = ctx.modelRegistry.find(provider, modelId);
 			if (!model) throw new Error(`${provider}/${modelId} is unavailable`);
 
@@ -83,7 +110,7 @@ export default function (pi: ExtensionAPI) {
 					headers: auth.headers,
 					env: auth.env,
 					maxTokens: 256,
-					reasoningEffort: "low",
+					reasoningEffort: titleReasoningEffort(model),
 					signal: requestController.signal,
 				},
 			);

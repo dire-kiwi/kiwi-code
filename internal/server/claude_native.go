@@ -37,6 +37,7 @@ type claudeNativeManager struct {
 	pluginPath       string
 	pluginErr        error
 	figmaMCPURL      func(project.Project) string
+	titleSettings    func() titleGenerationSettings
 	processes        map[piNativeProcessKey]*claudeNativeProcess
 	contextWatchOnce sync.Once
 	usageReporter    func(piNativeProcessKey, string, threadUsageTotals)
@@ -488,7 +489,11 @@ func (m *claudeNativeManager) startProcess(
 	}
 	command := exec.Command(claudePath, arguments...)
 	command.Dir = thread.Cwd
-	threadEnvironment := kiwiCodeThreadEnvironment(threadEndpoint, key.ProjectID, key.ThreadID)
+	titleSettings := titleGenerationSettings{}
+	if m.titleSettings != nil {
+		titleSettings = m.titleSettings()
+	}
+	threadEnvironment := kiwiCodeThreadEnvironment(threadEndpoint, key.ProjectID, key.ThreadID, titleSettings)
 	// Match the terminal Claude launch: no Kiwi Code agent token. The Claude
 	// browser MCP server reads its capability from the
 	// protected data directory instead of the environment.

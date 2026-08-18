@@ -122,7 +122,14 @@
         "models": [
           {
             "id": "openai/gpt-5",
-            "label": "GPT-5"
+            "label": "GPT-5",
+            "reasoningLevels": [
+              "off",
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ]
           }
         ],
         "thinkingLevels": [
@@ -223,6 +230,10 @@
           "isDefault": true
         }
       ],
+      "titleModel": "",
+      "defaultTitleModel": "openai-codex/gpt-5.6-luna",
+      "titleThinking": "",
+      "defaultTitleThinking": "low",
       "theme": {
         "fontFamily": "\"JetBrains Mono Variable\", \"Symbols Nerd Font Mono\", monospace",
         "fontSize": 13,

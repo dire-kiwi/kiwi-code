@@ -1811,6 +1811,162 @@ func TestStoreRejectsInvalidTheme(t *testing.T) {
 	}
 }
 
+func TestStorePersistsTitleModel(t *testing.T) {
+	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
+	store, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings := store.GetSettings()
+	if settings.TitleModel != "" || settings.DefaultTitleModel != DefaultTitleModel {
+		t.Fatalf("unexpected default title model settings: %#v", settings)
+	}
+	if store.TitleModel() != DefaultTitleModel {
+		t.Fatalf("TitleModel() = %q, want the default %q", store.TitleModel(), DefaultTitleModel)
+	}
+
+	custom := "anthropic/claude-sonnet-5"
+	settings, err = store.UpdateSettingsValues(SettingsUpdate{TitleModel: &custom})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.TitleModel != custom {
+		t.Fatalf("updated title model = %q, want %q", settings.TitleModel, custom)
+	}
+	if store.TitleModel() != custom {
+		t.Fatalf("TitleModel() = %q, want %q", store.TitleModel(), custom)
+	}
+
+	reloaded, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.GetSettings().TitleModel != custom {
+		t.Fatalf("custom title model was not persisted: %#v", reloaded.GetSettings())
+	}
+
+	// Selecting the built-in default explicitly stores the empty override so a
+	// future default change applies automatically.
+	explicitDefault := DefaultTitleModel
+	settings, err = reloaded.UpdateSettingsValues(SettingsUpdate{TitleModel: &explicitDefault})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.TitleModel != "" || reloaded.TitleModel() != DefaultTitleModel {
+		t.Fatalf("default title model was not normalized to empty: %#v", settings)
+	}
+	contents, err := os.ReadFile(filepath.Join(filepath.Dir(dataFile), "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(contents), `"titleModel"`) {
+		t.Fatalf("default title model should not be persisted as an override: %s", contents)
+	}
+}
+
+func TestStorePersistsTitleThinking(t *testing.T) {
+	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
+	store, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings := store.GetSettings()
+	if settings.TitleThinking != "" || settings.DefaultTitleThinking != DefaultTitleThinking {
+		t.Fatalf("unexpected default title thinking settings: %#v", settings)
+	}
+	if store.TitleThinking() != DefaultTitleThinking {
+		t.Fatalf("TitleThinking() = %q, want the default %q", store.TitleThinking(), DefaultTitleThinking)
+	}
+
+	custom := "high"
+	settings, err = store.UpdateSettingsValues(SettingsUpdate{TitleThinking: &custom})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.TitleThinking != custom {
+		t.Fatalf("updated title thinking = %q, want %q", settings.TitleThinking, custom)
+	}
+	if store.TitleThinking() != custom {
+		t.Fatalf("TitleThinking() = %q, want %q", store.TitleThinking(), custom)
+	}
+
+	reloaded, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.GetSettings().TitleThinking != custom {
+		t.Fatalf("custom title thinking was not persisted: %#v", reloaded.GetSettings())
+	}
+
+	// Selecting the built-in default explicitly stores the empty override so a
+	// future default change applies automatically.
+	explicitDefault := DefaultTitleThinking
+	settings, err = reloaded.UpdateSettingsValues(SettingsUpdate{TitleThinking: &explicitDefault})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.TitleThinking != "" || reloaded.TitleThinking() != DefaultTitleThinking {
+		t.Fatalf("default title thinking was not normalized to empty: %#v", settings)
+	}
+	contents, err := os.ReadFile(filepath.Join(filepath.Dir(dataFile), "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(contents), `"titleThinking"`) {
+		t.Fatalf("default title thinking should not be persisted as an override: %s", contents)
+	}
+}
+
+func TestStoreRejectsInvalidTitleThinking(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, value := range map[string]string{
+		"unknown level": "ultra",
+		"wrong case":    "High",
+		"pi flag value": "--thinking",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := store.UpdateSettingsValues(SettingsUpdate{TitleThinking: &value}); err == nil {
+				t.Fatalf("expected invalid title thinking level %q to be rejected", value)
+			}
+		})
+	}
+	if store.TitleThinking() != DefaultTitleThinking {
+		t.Fatalf("invalid updates changed the title thinking level: %q", store.TitleThinking())
+	}
+}
+
+func TestStoreRejectsInvalidTitleModel(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, value := range map[string]string{
+		"no separator":      "gpt-5.6-luna",
+		"empty provider":    "/gpt-5.6-luna",
+		"empty model":       "openai-codex/",
+		"embedded space":    "openai-codex/gpt 5",
+		"control character": "openai-codex/gpt\x005",
+		"leading dash":      "-openai/gpt-5",
+		"too long":          "openai-codex/" + strings.Repeat("a", 300),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := store.UpdateSettingsValues(SettingsUpdate{TitleModel: &value}); err == nil {
+				t.Fatalf("expected invalid title model %q to be rejected", value)
+			}
+		})
+	}
+	if store.TitleModel() != DefaultTitleModel {
+		t.Fatalf("invalid updates changed the title model: %q", store.TitleModel())
+	}
+}
+
 func TestStoreCreatesGitWorktreeThreads(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")

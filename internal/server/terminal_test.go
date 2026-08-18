@@ -187,11 +187,15 @@ func TestTmuxSessionNameAndShellCommand(t *testing.T) {
 	if got, want := threadEndpointURL(request, "project", "thread"), "http://127.0.0.1:8080/api/projects/project/threads/thread"; got != want {
 		t.Fatalf("threadEndpointURL() = %q, want %q", got, want)
 	}
-	environment := strings.Join(kiwiCodeThreadEnvironment("http://127.0.0.1:9090/api/projects/project/threads/thread", "project", "thread"), "\n")
-	for _, expected := range []string{"KIWI_CODE_PORT=9090", "KIWI_CODE_PROJECT_ID=project", "KIWI_CODE_THREAD_ID=thread"} {
+	environment := strings.Join(kiwiCodeThreadEnvironment("http://127.0.0.1:9090/api/projects/project/threads/thread", "project", "thread", titleGenerationSettings{Model: "anthropic/claude-sonnet-5", Thinking: "high"}), "\n")
+	for _, expected := range []string{"KIWI_CODE_PORT=9090", "KIWI_CODE_PROJECT_ID=project", "KIWI_CODE_THREAD_ID=thread", "KIWI_CODE_TITLE_MODEL=anthropic/claude-sonnet-5", "KIWI_CODE_TITLE_THINKING=high"} {
 		if !strings.Contains(environment, expected) {
 			t.Fatalf("thread environment %q does not contain %q", environment, expected)
 		}
+	}
+	withoutTitleSettings := strings.Join(kiwiCodeThreadEnvironment("http://127.0.0.1:9090/api/projects/project/threads/thread", "project", "thread", titleGenerationSettings{}), "\n")
+	if strings.Contains(withoutTitleSettings, "KIWI_CODE_TITLE_MODEL") || strings.Contains(withoutTitleSettings, "KIWI_CODE_TITLE_THINKING") {
+		t.Fatalf("thread environment %q sets title generation variables without configured values", withoutTitleSettings)
 	}
 }
 

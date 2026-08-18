@@ -137,15 +137,20 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 				ID: project.CodingAgentKindPiNative, Name: "Pi Native",
 				Kind: project.CodingAgentKindPiNative, IsDefault: true,
 			}},
-			Theme:             defaultTheme,
-			DefaultTheme:      defaultTheme,
-			UsingDefaultTheme: true,
+			TitleModel:           "",
+			DefaultTitleModel:    project.DefaultTitleModel,
+			TitleThinking:        "",
+			DefaultTitleThinking: project.DefaultTitleThinking,
+			Theme:                defaultTheme,
+			DefaultTheme:         defaultTheme,
+			UsingDefaultTheme:    true,
 		},
 		stateTopicCodingAgents: []codingAgentConfig{{
 			ID:    codingAgentPi,
 			Label: "Pi",
 			Models: []codingAgentChoice{{
 				ID: "openai/gpt-5", Label: "GPT-5",
+				ReasoningLevels: []string{"off", "minimal", "low", "medium", "high"},
 			}},
 			ThinkingLevels: []codingAgentChoice{{
 				ID: "high", Label: "High",

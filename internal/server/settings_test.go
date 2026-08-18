@@ -78,6 +78,135 @@ func TestSettingsAPIUpdatesCodingAgents(t *testing.T) {
 	}
 }
 
+func TestSettingsAPIUpdatesTitleModel(t *testing.T) {
+	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
+	store, err := project.NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := newIsolatedServerHandler(t, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(
+		http.MethodPut,
+		"/api/settings",
+		bytes.NewBufferString(`{"titleModel":"anthropic/claude-sonnet-5"}`),
+	))
+	if response.Code != http.StatusOK {
+		t.Fatalf("update title model status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var settings project.Settings
+	if err := json.NewDecoder(response.Body).Decode(&settings); err != nil {
+		t.Fatal(err)
+	}
+	if settings.TitleModel != "anthropic/claude-sonnet-5" || settings.DefaultTitleModel != project.DefaultTitleModel {
+		t.Fatalf("unexpected title model settings: %#v", settings)
+	}
+	if !settings.UsingDefault {
+		t.Fatalf("title model update changed worktree settings: %#v", settings)
+	}
+	if store.TitleModel() != "anthropic/claude-sonnet-5" {
+		t.Fatalf("store title model = %q", store.TitleModel())
+	}
+
+	reloaded, err := project.NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.GetSettings().TitleModel != "anthropic/claude-sonnet-5" {
+		t.Fatalf("title model was not persisted: %#v", reloaded.GetSettings())
+	}
+
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(
+		http.MethodPut,
+		"/api/settings",
+		bytes.NewBufferString(`{"titleModel":"not-a-model"}`),
+	))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid title model status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(
+		http.MethodPut,
+		"/api/settings",
+		bytes.NewBufferString(`{"titleModel":""}`),
+	))
+	if response.Code != http.StatusOK {
+		t.Fatalf("reset title model status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if store.TitleModel() != project.DefaultTitleModel {
+		t.Fatalf("store title model after reset = %q", store.TitleModel())
+	}
+}
+
+func TestSettingsAPIUpdatesTitleThinking(t *testing.T) {
+	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
+	store, err := project.NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := newIsolatedServerHandler(t, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(
+		http.MethodPut,
+		"/api/settings",
+		bytes.NewBufferString(`{"titleThinking":"high"}`),
+	))
+	if response.Code != http.StatusOK {
+		t.Fatalf("update title thinking status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var settings project.Settings
+	if err := json.NewDecoder(response.Body).Decode(&settings); err != nil {
+		t.Fatal(err)
+	}
+	if settings.TitleThinking != "high" || settings.DefaultTitleThinking != project.DefaultTitleThinking {
+		t.Fatalf("unexpected title thinking settings: %#v", settings)
+	}
+	if store.TitleThinking() != "high" {
+		t.Fatalf("store title thinking = %q", store.TitleThinking())
+	}
+
+	reloaded, err := project.NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.GetSettings().TitleThinking != "high" {
+		t.Fatalf("title thinking was not persisted: %#v", reloaded.GetSettings())
+	}
+
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(
+		http.MethodPut,
+		"/api/settings",
+		bytes.NewBufferString(`{"titleThinking":"ultra"}`),
+	))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid title thinking status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(
+		http.MethodPut,
+		"/api/settings",
+		bytes.NewBufferString(`{"titleThinking":""}`),
+	))
+	if response.Code != http.StatusOK {
+		t.Fatalf("reset title thinking status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if store.TitleThinking() != project.DefaultTitleThinking {
+		t.Fatalf("store title thinking after reset = %q", store.TitleThinking())
+	}
+}
+
 func TestSettingsAPIUpdatesThemeIndependently(t *testing.T) {
 	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
 	store, err := project.NewStore(dataFile)

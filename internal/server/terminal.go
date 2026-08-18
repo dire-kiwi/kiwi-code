@@ -291,6 +291,8 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 	}
 	handler.nativePi.figmaMCPURL = handler.figmaMCPURLForProject
 	handler.nativeClaude.figmaMCPURL = handler.figmaMCPURLForProject
+	handler.nativePi.titleSettings = handler.titleGenerationSettings
+	handler.nativeClaude.titleSettings = handler.titleGenerationSettings
 	return handler
 }
 
@@ -3457,7 +3459,7 @@ func (h *terminalHandler) commandForTmuxTarget(
 		"KIWI_CODE_TMUX_WINDOW=" + windowName,
 	}
 	if isTerminalCodingAgent(tool) && threadEndpoint != "" {
-		environment = append(environment, kiwiCodeThreadEnvironment(threadEndpoint, item.ID, thread.ID)...)
+		environment = append(environment, kiwiCodeThreadEnvironment(threadEndpoint, item.ID, thread.ID, h.titleGenerationSettings())...)
 	}
 	if tool == codingAgentPi && figmaMCPURL != "" && notice == "" {
 		environment = append(environment, figmaMCPEnvironmentName+"="+figmaMCPURL)
@@ -4502,11 +4504,31 @@ func threadEndpointURL(r *http.Request, projectID, threadID string) string {
 	return scheme + "://" + host + path
 }
 
-func kiwiCodeThreadEnvironment(threadEndpoint, projectID, threadID string) []string {
+// titleGenerationSettings carries the thread-title generation configuration
+// injected into coding agent environments.
+type titleGenerationSettings struct {
+	Model    string
+	Thinking string
+}
+
+func (h *terminalHandler) titleGenerationSettings() titleGenerationSettings {
+	return titleGenerationSettings{
+		Model:    h.projects.TitleModel(),
+		Thinking: h.projects.TitleThinking(),
+	}
+}
+
+func kiwiCodeThreadEnvironment(threadEndpoint, projectID, threadID string, title titleGenerationSettings) []string {
 	environment := []string{
 		"KIWI_CODE_THREAD_ENDPOINT=" + threadEndpoint,
 		"KIWI_CODE_PROJECT_ID=" + projectID,
 		"KIWI_CODE_THREAD_ID=" + threadID,
+	}
+	if title.Model != "" {
+		environment = append(environment, "KIWI_CODE_TITLE_MODEL="+title.Model)
+	}
+	if title.Thinking != "" {
+		environment = append(environment, "KIWI_CODE_TITLE_THINKING="+title.Thinking)
 	}
 	if endpoint, err := url.Parse(threadEndpoint); err == nil {
 		port := endpoint.Port()

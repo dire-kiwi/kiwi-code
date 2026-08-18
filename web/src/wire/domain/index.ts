@@ -156,6 +156,10 @@ export const AppSettingsSchema = Schema.Struct({
   archivedThreadRetentionDays: Schema.Number,
   orphanedWorktreeRetentionDays: Schema.Number,
   codingAgents: MutableArray(CodingAgentSettingSchema),
+  titleModel: Schema.String,
+  defaultTitleModel: Schema.String,
+  titleThinking: Schema.String,
+  defaultTitleThinking: Schema.String,
   theme: ThemeSettingsSchema,
   defaultTheme: ThemeSettingsSchema,
   usingDefaultTheme: Schema.Boolean,
@@ -311,6 +315,8 @@ export type AgentContextStatus = Schema.Schema.Type<typeof AgentContextStatusSch
 export const CodingAgentChoiceSchema = Schema.Struct({
   id: Schema.String,
   label: Schema.String,
+  // Thinking levels the model supports; only populated for pi models.
+  reasoningLevels: Schema.optional(MutableArray(Schema.String)),
 })
 export type CodingAgentChoice = Schema.Schema.Type<typeof CodingAgentChoiceSchema>
 
