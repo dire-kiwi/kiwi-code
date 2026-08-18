@@ -1,4 +1,3 @@
-import { complete } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const markerType = "kiwi-code-thread-title";
@@ -91,12 +90,14 @@ export default function (pi: ExtensionAPI) {
 			const { provider, modelId } = titleModelSelection();
 			const model = ctx.modelRegistry.find(provider, modelId);
 			if (!model) throw new Error(`${provider}/${modelId} is unavailable`);
+			if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
+				throw new Error(`No credentials for ${provider}/${modelId}`);
+			}
 
-			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-			if (!auth.ok) throw new Error(auth.error);
-			if (!auth.apiKey) throw new Error(`No credentials for ${provider}/${modelId}`);
-
-			const response = await complete(
+			// Route through the session registry so extension-registered APIs such
+			// as xai-responses keep their custom stream handlers. The compat
+			// complete() helper only knows built-in APIs.
+			const response = await ctx.modelRegistry.complete(
 				model,
 				{
 					messages: [{
@@ -106,12 +107,10 @@ export default function (pi: ExtensionAPI) {
 					}],
 				},
 				{
-					apiKey: auth.apiKey,
-					headers: auth.headers,
-					env: auth.env,
 					maxTokens: 256,
 					reasoningEffort: titleReasoningEffort(model),
 					signal: requestController.signal,
+					cacheRetention: "none",
 				},
 			);
 
