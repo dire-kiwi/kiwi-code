@@ -101,7 +101,7 @@ export async function waitForApplicationRestart(instanceId: string, timeoutMs = 
 
 export function updateSettings(input: string | Partial<Pick<
   AppSettings,
-  'worktreeBasePath' | 'archivedThreadRetentionDays' | 'orphanedWorktreeRetentionDays' | 'codingAgents' | 'theme'
+  'worktreeBasePath' | 'archivedThreadRetentionDays' | 'orphanedWorktreeRetentionDays' | 'codingAgents' | 'titleModel' | 'titleThinking' | 'theme'
 >>) {
   return jsonRequest<AppSettings>(
     '/api/settings',

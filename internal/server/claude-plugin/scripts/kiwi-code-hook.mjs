@@ -12,8 +12,21 @@ const transitionTimeoutMs = 2_500
 const transitionAttempts = 3
 const titleTimeoutMs = 20_000
 const maxTitleOutputBytes = 64 * 1024
-const titleModel = 'openai-codex/gpt-5.6-luna'
-const titleThinking = 'low'
+const defaultTitleModel = 'openai-codex/gpt-5.6-luna'
+const defaultTitleThinking = 'low'
+const supportedTitleThinking = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+
+// KIWI_CODE_TITLE_MODEL and KIWI_CODE_TITLE_THINKING carry the model
+// ("provider/model") and thinking level configured in Kiwi Code's settings;
+// the model is handed to `pi --model` unchanged.
+function titleModel() {
+  return (process.env.KIWI_CODE_TITLE_MODEL || '').trim() || defaultTitleModel
+}
+
+function titleThinking() {
+  const level = (process.env.KIWI_CODE_TITLE_THINKING || '').trim()
+  return supportedTitleThinking.has(level) ? level : defaultTitleThinking
+}
 
 function safeSegment(value) {
   return String(value || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 160)
@@ -276,24 +289,26 @@ async function generateTitle(prompt) {
   delete environment.CODEX_THREAD_ID
 
   // Match Pi's thread-title extension while keeping this one-shot process
-  // isolated from project context and globally installed resources.
+  // isolated from project context. Globally installed extensions must stay
+  // enabled because they can register the configured model's provider; running
+  // from the temp directory keeps project-local extensions out instead.
   const args = [
     '--print',
     '--no-session',
     '--no-tools',
-    '--no-extensions',
     '--no-skills',
     '--no-prompt-templates',
     '--no-themes',
     '--no-context-files',
-    '--model', titleModel,
-    '--thinking', titleThinking,
+    '--model', titleModel(),
+    '--thinking', titleThinking(),
     '--system-prompt', 'Generate only the requested concise title. Do not use tools.',
     titlePrompt(prompt),
   ]
 
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, {
+      cwd: os.tmpdir(),
       env: environment,
       stdio: ['ignore', 'pipe', 'pipe'],
     })

@@ -17,13 +17,16 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 		ArchivedThreadRetentionDays   *int                          `json:"archivedThreadRetentionDays"`
 		OrphanedWorktreeRetentionDays *int                          `json:"orphanedWorktreeRetentionDays"`
 		CodingAgents                  *[]project.CodingAgentSetting `json:"codingAgents"`
+		TitleModel                    *string                       `json:"titleModel"`
+		TitleThinking                 *string                       `json:"titleThinking"`
 		Theme                         *project.Theme                `json:"theme"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil || (input.WorktreeBasePath == nil &&
 		input.ArchivedThreadRetentionDays == nil &&
-		input.OrphanedWorktreeRetentionDays == nil && input.CodingAgents == nil && input.Theme == nil) {
+		input.OrphanedWorktreeRetentionDays == nil && input.CodingAgents == nil &&
+		input.TitleModel == nil && input.TitleThinking == nil && input.Theme == nil) {
 		writeError(w, http.StatusBadRequest, "Invalid settings.")
 		return
 	}
@@ -32,6 +35,8 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 		ArchivedThreadRetentionDays:   input.ArchivedThreadRetentionDays,
 		OrphanedWorktreeRetentionDays: input.OrphanedWorktreeRetentionDays,
 		CodingAgents:                  input.CodingAgents,
+		TitleModel:                    input.TitleModel,
+		TitleThinking:                 input.TitleThinking,
 		Theme:                         input.Theme,
 	})
 	if err != nil {

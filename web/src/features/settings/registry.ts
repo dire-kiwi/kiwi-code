@@ -4,6 +4,7 @@ import {
   Palette,
   Settings2,
   Sparkles,
+  Type,
   UserRound,
   type LucideIcon,
 } from 'lucide-react'
@@ -21,6 +22,7 @@ export type SettingsSectionMeta<Id extends string = string> = {
 export type GlobalSettingsSectionId =
   | 'worktrees'
   | 'profiles'
+  | 'titles'
   | 'cleanup'
   | 'appearance'
   | 'skills'
@@ -41,6 +43,13 @@ export const GLOBAL_SETTINGS_SECTIONS: Array<SettingsSectionMeta<GlobalSettingsS
     keywords: ['pi', 'pi native', 'claude code', 'gpt', 'default', 'order', 'dropdown', 'config directory', 'accounts', 'login', 'sessions'],
     icon: UserRound,
     tone: 'blue',
+  },
+  {
+    id: 'titles',
+    label: 'Thread titles',
+    keywords: ['title', 'model', 'auto', 'generate', 'rename', 'name', 'pi', 'thinking', 'reasoning'],
+    icon: Type,
+    tone: 'magenta',
   },
   {
     id: 'cleanup',

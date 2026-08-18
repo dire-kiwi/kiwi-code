@@ -203,11 +203,14 @@ func TestPiNativeThreadEnvironmentRoutesBrowserToolsToTheCurrentThread(t *testin
 		"thread",
 		"token",
 		"http://127.0.0.1:43210/api/projects/project/threads/thread",
+		titleGenerationSettings{Model: "anthropic/claude-sonnet-5", Thinking: "high"},
 	)
 	joined := strings.Join(environment, "\n")
 	for _, want := range []string{
 		"KIWI_CODE_THREAD_ENDPOINT=http://127.0.0.1:43210/api/projects/project/threads/thread",
 		"KIWI_CODE_BROWSER_THREAD_ENDPOINT=http://127.0.0.1:43210/api/projects/project/threads/thread",
+		"KIWI_CODE_TITLE_MODEL=anthropic/claude-sonnet-5",
+		"KIWI_CODE_TITLE_THINKING=high",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("Pi environment does not contain %q: %#v", want, environment)

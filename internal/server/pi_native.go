@@ -44,6 +44,7 @@ type piNativeManager struct {
 	extensionErr     error
 	figmaExtension   string
 	figmaMCPURL      func(project.Project) string
+	titleSettings    func() titleGenerationSettings
 	agentToken       string
 	processes        map[piNativeProcessKey]*piNativeProcess
 	history          map[piNativeProcessKey]*piNativeProcess
@@ -170,6 +171,13 @@ func (m *piNativeManager) resolveFigmaMCPURL(item project.Project) string {
 		return ""
 	}
 	return m.figmaMCPURL(item)
+}
+
+func (m *piNativeManager) resolveTitleSettings() titleGenerationSettings {
+	if m == nil || m.titleSettings == nil {
+		return titleGenerationSettings{}
+	}
+	return m.titleSettings()
 }
 
 func (m *piNativeManager) stopOnContext(ctx context.Context) {
@@ -511,8 +519,9 @@ func piNativeThreadEnvironment(
 	threadID string,
 	agentToken string,
 	browserThreadEndpoint string,
+	title titleGenerationSettings,
 ) []string {
-	environment := kiwiCodeThreadEnvironment(threadEndpoint, projectID, threadID)
+	environment := kiwiCodeThreadEnvironment(threadEndpoint, projectID, threadID, title)
 	if agentToken != "" {
 		environment = append(environment, "KIWI_CODE_AGENT_TOKEN="+agentToken)
 	}
@@ -570,6 +579,7 @@ func (m *piNativeManager) startProcess(
 		key.ThreadID,
 		m.agentToken,
 		launchOptions.BrowserThreadEndpoint,
+		m.resolveTitleSettings(),
 	)
 	if launchOptions.FigmaMCPURL != "" {
 		threadEnvironment = append(threadEnvironment, figmaMCPEnvironmentName+"="+launchOptions.FigmaMCPURL)
