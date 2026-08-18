@@ -60,6 +60,9 @@ export type PiModel = {
   provider?: string
   id?: string
   name?: string
+  reasoning?: boolean
+  thinkingLevelMap?: Record<string, string | null | undefined>
+  reasoningLevels?: string[]
 }
 
 export type PiContextUsage = {

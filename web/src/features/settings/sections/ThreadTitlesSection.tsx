@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { LoaderCircle, Save, Type } from 'lucide-react'
 import { updateSettings } from '@/api'
+import { piThinkingLevelIds, supportedThinkingLevelIds, thinkingLevelLabel } from '@/codingAgents'
 import { useAsyncFeedback } from '@/lib/useAsyncFeedback'
 import { useAppDispatch } from '@/store/hooks'
 import { settingsReceived } from '@/store/slices/settings'
@@ -15,18 +16,6 @@ import { ActionFeedback, InfoCallout } from '@/ui/feedback'
 type ThreadTitlesSectionProps = {
   settings: AppSettings
 }
-
-const thinkingLevelLabels: Record<string, string> = {
-  off: 'Off',
-  minimal: 'Minimal',
-  low: 'Low',
-  medium: 'Medium',
-  high: 'High',
-  xhigh: 'Extra high',
-  max: 'Maximum',
-}
-
-const thinkingLevelOrder = Object.keys(thinkingLevelLabels)
 
 export function ThreadTitlesSection({ settings }: ThreadTitlesSectionProps) {
   const dispatch = useAppDispatch()
@@ -67,23 +56,22 @@ export function ThreadTitlesSection({ settings }: ThreadTitlesSectionProps) {
   const effectiveModel = titleModel || settings.defaultTitleModel
   const supportedLevels = useMemo(() => {
     const model = piModels.find((candidate) => candidate.id === effectiveModel)
-    const reported = model?.reasoningLevels ?? []
-    if (reported.length === 0) return thinkingLevelOrder
-    return thinkingLevelOrder.filter((level) => reported.includes(level))
+    return supportedThinkingLevelIds(model?.reasoningLevels, piThinkingLevelIds)
   }, [piModels, effectiveModel])
 
   const thinkingOptions = useMemo(() => {
-    const defaultLabel = thinkingLevelLabels[settings.defaultTitleThinking] ?? settings.defaultTitleThinking
+    const defaultLabel = thinkingLevelLabel(settings.defaultTitleThinking)
     const result: SelectOption[] = [{
       value: '',
       label: `Default (${defaultLabel})`,
       textValue: `Default (${defaultLabel})`,
     }]
     for (const level of supportedLevels) {
-      result.push({ value: level, label: thinkingLevelLabels[level], textValue: thinkingLevelLabels[level] })
+      const label = thinkingLevelLabel(level)
+      result.push({ value: level, label, textValue: label })
     }
     if (titleThinking !== '' && !supportedLevels.includes(titleThinking)) {
-      const label = thinkingLevelLabels[titleThinking] ?? titleThinking
+      const label = thinkingLevelLabel(titleThinking)
       result.push({ value: titleThinking, label, textValue: label })
     }
     return result

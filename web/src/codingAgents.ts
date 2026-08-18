@@ -126,7 +126,7 @@ export const claudeModelChoices: CodingAgentChoice[] = [
 
 type ThinkingLevelId = typeof piThinkingLevelIds[number] | typeof claudeThinkingLevelIds[number]
 
-const thinkingLevelLabels: Record<ThinkingLevelId, string> = {
+export const thinkingLevelLabels: Record<ThinkingLevelId, string> = {
   off: 'Off',
   minimal: 'Minimal',
   low: 'Low',
@@ -135,6 +135,47 @@ const thinkingLevelLabels: Record<ThinkingLevelId, string> = {
   xhigh: 'Extra high',
   max: 'Maximum',
   ultracode: 'Ultracode (Claude built-in)',
+}
+
+export function thinkingLevelLabel(level: string): string {
+  return thinkingLevelLabels[level as ThinkingLevelId] ?? level
+}
+
+// Empty or missing reported levels mean the model has not declared a subset, so
+// every known choice stays available. Explicit lists hide levels the model cannot run.
+export function supportedThinkingLevelIds(
+  reported: readonly string[] | undefined,
+  allIds: readonly string[] = piThinkingLevelIds,
+): string[] {
+  if (!reported || reported.length === 0) return [...allIds]
+  return allIds.filter((level) => reported.includes(level))
+}
+
+export function thinkingChoicesForModel(
+  reported: readonly string[] | undefined,
+  allChoices: readonly CodingAgentChoice[],
+): CodingAgentChoice[] {
+  const concreteIds = allChoices.filter((choice) => choice.id !== '').map((choice) => choice.id)
+  const supported = new Set(supportedThinkingLevelIds(reported, concreteIds))
+  return allChoices.filter((choice) => choice.id === '' || supported.has(choice.id))
+}
+
+// Mirrors server piRPCReasoningLevels: models that cannot reason only expose
+// off; declared map entries win; xhigh/max stay hidden unless the map includes them.
+export function piModelReasoningLevels(
+  reasoning?: boolean,
+  thinkingLevelMap?: Record<string, string | null | undefined>,
+): string[] {
+  if (!reasoning) return ['off']
+  const levels: string[] = []
+  for (const level of piThinkingLevelIds) {
+    if (thinkingLevelMap && Object.prototype.hasOwnProperty.call(thinkingLevelMap, level)) {
+      if (thinkingLevelMap[level] != null) levels.push(level)
+      continue
+    }
+    if (level !== 'xhigh' && level !== 'max') levels.push(level)
+  }
+  return levels
 }
 
 function thinkingLevels(

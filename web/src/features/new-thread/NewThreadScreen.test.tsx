@@ -1,5 +1,5 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fallbackCodingAgentConfigs } from '@/codingAgents'
 import type { Project } from '@/types'
 import { renderWithStore } from '@/store/testing'
@@ -46,6 +46,10 @@ const project: Project = {
 function ready(data: unknown) {
   return { state: 'ready' as const, data, retry: vi.fn() }
 }
+
+afterEach(() => {
+  cleanup()
+})
 
 beforeEach(() => {
   window.localStorage.clear()
@@ -112,3 +116,106 @@ describe('NewThreadScreen worktree controls', () => {
     ])
   })
 })
+
+describe('NewThreadScreen thinking levels', () => {
+    const piThinkingChoices = [
+      { id: '', label: 'Use Pi default' },
+      { id: 'off', label: 'Off' },
+      { id: 'minimal', label: 'Minimal' },
+      { id: 'low', label: 'Low' },
+      { id: 'medium', label: 'Medium' },
+      { id: 'high', label: 'High' },
+      { id: 'xhigh', label: 'Extra high' },
+      { id: 'max', label: 'Maximum' },
+    ]
+
+    function modelPicker() {
+      return document.getElementById('thread-agent-model') as HTMLButtonElement
+    }
+
+    function thinkingPicker() {
+      return document.getElementById('thread-agent-thinking') as HTMLButtonElement
+    }
+
+    function thinkingOptions() {
+      const picker = thinkingPicker()
+      fireEvent.click(picker)
+      const options = within(screen.getByRole('listbox', { name: 'Thinking' }))
+        .getAllByRole('option')
+        .map((option) => option.textContent)
+      fireEvent.keyDown(picker, { key: 'Escape' })
+      return options
+    }
+
+    it('limits thinking choices to the selected model and keeps the default option', async () => {
+        mocks.subscriptions.codingAgents = ready([
+          {
+            id: 'pi',
+            label: 'Pi',
+            models: [
+              { id: '', label: 'Use Pi default' },
+              {
+                id: 'custom/mapped',
+                label: 'Mapped model',
+                reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
+              },
+              {
+                id: 'custom/plain',
+                label: 'Plain model',
+                reasoningLevels: ['off'],
+              },
+            ],
+            thinkingLevels: piThinkingChoices,
+          },
+        ])
+
+        renderWithStore(
+          <NewThreadScreen
+            project={project}
+            onOpenSidebar={() => {}}
+            onCancel={() => {}}
+            onCreated={() => {}}
+          />,
+        )
+
+        await waitFor(() => {
+          expect(modelPicker()).toBeTruthy()
+          expect(thinkingPicker()).toBeTruthy()
+        })
+        expect(thinkingOptions()).toEqual([
+          'Use Pi default',
+          'Off',
+          'Minimal',
+          'Low',
+          'Medium',
+          'High',
+          'Extra high',
+          'Maximum',
+        ])
+
+        fireEvent.click(modelPicker())
+        fireEvent.click(within(screen.getByRole('listbox', { name: 'Model' })).getByRole('option', {
+          name: 'Mapped model',
+        }))
+        expect(thinkingOptions()).toEqual([
+          'Use Pi default',
+          'Low',
+          'Medium',
+          'High',
+          'Extra high',
+        ])
+
+        fireEvent.click(thinkingPicker())
+        fireEvent.click(within(screen.getByRole('listbox', { name: 'Thinking' })).getByRole('option', {
+          name: 'High',
+        }))
+        expect(thinkingPicker().textContent).toContain('High')
+
+        fireEvent.click(modelPicker())
+        fireEvent.click(within(screen.getByRole('listbox', { name: 'Model' })).getByRole('option', {
+          name: 'Plain model',
+        }))
+        expect(thinkingPicker().textContent).toContain('Use Pi default')
+        expect(thinkingOptions()).toEqual(['Use Pi default', 'Off'])
+      })
+  })

@@ -1,5 +1,5 @@
 // The slash-command vocabulary and the composer autocomplete built from it.
-import { piThinkingLevelIds } from '@/codingAgents'
+import { piModelReasoningLevels, piThinkingLevelIds } from '@/codingAgents'
 import { suggestionID } from './agentFormat'
 import { piSlashSourceLabel } from './PiNativeComposer'
 import type { ComposerSuggestion, PiModel, PiSlashCommand } from './piTypes'
@@ -72,10 +72,22 @@ export function normalizePiModels(models: PiModel[]): PiModel[] {
     const identifier = provider && id ? `${provider}/${id}` : ''
     if (!identifier || seen.has(identifier)) continue
     seen.add(identifier)
+    const reasoning = typeof model.reasoning === 'boolean' ? model.reasoning : undefined
+    const thinkingLevelMap = model.thinkingLevelMap
+    const reportedLevels = Array.isArray(model.reasoningLevels)
+      ? model.reasoningLevels.filter((level): level is string => typeof level === 'string' && level.length > 0)
+      : undefined
+    const reasoningLevels = reportedLevels
+      ?? ((reasoning !== undefined || thinkingLevelMap)
+        ? piModelReasoningLevels(reasoning, thinkingLevelMap)
+        : undefined)
     normalized.push({
       provider,
       id,
       ...(typeof model.name === 'string' && model.name.trim() ? { name: model.name.trim() } : {}),
+      ...(reasoning !== undefined ? { reasoning } : {}),
+      ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
+      ...(reasoningLevels ? { reasoningLevels } : {}),
     })
   }
   return normalized
@@ -85,6 +97,7 @@ export function buildComposerSuggestions(
   draft: string,
   piCommands: PiSlashCommand[],
   models: PiModel[],
+  thinkingLevels: readonly string[] = piThinkingLevelIds,
 ): ComposerSuggestion[] {
   const commandMatch = draft.match(/^\/([^\s]*)$/)
   if (commandMatch) {
@@ -126,7 +139,7 @@ export function buildComposerSuggestions(
   const thinkingMatch = draft.match(/^\/thinking\s+([^\s]*)$/)
   if (thinkingMatch) {
     const query = (thinkingMatch[1] ?? '').toLowerCase()
-    return piThinkingLevelIds
+    return thinkingLevels
       .filter((level) => level.startsWith(query))
       .map((level, index) => ({
         id: suggestionID('level', level, String(index)),

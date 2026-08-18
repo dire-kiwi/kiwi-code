@@ -27,6 +27,7 @@ import {
   isClaudeGPTCodingAgent,
   isNativeCodingAgentSelection,
   nativeCodingAgentLabel,
+  thinkingChoicesForModel,
 } from '@/codingAgents'
 import {
   formatImageSize,
@@ -188,9 +189,11 @@ export function NewThreadScreen({
     const nextModel = config.models.some((option) => option.id === model)
       ? model
       : config.models[0]?.id ?? ''
-    const nextThinkingLevel = config.thinkingLevels.some((option) => option.id === thinkingLevel)
+    const selectedModel = config.models.find((option) => option.id === nextModel)
+    const allowedThinking = thinkingChoicesForModel(selectedModel?.reasoningLevels, config.thinkingLevels)
+    const nextThinkingLevel = allowedThinking.some((option) => option.id === thinkingLevel)
       ? thinkingLevel
-      : config.thinkingLevels[0]?.id ?? ''
+      : allowedThinking[0]?.id ?? ''
     if (nextModel === model && nextThinkingLevel === thinkingLevel) return
 
     setModel(nextModel)
@@ -376,7 +379,11 @@ export function NewThreadScreen({
     value: option.id,
     label: option.label,
   }))
-  const thinkingSelectOptions = selectedAgent.thinkingLevels.map((option) => ({
+  const selectedModelChoice = selectedAgent.models.find((option) => option.id === model)
+  const thinkingSelectOptions = thinkingChoicesForModel(
+    selectedModelChoice?.reasoningLevels,
+    selectedAgent.thinkingLevels,
+  ).map((option) => ({
     value: option.id,
     label: option.label,
   }))
@@ -453,17 +460,33 @@ export function NewThreadScreen({
     setCodingAgent(nextAgent)
     if (nextAgentId !== currentAgentId) {
       const remembered = nextAgentModels[nextAgentId]
-      setModel(remembered?.model ?? nextConfig?.models[0]?.id ?? '')
-      setThinkingLevel(remembered?.thinkingLevel ?? nextConfig?.thinkingLevels[0]?.id ?? '')
+      const nextModel = remembered?.model ?? nextConfig?.models[0]?.id ?? ''
+      const selectedModel = nextConfig?.models.find((option) => option.id === nextModel)
+      const allowedThinking = nextConfig
+        ? thinkingChoicesForModel(selectedModel?.reasoningLevels, nextConfig.thinkingLevels)
+        : []
+      const rememberedThinking = remembered?.thinkingLevel ?? ''
+      setModel(nextModel)
+      setThinkingLevel(
+        allowedThinking.some((option) => option.id === rememberedThinking)
+          ? rememberedThinking
+          : allowedThinking[0]?.id ?? '',
+      )
     }
     setError('')
   }
 
   function handleModelChange(nextModel: string) {
+    const selected = selectedAgent.models.find((option) => option.id === nextModel)
+    const allowedThinking = thinkingChoicesForModel(selected?.reasoningLevels, selectedAgent.thinkingLevels)
+    const nextThinkingLevel = allowedThinking.some((option) => option.id === thinkingLevel)
+      ? thinkingLevel
+      : allowedThinking[0]?.id ?? ''
     setModel(nextModel)
+    setThinkingLevel(nextThinkingLevel)
     setAgentModels((current) => ({
       ...current,
-      [selectedAgentId]: { model: nextModel, thinkingLevel },
+      [selectedAgentId]: { model: nextModel, thinkingLevel: nextThinkingLevel },
     }))
   }
 
@@ -512,6 +535,7 @@ export function NewThreadScreen({
                 <Select
                   id="thread-agent-model"
                   variant="inline"
+                  aria-label="Model"
                   value={model}
                   options={modelSelectOptions.some((option) => option.value === model)
                     ? modelSelectOptions
@@ -526,6 +550,7 @@ export function NewThreadScreen({
                 <Select
                   id="thread-agent-thinking"
                   variant="inline"
+                  aria-label="Thinking"
                   value={thinkingLevel}
                   options={thinkingSelectOptions.some((option) => option.value === thinkingLevel)
                     ? thinkingSelectOptions

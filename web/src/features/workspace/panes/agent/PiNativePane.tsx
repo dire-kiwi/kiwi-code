@@ -12,7 +12,7 @@ import {
 import { ArrowDown, Bot } from 'lucide-react'
 import { uploadPiImage } from '@/api'
 import { apiWebSocketUrl } from '@/apiUrl'
-import { piThinkingLevelIds } from '@/codingAgents'
+import { supportedThinkingLevelIds, thinkingLevelLabel } from '@/codingAgents'
 import { classNames } from '@/lib/classNames'
 import { formatDuration } from '@/lib/formatDuration'
 import { imageFilesFromClipboard, piNativePromptImagePolicy } from '@/lib/promptImages'
@@ -609,9 +609,13 @@ export function PiNativePane({
   )
   const expandedDraft = expandPromptPastes(draft, draftPastes)
   const latestCacheHitRate = useMemo(() => piLatestCacheHitRate(messages), [messages])
+  const supportedThinkingLevels = useMemo(() => {
+    const selected = availableModels.find((model) => modelIdentifier(model) === selectedModel)
+    return supportedThinkingLevelIds(selected?.reasoningLevels)
+  }, [availableModels, selectedModel])
   const composerSuggestions = useMemo(
-    () => buildComposerSuggestions(draft, piCommands, availableModels),
-    [availableModels, draft, piCommands],
+    () => buildComposerSuggestions(draft, piCommands, availableModels, supportedThinkingLevels),
+    [availableModels, draft, piCommands, supportedThinkingLevels],
   )
   const visibleComposerSuggestions = slashMenuDismissed ? [] : composerSuggestions
 
@@ -720,6 +724,7 @@ export function PiNativePane({
       hasImageAttachments: draftImages.length > 0,
       selectedModel,
       selectedThinking,
+      thinkingLevels: supportedThinkingLevels,
       send: sendSocketCommand,
       setError,
       setNotice,
@@ -810,10 +815,18 @@ export function PiNativePane({
     selectedModelRef.current = identifier
     setSelectedModel(identifier)
     setNotice(`Switching Pi to ${identifier}…`)
+    const nextModel = availableModels.find((model) => modelIdentifier(model) === identifier)
+    const nextLevels = supportedThinkingLevelIds(nextModel?.reasoningLevels)
+    if (selectedThinking && nextLevels.length > 0 && !nextLevels.includes(selectedThinking)) {
+      const fallback = nextLevels[0]
+      if (fallback && sendSocketCommand({ type: 'set_thinking_level', level: fallback })) {
+        setSelectedThinking(fallback)
+      }
+    }
   }
 
   function selectThinking(level: string) {
-    if (!piThinkingLevelIds.some((candidate) => candidate === level)) return
+    if (!supportedThinkingLevels.includes(level)) return
     if (!sendSocketCommand({ type: 'set_thinking_level', level })) return
     setSelectedThinking(level)
     setNotice(`Setting Pi thinking to ${level}…`)
@@ -998,7 +1011,15 @@ export function PiNativePane({
         modelDisabled={connectionStatus !== 'open' || isStreaming || isUploadingImages}
         onModelChange={selectModel}
         thinking={selectedThinking}
-        thinkingOptions={piThinkingLevelIds.map((level) => ({ value: level, label: level }))}
+        thinkingOptions={[
+          ...supportedThinkingLevels.map((level) => ({
+            value: level,
+            label: thinkingLevelLabel(level),
+          })),
+          ...(selectedThinking && !supportedThinkingLevels.includes(selectedThinking)
+            ? [{ value: selectedThinking, label: thinkingLevelLabel(selectedThinking) }]
+            : []),
+        ]}
         thinkingDisabled={connectionStatus !== 'open' || isStreaming || isUploadingImages}
         onThinkingChange={selectThinking}
         onImageInput={handleImageInput}

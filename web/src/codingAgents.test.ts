@@ -4,6 +4,10 @@ import {
   codingAgentTargetForSelection,
   isNativeCodingAgentSelection,
   nativeCodingAgentLabel,
+  piModelReasoningLevels,
+  piThinkingLevelIds,
+  supportedThinkingLevelIds,
+  thinkingChoicesForModel,
 } from './codingAgents'
 
 describe('native coding-agent selection mappings', () => {
@@ -29,5 +33,47 @@ describe('native coding-agent selection mappings', () => {
     expect(isNativeCodingAgentSelection('claude')).toBe(false)
     expect(nativeCodingAgentLabel('claude-native')).toBe('Claude Native')
     expect(nativeCodingAgentLabel('claude')).toBeNull()
+  })
+})
+
+describe('model thinking-level capabilities', () => {
+  it('keeps every known level when a model has not declared a subset', () => {
+    expect(supportedThinkingLevelIds(undefined)).toEqual([...piThinkingLevelIds])
+    expect(supportedThinkingLevelIds([])).toEqual([...piThinkingLevelIds])
+  })
+
+  it('hides levels the model cannot run', () => {
+    expect(supportedThinkingLevelIds(['low', 'high', 'unknown'])).toEqual(['low', 'high'])
+  })
+
+  it('keeps the empty default choice while filtering concrete levels', () => {
+    const choices = thinkingChoicesForModel(
+      ['low', 'medium'],
+      [
+        { id: '', label: 'Use Pi default' },
+        { id: 'off', label: 'Off' },
+        { id: 'low', label: 'Low' },
+        { id: 'medium', label: 'Medium' },
+        { id: 'high', label: 'High' },
+      ],
+    )
+    expect(choices.map((choice) => choice.id)).toEqual(['', 'low', 'medium'])
+  })
+
+  it('mirrors Pi RPC reasoning maps, including models that cannot think', () => {
+    expect(piModelReasoningLevels(false)).toEqual(['off'])
+    expect(piModelReasoningLevels(true, {
+      off: null,
+      minimal: null,
+      xhigh: 'xhigh',
+    })).toEqual(['low', 'medium', 'high', 'xhigh'])
+    expect(piModelReasoningLevels(true, { max: 'max' })).toEqual([
+      'off',
+      'minimal',
+      'low',
+      'medium',
+      'high',
+      'max',
+    ])
   })
 })

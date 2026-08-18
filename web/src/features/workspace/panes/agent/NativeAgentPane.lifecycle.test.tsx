@@ -3,6 +3,7 @@ import {
   cleanup,
   fireEvent,
   screen,
+  within,
 } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTestStore, renderWithStore } from '@/store/testing'
@@ -433,5 +434,76 @@ describe('ClaudeNativePane prompt lifecycle', () => {
     }))
     fireEvent.click(screen.getByRole('button', { name: 'Stop Claude' }))
     expect(messagesOfType(socket, 'abort')).toEqual([{ type: 'abort' }])
+  })
+})
+
+describe('PiNativePane thinking levels', () => {
+  function thinkingOptions() {
+    const picker = screen.getByRole('combobox', { name: 'Thinking level' })
+    fireEvent.click(picker)
+    const options = within(screen.getByRole('listbox', { name: 'Thinking level' }))
+      .getAllByRole('option')
+      .map((option) => option.textContent)
+    fireEvent.keyDown(picker, { key: 'Escape' })
+    return options
+  }
+
+  it('limits thinking choices to the selected Pi model', () => {
+    renderPane('Pi')
+    const socket = sockets[0]
+    act(() => {
+      socket.open()
+      socket.receive(readyEvent('Pi'))
+      socket.receive({
+        type: 'response',
+        command: 'get_available_models',
+        success: true,
+        data: {
+          models: [
+            {
+              provider: 'custom',
+              id: 'mapped',
+              name: 'Mapped model',
+              reasoning: true,
+              thinkingLevelMap: { off: null, minimal: null, xhigh: 'xhigh' },
+            },
+            {
+              provider: 'custom',
+              id: 'plain',
+              name: 'Plain model',
+              reasoning: false,
+            },
+          ],
+        },
+      })
+      socket.receive({
+        type: 'response',
+        command: 'get_state',
+        success: true,
+        data: {
+          model: { provider: 'custom', id: 'mapped', name: 'Mapped model' },
+          thinkingLevel: 'high',
+        },
+      })
+    })
+
+    expect(screen.getByRole('combobox', { name: 'Thinking level' }).textContent).toContain('High')
+    expect(thinkingOptions()).toEqual(['Low', 'Medium', 'High', 'Extra high'])
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Model' }))
+    fireEvent.click(within(screen.getByRole('listbox', { name: 'Model' })).getByRole('option', {
+      name: 'Plain model',
+    }))
+    expect(messagesOfType(socket, 'set_model')).toEqual([{
+      type: 'set_model',
+      provider: 'custom',
+      modelId: 'plain',
+    }])
+    expect(messagesOfType(socket, 'set_thinking_level')).toEqual([{
+      type: 'set_thinking_level',
+      level: 'off',
+    }])
+    expect(screen.getByRole('combobox', { name: 'Thinking level' }).textContent).toContain('Off')
+    expect(thinkingOptions()).toEqual(['Off'])
   })
 })

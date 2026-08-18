@@ -9,6 +9,7 @@ export type PiSlashCommandContext = {
   hasImageAttachments: boolean
   selectedModel: string
   selectedThinking: string
+  thinkingLevels: readonly string[]
   /** Returns false when the socket refused the command; nothing else should happen then. */
   send: (payload: Record<string, unknown> & { type: string }) => boolean
   setError: (message: string) => void
@@ -98,8 +99,11 @@ export function runPiSlashCommand(message: string, context: PiSlashCommandContex
   }
 
   if (commandName === 'thinking') {
-    if (!piThinkingLevelIds.some((level) => level === argument)) {
-      context.setError(`Use /thinking <${piThinkingLevelIds.join('|')}>.`)
+    const allowedLevels = context.thinkingLevels.length > 0
+      ? context.thinkingLevels
+      : piThinkingLevelIds
+    if (!allowedLevels.some((level) => level === argument)) {
+      context.setError(`Use /thinking <${allowedLevels.join('|')}>.`)
       return true
     }
     if (!context.send({ type: 'set_thinking_level', level: argument })) return true
