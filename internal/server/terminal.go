@@ -3388,7 +3388,7 @@ func (h *terminalHandler) commandForTmuxTarget(
 		}
 		pluginArguments := []string{
 			"--profile", h.codexProfileName,
-			"--dangerously-bypass-approvals-and-sandbox",
+			"--approve-for-me",
 			"--dangerously-bypass-hook-trust",
 		}
 		relatedDirectories, err := codingAgentRelatedProjectDirectories(item, thread)
