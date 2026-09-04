@@ -63,6 +63,7 @@ func TestMaterializeCodexPlugin(t *testing.T) {
 		Description string `json:"description"`
 		Skills      string `json:"skills"`
 		MCPServers  string `json:"mcpServers"`
+		Hooks       string `json:"hooks"`
 	}
 	if err := json.Unmarshal(codexPluginManifest, &manifest); err != nil {
 		t.Fatalf("parse Codex plugin manifest: %v", err)
@@ -76,8 +77,14 @@ func TestMaterializeCodexPlugin(t *testing.T) {
 			t.Fatalf("Codex plugin description %q does not mention %q", manifest.Description, capability)
 		}
 	}
-	if bytes.Contains(codexPluginManifest, []byte(`"hooks"`)) {
-		t.Fatal("Codex plugin manifest declares unsupported hooks instead of using root discovery")
+	// Codex defaults to hooks/hooks.json, while our shared lifecycle hooks
+	// live at the plugin root. They must be explicitly registered.
+	if manifest.Hooks != "./hooks.json" {
+		t.Fatalf("Codex plugin hook entry = %q", manifest.Hooks)
+	}
+	hooks, err := os.ReadFile(filepath.Join(installation.PluginRoot, manifest.Hooks))
+	if err != nil || !bytes.Equal(hooks, codexPluginHooks) {
+		t.Fatalf("manifest hook entry does not resolve to lifecycle hooks: %v", err)
 	}
 
 	var mcpConfig struct {
