@@ -14,6 +14,7 @@
   ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
+  "hooks": "./hooks.json",
   "interface": {
     "displayName": "Kiwi Code",
     "shortDescription": "Connect Codex CLI to its Kiwi Code thread",
