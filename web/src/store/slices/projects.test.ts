@@ -68,6 +68,14 @@ beforeEach(() => {
 })
 
 describe('projects slice', () => {
+  it('retains server agent and tab changes from socket snapshots', () => {
+    const first = reduce(undefined, projectsReceived([project('a', [thread('t1')])]))
+    const updated = reduce(first, projectsReceived([
+      project('a', [thread('t1', { codingAgent: 'codex', activeTab: 'terminal' })]),
+    ]))
+    expect(updated.projects).not.toBe(first.projects)
+    expect(updated.projects[0].threads[0]).toMatchObject({ codingAgent: 'codex', activeTab: 'terminal' })
+  })
   it('keeps the same array when a socket push changes nothing', () => {
     // This is the guard that stops every push re-rendering the sidebar tree.
     const first = reduce(undefined, projectsReceived([project('a', [thread('t1')])]))

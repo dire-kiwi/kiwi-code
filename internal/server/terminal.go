@@ -382,6 +382,10 @@ func (h *terminalHandler) startCodingAgent(w http.ResponseWriter, r *http.Reques
 				}
 			}
 		}
+		if _, err := h.projects.UpdateThreadWorkspace(item.ID, thread.ID, project.ThreadWorkspaceUpdate{CodingAgent: selection, ActiveTab: "pi"}); err != nil {
+			writeError(w, http.StatusInternalServerError, "The agent started, but its workspace selection could not be saved.")
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -428,6 +432,10 @@ func (h *terminalHandler) startCodingAgent(w http.ResponseWriter, r *http.Reques
 	}
 	if !sessionCreated && !paneCreated && launchOptions.InitialPrompt != "" {
 		writeError(w, http.StatusConflict, "The coding agent is already running; the initial prompt was not sent.")
+		return
+	}
+	if _, err := h.projects.UpdateThreadWorkspace(item.ID, thread.ID, project.ThreadWorkspaceUpdate{CodingAgent: selection, ActiveTab: "pi"}); err != nil {
+		writeError(w, http.StatusInternalServerError, "The agent started, but its workspace selection could not be saved.")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

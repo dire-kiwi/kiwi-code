@@ -14,7 +14,7 @@ export const THREAD_ROUTE = '/projects/:projectId/threads/:threadId'
 export const WORKSPACE_ROUTE = '/projects/:projectId/threads/:threadId/:tool'
 
 const routeSegmentByTool: Record<WorkspaceTool, string> = {
-  pi: 'pi',
+  pi: 'agent',
   terminal: 'shell',
   nvim: 'nvim',
   lazygit: 'lazygit',
@@ -27,6 +27,8 @@ const toolByRouteSegment = Object.fromEntries(
 ) as Record<string, WorkspaceTool>
 
 export function workspaceToolFromRoute(segment: string | undefined): WorkspaceTool | null {
+  // Keep old bookmarks valid while the internal tool/tmux identity stays pi.
+  if (segment === 'pi') return 'pi'
   return segment ? toolByRouteSegment[segment] ?? null : null
 }
 

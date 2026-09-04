@@ -273,7 +273,7 @@ test('every Kiwi Code page renders and real Pi follows the deterministic chat fi
       assert.equal(submitted, true)
 
       await page.waitForFunction(
-        (prefix) => window.location.pathname.startsWith(prefix) && window.location.pathname.endsWith('/pi'),
+        (prefix) => window.location.pathname.startsWith(prefix) && window.location.pathname.endsWith('/agent'),
         {},
         `${projectPrefix}/threads/`,
       )
@@ -368,7 +368,7 @@ test('every Kiwi Code page renders and real Pi follows the deterministic chat fi
         '/route-that-does-not-exist',
       ]) {
         await openPage(harness, legacyPath)
-        await waitForPath(page, `${chatPrefix}/pi`)
+        await waitForPath(page, `${chatPrefix}/agent`)
         await page.waitForSelector('[data-testid="pi-native-conversation"]')
       }
     })

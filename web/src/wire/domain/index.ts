@@ -47,6 +47,8 @@ export const ThreadSchema = Schema.Struct({
   cwd: Schema.String,
   createdAt: Schema.String,
   environmentSetupStatus: Schema.optional(Schema.Literal('pending', 'running', 'succeeded', 'failed')),
+  codingAgent: Schema.optional(Schema.String),
+  activeTab: Schema.optional(Schema.Literal('pi', 'terminal', 'nvim', 'lazygit', 'process', 'browser')),
   lastPromptAt: Schema.optional(Schema.String),
   worktree: Schema.optional(Schema.Boolean),
   branch: Schema.optional(Schema.String),

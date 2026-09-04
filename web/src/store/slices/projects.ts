@@ -54,6 +54,8 @@ function sameThreads(current: readonly Thread[], next: readonly Thread[]) {
     return candidate
       && candidate.id === thread.id
       && candidate.title === thread.title
+      && candidate.codingAgent === thread.codingAgent
+      && candidate.activeTab === thread.activeTab
       && candidate.cwd === thread.cwd
       && candidate.createdAt === thread.createdAt
       && candidate.lastPromptAt === thread.lastPromptAt

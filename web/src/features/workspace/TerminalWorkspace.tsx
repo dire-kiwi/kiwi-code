@@ -1,5 +1,4 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { shallowEqual } from 'react-redux'
 import { Link, useLocation, useMatch, useNavigate } from 'react-router-dom'
 import {
   Activity,
@@ -19,6 +18,7 @@ import {
 } from '@/codingAgents'
 import { WORKSPACE_ROUTE, workspacePath, workspaceToolFromRoute } from '@/app/routes'
 import { newThreadStartFromState } from './newThreadStart'
+import { useThreadWorkspaceState } from './useThreadWorkspaceState'
 import type {
   CodingAgentSelection,
   ConnectionStatus,
@@ -30,12 +30,6 @@ import type {
 } from '@/types'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import {
-  resolveThreadWorkspace,
-  threadClaudePresentationChanged,
-  threadCodingAgentChanged,
-  threadPiPresentationChanged,
-  threadWorkspaceKey,
-  threadWorkspaceMounted,
   type ThreadWorkspaceRouting,
 } from '@/store/slices/threadWorkspace'
 import { selectSettings } from '@/store/slices/settings'
@@ -96,7 +90,7 @@ const tools: Array<{
   shortcut: string
   icon: typeof SquareTerminal
 }> = [
-  { id: 'pi', label: 'Pi', shortcut: '⌘1', icon: Bot },
+  { id: 'pi', label: 'Agent', shortcut: '⌘1', icon: Bot },
   { id: 'terminal', label: 'Shell', shortcut: '⌘2', icon: SquareTerminal },
   { id: 'nvim', label: 'Neovim', shortcut: '⌘3', icon: Braces },
   { id: 'lazygit', label: 'Lazygit', shortcut: '⌘4', icon: GitBranch },
@@ -127,7 +121,7 @@ export function TerminalWorkspace({
   const navigate = useNavigate()
   const routeLocation = useLocation()
   const dispatch = useAppDispatch()
-  const activeTool = workspaceToolFromRoute(useMatch(WORKSPACE_ROUTE)?.params.tool) ?? 'pi'
+  const routeTool = workspaceToolFromRoute(useMatch(WORKSPACE_ROUTE)?.params.tool) ?? 'pi'
   const detailsExpanded = useAppSelector(selectDetailsSidebarExpanded)
   // The sidebar floats over the pane area, so the embedded browser surface
   // has to stand down while it is open.
@@ -190,20 +184,22 @@ export function TerminalWorkspace({
       : initialCodingAgentChoices,
     [initialCodingAgentChoices, settings],
   )
-  const workspaceKey = threadWorkspaceKey(project.id, thread.id)
   const routing = useMemo<ThreadWorkspaceRouting>(
     () => ({ initialCodingAgent, initialPresentation }),
     [initialCodingAgent, initialPresentation],
   )
-  // Selecting through the same resolver the reducer uses keeps the first render
-  // correct, so the panes below never seed themselves from the wrong presentation.
-  const { codingAgent, piPresentation, claudePresentation } = useAppSelector(
-    (state) => resolveThreadWorkspace(state.threadWorkspace.byThread[workspaceKey], routing),
-    shallowEqual,
-  )
+  const { codingAgent, piPresentation, claudePresentation, activeTool, saveWorkspace, workspaceError } =
+    useThreadWorkspaceState(project.id, thread, routing, routeTool)
+  // Reflect server changes without publishing them again. Saved state also wins
+  // over a stale URL on reload, before any terminal pane is mounted.
   useEffect(() => {
-    dispatch(threadWorkspaceMounted({ key: workspaceKey, routing }))
-  }, [dispatch, routing, workspaceKey])
+    const destination = workspacePath(project.id, thread.id, activeTool)
+    if (routeLocation.pathname !== destination) {
+      navigate(destination, {
+        replace: true, state: routeLocation.state,
+      })
+    }
+  }, [activeTool, navigate, project.id, thread.id, routeLocation.pathname, routeLocation.state])
   const [piNativeOpened, setPiNativeOpened] = useState(() => piPresentation === 'native')
   const [piTerminalOpened, setPiTerminalOpened] = useState(() => piPresentation === 'terminal')
   const [claudeNativeOpened, setClaudeNativeOpened] = useState(() => claudePresentation === 'native')
@@ -258,11 +254,6 @@ export function TerminalWorkspace({
     }
   }, [project.id, thread.id])
 
-  useEffect(() => {
-    if (codingAgentChoices.some((choice) => choice.id === codingAgent)) return
-    dispatch(threadCodingAgentChanged({ key: workspaceKey, codingAgent: 'pi' }))
-  }, [codingAgent, codingAgentChoices, dispatch, workspaceKey])
-
   const reportToolStatus = useCallback((tool: WorkspaceTool, status: ConnectionStatus) => {
     dispatch(toolStatusReported({ threadKey, tool, status }))
   }, [dispatch, threadKey])
@@ -284,9 +275,8 @@ export function TerminalWorkspace({
   }, [])
 
   const activateTool = useCallback((tool: WorkspaceTool) => {
-    markToolOpened(tool)
-    navigate(workspacePath(project.id, thread.id, tool))
-  }, [dispatch, markToolOpened, navigate, project.id, thread.id])
+    saveWorkspace({ activeTab: tool })
+  }, [saveWorkspace])
 
   async function handleEnvironmentAction(actionId: string) {
     if (runningEnvironmentAction) return
@@ -312,20 +302,15 @@ export function TerminalWorkspace({
       activateTool('pi')
       return
     }
-    if (agent === 'pi') {
-      if (presentation === 'native') setPiNativeOpened(true)
-      if (presentation === 'terminal') setPiTerminalOpened(true)
-      dispatch(threadPiPresentationChanged({ key: workspaceKey, presentation }))
-    }
-    if (agent === 'claude') {
-      if (presentation === 'native') setClaudeNativeOpened(true)
-      if (presentation === 'terminal') setClaudeTerminalOpened(true)
-      dispatch(threadClaudePresentationChanged({ key: workspaceKey, presentation }))
-    }
-    dispatch(threadCodingAgentChanged({ key: workspaceKey, codingAgent: agent }))
-    reportToolStatus('pi', 'connecting')
-    activateTool('pi')
+    saveWorkspace({ codingAgent: selection, activeTab: 'pi' })
   }
+
+  useEffect(() => {
+    if (piPresentation === 'native') setPiNativeOpened(true)
+    else setPiTerminalOpened(true)
+    if (claudePresentation === 'native') setClaudeNativeOpened(true)
+    else setClaudeTerminalOpened(true)
+  }, [piPresentation, claudePresentation])
 
   useEffect(() => {
     markToolOpened(activeTool)
@@ -469,8 +454,10 @@ export function TerminalWorkspace({
                       role="tab"
                       aria-label={selectedCodingAgent.label}
                       aria-selected={active}
-                      onClick={() => {
-                                            markToolOpened(tool.id)
+                      onClick={(event) => {
+                        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+                        event.preventDefault()
+                        activateTool(tool.id)
                       }}
                       className="flex h-full items-center gap-2 pl-2.5 pr-1.5 lg:pl-3.5 lg:pr-2"
                     >
@@ -504,8 +491,10 @@ export function TerminalWorkspace({
                   to={workspacePath(project.id, thread.id, tool.id)}
                   role="tab"
                   aria-selected={active}
-                  onClick={() => {
-                                    markToolOpened(tool.id)
+                  onClick={(event) => {
+                    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+                    event.preventDefault()
+                    activateTool(tool.id)
                   }}
                   className={`group relative flex h-9 shrink-0 items-center gap-2 rounded-lg px-2.5 text-[11px] font-medium transition lg:px-3.5 ${
                     active
@@ -598,6 +587,11 @@ export function TerminalWorkspace({
         {environmentActionError && (
           <div className="border-t border-ghost-bright-red/20 bg-ghost-bright-red/10 px-4 py-1.5 text-center text-[9px] text-ghost-bright-red" role="alert">
             {environmentActionError}
+          </div>
+        )}
+        {workspaceError && (
+          <div role="alert" className="px-3 py-2 text-sm text-ghost-red">
+            {workspaceError} Try selecting the agent or tab again.
           </div>
         )}
         {activeTool === 'terminal' && (

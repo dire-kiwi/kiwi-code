@@ -67,6 +67,8 @@ type Thread struct {
 	ArchivedAt             *time.Time `json:"archivedAt,omitempty"`
 	TokenLimit             *int64     `json:"tokenLimit,omitempty"`
 	CostLimitUSD           *float64   `json:"costLimitUsd,omitempty"`
+	CodingAgent            string     `json:"codingAgent,omitempty"`
+	ActiveTab              string     `json:"activeTab,omitempty"`
 }
 
 type Project struct {

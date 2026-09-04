@@ -92,20 +92,20 @@ function firstWorkspacePath(projects: Project[], preferredProjectId?: string): s
     : undefined
   const preferredActiveThread = preferredProject?.threads.find((thread) => !thread.archivedAt)
   if (preferredProject && preferredActiveThread) {
-    return workspacePath(preferredProject.id, preferredActiveThread.id, defaultWorkspaceTool)
+    return workspacePath(preferredProject.id, preferredActiveThread.id, preferredActiveThread.activeTab ?? defaultWorkspaceTool)
   }
 
   const activeProject = projects.find((project) => project.threads.some((thread) => !thread.archivedAt))
   const activeThread = activeProject?.threads.find((thread) => !thread.archivedAt)
   if (activeProject && activeThread) {
-    return workspacePath(activeProject.id, activeThread.id, defaultWorkspaceTool)
+    return workspacePath(activeProject.id, activeThread.id, activeThread.activeTab ?? defaultWorkspaceTool)
   }
 
   const project = preferredProject?.threads.length
     ? preferredProject
     : projects.find((item) => item.threads.length > 0)
   const thread = project?.threads[0]
-  return project && thread ? workspacePath(project.id, thread.id, defaultWorkspaceTool) : null
+  return project && thread ? workspacePath(project.id, thread.id, thread.activeTab ?? defaultWorkspaceTool) : null
 }
 
 function rememberedWorkspacePath(projects: Project[], lastWorkspace: LastWorkspace | null): string | null {
@@ -113,7 +113,7 @@ function rememberedWorkspacePath(projects: Project[], lastWorkspace: LastWorkspa
   const project = projects.find((item) => item.id === lastWorkspace.projectId)
   const thread = project?.threads.find((item) => item.id === lastWorkspace.threadId)
   return project && thread
-    ? workspacePath(project.id, thread.id, lastWorkspace.tool)
+    ? workspacePath(project.id, thread.id, thread.activeTab ?? lastWorkspace.tool)
     : null
 }
 
@@ -318,7 +318,7 @@ export default function App() {
     acknowledgeThreadActivity(projectId, threadId, true)
     const tool = selectedProject?.id === projectId && selectedThread?.id === threadId && activeTool
       ? activeTool
-      : defaultWorkspaceTool
+      : projects.find((project) => project.id === projectId)?.threads.find((thread) => thread.id === threadId)?.activeTab ?? defaultWorkspaceTool
     navigate(workspacePath(projectId, threadId, tool))
     dispatch(sidebarDismissed())
   }
@@ -347,7 +347,7 @@ export default function App() {
     dispatch(projectCreated(project))
     dispatch(sidebarClosed())
     const thread = project.threads[0]
-    navigate(thread ? workspacePath(project.id, thread.id, defaultWorkspaceTool) : newThreadPath(project.id))
+    navigate(thread ? workspacePath(project.id, thread.id, thread.activeTab ?? defaultWorkspaceTool) : newThreadPath(project.id))
   }
 
   function handleThreadCreated(
@@ -402,7 +402,7 @@ export default function App() {
     if (archived && selectedProject?.id === project.id && selectedThread?.id === thread.id) {
       const nextThread = project.threads.find((candidate) => candidate.id !== thread.id && !candidate.archivedAt)
       navigate(nextThread
-        ? workspacePath(project.id, nextThread.id, defaultWorkspaceTool)
+        ? workspacePath(project.id, nextThread.id, nextThread.activeTab ?? defaultWorkspaceTool)
         : newThreadPath(project.id))
     }
   }
@@ -421,16 +421,16 @@ export default function App() {
   }
 
   const invalidWorkspaceDestination = selectedProject && selectedThread
-    ? workspacePath(selectedProject.id, selectedThread.id, defaultWorkspaceTool)
+    ? workspacePath(selectedProject.id, selectedThread.id, selectedThread.activeTab ?? defaultWorkspaceTool)
     : defaultWorkspacePath ?? '/'
   const legacyDestination = legacyProject && legacyThread
-    ? workspacePath(legacyProject.id, legacyThread.id, defaultWorkspaceTool)
+    ? workspacePath(legacyProject.id, legacyThread.id, legacyThread.activeTab ?? defaultWorkspaceTool)
     : defaultWorkspacePath ?? '/'
   const landingThread = landingProject?.threads.find((thread) => !thread.archivedAt)
     ?? landingProject?.threads[0]
   const projectDestination = landingProject
     ? landingThread
-      ? workspacePath(landingProject.id, landingThread.id, defaultWorkspaceTool)
+      ? workspacePath(landingProject.id, landingThread.id, landingThread.activeTab ?? defaultWorkspaceTool)
       : newThreadPath(landingProject.id)
     : defaultWorkspacePath ?? '/'
 

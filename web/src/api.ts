@@ -80,6 +80,17 @@ export function getApplicationHealth(signal?: AbortSignal) {
   return request<ApplicationHealth>('/api/health', { signal, cache: 'no-store' })
 }
 
+export function updateThreadWorkspace(
+  projectId: string,
+  threadId: string,
+  update: { codingAgent?: string; activeTab?: string; initialize?: boolean },
+) {
+  return jsonRequest<Thread>(
+    `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/workspace`,
+    'PATCH', update,
+  )
+}
+
 export function restartApplication() {
   return request<ApplicationRestart>('/api/restart', { method: 'POST' })
 }
