@@ -25,7 +25,7 @@ type codingAgentChoice struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 	// ReasoningLevels lists the thinking levels the model supports. It is only
-	// populated for pi models; empty means the levels are not known.
+	// populated for discovered models; empty means the levels are not known.
 	ReasoningLevels []string `json:"reasoningLevels,omitempty"`
 }
 
@@ -170,13 +170,19 @@ func (h *terminalHandler) codingAgentConfigs(parent context.Context, projectID s
 	}
 
 	type modelDiscoveryResult struct {
-		piModels   []piModelCapability
-		gptModels  []codingAgentChoice
-		grokModels []codingAgentChoice
+		piModels    []piModelCapability
+		gptModels   []codingAgentChoice
+		grokModels  []codingAgentChoice
+		codexModels []codingAgentChoice
 	}
 	piResult := make(chan []piModelCapability, 1)
 	claudeGPTResult := make(chan []codingAgentChoice, 1)
 	grokResult := make(chan []codingAgentChoice, 1)
+	codexResult := make(chan []codingAgentChoice, 1)
+	go func() {
+		discovered, _ := discoverCodexModels(ctx, discoveryCwd)
+		codexResult <- discovered
+	}()
 	go func() {
 		discovered, _ := h.availablePiModelCapabilities(ctx, discoveryCwd, false)
 		piResult <- discovered
@@ -194,9 +200,10 @@ func (h *terminalHandler) codingAgentConfigs(parent context.Context, projectID s
 		claudeGPTResult <- nil
 	}
 	result := modelDiscoveryResult{
-		piModels:   <-piResult,
-		gptModels:  <-claudeGPTResult,
-		grokModels: <-grokResult,
+		piModels:    <-piResult,
+		gptModels:   <-claudeGPTResult,
+		grokModels:  <-grokResult,
+		codexModels: <-codexResult,
 	}
 
 	piModels := []codingAgentChoice{{ID: "", Label: "Use Pi default"}}
@@ -226,7 +233,7 @@ func (h *terminalHandler) codingAgentConfigs(parent context.Context, projectID s
 		{
 			ID:             codingAgentCodex,
 			Label:          "Codex CLI",
-			Models:         []codingAgentChoice{{ID: "", Label: "Use Codex default"}},
+			Models:         append([]codingAgentChoice{{ID: "", Label: "Use Codex default"}}, result.codexModels...),
 			ThinkingLevels: codexThinkingLevels,
 		},
 		{

@@ -503,6 +503,9 @@ func TestDiscoverPiModelCapabilitiesLoadsAnApprovedProjectExtension(t *testing.T
 
 func TestListCodingAgents(t *testing.T) {
 	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "codex"), []byte(codexModelTestScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(directory, codingAgentPi)
 	script := `#!/bin/sh
 for argument in "$@"; do
@@ -573,6 +576,9 @@ printf '%s\n' '  - grok-4.5'
 	}
 	if len(configs[0].Models) != 3 || configs[0].Models[1].ID != "custom/model-a" || configs[0].Models[2].ID != "custom/model-b" {
 		t.Fatalf("Pi models = %#v", configs[0].Models)
+	}
+	if len(configs[1].Models) != 3 || configs[1].Models[0].ID != "" || configs[1].Models[1].ID != "codex-test" || configs[1].Models[2].ID != "other-test" {
+		t.Fatalf("Codex models = %#v", configs[1].Models)
 	}
 	if !codingAgentChoiceExists(configs[1].ThinkingLevels, "minimal") || codingAgentChoiceExists(configs[1].ThinkingLevels, "max") {
 		t.Fatalf("Codex thinking levels = %#v", configs[1].ThinkingLevels)
