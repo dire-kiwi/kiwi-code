@@ -199,7 +199,9 @@ export function TerminalSession({
         letterSpacing: 0,
         lineHeight: 1.28,
         macOptionIsMeta: true,
-        minimumContrastRatio: 1,
+        // Keep explicit agent colors (including RGB black) readable on the
+        // configured background without changing the terminal's ANSI palette.
+        minimumContrastRatio: 4.5,
         overviewRulerWidth: 0,
         rightClickSelectsWord: true,
         scrollback: 10_000,
