@@ -264,6 +264,60 @@ func TestPrepareCodexPluginProfileUsesNormalCodexHome(t *testing.T) {
 	}
 }
 
+func TestPrepareCodexPluginProfilePreservesSavedPreferences(t *testing.T) {
+	installation, err := materializeCodexPlugin(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	configDirectory := t.TempDir()
+	profileName := "kiwi-code-preferences"
+	if err := prepareCodexPluginProfile(configDirectory, profileName, installation); err != nil {
+		t.Fatal(err)
+	}
+	profilePath := filepath.Join(configDirectory, profileName+".config.toml")
+	generated, err := os.ReadFile(profilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reproduce the production profile: saved root settings precede the marker,
+	// and a trusted project follows the generated plugin settings.
+	profile := []byte("approvals_reviewer = \"auto_review\"\nmodel = \"gpt-5.6-sol\"\nmodel_reasoning_effort = \"high\"\n" +
+		string(generated) + "\n[projects.\"/example/project\"]\ntrust_level = \"trusted\"\n")
+	if err := os.WriteFile(profilePath, profile, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cacheFile := filepath.Join(configDirectory, "plugins", "cache", installation.MarketplaceName,
+		codexPluginName, codexPluginVersion, ".codex-plugin", "plugin.json")
+	if err := os.WriteFile(cacheFile, []byte("stale cache"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := prepareCodexPluginProfile(configDirectory, profileName, installation); err != nil {
+			t.Fatalf("prepare existing profile: %v", err)
+		}
+		current, err := os.ReadFile(profilePath)
+		if err != nil || !bytes.Equal(current, profile) {
+			t.Fatalf("saved profile changed: %q, err=%v", current, err)
+		}
+	}
+	cached, err := os.ReadFile(cacheFile)
+	if err != nil || !bytes.Equal(cached, codexPluginManifest) {
+		t.Fatalf("existing profile did not refresh plugin cache: %q, err=%v", cached, err)
+	}
+}
+
+func TestCodexManagedProfileMarkerRequiresACompleteLine(t *testing.T) {
+	for _, contents := range []string{
+		"model = \"personal\"\n",
+		"# Copied from " + codexManagedProfileMarker,
+		strings.TrimSpace(codexManagedProfileMarker) + " extra text\n",
+	} {
+		if hasCodexManagedProfileMarker([]byte(contents)) {
+			t.Fatalf("accepted unrelated marker text: %q", contents)
+		}
+	}
+}
+
 func TestPrepareCodexPluginProfileRefusesAnUnmanagedCollision(t *testing.T) {
 	installation, err := materializeCodexPlugin(t.TempDir())
 	if err != nil {

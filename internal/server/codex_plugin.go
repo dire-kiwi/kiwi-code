@@ -226,10 +226,11 @@ func prepareCodexPluginProfile(configDirectory, profileName string, installation
 		return fmt.Errorf("create Codex config directory: %w", err)
 	}
 	profilePath := filepath.Join(configDirectory, profileName+".config.toml")
-	if current, err := os.ReadFile(profilePath); err == nil && !bytes.HasPrefix(current, []byte(codexManagedProfileMarker)) {
+	currentProfile, readErr := os.ReadFile(profilePath)
+	if readErr == nil && !hasCodexManagedProfileMarker(currentProfile) {
 		return fmt.Errorf("Codex profile %q already exists and is not managed by Kiwi Code", profileName)
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("read Codex profile: %w", err)
+	} else if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return fmt.Errorf("read Codex profile: %w", readErr)
 	}
 
 	// A profile can enable a plugin but does not install its marketplace source.
@@ -250,6 +251,12 @@ func prepareCodexPluginProfile(configDirectory, profileName string, installation
 			return err
 		}
 	}
+	// Codex persists preferences and project trust in the selected profile and
+	// can insert settings before our ownership comment. Seed new profiles only;
+	// keep existing profiles intact while still refreshing the plugin cache.
+	if readErr == nil {
+		return nil
+	}
 
 	marketplaceRoot := canonicalCodexPath(installation.MarketplaceRoot)
 	profile := codexManagedProfileMarker +
@@ -265,9 +272,6 @@ func prepareCodexPluginProfile(configDirectory, profileName string, installation
 		"# The ChatGPT in-app Browser is not the browser shown by Kiwi Code.\n" +
 		"[plugins.\"browser@openai-bundled\"]\n" +
 		"enabled = false\n"
-	if current, err := os.ReadFile(profilePath); err == nil && string(current) == profile {
-		return nil
-	}
 	if err := writeFileAtomically(profilePath, []byte(profile), serverAtomicFileOptions{
 		Mode:     0o600,
 		SyncFile: true,
@@ -275,6 +279,16 @@ func prepareCodexPluginProfile(configDirectory, profileName string, installation
 		return fmt.Errorf("write Codex profile: %w", err)
 	}
 	return nil
+}
+
+func hasCodexManagedProfileMarker(contents []byte) bool {
+	marker := strings.TrimSpace(codexManagedProfileMarker)
+	for _, line := range strings.Split(string(contents), "\n") {
+		if strings.TrimSpace(line) == marker {
+			return true
+		}
+	}
+	return false
 }
 
 func canonicalCodexPath(path string) string {
