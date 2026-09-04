@@ -307,7 +307,7 @@ func (h *terminalHandler) serveTmuxBrowserTerminal(w http.ResponseWriter, r *htt
 	if r.URL.Query().Get("protocol") == strconv.Itoa(terminalProtocolV2) {
 		protocol = terminalProtocolV2
 	}
-	diagnostics := newTerminalConnectionDiagnostics(r, "", "", "tmux")
+	diagnostics := newTerminalConnectionDiagnostics(r, "", "", "tmux", "", h.tmuxSocket)
 	diagnostics.mark("accepted")
 	defer diagnostics.finish()
 

@@ -627,7 +627,7 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("protocol") == strconv.Itoa(terminalProtocolV2) {
 		protocol = terminalProtocolV2
 	}
-	diagnostics := newTerminalConnectionDiagnostics(r, item.ID, thread.ID, tool)
+	diagnostics := newTerminalConnectionDiagnostics(r, item.ID, thread.ID, tool, codingAgent, h.tmuxSocket)
 	diagnostics.mark("accepted")
 	defer diagnostics.finish()
 
@@ -635,6 +635,7 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 	// handshake must not leave behind a session or temporary view.
 	connection, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		diagnostics.failure("WebSocket upgrade", err)
 		return
 	}
 	defer connection.Close()
@@ -649,7 +650,8 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 	diagnostics.mark("websocket-upgraded")
 
 	writer := newWebSocketWriter(connection)
-	closeWithError := func(message string) {
+	closeWithError := func(message string, cause error) {
+		diagnostics.failure(message, cause)
 		_ = writer.Close(websocket.CloseInternalServerErr, message)
 	}
 	closeCodingAgentEnded := func() {
@@ -669,21 +671,22 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 	launchedAgent := false
 	if tool == "process" {
 		if err := h.reconcileThreadTmuxState(item, thread); err != nil {
-			closeWithError("Could not load the process terminal")
+			closeWithError("Could not load the process terminal", err)
 			return
 		}
 		sessionName = tmuxSessionName(item.ID, thread.ID, tool)
 		_, processTarget, found, processErr := h.tmuxProcessWindow(sessionName, processID)
 		if processErr != nil {
-			closeWithError("Could not load the process terminal")
+			closeWithError("Could not load the process terminal", processErr)
 			return
 		}
 		if !found {
-			closeWithError("Process not found")
+			closeWithError("Process not found", nil)
 			return
 		}
 		target = processTarget
 	} else {
+		diagnostics.mark("ensuring-session")
 		sessionName, notice, created, err = h.ensureTmuxSessionWithCodingAgentOptions(
 			item,
 			thread,
@@ -699,12 +702,13 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 				closeCodingAgentEnded()
 				return
 			}
-			closeWithError("Could not create the terminal session")
+			closeWithError("Could not create the terminal session", err)
 			return
 		}
 		if tool == "pi" {
 			var agentNotice string
 			var agentCreated bool
+			diagnostics.mark("ensuring-agent-pane")
 			agentPaneID, agentNotice, agentCreated, err = h.ensureCodingAgentPaneWithOptions(
 				item,
 				thread,
@@ -720,7 +724,7 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 					closeCodingAgentEnded()
 					return
 				}
-				closeWithError("Could not start the coding agent")
+				closeWithError("Could not start the coding agent", err)
 				return
 			}
 			launchedAgent = created || agentCreated
@@ -734,11 +738,11 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 					closeCodingAgentEnded()
 					return
 				}
-				closeWithError("Could not inspect the coding agent")
+				closeWithError("Could not inspect the coding agent", stateErr)
 				return
 			}
 			if state.ServerPID != agentServerPID {
-				closeWithError("Coding agent incarnation changed during setup")
+				closeWithError("Coding agent incarnation changed during setup", nil)
 				return
 			}
 			if state.Dead {
@@ -749,7 +753,7 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 			if !restartCodingAgent && launchedAgent {
 				marked, markerErr := h.stopCodingAgentPaneIfExitMarked(item.ID, thread.ID, codingAgent, agentPaneID, agentServerPID)
 				if markerErr != nil {
-					closeWithError("Could not verify the coding agent launch")
+					closeWithError("Could not verify the coding agent launch", markerErr)
 					return
 				}
 				if marked {
@@ -760,7 +764,7 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	diagnostics.mark("canonical-target-ready")
-	closeSetupFailure := func(message string) {
+	closeSetupFailure := func(message string, cause error) {
 		if agentPaneID != "" {
 			state, stateErr := h.tmuxPaneExitState(agentPaneID)
 			if stateErr == nil && state.Found && state.ServerPID == agentServerPID && state.Dead {
@@ -773,7 +777,7 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		closeWithError(message)
+		closeWithError(message, cause)
 	}
 
 	defer func() { _ = h.markTmuxSessionUsed(sessionName, time.Now()) }()
@@ -796,13 +800,13 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 			var found bool
 			target, found, err = h.tmuxToolWindow(sessionName, tool)
 			if err != nil || !found {
-				closeSetupFailure("Could not find the terminal window")
+				closeSetupFailure("Could not find the terminal window", err)
 				return
 			}
 		}
 		viewSessionName, err = h.createTmuxViewSession(item, thread, sessionName, target)
 		if err != nil {
-			closeSetupFailure("Could not create the terminal view")
+			closeSetupFailure("Could not create the terminal view", err)
 			return
 		}
 		attachSessionName = viewSessionName
@@ -821,7 +825,7 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})
 	if err != nil {
 		log.Printf("attach tmux terminal: project=%q thread=%q tool=%q error=%v", item.ID, thread.ID, tool, err)
-		closeSetupFailure("Could not attach to the terminal session")
+		closeSetupFailure("Could not attach to the terminal session", err)
 		return
 	}
 	defer func() {
