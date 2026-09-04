@@ -973,8 +973,11 @@ func TestCodingAgentCommandsUseAgentSpecificModelAndThinkingFlags(t *testing.T) 
 				t.Fatalf("args tail = %#v, want %#v", args, test.wantTail)
 			}
 			if test.agent == codingAgentCodex {
+				if strings.Contains(joined, "--dangerously-bypass-approvals-and-sandbox") || strings.Contains(joined, "--yolo") {
+					t.Fatalf("Codex args %#v must not bypass approvals and sandboxing", args)
+				}
 				for _, expected := range []string{
-					"--dangerously-bypass-approvals-and-sandbox",
+					"--approve-for-me",
 					"--dangerously-bypass-hook-trust",
 					"--profile",
 					managedCodexProfileName(codexDataDirectory),
