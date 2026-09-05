@@ -112,7 +112,7 @@ export async function waitForApplicationRestart(instanceId: string, timeoutMs = 
 
 export function updateSettings(input: string | Partial<Pick<
   AppSettings,
-  'worktreeBasePath' | 'archivedThreadRetentionDays' | 'orphanedWorktreeRetentionDays' | 'codingAgents' | 'titleModel' | 'titleThinking' | 'theme'
+  'newThreadSelection' | 'worktreeBasePath' | 'archivedThreadRetentionDays' | 'orphanedWorktreeRetentionDays' | 'codingAgents' | 'titleModel' | 'titleThinking' | 'theme'
 >>) {
   return jsonRequest<AppSettings>(
     '/api/settings',
@@ -332,4 +332,12 @@ export function selectShellWindow(id: string, threadId: string, index: number) {
     `${shellWindowsPath(id, threadId)}/${index}/select`,
     { method: 'POST' },
   )
+}
+
+// Serialize selection writes so a slower request cannot overwrite a newer choice.
+let newThreadSelectionSave = Promise.resolve()
+export function rememberNewThreadSelection(selection: NonNullable<AppSettings['newThreadSelection']>) {
+  const save = newThreadSelectionSave.then(() => updateSettings({ newThreadSelection: selection }))
+  newThreadSelectionSave = save.then(() => {}, () => {})
+  return save
 }

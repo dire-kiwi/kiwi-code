@@ -13,6 +13,7 @@ func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	var input struct {
+		NewThreadSelection            *project.NewThreadSelection   `json:"newThreadSelection"`
 		WorktreeBasePath              *string                       `json:"worktreeBasePath"`
 		ArchivedThreadRetentionDays   *int                          `json:"archivedThreadRetentionDays"`
 		OrphanedWorktreeRetentionDays *int                          `json:"orphanedWorktreeRetentionDays"`
@@ -26,11 +27,12 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	if err := decoder.Decode(&input); err != nil || (input.WorktreeBasePath == nil &&
 		input.ArchivedThreadRetentionDays == nil &&
 		input.OrphanedWorktreeRetentionDays == nil && input.CodingAgents == nil &&
-		input.TitleModel == nil && input.TitleThinking == nil && input.Theme == nil) {
+		input.TitleModel == nil && input.TitleThinking == nil && input.Theme == nil && input.NewThreadSelection == nil) {
 		writeError(w, http.StatusBadRequest, "Invalid settings.")
 		return
 	}
 	settings, err := s.projects.UpdateSettingsFields(project.SettingsUpdate{
+		NewThreadSelection:            input.NewThreadSelection,
 		WorktreeBasePath:              input.WorktreeBasePath,
 		ArchivedThreadRetentionDays:   input.ArchivedThreadRetentionDays,
 		OrphanedWorktreeRetentionDays: input.OrphanedWorktreeRetentionDays,

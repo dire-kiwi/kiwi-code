@@ -152,6 +152,11 @@ export const CodingAgentSettingSchema = Schema.Struct({
 export type CodingAgentSetting = Schema.Schema.Type<typeof CodingAgentSettingSchema>
 
 export const AppSettingsSchema = Schema.Struct({
+  newThreadSelection: Schema.optional(Schema.Struct({
+    codingAgent: Schema.String,
+    model: Schema.String,
+    thinkingLevel: Schema.String,
+  })),
   worktreeBasePath: Schema.String,
   defaultWorktreeBasePath: Schema.String,
   usingDefault: Schema.Boolean,

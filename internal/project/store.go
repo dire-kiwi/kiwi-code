@@ -204,7 +204,14 @@ type ClaudeCodeProfile struct {
 	ConfigDirectory string `json:"configDirectory"`
 }
 
+type NewThreadSelection struct {
+	CodingAgent   string `json:"codingAgent"`
+	Model         string `json:"model"`
+	ThinkingLevel string `json:"thinkingLevel"`
+}
+
 type Settings struct {
+	NewThreadSelection            *NewThreadSelection  `json:"newThreadSelection,omitempty"`
 	WorktreeBasePath              string               `json:"worktreeBasePath"`
 	DefaultWorktreeBasePath       string               `json:"defaultWorktreeBasePath"`
 	UsingDefault                  bool                 `json:"usingDefault"`
@@ -224,6 +231,7 @@ type Settings struct {
 }
 
 type SettingsUpdate struct {
+	NewThreadSelection            *NewThreadSelection
 	WorktreeBasePath              *string
 	ArchivedThreadRetentionDays   *int
 	OrphanedWorktreeRetentionDays *int
@@ -234,6 +242,7 @@ type SettingsUpdate struct {
 }
 
 type persistedSettings struct {
+	NewThreadSelection            *NewThreadSelection   `json:"newThreadSelection,omitempty"`
 	WorktreeBasePath              string                `json:"worktreeBasePath,omitempty"`
 	ArchivedThreadRetentionDays   *int                  `json:"archivedThreadRetentionDays,omitempty"`
 	OrphanedWorktreeRetentionDays *int                  `json:"orphanedWorktreeRetentionDays,omitempty"`
@@ -272,6 +281,7 @@ type Store struct {
 	orphanedWorktreeRetentionDays int
 	codingAgents                  []CodingAgentSetting
 	titleModel                    string
+	newThreadSelection            *NewThreadSelection
 	titleThinking                 string
 	theme                         Theme
 	usingDefaultTheme             bool
@@ -916,7 +926,7 @@ func (s *Store) UpdateSettingsValues(update SettingsUpdate) (Settings, error) {
 func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 	if update.WorktreeBasePath == nil && update.ArchivedThreadRetentionDays == nil &&
 		update.OrphanedWorktreeRetentionDays == nil && update.CodingAgents == nil &&
-		update.TitleModel == nil && update.TitleThinking == nil && update.Theme == nil {
+		update.TitleModel == nil && update.TitleThinking == nil && update.Theme == nil && update.NewThreadSelection == nil {
 		return Settings{}, errors.New("at least one setting is required")
 	}
 
@@ -1008,6 +1018,7 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 	previousOrphanedDays := s.orphanedWorktreeRetentionDays
 	previousCodingAgents := s.codingAgents
 	previousTitleModel := s.titleModel
+	previousSelection := s.newThreadSelection
 	previousTitleThinking := s.titleThinking
 	previousTheme := s.theme
 	previousUsingDefaultTheme := s.usingDefaultTheme
@@ -1030,6 +1041,10 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 	if normalizedTitleModel != nil {
 		s.titleModel = *normalizedTitleModel
 	}
+	if update.NewThreadSelection != nil {
+		selection := *update.NewThreadSelection
+		s.newThreadSelection = &selection
+	}
 	if normalizedTitleThinking != nil {
 		s.titleThinking = *normalizedTitleThinking
 	}
@@ -1043,6 +1058,7 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 		s.orphanedWorktreeRetentionDays = previousOrphanedDays
 		s.codingAgents = previousCodingAgents
 		s.titleModel = previousTitleModel
+		s.newThreadSelection = previousSelection
 		s.titleThinking = previousTitleThinking
 		s.theme = previousTheme
 		s.usingDefaultTheme = previousUsingDefaultTheme
@@ -1074,6 +1090,7 @@ func (s *Store) settingsLocked() Settings {
 		CodingAgents:                  append([]CodingAgentSetting{}, s.codingAgents...),
 		TitleModel:                    s.titleModel,
 		DefaultTitleModel:             DefaultTitleModel,
+		NewThreadSelection:            cloneNewThreadSelection(s.newThreadSelection),
 		TitleThinking:                 s.titleThinking,
 		DefaultTitleThinking:          DefaultTitleThinking,
 		Theme:                         s.theme,
@@ -2652,6 +2669,7 @@ func (s *Store) loadSettings() error {
 		}
 		s.titleModel = titleModel
 	}
+	s.newThreadSelection = cloneNewThreadSelection(settings.NewThreadSelection)
 	if settings.TitleThinking != "" {
 		titleThinking, err := normalizeTitleThinking(settings.TitleThinking)
 		if err != nil {
@@ -2827,6 +2845,7 @@ func (s *Store) saveSettingsLocked() error {
 		OrphanedWorktreeRetentionDays: &orphanedDays,
 		CodingAgents:                  &codingAgents,
 		TitleModel:                    s.titleModel,
+		NewThreadSelection:            cloneNewThreadSelection(s.newThreadSelection),
 		TitleThinking:                 s.titleThinking,
 	}
 	if !s.usingDefaultTheme {
@@ -2852,4 +2871,12 @@ func randomID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buffer), nil
+}
+
+func cloneNewThreadSelection(selection *NewThreadSelection) *NewThreadSelection {
+	if selection == nil {
+		return nil
+	}
+	copy := *selection
+	return &copy
 }

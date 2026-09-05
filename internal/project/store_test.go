@@ -2533,3 +2533,41 @@ func TestFigmaMCPProjectToggleRoundTrip(t *testing.T) {
 		t.Fatalf("disable Figma MCP = %#v, err=%v", updated, err)
 	}
 }
+
+func TestStorePersistsNewThreadSelection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "projects.json")
+	store, err := NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.GetSettings().NewThreadSelection != nil {
+		t.Fatal("unexpected saved selection")
+	}
+	selection := NewThreadSelection{CodingAgent: "pi-native", Model: "provider/model", ThinkingLevel: "high"}
+	settings, err := store.UpdateSettingsFields(SettingsUpdate{NewThreadSelection: &selection})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.NewThreadSelection.Model = "mutated"
+	reloaded, err := NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reloaded.GetSettings().NewThreadSelection; got == nil || *got != selection {
+		t.Fatalf("selection did not survive reload: %#v", got)
+	}
+	if got := store.GetSettings().NewThreadSelection; *got != selection {
+		t.Fatalf("snapshot changed store: %#v", got)
+	}
+	theme := store.GetSettings().Theme
+	if _, err := reloaded.UpdateSettingsFields(SettingsUpdate{Theme: &theme}); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err = NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reloaded.GetSettings().NewThreadSelection; got == nil || *got != selection {
+		t.Fatalf("unrelated update lost selection: %#v", got)
+	}
+}

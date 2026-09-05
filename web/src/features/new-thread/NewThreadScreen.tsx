@@ -18,13 +18,14 @@ import {
   Plus,
   X,
 } from 'lucide-react'
-import { createThread, uploadPiImage } from '@/api'
+import { createThread, rememberNewThreadSelection, uploadPiImage } from '@/api'
 import {
   codingAgentSelectionForSetting,
   codingAgentTargetForSelection,
   defaultCodingAgentSelection,
   fallbackCodingAgentConfigs,
   isClaudeGPTCodingAgent,
+  isCodingAgentSelection,
   isNativeCodingAgentSelection,
   nativeCodingAgentLabel,
   thinkingChoicesForModel,
@@ -65,7 +66,7 @@ import {
   type AgentModelPreferences,
   type ThreadLocation,
 } from '@/store/slices/newThreadPreferences'
-import { selectSettings } from '@/store/slices/settings'
+import { selectSettings, settingsReceived } from '@/store/slices/settings'
 import { useSubscription } from '@/wire/react'
 import { CodingAgentsTopic, GitBranchesTopic } from '@/wire/topics'
 import { GhostButton, PrimaryButton } from '@/ui/buttons'
@@ -173,12 +174,16 @@ export function NewThreadScreen({
     settingsInitializedRef.current = true
     const availableAgents = settings.codingAgents.map(codingAgentSelectionForSetting)
     const configuredDefault = defaultCodingAgentSelection(settings.codingAgents)
-    const nextAgent = availableAgents.includes(configuredDefault) ? configuredDefault : 'pi-native'
-    const rememberedModel = agentModels[codingAgentTargetForSelection(nextAgent).agent]
+    const saved = settings.newThreadSelection
+    const preferred = saved?.codingAgent ?? rememberedPreferences?.codingAgent ?? configuredDefault
+    const nextAgent = isCodingAgentSelection(preferred) && availableAgents.includes(preferred)
+      ? preferred : availableAgents.includes(configuredDefault) ? configuredDefault : 'pi-native'
+    const rememberedModel = saved?.codingAgent === nextAgent
+      ? saved : agentModels[codingAgentTargetForSelection(nextAgent).agent]
     setCodingAgent(nextAgent)
     setModel(rememberedModel?.model ?? '')
     setThinkingLevel(rememberedModel?.thinkingLevel ?? '')
-  }, [agentModels, settings])
+  }, [agentModels, rememberedPreferences, settings])
 
   useEffect(() => {
     if (codingAgentsLoading) return
@@ -447,6 +452,15 @@ export function NewThreadScreen({
     event.currentTarget.form?.requestSubmit()
   }
 
+  function persistSelection(agent: CodingAgentSelection, nextModel: string, nextThinking: string) {
+    settingsInitializedRef.current = true
+    const selection = { codingAgent: agent, model: nextModel, thinkingLevel: nextThinking }
+    if (settings) dispatch(settingsReceived({ ...settings, newThreadSelection: selection }))
+    void rememberNewThreadSelection(selection).catch((reason: unknown) => {
+      setError(reason instanceof Error ? reason.message : 'Could not remember thread selections.')
+    })
+  }
+
   function handleCodingAgentChange(nextAgent: CodingAgentSelection) {
     const nextAgentId = codingAgentTargetForSelection(nextAgent).agent
     const currentAgentId = codingAgentTargetForSelection(codingAgent).agent
@@ -467,11 +481,12 @@ export function NewThreadScreen({
         : []
       const rememberedThinking = remembered?.thinkingLevel ?? ''
       setModel(nextModel)
-      setThinkingLevel(
-        allowedThinking.some((option) => option.id === rememberedThinking)
-          ? rememberedThinking
-          : allowedThinking[0]?.id ?? '',
-      )
+      const nextThinking = allowedThinking.some((option) => option.id === rememberedThinking)
+        ? rememberedThinking : allowedThinking[0]?.id ?? ''
+      setThinkingLevel(nextThinking)
+      persistSelection(nextAgent, nextModel, nextThinking)
+    } else {
+      persistSelection(nextAgent, model, thinkingLevel)
     }
     setError('')
   }
@@ -482,6 +497,7 @@ export function NewThreadScreen({
     const nextThinkingLevel = allowedThinking.some((option) => option.id === thinkingLevel)
       ? thinkingLevel
       : allowedThinking[0]?.id ?? ''
+    persistSelection(codingAgent, nextModel, nextThinkingLevel)
     setModel(nextModel)
     setThinkingLevel(nextThinkingLevel)
     setAgentModels((current) => ({
@@ -491,6 +507,7 @@ export function NewThreadScreen({
   }
 
   function handleThinkingLevelChange(nextThinkingLevel: string) {
+    persistSelection(codingAgent, model, nextThinkingLevel)
     setThinkingLevel(nextThinkingLevel)
     setAgentModels((current) => ({
       ...current,

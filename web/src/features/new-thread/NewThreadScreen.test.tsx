@@ -1,13 +1,17 @@
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fallbackCodingAgentConfigs } from '@/codingAgents'
-import type { Project } from '@/types'
-import { renderWithStore } from '@/store/testing'
+import type { AppSettings, Project } from '@/types'
+import { createTestStore, renderWithStore } from '@/store/testing'
+import { settingsReceived } from '@/store/slices/settings'
 import { NewThreadScreen } from './NewThreadScreen'
 
 const mocks = vi.hoisted(() => ({
+  saveSelection: vi.fn().mockResolvedValue({}),
   subscriptions: {} as Record<string, unknown>,
 }))
+
+vi.mock('@/api', () => ({ rememberNewThreadSelection: mocks.saveSelection }))
 
 vi.mock('@/wire/react', () => ({
   useSubscription: (topic: { tag: string }) => mocks.subscriptions[topic.tag],
@@ -219,3 +223,36 @@ describe('NewThreadScreen thinking levels', () => {
         expect(thinkingOptions()).toEqual(['Use Pi default', 'Off'])
       })
   })
+
+describe('server thread selection', () => {
+  it('restores delayed server settings over the default and saves changes before submit', async () => {
+    mocks.subscriptions.codingAgents = ready(fallbackCodingAgentConfigs.map((config) => (
+      config.id === 'codex'
+        ? { ...config, models: [...config.models, { id: 'saved-model', label: 'Saved model' }] }
+        : config
+    )))
+    const store = createTestStore()
+    const settings = {
+      codingAgents: [
+        { id: 'pi-native', kind: 'pi-native', name: 'Pi', isDefault: true },
+        { id: 'codex', kind: 'codex', name: 'Codex', isDefault: false },
+      ],
+      newThreadSelection: { codingAgent: 'codex', model: 'saved-model', thinkingLevel: 'high' },
+    } as unknown as AppSettings
+    const props = { project, onOpenSidebar: () => {}, onCancel: () => {}, onCreated: () => {} }
+    const rendered = renderWithStore(<NewThreadScreen {...props} />, { store })
+    act(() => { store.dispatch(settingsReceived(settings)) })
+    const thinking = () => document.getElementById('thread-agent-thinking') as HTMLButtonElement
+    await waitFor(() => expect(thinking().textContent).toContain('High'))
+    expect(document.getElementById('thread-coding-agent')?.textContent).toContain('Codex')
+    expect(document.getElementById('thread-agent-model')?.textContent).toContain('Saved model')
+    fireEvent.click(thinking())
+    fireEvent.click(within(screen.getByRole('listbox', { name: 'Thinking' })).getByRole('option', { name: /^Low$/ }))
+    await waitFor(() => expect(mocks.saveSelection).toHaveBeenLastCalledWith({ codingAgent: 'codex', model: 'saved-model', thinkingLevel: 'low' }))
+    rendered.unmount()
+    const freshStore = createTestStore()
+    freshStore.dispatch(settingsReceived({ ...settings, newThreadSelection: mocks.saveSelection.mock.calls.at(-1)![0] }))
+    renderWithStore(<NewThreadScreen {...props} />, { store: freshStore })
+    await waitFor(() => expect(thinking().textContent).toContain('Low'))
+  })
+})
