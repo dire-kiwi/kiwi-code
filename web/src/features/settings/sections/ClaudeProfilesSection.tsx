@@ -31,13 +31,14 @@ function newCodingAgentId() {
 }
 
 function isBuiltInAgent(agent: CodingAgentSetting) {
-  return agent.kind === 'pi' || agent.kind === 'pi-native' || agent.kind === 'codex' || agent.kind === 'grok'
+  return agent.kind === 'pi' || agent.kind === 'pi-native' || agent.kind === 'codex' || agent.kind === 'codex-native' || agent.kind === 'grok'
 }
 
 function builtInAgentName(agent: CodingAgentSetting) {
   switch (agent.kind) {
     case 'pi': return 'Pi'
     case 'pi-native': return 'Pi Native'
+    case 'codex-native': return 'Codex Native'
     case 'codex': return 'Codex CLI'
     case 'grok': return 'Grok CLI'
     default: return agent.name
@@ -48,6 +49,7 @@ function agentTypeLabel(agent: CodingAgentSetting) {
   switch (agent.kind) {
     case 'pi': return 'Pi (terminal)'
     case 'pi-native': return 'Pi Native'
+    case 'codex-native': return 'Codex Native'
     case 'codex': return 'Codex CLI (terminal)'
     case 'grok': return 'Grok CLI (terminal)'
     case 'claude-gpt': return 'Claude Code with GPT'

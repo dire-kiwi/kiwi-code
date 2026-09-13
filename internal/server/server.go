@@ -95,6 +95,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	}
 	terminal.nativePi.stopOnContext(options.CleanupContext)
 	terminal.nativeClaude.stopOnContext(options.CleanupContext)
+	terminal.nativeCodex.stopOnContext(options.CleanupContext)
 	terminal.stopTmuxWatchesOnContext(options.CleanupContext)
 	browserProvider, err := configuredBrowserProvider(projects, options)
 	if err != nil {
@@ -116,12 +117,34 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 		assets:              assets,
 		static:              http.FileServer(http.FS(assets)),
 	}
+	terminal.nativeCodex.activityReporter = func(key nativeProcessKey, working bool) {
+		server.settlementMu.Lock()
+		defer server.settlementMu.Unlock()
+		_, thread, err := server.projects.GetThreadPersisted(key.ProjectID, key.ThreadID)
+		if err != nil || thread.SettledAt != nil {
+			return
+		}
+		now := time.Now().UTC()
+		state := piActivityFinished
+		if working {
+			state = piActivityWorking
+		}
+		_, started := server.piActivity.updateAgentTransition(key.ProjectID, key.ThreadID, codingAgentCodex, state, now)
+		if started || !working {
+			_ = server.projects.RecordThreadActivity(key.ProjectID, key.ThreadID, now)
+		}
+	}
 	terminal.threadStatusChanged = server.notifyThreadStatusChanged
 	server.piActivity.stateChanged = terminal.markThreadTmuxStatusChanged
 	terminal.budgetReached = server.threadBudgetReached
 	terminal.nativePi.usageReporter = func(key piNativeProcessKey, sessionID string, totals threadUsageTotals) {
 		if err := server.threadUsage.report(key.ProjectID, key.ThreadID, sessionID, totals); err != nil {
 			log.Printf("record native Pi usage: project=%q thread=%q error=%v", key.ProjectID, key.ThreadID, err)
+		}
+	}
+	terminal.nativeCodex.usageReporter = func(key nativeProcessKey, sessionID string, totals threadUsageTotals) {
+		if err := server.threadUsage.report(key.ProjectID, key.ThreadID, sessionID, totals); err != nil {
+			log.Printf("record native Codex usage: %v", err)
 		}
 	}
 	terminal.nativeClaude.usageReporter = func(key piNativeProcessKey, sessionID string, totals threadUsageTotals) {
@@ -194,6 +217,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("POST /api/projects/{id}/pi/images", server.uploadPiImage)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/pi/native", server.terminal.servePiNative)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/claude/native", server.terminal.serveClaudeNative)
+	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/codex/native", server.terminal.serveCodexNative)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/terminal", server.terminal.serve)
 	mux.HandleFunc("/", server.serveFrontend)
 	server.handler = withRequestLogging(withOriginPolicy(mux, originPolicy))
@@ -294,6 +318,9 @@ func (s *Server) recoverPendingThreadCreationRollbacks() error {
 			}
 			if s.terminal != nil && s.terminal.nativeClaude != nil {
 				nativeErr = errors.Join(nativeErr, s.terminal.nativeClaude.removeThread(item.ID, thread.ID))
+			}
+			if s.terminal != nil && s.terminal.nativeCodex != nil {
+				nativeErr = errors.Join(nativeErr, s.terminal.nativeCodex.removeThread(item.ID, thread.ID))
 			}
 			usageErr := error(nil)
 			if s.threadUsage != nil {
@@ -808,6 +835,9 @@ func (s *Server) reconcileDeletedThreadMarkers(projectID, requestedThreadID stri
 		}
 		if s.terminal.nativeClaude != nil {
 			reconcileErrors = append(reconcileErrors, s.terminal.nativeClaude.removeThread(ref.ProjectID, ref.ThreadID))
+		}
+		if s.terminal.nativeCodex != nil {
+			reconcileErrors = append(reconcileErrors, s.terminal.nativeCodex.removeThread(ref.ProjectID, ref.ThreadID))
 		}
 		s.stopDeletedBrowserSessions(ref.ProjectID, []string{ref.ThreadID})
 		s.finishDeletedThreadRuntime(ref.ProjectID, ref.ThreadID, "retried")

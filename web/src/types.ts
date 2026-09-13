@@ -92,7 +92,7 @@ export type BrowserViewBounds = {
 
 export type PiPresentation = 'native' | 'terminal'
 
-export type CodingAgentSelection = CodingAgent | 'pi-native' | 'claude-native'
+export type CodingAgentSelection = CodingAgent | 'pi-native' | 'claude-native' | 'codex-native'
 
 export type CodingAgentStart = {
   agent: CodingAgent

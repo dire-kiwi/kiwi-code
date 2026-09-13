@@ -41,6 +41,7 @@ type terminalHandler struct {
 	agentTokenErr         error
 	nativePi              *piNativeManager
 	nativeClaude          *claudeNativeManager
+	nativeCodex           *codexNativeManager
 	codexPlugin           codexPluginInstallation
 	codexPluginErr        error
 	codexConfigPath       string
@@ -255,6 +256,7 @@ func newTerminalHandlerUnreconciledWithOptions(projects *project.Store, policy o
 			agentToken,
 			figmaExtensionPath,
 		),
+		nativeCodex: newCodexNativeManager(projects.DataDirectory()),
 		nativeClaude: newClaudeNativeManager(
 			projects.DataDirectory(),
 			claudePluginPath,
@@ -335,6 +337,9 @@ func (h *terminalHandler) startCodingAgent(w http.ResponseWriter, r *http.Reques
 	case "pi-native":
 		agent = codingAgentPi
 		native = true
+	case "codex-native":
+		agent = codingAgentCodex
+		native = true
 	case "claude-native":
 		agent = codingAgentClaude
 		native = true
@@ -357,6 +362,23 @@ func (h *terminalHandler) startCodingAgent(w http.ResponseWriter, r *http.Reques
 	threadEndpoint := threadEndpointURL(r, item.ID, thread.ID)
 	if native {
 		switch agent {
+		case codingAgentCodex:
+			process, startErr := h.startCodexNativeProcess(item, thread, threadEndpoint)
+			if startErr != nil {
+				writeError(w, 500, startErr.Error())
+				return
+			}
+			if launchOptions.InitialPrompt != "" {
+				if _, err := withTerminalThreadMutation(h, item, thread, func() (bool, error) {
+					if _, err := h.projects.RecordThreadPrompt(item.ID, thread.ID, time.Now().UTC()); err != nil {
+						return false, err
+					}
+					return true, process.prompt(chatClientMessage{Message: launchOptions.InitialPrompt, Model: launchOptions.Model, Effort: launchOptions.ThinkingLevel})
+				}, nil); err != nil {
+					writeError(w, 500, err.Error())
+					return
+				}
+			}
 		case codingAgentPi:
 			process, startErr := h.startPiNativeProcess(item, thread, threadEndpoint, launchOptions)
 			if startErr != nil {
@@ -4260,6 +4282,9 @@ func (h *terminalHandler) finishStopThread(item project.Project, threadID string
 			if h.nativeClaude != nil {
 				cleanupErr = errors.Join(cleanupErr, h.nativeClaude.removeThread(item.ID, threadID))
 			}
+			if h.nativeCodex != nil {
+				cleanupErr = errors.Join(cleanupErr, h.nativeCodex.removeThread(item.ID, threadID))
+			}
 		}
 	}
 	h.unmarkThreadStoppingLocked(item.ID, threadID)
@@ -4290,6 +4315,9 @@ func (h *terminalHandler) finishStopProject(item project.Project, lease *termina
 			}
 			if h.nativeClaude != nil {
 				cleanupErr = errors.Join(cleanupErr, h.nativeClaude.removeProject(item.ID))
+			}
+			if h.nativeCodex != nil {
+				cleanupErr = errors.Join(cleanupErr, h.nativeCodex.removeProject(item.ID))
 			}
 		}
 	}

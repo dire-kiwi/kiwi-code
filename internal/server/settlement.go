@@ -93,6 +93,9 @@ func (s *Server) setThreadSettlementLocked(projectID, threadID string, settled b
 		if h.nativeClaude != nil {
 			err = errors.Join(err, h.nativeClaude.stopThread(projectID, threadID))
 		}
+		if h.nativeCodex != nil {
+			err = errors.Join(err, h.nativeCodex.stopThread(projectID, threadID))
+		}
 		if s.piActivity != nil {
 			s.piActivity.acknowledge(projectID, threadID)
 		}
@@ -151,6 +154,19 @@ func (s *Server) settleIdleThreads(now time.Time) error {
 
 func (h *terminalHandler) nativeThreadWorking(projectID, threadID string) bool {
 	key := piNativeProcessKey{ProjectID: projectID, ThreadID: threadID}
+	if h.nativeCodex != nil {
+		h.nativeCodex.mu.Lock()
+		p := h.nativeCodex.processes[key]
+		h.nativeCodex.mu.Unlock()
+		if p != nil {
+			p.mu.Lock()
+			working := p.state.Working
+			p.mu.Unlock()
+			if working {
+				return true
+			}
+		}
+	}
 	if h.nativePi != nil {
 		h.nativePi.mu.Lock()
 		process := h.nativePi.processes[key]

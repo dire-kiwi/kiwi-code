@@ -147,12 +147,13 @@ func DefaultTheme() Theme {
 }
 
 const (
-	CodingAgentKindPi        = "pi"
-	CodingAgentKindPiNative  = "pi-native"
-	CodingAgentKindCodex     = "codex"
-	CodingAgentKindGrok      = "grok"
-	CodingAgentKindClaude    = "claude"
-	CodingAgentKindClaudeGPT = "claude-gpt"
+	CodingAgentKindPi          = "pi"
+	CodingAgentKindPiNative    = "pi-native"
+	CodingAgentKindCodex       = "codex"
+	CodingAgentKindCodexNative = "codex-native"
+	CodingAgentKindGrok        = "grok"
+	CodingAgentKindClaude      = "claude"
+	CodingAgentKindClaudeGPT   = "claude-gpt"
 )
 
 // DefaultTitleModel is the pi model registry entry (provider/model) used to
@@ -193,6 +194,7 @@ func defaultCodingAgentSettings() []CodingAgentSetting {
 		{ID: CodingAgentKindPi, Name: "Pi", Kind: CodingAgentKindPi},
 		{ID: CodingAgentKindPiNative, Name: "Pi Native", Kind: CodingAgentKindPiNative, IsDefault: true},
 		{ID: CodingAgentKindCodex, Name: "Codex CLI", Kind: CodingAgentKindCodex},
+		{ID: CodingAgentKindCodexNative, Name: "Codex Native", Kind: CodingAgentKindCodexNative},
 		{ID: CodingAgentKindGrok, Name: "Grok CLI", Kind: CodingAgentKindGrok},
 	}
 }
@@ -1155,6 +1157,7 @@ func normalizeCodingAgents(agents []CodingAgentSetting) ([]CodingAgentSetting, e
 	seenPi := false
 	seenPiNative := false
 	seenCodex := false
+	seenCodexNative := false
 	seenGrok := false
 	customAgentCount := 0
 	defaultCount := 0
@@ -1177,6 +1180,14 @@ func normalizeCodingAgents(agents []CodingAgentSetting) ([]CodingAgentSetting, e
 			seenPiNative = true
 			agent.ID = CodingAgentKindPiNative
 			agent.Name = "Pi Native"
+			agent.ConfigDirectory = ""
+		case CodingAgentKindCodexNative:
+			if seenCodexNative {
+				return nil, errors.New("Codex Native may appear only once in coding agents")
+			}
+			seenCodexNative = true
+			agent.ID = CodingAgentKindCodexNative
+			agent.Name = "Codex Native"
 			agent.ConfigDirectory = ""
 		case CodingAgentKindCodex:
 			if seenCodex {
@@ -1251,7 +1262,7 @@ func normalizeCodingAgents(agents []CodingAgentSetting) ([]CodingAgentSetting, e
 			seenIDs[agent.ID] = struct{}{}
 			seenNames[foldedName] = struct{}{}
 		default:
-			return nil, errors.New("coding agent kind must be pi, pi-native, codex, grok, claude, or claude-gpt")
+			return nil, errors.New("coding agent kind must be pi, pi-native, codex, codex-native, grok, claude, or claude-gpt")
 		}
 
 		if agent.IsDefault {
@@ -1268,6 +1279,9 @@ func normalizeCodingAgents(agents []CodingAgentSetting) ([]CodingAgentSetting, e
 	}
 	if !seenCodex {
 		normalized = append(normalized, CodingAgentSetting{ID: CodingAgentKindCodex, Name: "Codex CLI", Kind: CodingAgentKindCodex})
+	}
+	if !seenCodexNative {
+		normalized = append(normalized, CodingAgentSetting{ID: CodingAgentKindCodexNative, Name: "Codex Native", Kind: CodingAgentKindCodexNative})
 	}
 	if !seenGrok {
 		normalized = append(normalized, CodingAgentSetting{ID: CodingAgentKindGrok, Name: "Grok CLI", Kind: CodingAgentKindGrok})

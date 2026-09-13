@@ -147,7 +147,7 @@ export type ThemeSettings = Schema.Schema.Type<typeof ThemeSettingsSchema>
 export const CodingAgentSettingSchema = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
-  kind: Schema.Literal('pi', 'pi-native', 'codex', 'grok', 'claude', 'claude-gpt'),
+  kind: Schema.Literal('pi', 'pi-native', 'codex', 'codex-native', 'grok', 'claude', 'claude-gpt'),
   configDirectory: Schema.optional(Schema.String),
   isDefault: Schema.Boolean,
 })

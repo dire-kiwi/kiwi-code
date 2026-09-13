@@ -1478,11 +1478,11 @@ func TestStorePersistsCodingAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if agents := store.GetSettings().CodingAgents; len(agents) != 4 ||
+	if agents := store.GetSettings().CodingAgents; len(agents) != 5 ||
 		agents[0].Kind != CodingAgentKindPi || agents[0].IsDefault ||
 		agents[1].Kind != CodingAgentKindPiNative || !agents[1].IsDefault ||
 		agents[2].Kind != CodingAgentKindCodex ||
-		agents[3].Kind != CodingAgentKindGrok {
+		agents[3].Kind != CodingAgentKindCodexNative || agents[4].Kind != CodingAgentKindGrok {
 		t.Fatalf("default coding agents = %#v", agents)
 	}
 
@@ -1501,6 +1501,7 @@ func TestStorePersistsCodingAgents(t *testing.T) {
 		{ID: "gpt", Name: "GPT", Kind: CodingAgentKindClaudeGPT},
 		{ID: CodingAgentKindPiNative, Name: "Pi Native", Kind: CodingAgentKindPiNative, IsDefault: true},
 		{ID: CodingAgentKindCodex, Name: "Codex CLI", Kind: CodingAgentKindCodex},
+		{ID: CodingAgentKindCodexNative, Name: "Codex Native", Kind: CodingAgentKindCodexNative},
 		{ID: CodingAgentKindGrok, Name: "Grok CLI", Kind: CodingAgentKindGrok},
 	}
 	if len(settings.CodingAgents) != len(want) {
@@ -1540,10 +1541,10 @@ func TestStorePersistsCodingAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(settings.CodingAgents) != 4 || settings.CodingAgents[0].Kind != CodingAgentKindPi ||
+	if len(settings.CodingAgents) != 5 || settings.CodingAgents[0].Kind != CodingAgentKindPi ||
 		settings.CodingAgents[1].Kind != CodingAgentKindPiNative || !settings.CodingAgents[1].IsDefault ||
 		settings.CodingAgents[2].Kind != CodingAgentKindCodex ||
-		settings.CodingAgents[3].Kind != CodingAgentKindGrok {
+		settings.CodingAgents[3].Kind != CodingAgentKindCodexNative || settings.CodingAgents[4].Kind != CodingAgentKindGrok {
 		t.Fatalf("reset coding agents = %#v", settings.CodingAgents)
 	}
 }
@@ -1563,11 +1564,11 @@ func TestStoreMigratesLegacyClaudeCodeProfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	agents := store.GetSettings().CodingAgents
-	if len(agents) != 5 || agents[0].Kind != CodingAgentKindPi ||
+	if len(agents) != 6 || agents[0].Kind != CodingAgentKindPi ||
 		agents[1].Kind != CodingAgentKindClaude || agents[1].ID != "work" ||
 		agents[2].Kind != CodingAgentKindPiNative || !agents[2].IsDefault ||
 		agents[3].Kind != CodingAgentKindCodex ||
-		agents[4].Kind != CodingAgentKindGrok {
+		agents[4].Kind != CodingAgentKindCodexNative || agents[5].Kind != CodingAgentKindGrok {
 		t.Fatalf("migrated coding agents = %#v", agents)
 	}
 }

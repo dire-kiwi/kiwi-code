@@ -65,6 +65,7 @@ import {
 import { Select } from '@/ui/inputs'
 import { OpenSidebarButton } from '@/ui/buttons'
 import { GitBranchBar } from './GitBranchBar'
+import { NativeChatPane } from '@/features/workspace/panes/agent/NativeChatPane'
 import { ClaudeNativePane } from '@/features/workspace/panes/agent/ClaudeNativePane'
 import { PiNativePane } from '@/features/workspace/panes/agent/PiNativePane'
 import { ProcessWindowTabs } from './ProcessWindowTabs'
@@ -188,7 +189,7 @@ export function TerminalWorkspace({
     () => ({ initialCodingAgent, initialPresentation }),
     [initialCodingAgent, initialPresentation],
   )
-  const { codingAgent, piPresentation, claudePresentation, activeTool, saveWorkspace, workspaceError } =
+  const { codingAgent, piPresentation, claudePresentation, codexPresentation, activeTool, saveWorkspace, workspaceError } =
     useThreadWorkspaceState(project.id, thread, routing, routeTool)
   // Reflect server changes without publishing them again. Saved state also wins
   // over a stale URL on reload, before any terminal pane is mounted.
@@ -296,6 +297,7 @@ export function TerminalWorkspace({
   function selectCodingAgent(selection: CodingAgentSelection) {
     const { agent, presentation } = codingAgentTargetForSelection(selection)
     const selectionUnchanged = agent === codingAgent
+      && (agent !== 'codex' || presentation === codexPresentation)
       && (agent !== 'pi' || presentation === piPresentation)
       && (agent !== 'claude' || presentation === claudePresentation)
     if (selectionUnchanged) {
@@ -389,7 +391,7 @@ export function TerminalWorkspace({
   const availableCodingAgents = codingAgentChoices
   const codingAgentSelection = codingAgentSelectionForTarget(
     codingAgent,
-    codingAgent === 'claude'
+    codingAgent === 'codex' ? codexPresentation : codingAgent === 'claude'
       ? claudePresentation
       : codingAgent === 'pi'
         ? piPresentation
@@ -655,6 +657,13 @@ export function TerminalWorkspace({
                     }}
                   />
                 )
+              }
+              if (tool === 'pi' && codingAgent === 'codex' && codexPresentation === 'native') {
+                return <NativeChatPane key={tool} projectId={project.id} threadId={thread.id} threadTitle={thread.title}
+                  provider="codex" active={activeTool === 'pi'} initialModel={initialModel} initialThinkingLevel={initialThinkingLevel}
+                  initialPrompt={initialCodingAgent === 'codex' && initialPresentation === 'native' ? initialPrompt : undefined}
+                  initialImagePaths={initialCodingAgent === 'codex' && initialPresentation === 'native' ? initialImagePaths : undefined} onInitialPromptSent={initialCodingAgent === 'codex' && initialPresentation === 'native' ? onInitialPromptSent : undefined}
+                  onStatusChange={(status) => reportToolStatus('pi', status)} />
               }
               if (tool === 'pi' && codingAgent === 'claude') {
                 const initialPromptTargetsNative = initialClaudePresentationRef.current === 'native'
