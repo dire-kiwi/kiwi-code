@@ -7,8 +7,6 @@ import (
 	"log"
 	"net/http"
 	"time"
-
-	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
 
 const defaultCleanupInterval = time.Hour
@@ -52,33 +50,8 @@ func (s *Server) startCleanupLoop(ctx context.Context, interval time.Duration) {
 func (s *Server) runCleanupCycle(now time.Time) error {
 	defer s.notifyStateChanged(stateTopicCleanup, "", "")
 	var cleanupErrors []error
-	if err := s.closeInactiveTmuxSessions(now); err != nil {
-		cleanupErrors = append(cleanupErrors, fmt.Errorf("close inactive tmux sessions: %w", err))
-	}
-
-	due, err := s.projects.ArchivedThreadsDue(now)
-	if err != nil {
-		cleanupErrors = append(cleanupErrors, fmt.Errorf("find archived threads: %w", err))
-		return errors.Join(cleanupErrors...)
-	}
-	for _, ref := range due {
-		if err := s.deleteExpiredArchivedThread(ref); err != nil {
-			cleanupErrors = append(cleanupErrors, fmt.Errorf(
-				"delete archived thread project=%q thread=%q: %w",
-				ref.ProjectID,
-				ref.ThreadID,
-				err,
-			))
-		} else if exists, inspectErr := s.projects.PersistedResourceExists(ref.ProjectID, ref.ThreadID); inspectErr != nil {
-			cleanupErrors = append(cleanupErrors, fmt.Errorf(
-				"verify archived thread cleanup project=%q thread=%q: %w",
-				ref.ProjectID,
-				ref.ThreadID,
-				inspectErr,
-			))
-		} else if !exists {
-			log.Printf("automatic cleanup deleted archived thread: project=%q thread=%q", ref.ProjectID, ref.ThreadID)
-		}
+	if err := s.settleIdleThreads(now); err != nil {
+		cleanupErrors = append(cleanupErrors, err)
 	}
 	worktrees, worktreeErr := s.projects.CleanupOrphanedWorktrees(now)
 	if worktreeErr != nil {
@@ -88,13 +61,4 @@ func (s *Server) runCleanupCycle(now time.Time) error {
 		log.Printf("automatic cleanup deleted unattached worktree: path=%q", path)
 	}
 	return errors.Join(cleanupErrors...)
-}
-
-func (s *Server) deleteExpiredArchivedThread(ref project.ArchivedThreadRef) error {
-	archivedBefore := ref.ArchivedBefore.UTC()
-	failure := s.deleteThreadRecord(ref.ProjectID, ref.ThreadID, &archivedBefore)
-	if failure == nil || failure.status == http.StatusNotFound || errors.Is(failure, project.ErrThreadNotArchived) {
-		return nil
-	}
-	return failure
 }

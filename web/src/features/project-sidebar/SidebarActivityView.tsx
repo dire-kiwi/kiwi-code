@@ -1,31 +1,29 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Folder, Inbox, LoaderCircle, Plus } from 'lucide-react'
+import { ChevronDown, ChevronRight, Inbox, LoaderCircle } from 'lucide-react'
 import { useMatch } from 'react-router-dom'
 import { WORKSPACE_ROUTE } from '@/app/routes'
 import { usageDescription } from '@/lib/formatUsage'
-import { projectsByMostRecentThread } from '@/new-thread-project-order.mjs'
 import { activityViewGroups, formatRelativeShort, type ActivityGroupEntry } from '@/sidebar-activity-groups.mjs'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { selectActiveProjects, selectActiveThreadIndex } from '@/store/selectors/workspace'
 import { selectPiActivities } from '@/store/slices/agentActivity'
 import {
-  selectArchivingThreadId,
   selectDeletingThreadId,
 } from '@/store/slices/projects'
 import { sidebarViewChanged } from '@/store/slices/sidebar'
 import type { Project, Thread } from '@/types'
-import { Button, IconButton, SelectionButton } from '@/ui/buttons'
+import { Button, SelectionButton } from '@/ui/buttons'
 import { useThreadUsage } from '@/wire/serverData'
+import { useThreadSettlement } from './useThreadSettlement'
 import { ThreadActionsMenu } from './ThreadActionsMenu'
 
-type SectionKind = 'working' | 'needsReview' | 'recent'
+type SectionKind = 'working' | 'needsReview' | 'recent' | 'settled'
 
 // Sibling of ProjectSidebar, rendered in its place when the view is switched.
 // It was handed eight of the sidebar's own props; it selects the same state.
 type SidebarActivityViewProps = {
   onSelectThread: (projectId: string, threadId: string) => void
-  onNewThread: (projectId: string) => void
-  onArchiveThread: (project: Project, thread: Thread, archived: boolean) => void
+  projectScope?: string
   onDeleteThread: (project: Project, thread: Thread) => void
 }
 
@@ -33,53 +31,41 @@ const sectionStateDescriptions: Record<SectionKind, string> = {
   working: 'Coding agent is working',
   needsReview: 'Coding agent finished — needs review',
   recent: '',
+  settled: 'Settled thread',
 }
 
 export function SidebarActivityView({
   onSelectThread,
-  onNewThread,
-  onArchiveThread,
+  projectScope,
   onDeleteThread,
 }: SidebarActivityViewProps) {
   const dispatch = useAppDispatch()
+  const { settlingThreadId, toggleSettlement } = useThreadSettlement()
+  const [settledOpen, setSettledOpen] = useState(false)
   const projects = useAppSelector(selectActiveProjects)
   const piActivities = useAppSelector(selectPiActivities)
   const threadIndex = useAppSelector(selectActiveThreadIndex)
   const usageSnapshots = useThreadUsage()
   const selectedThreadId = useMatch(WORKSPACE_ROUTE)?.params.threadId ?? null
   const deletingThreadId = useAppSelector(selectDeletingThreadId)
-  const archivingThreadId = useAppSelector(selectArchivingThreadId)
   const onShowAllThreads = () => dispatch(sidebarViewChanged('tree'))
   const [now, setNow] = useState(() => Date.now())
-  const [projectPickerOpen, setProjectPickerOpen] = useState(false)
   const [threadMenuKey, setThreadMenuKey] = useState<string | null>(null)
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000)
     return () => window.clearInterval(timer)
   }, [])
 
-  useEffect(() => {
-    if (!projectPickerOpen) return
-
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target
-      if (target instanceof Element && target.closest('[data-new-thread-picker]')) return
-      setProjectPickerOpen(false)
-    }
-
-    document.addEventListener('pointerdown', handlePointerDown, true)
-    return () => document.removeEventListener('pointerdown', handlePointerDown, true)
-  }, [projectPickerOpen])
-
   const groups = useMemo(
-    () => activityViewGroups(projects, piActivities, undefined, threadIndex),
-    [piActivities, projects, threadIndex],
+    () => activityViewGroups(projectScope ? projects.filter((project) => project.id === projectScope) : projects, piActivities, undefined, threadIndex),
+    [piActivities, projects, projectScope, threadIndex],
   )
-  const newThreadProjects = useMemo(() => projectsByMostRecentThread(projects), [projects])
+  useEffect(() => {
+    if (groups.settled.some((entry) => entry.threadId === selectedThreadId)) setSettledOpen(true)
+  }, [groups.settled, selectedThreadId])
   const usageByKey = useMemo(() => new Map(
     usageSnapshots.map((snapshot) => [`${snapshot.projectId}\0${snapshot.threadId}`, snapshot]),
   ), [usageSnapshots])
-  const showProjectTags = projects.length > 1
 
   const isEmpty = groups.working.length === 0
     && groups.needsReview.length === 0
@@ -100,7 +86,6 @@ export function SidebarActivityView({
       usage ? `Usage: ${usageDescription(usage.own)}${usage.limitReached ? ' — limit reached' : ''}` : '',
     ].filter(Boolean).join('\n')
     const elapsed = formatRelativeShort(entry.at, now)
-    const archived = Boolean(thread.archivedAt)
     const menuOpen = threadMenuKey === key
     // The open menu needs its row on top; an opacity below 1 would create a
     // stacking context that traps the menu behind later rows.
@@ -115,40 +100,38 @@ export function SidebarActivityView({
             onClick={() => onSelectThread(project.id, thread.id)}
             aria-current={selected ? 'page' : undefined}
             title={title}
-            className="pl-2 pr-8"
+            className="!h-auto min-h-14 pl-3 pr-14"
           >
-            {kind === 'working' && (
-              <LoaderCircle size={11} className="shrink-0 animate-spin text-ghost-green" aria-hidden="true" />
-            )}
+            <span className="pointer-events-none absolute right-2.5 top-2.5 flex h-3 items-center justify-end">
+              {kind === 'working' ? (
+                <LoaderCircle size={11} className="animate-spin text-ghost-green" aria-hidden="true" />
+              ) : elapsed ? (
+                <span className="font-mono text-[9px] leading-none text-ghost-faint">{elapsed}</span>
+              ) : null}
+            </span>
             {kind === 'needsReview' && (
               <span
                 className="size-1.5 shrink-0 rounded-full bg-ghost-green shadow-[0_0_6px_rgba(181,189,104,0.7)]"
                 aria-hidden="true"
               />
             )}
-            <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+            <span className="min-w-0 flex-1">
+              <span className="mb-1 block truncate text-[10px] text-ghost-dim">{project.name}</span>
+              <span className="block truncate text-xs text-ghost-white">{thread.title}</span>
+            </span>
             {stateDescription && <span className="sr-only">{stateDescription}</span>}
-            {showProjectTags && (
-              <span className="max-w-20 shrink-0 truncate rounded border border-ghost-border/65 px-1 py-0.5 font-mono text-[9px] leading-none text-ghost-dim">
-                {project.name}
-              </span>
-            )}
-            {elapsed && (
-              <span className="w-6 shrink-0 text-right font-mono text-[9px] leading-none text-ghost-faint">
-                {elapsed}
-              </span>
-            )}
           </SelectionButton>
-          <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center">
+          <div className="absolute bottom-1 right-1 flex items-center">
             <ThreadActionsMenu
               threadTitle={thread.title}
-              archived={archived}
-              archiving={archivingThreadId === thread.id}
+              settled={Boolean(thread.settledAt)}
+              working={kind === 'working'}
+              settling={settlingThreadId === thread.id}
+              onSettle={() => void toggleSettlement(project, thread)}
               deleting={deletingThreadId === thread.id}
-              disabled={Boolean(archivingThreadId || deletingThreadId)}
+              disabled={Boolean(deletingThreadId || settlingThreadId)}
               open={menuOpen}
               onOpenChange={(open) => setThreadMenuKey(open ? key : null)}
-              onArchive={() => onArchiveThread(project, thread, !archived)}
               onDelete={() => onDeleteThread(project, thread)}
               triggerClassName={menuOpen || selected
                 ? undefined
@@ -164,7 +147,7 @@ export function SidebarActivityView({
     if (entries.length === 0) return null
     return (
       <section aria-label={label}>
-        <h3 className="flex items-center gap-1.5 px-2 pb-1 pt-3 font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-dim">
+        <h3 className="flex items-center gap-1.5 px-2 pb-1 pt-3 text-[11px] font-medium text-ghost-dim">
           {label}
           {showCount && <span className="text-ghost-green">· {entries.length}</span>}
         </h3>
@@ -177,57 +160,6 @@ export function SidebarActivityView({
 
   return (
     <div>
-      <div className="flex justify-end">
-        <div className="relative" data-new-thread-picker>
-          <IconButton
-            type="button"
-            size="sm"
-            variant="subtle"
-            onClick={() => setProjectPickerOpen((current) => !current)}
-            aria-haspopup="menu"
-            aria-expanded={projectPickerOpen}
-            aria-label="New thread"
-            title="New thread…"
-            className={projectPickerOpen ? 'bg-ghost-raised text-ghost-bright-white' : undefined}
-          >
-            <Plus size={14} />
-          </IconButton>
-          {projectPickerOpen && (
-            <div
-              role="menu"
-              aria-label="New thread in project"
-              onKeyDown={(event) => {
-                if (event.key !== 'Escape') return
-                event.stopPropagation()
-                setProjectPickerOpen(false)
-              }}
-              className="absolute right-0 top-[calc(100%+2px)] z-30 w-52 rounded-lg border border-ghost-border/90 bg-ghost-panel p-1 shadow-2xl"
-            >
-              <p className="px-2 pb-1 pt-1.5 font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-dim">
-                New thread in…
-              </p>
-              <div className="max-h-56 overflow-y-auto">
-                {newThreadProjects.map((project) => (
-                  <Button
-                    key={project.id}
-                    role="menuitem"
-                    type="button"
-                    variant="subtle"
-                    onClick={() => {
-                      setProjectPickerOpen(false)
-                      onNewThread(project.id)
-                    }}
-                    className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px]"
-                  >
-                    <Folder size={13} className="shrink-0 text-ghost-dim" aria-hidden="true" />
-                    <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
       {isEmpty ? (
         <div className="mx-1 mt-3 rounded-lg border border-dashed border-ghost-border/70 px-3 py-6 text-center">
           <Inbox size={17} className="mx-auto text-ghost-faint" aria-hidden="true" />
@@ -258,6 +190,17 @@ export function SidebarActivityView({
           )}
         </>
       )}
+      <section aria-label="Settled threads" className="mt-3 border-t border-ghost-border/45 pt-1">
+        <button type="button" aria-expanded={settledOpen} onClick={() => setSettledOpen((open) => !open)}
+          className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-ghost-dim hover:bg-ghost-raised/40">
+          <span className="flex-1">Settled ({groups.settled.length})</span>
+          {settledOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        </button>
+        {settledOpen && (
+          groups.settled.length ? <ul className="space-y-0.5">{groups.settled.map((entry) => renderEntry('settled', entry))}</ul>
+            : <p className="px-2 py-3 text-xs text-ghost-faint">No settled threads</p>
+        )}
+      </section>
     </div>
   )
 }

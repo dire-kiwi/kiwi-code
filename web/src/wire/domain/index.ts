@@ -55,7 +55,9 @@ export const ThreadSchema = Schema.Struct({
   worktreePath: Schema.optional(Schema.String),
   autoNamed: Schema.optional(Schema.Boolean),
   titleLocked: Schema.optional(Schema.Boolean),
-  archivedAt: Schema.optional(Schema.String),
+  settledAt: Schema.optional(Schema.String),
+  lastActivityAt: Schema.optional(Schema.String),
+  unsettledAt: Schema.optional(Schema.String),
   tokenLimit: Schema.optional(Schema.Number),
   costLimitUsd: Schema.optional(Schema.Number),
   rollbackPending: Schema.optional(Schema.Boolean),
@@ -145,7 +147,7 @@ export type ThemeSettings = Schema.Schema.Type<typeof ThemeSettingsSchema>
 export const CodingAgentSettingSchema = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
-  kind: Schema.Literal('pi', 'pi-native', 'codex', 'grok', 'claude', 'claude-gpt'),
+  kind: Schema.Literal('pi', 'pi-native', 'codex', 'codex-native', 'grok', 'claude', 'claude-gpt'),
   configDirectory: Schema.optional(Schema.String),
   isDefault: Schema.Boolean,
 })
@@ -160,7 +162,6 @@ export const AppSettingsSchema = Schema.Struct({
   worktreeBasePath: Schema.String,
   defaultWorktreeBasePath: Schema.String,
   usingDefault: Schema.Boolean,
-  archivedThreadRetentionDays: Schema.Number,
   orphanedWorktreeRetentionDays: Schema.Number,
   codingAgents: MutableArray(CodingAgentSettingSchema),
   titleModel: Schema.String,
@@ -172,16 +173,6 @@ export const AppSettingsSchema = Schema.Struct({
   usingDefaultTheme: Schema.Boolean,
 })
 export type AppSettings = Schema.Schema.Type<typeof AppSettingsSchema>
-
-export const ThreadCleanupOverviewSchema = Schema.Struct({
-  projectId: Schema.String,
-  projectName: Schema.String,
-  threadId: Schema.String,
-  threadTitle: Schema.String,
-  archivedAt: Schema.String,
-  scheduledDeletionAt: Schema.NullOr(Schema.String),
-})
-export type ThreadCleanupOverview = Schema.Schema.Type<typeof ThreadCleanupOverviewSchema>
 
 export const WorktreeCleanupOverviewSchema = Schema.Struct({
   projectId: Schema.String,
@@ -199,9 +190,7 @@ export type WorktreeCleanupOverview = Schema.Schema.Type<typeof WorktreeCleanupO
 
 export const CleanupOverviewSchema = Schema.Struct({
   generatedAt: Schema.String,
-  archivedThreadRetentionDays: Schema.Number,
   orphanedWorktreeRetentionDays: Schema.Number,
-  threads: MutableArray(ThreadCleanupOverviewSchema),
   worktrees: MutableArray(WorktreeCleanupOverviewSchema),
 })
 export type CleanupOverview = Schema.Schema.Type<typeof CleanupOverviewSchema>
@@ -215,7 +204,7 @@ export const SessionClosureEventSchema = Schema.Struct({
   sessionNames: StringArray,
   lastActivityAt: Schema.String,
   closedAt: Schema.String,
-  reason: Schema.Literal('inactivity'),
+  reason: Schema.Literal('inactivity', 'settlement'),
 })
 export type SessionClosureEvent = Schema.Schema.Type<typeof SessionClosureEventSchema>
 

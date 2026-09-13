@@ -1,34 +1,36 @@
 import { useEffect, useRef } from 'react'
-import { Archive, ArchiveRestore, EllipsisVertical, LoaderCircle, Trash2 } from 'lucide-react'
+import { CircleCheck, RotateCcw, EllipsisVertical, LoaderCircle, Trash2 } from 'lucide-react'
 import { Button, IconButton } from '@/ui/buttons'
 
 type ThreadActionsMenuProps = {
   threadTitle: string
-  archived: boolean
-  archiving: boolean
+  settled?: boolean
+  working?: boolean
+  settling?: boolean
+  onSettle?: () => void
   deleting: boolean
   /** Blocks every action while another thread mutation is still in flight. */
   disabled: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
-  onArchive: () => void
   onDelete: () => void
   triggerClassName?: string
 }
 
 /**
- * Archive/restore and delete actions for a single sidebar thread row. The open
+ * Settle/un-settle and delete actions for a single sidebar thread row. The open
  * row is owned by the caller so only one menu can be open across a view.
  */
 export function ThreadActionsMenu({
   threadTitle,
-  archived,
-  archiving,
+  settled,
+  working,
+  settling,
+  onSettle,
   deleting,
   disabled,
   open,
   onOpenChange,
-  onArchive,
   onDelete,
   triggerClassName,
 }: ThreadActionsMenuProps) {
@@ -49,7 +51,15 @@ export function ThreadActionsMenu({
   }, [open])
 
   return (
-    <div className="relative" data-thread-menu>
+    <div className="relative flex items-center gap-0.5" data-thread-menu>
+      {onSettle && (
+        <IconButton type="button" size="xs" variant="subtle" disabled={disabled || (!settled && working)}
+          onClick={onSettle} aria-label={`${settled ? 'Un-settle' : 'Settle'} ${threadTitle}`}
+          title={!settled && working ? 'Wait for the agent to finish' : settled ? 'Un-settle thread' : 'Settle thread'}
+          className={triggerClassName}>
+          {settling ? <LoaderCircle size={12} className="animate-spin" /> : settled ? <RotateCcw size={12} /> : <CircleCheck size={12} />}
+        </IconButton>
+      )}
       <IconButton
         type="button"
         size="xs"
@@ -74,22 +84,14 @@ export function ThreadActionsMenu({
           }}
           className="absolute right-0 top-[calc(100%+2px)] z-30 w-40 rounded-lg border border-ghost-border/90 bg-ghost-panel p-1 shadow-2xl"
         >
-          <Button
-            role="menuitem"
-            type="button"
-            variant="subtle"
-            disabled={disabled}
-            onClick={() => {
-              onOpenChange(false)
-              onArchive()
-            }}
-            className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px]"
-          >
-            {archiving
-              ? <LoaderCircle size={12} className="animate-spin" />
-              : archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}
-            {archived ? 'Restore thread' : 'Archive thread'}
-          </Button>
+          {onSettle && (
+            <Button role="menuitem" type="button" variant="subtle" disabled={disabled || (!settled && working)}
+              onClick={() => { onOpenChange(false); onSettle() }}
+              className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px]">
+              {settled ? <RotateCcw size={12} /> : <CircleCheck size={12} />}
+              {settled ? 'Un-settle thread' : 'Settle thread'}
+            </Button>
+          )}
           <Button
             role="menuitem"
             type="button"

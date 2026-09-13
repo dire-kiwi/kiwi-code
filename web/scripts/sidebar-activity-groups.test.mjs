@@ -35,13 +35,16 @@ test('sections sort newest first and recent reports overflow', () => {
   assert.equal(groups.hiddenRecentCount, 1)
 })
 
-test('archived threads and unknown activity are excluded', () => {
-  const projects = [{ id: 'p1', threads: [{ id: 'archived', createdAt: at(1), archivedAt: at(2) }] }]
+test('settled threads and unknown activity are excluded', () => {
+  const projects = [{ id: 'p1', threads: [{ id: 'settled', createdAt: at(1), settledAt: at(2) }] }]
   const groups = activityViewGroups(projects, [
-    { projectId: 'p1', threadId: 'archived', state: 'working', updatedAt: at(3) },
+    { projectId: 'p1', threadId: 'settled', state: 'working', updatedAt: at(3) },
     { projectId: 'p1', threadId: 'missing', state: 'finished', updatedAt: at(3) },
   ])
-  assert.deepEqual(groups, { working: [], needsReview: [], recent: [], hiddenRecentCount: 0 })
+  assert.deepEqual(keys(groups.settled), ['p1:settled'])
+  assert.deepEqual(groups.working, [])
+  assert.deepEqual(groups.needsReview, [])
+  assert.deepEqual(groups.recent, [])
 })
 
 test('formatRelativeShort compresses elapsed time', () => {
@@ -51,4 +54,24 @@ test('formatRelativeShort compresses elapsed time', () => {
   assert.equal(formatRelativeShort(now - 3 * 60 * 60_000, now), '3h')
   assert.equal(formatRelativeShort(now - 2 * 24 * 60 * 60_000, now), '2d')
   assert.equal(formatRelativeShort(now - 7 * 24 * 60 * 60_000, now), '1w')
+})
+
+test('settled shelf is sorted by settlement and unsettle promotes old work', () => {
+  const groups = activityViewGroups([{ id: 'p', threads: [
+    { id: 'older', createdAt: at(1), settledAt: at(4) },
+    { id: 'newer', createdAt: at(2), settledAt: at(6) },
+    { id: 'resumed', createdAt: at(1), unsettledAt: at(8) },
+    { id: 'active', createdAt: at(5) },
+  ] }], [{projectId:'p',threadId:'newer',state:'finished',updatedAt:at(9)}])
+  assert.deepEqual(keys(groups.settled), ['p:newer', 'p:older'])
+  assert.deepEqual(keys(groups.recent), ['p:resumed', 'p:active'])
+  assert.deepEqual(groups.needsReview, [])
+})
+
+test('scope applies even when using a shared index of all projects', async () => {
+  const { createSidebarThreadIndex } = await import('../src/sidebar-thread-index.mjs')
+  const projects = ['one', 'two'].map(id => ({id,threads:[{id:'thread',createdAt:at(1),settledAt:at(2)}]}))
+  const index = createSidebarThreadIndex(projects, [])
+  const groups = activityViewGroups([projects[1]], [], 8, index)
+  assert.deepEqual(keys(groups.settled), ['two:thread'])
 })

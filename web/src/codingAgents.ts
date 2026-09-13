@@ -17,7 +17,7 @@ export function configuredCodingAgentId(agent: CodingAgentSetting): ConfiguredCl
 }
 
 export function codingAgentSelectionForSetting(agent: CodingAgentSetting): CodingAgentSelection {
-  if (agent.kind === 'pi' || agent.kind === 'pi-native' || agent.kind === 'codex' || agent.kind === 'grok') {
+  if (agent.kind === 'pi' || agent.kind === 'pi-native' || agent.kind === 'codex' || agent.kind === 'codex-native' || agent.kind === 'grok') {
     return agent.kind
   }
   return configuredCodingAgentId(agent)
@@ -43,19 +43,20 @@ export function isClaudeGPTCodingAgent(value: unknown) {
 }
 
 export function isCodingAgentSelection(value: unknown): value is CodingAgentSelection {
-  return value === 'pi-native' || value === 'claude-native' || isCodingAgent(value)
+  return value === 'codex-native' || value === 'pi-native' || value === 'claude-native' || isCodingAgent(value)
 }
 
 export function isNativeCodingAgentSelection(
   selection: CodingAgentSelection,
-): selection is 'pi-native' | 'claude-native' {
-  return selection === 'pi-native' || selection === 'claude-native'
+): selection is 'pi-native' | 'claude-native' | 'codex-native' {
+  return selection === 'codex-native' || selection === 'pi-native' || selection === 'claude-native'
 }
 
 export function codingAgentTargetForSelection(selection: CodingAgentSelection): {
   agent: CodingAgent
   presentation: PiPresentation
 } {
+  if (selection === 'codex-native') return { agent: 'codex', presentation: 'native' }
   if (selection === 'pi-native') return { agent: 'pi', presentation: 'native' }
   if (selection === 'claude-native') return { agent: 'claude', presentation: 'native' }
   return { agent: selection, presentation: 'terminal' }
@@ -65,12 +66,14 @@ export function codingAgentSelectionForTarget(
   agent: CodingAgent,
   presentation: PiPresentation = 'terminal',
 ): CodingAgentSelection {
+  if (presentation === 'native' && agent === 'codex') return 'codex-native'
   if (presentation === 'native' && agent === 'pi') return 'pi-native'
   if (presentation === 'native' && agent === 'claude') return 'claude-native'
   return agent
 }
 
 export function nativeCodingAgentLabel(selection: CodingAgentSelection): string | null {
+  if (selection === 'codex-native') return 'Codex Native'
   if (selection === 'pi-native') return 'Pi Native'
   if (selection === 'claude-native') return 'Claude Native'
   return null

@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { SettledWorkspace } from '@/features/workspace/SettledWorkspace'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useMatch, useNavigate } from 'react-router-dom'
 import { piActivityKey } from '@/pi-activity-reconciliation.mjs'
 import { WorkspaceLoadingState } from './WorkspaceLoadingState'
 import { ProjectSidebar } from '@/features/project-sidebar/ProjectSidebar'
 import { CleanupScreen } from '@/features/screens/CleanupScreen'
 import { EmptyWorkspace } from '@/features/screens/EmptyWorkspace'
+import { NewThreadProjectDialog } from '@/features/new-thread/NewThreadProjectDialog'
 import { NewThreadScreen } from '@/features/new-thread/NewThreadScreen'
 import { SessionLogScreen } from '@/features/screens/SessionLogScreen'
 import { SettingsShell } from '@/features/settings/SettingsShell'
@@ -13,7 +15,6 @@ import {
   DEFAULT_PROJECT_SETTINGS_SECTION,
 } from '@/features/settings/registry'
 import { TmuxScreen } from '@/features/screens/TmuxScreen'
-import { TerminalWorkspace } from '@/features/workspace/TerminalWorkspace'
 import {
   CLEANUP_ROUTE,
   NEW_THREAD_ROUTE,
@@ -39,12 +40,10 @@ import {
   projectCreated,
   projectRemoved,
   projectUpdated,
-  selectArchivingThreadId,
   selectDeletingProjectId,
   selectDeletingThreadId,
   selectProjects,
   selectProjectsHydrated,
-  threadArchived,
   threadCreated,
   threadRemoved,
 } from '@/store/slices/projects'
@@ -90,13 +89,13 @@ function firstWorkspacePath(projects: Project[], preferredProjectId?: string): s
   const preferredProject = preferredProjectId
     ? projects.find((project) => project.id === preferredProjectId)
     : undefined
-  const preferredActiveThread = preferredProject?.threads.find((thread) => !thread.archivedAt)
+  const preferredActiveThread = preferredProject?.threads.find((thread) => !thread.settledAt)
   if (preferredProject && preferredActiveThread) {
     return workspacePath(preferredProject.id, preferredActiveThread.id, preferredActiveThread.activeTab ?? defaultWorkspaceTool)
   }
 
-  const activeProject = projects.find((project) => project.threads.some((thread) => !thread.archivedAt))
-  const activeThread = activeProject?.threads.find((thread) => !thread.archivedAt)
+  const activeProject = projects.find((project) => project.threads.some((thread) => !thread.settledAt))
+  const activeThread = activeProject?.threads.find((thread) => !thread.settledAt)
   if (activeProject && activeThread) {
     return workspacePath(activeProject.id, activeThread.id, activeThread.activeTab ?? defaultWorkspaceTool)
   }
@@ -119,6 +118,7 @@ function rememberedWorkspacePath(projects: Project[], lastWorkspace: LastWorkspa
 
 export default function App() {
   const navigate = useNavigate()
+  const [newThreadPickerProjectId, setNewThreadPickerProjectId] = useState<string | null>(null)
   const desktopApp = window.kiwiCodeDesktopApp ?? window.direMuxDesktopApp
   const desktopShellClassName = desktopApp
     ? `desktop-shell desktop-shell-${desktopApp.platform || 'unknown'}`
@@ -158,7 +158,6 @@ export default function App() {
   const threadIndex = useAppSelector(selectThreadIndex)
   const deletingId = useAppSelector(selectDeletingProjectId)
   const deletingThreadId = useAppSelector(selectDeletingThreadId)
-  const archivingThreadId = useAppSelector(selectArchivingThreadId)
   const lastWorkspacesRef = useRef<Record<string, LastWorkspace>>({})
   const previousActiveThreadRef = useRef<string | null>(null)
 
@@ -282,13 +281,14 @@ export default function App() {
       event.stopPropagation()
       if (event.repeat || newThreadProjectId === projectId) return
 
-      navigate(newThreadPath(projectId))
+      if (activeProjects.length > 1) setNewThreadPickerProjectId(projectId)
+      else navigate(newThreadPath(projectId))
       dispatch(sidebarDismissed())
     }
 
     window.addEventListener('keydown', handleNewThreadShortcut, true)
     return () => window.removeEventListener('keydown', handleNewThreadShortcut, true)
-  }, [navigate, newThreadProjectId, routedProjectId])
+  }, [navigate, newThreadProjectId, routedProjectId, activeProjects.length])
 
   useEffect(() => {
     if (activeThreadIdentity && previousActiveThreadRef.current !== activeThreadIdentity && selectedProject && selectedThread) {
@@ -387,25 +387,6 @@ export default function App() {
     if (projectRemoved.rejected.match(result)) window.alert(result.payload)
   }
 
-  async function handleThreadArchived(project: Project, thread: Thread, archived: boolean) {
-    if (archivingThreadId) return
-    const result = await dispatch(threadArchived({
-      projectId: project.id,
-      threadId: thread.id,
-      archived,
-    }))
-    if (threadArchived.rejected.match(result)) {
-      window.alert(result.payload)
-      return
-    }
-    // Archiving the thread you are looking at has to move you somewhere real.
-    if (archived && selectedProject?.id === project.id && selectedThread?.id === thread.id) {
-      const nextThread = project.threads.find((candidate) => candidate.id !== thread.id && !candidate.archivedAt)
-      navigate(nextThread
-        ? workspacePath(project.id, nextThread.id, nextThread.activeTab ?? defaultWorkspaceTool)
-        : newThreadPath(project.id))
-    }
-  }
 
   async function handleDeleteThread(project: Project, thread: Thread) {
     const worktreeNotice = thread.worktree
@@ -426,7 +407,7 @@ export default function App() {
   const legacyDestination = legacyProject && legacyThread
     ? workspacePath(legacyProject.id, legacyThread.id, legacyThread.activeTab ?? defaultWorkspaceTool)
     : defaultWorkspacePath ?? '/'
-  const landingThread = landingProject?.threads.find((thread) => !thread.archivedAt)
+  const landingThread = landingProject?.threads.find((thread) => !thread.settledAt)
     ?? landingProject?.threads[0]
   const projectDestination = landingProject
     ? landingThread
@@ -455,13 +436,26 @@ export default function App() {
           )}
         </div>
       )}
+      {newThreadPickerProjectId && (
+        <NewThreadProjectDialog projects={activeProjects} preferredProjectId={newThreadPickerProjectId}
+          onClose={() => setNewThreadPickerProjectId(null)}
+          onSelect={(projectId) => {
+            setNewThreadPickerProjectId(null)
+            navigate(newThreadPath(projectId))
+            dispatch(sidebarDismissed())
+          }} />
+      )}
       <ProjectSidebar
+        onNewThreadRequested={(projectId, skipPicker) => {
+          if (activeProjects.length > 1 && !skipPicker) setNewThreadPickerProjectId(projectId)
+          else navigate(newThreadPath(projectId))
+          dispatch(sidebarDismissed())
+        }}
         onSelectProfile={handleProfileSelected}
         onProfileCreated={handleProfileCreated}
         onSelectThread={handleThreadSelected}
         onProjectCreated={handleCreated}
         onDeleteProject={handleDelete}
-        onArchiveThread={(project, thread, archived) => void handleThreadArchived(project, thread, archived)}
         onDeleteThread={(project, thread) => void handleDeleteThread(project, thread)}
       />
 
@@ -540,8 +534,9 @@ export default function App() {
               path={NEW_THREAD_ROUTE}
               element={newThreadProject ? (
                 <NewThreadScreen
-                  key={newThreadProject.id}
                   project={newThreadProject}
+                  projects={activeProjects}
+                  onSelectProject={(projectId) => navigate(newThreadPath(projectId), { replace: true })}
                   onOpenSidebar={() => dispatch(sidebarOpened())}
                   onCancel={() => navigate(workspaceReturnDestination(newThreadProject.id), { replace: true })}
                   onCreated={(thread, start) =>
@@ -554,7 +549,7 @@ export default function App() {
             <Route
               path={WORKSPACE_ROUTE}
               element={selectedProject && selectedThread && activeTool ? (
-                <TerminalWorkspace
+                <SettledWorkspace
                   key={`${selectedProject.id}:${selectedThread.id}`}
                   project={selectedProject}
                   thread={selectedThread}

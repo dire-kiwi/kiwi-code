@@ -459,6 +459,18 @@ func (s *Server) updateAgentActivity(w http.ResponseWriter, r *http.Request, age
 		}
 		activityAgent = requestedAgent
 	}
+	s.settlementMu.Lock()
+	defer s.settlementMu.Unlock()
+	// Reports already in flight when settlement stopped an agent must not wake it.
+	_, current, err := s.projects.GetThreadPersisted(projectID, threadID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "Thread not found.")
+		return
+	}
+	if current.SettledAt != nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	now := time.Now().UTC()
 	promptStartedAt := input.PromptStartedAt
 	if promptStartedAt != nil {
@@ -500,6 +512,12 @@ func (s *Server) updateAgentActivity(w http.ResponseWriter, r *http.Request, age
 				writeError(w, http.StatusInternalServerError, "Could not record thread prompt activity.")
 				return
 			}
+		}
+	}
+	if input.State != piActivityWorking || startedWorking {
+		if err := s.projects.RecordThreadActivity(projectID, threadID, now); err != nil {
+			writeError(w, http.StatusInternalServerError, "Could not record thread activity.")
+			return
 		}
 	}
 	if activity == nil {

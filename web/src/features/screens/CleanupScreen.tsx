@@ -1,5 +1,4 @@
 import {
-  Archive,
   Clock3,
   FolderGit2,
   GitBranch,
@@ -10,7 +9,6 @@ import {
 import { classNames } from '@/lib/classNames'
 import type {
   CleanupOverview,
-  ThreadCleanupOverview,
   WorktreeCleanupOverview,
 } from '@/types'
 import { useLastReadySubscriptionData, useSubscription } from '@/wire/react'
@@ -78,28 +76,6 @@ function CleanupScheduleDetails({
         {scheduledAt ? formatDate(scheduledAt) : 'Kept until cleanup is enabled'}
       </p>
     </div>
-  )
-}
-
-function ThreadRow({ item, generatedAt }: { item: ThreadCleanupOverview; generatedAt: string }) {
-  const state = scheduleState(item.scheduledDeletionAt, generatedAt)
-  return (
-    <li className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:px-5">
-      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-ghost-raised text-ghost-yellow">
-        <Archive size={15} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="truncate text-xs font-semibold text-ghost-bright-white">{item.threadTitle}</h3>
-          <ScheduleBadge state={state} />
-        </div>
-        <p className="mt-1 truncate text-[10px] text-ghost-muted">{item.projectName}</p>
-        <p className="mt-1 font-mono text-[8px] text-ghost-faint">
-          Archived {formatDate(item.archivedAt)}
-        </p>
-      </div>
-      <CleanupScheduleDetails state={state} scheduledAt={item.scheduledDeletionAt} />
-    </li>
   )
 }
 
@@ -227,7 +203,7 @@ export function CleanupScreen({ onOpenSidebar, onBack }: CleanupScreenProps) {
           </GhostButton>
         </div>
         <PageIntro icon={<Clock3 size={20} />} title="Scheduled deletion">
-          Review archived threads and unattached Git worktrees before automatic cleanup removes them.
+          Review unattached Git worktrees before automatic cleanup removes them.
         </PageIntro>
 
         {loading && !overview ? (
@@ -245,12 +221,7 @@ export function CleanupScreen({ onOpenSidebar, onBack }: CleanupScreenProps) {
               </Surface>
             )}
 
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Surface className="px-4 py-3.5">
-                <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-faint">Archived threads</p>
-                <p className="mt-2 text-xl font-semibold text-ghost-bright-white">{overview.threads.length}</p>
-                <p className="mt-1 text-[9px] text-ghost-muted">{retentionLabel(overview.archivedThreadRetentionDays)}</p>
-              </Surface>
+            <div className="grid gap-3 sm:grid-cols-2">
               <Surface className="px-4 py-3.5">
                 <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ghost-faint">Unattached worktrees</p>
                 <p className="mt-2 text-xl font-semibold text-ghost-bright-white">{overview.worktrees.length}</p>
@@ -268,29 +239,6 @@ export function CleanupScreen({ onOpenSidebar, onBack }: CleanupScreenProps) {
             <InfoCallout>
               Times show when an item becomes eligible. Cleanup runs at startup and once per hour, so deletion happens in the first successful cycle after that time. Dirty worktrees and worktrees whose Git status cannot be checked are kept; Git branches are never deleted.
             </InfoCallout>
-
-            <Surface as="section" variant="elevated-panel" className="overflow-hidden">
-              <SectionHeader
-                icon={<Archive size={16} />}
-                title="Archived threads"
-                description="Deleting a thread stops its tmux sessions and detaches its managed worktree."
-                tone="yellow"
-                badge={<StatusBadge monospace>{overview.threads.length}</StatusBadge>}
-              />
-              {overview.threads.length ? (
-                <ul className="divide-y divide-ghost-border/50">
-                  {overview.threads.map((item) => (
-                    <ThreadRow key={`${item.projectId}:${item.threadId}`} item={item} generatedAt={overview.generatedAt} />
-                  ))}
-                </ul>
-              ) : (
-                <div className="px-5 py-9 text-center">
-                  <Archive size={18} className="mx-auto text-ghost-faint" />
-                  <p className="mt-3 text-xs font-medium text-ghost-muted">No archived threads</p>
-                  <p className="mt-1 text-[9px] text-ghost-faint">Nothing is queued for thread deletion.</p>
-                </div>
-              )}
-            </Surface>
 
             <Surface as="section" variant="elevated-panel" className="overflow-hidden">
               <SectionHeader

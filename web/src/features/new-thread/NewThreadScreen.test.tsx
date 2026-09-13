@@ -256,3 +256,15 @@ describe('server thread selection', () => {
     await waitFor(() => expect(thinking().textContent).toContain('Low'))
   })
 })
+
+
+it('keeps the prompt when choosing another project in the open composer', async () => {
+  const callbacks = { onOpenSidebar: vi.fn(), onCancel: vi.fn(), onCreated: vi.fn() }
+  const { rerender } = renderWithStore(<NewThreadScreen project={project} {...callbacks} />)
+  fireEvent.change(screen.getByRole('textbox', { name: 'Initial prompt (optional)' }), {
+    target: { value: 'Keep this draft while choosing its project' },
+  })
+  rerender(<NewThreadScreen project={{ ...project, id: 'another-project', name: 'Another project' }} {...callbacks} />)
+  expect((screen.getByRole('textbox', { name: 'Initial prompt (optional)' }) as HTMLTextAreaElement).value)
+    .toBe('Keep this draft while choosing its project')
+})

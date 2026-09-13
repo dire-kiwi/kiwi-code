@@ -12,10 +12,11 @@ export function resolveServerThreadWorkspace(
   selection: string | undefined,
 ) {
   const legacy = resolveThreadWorkspace(stored, routing)
-  if (!isCodingAgentSelection(selection)) return legacy
+  if (!isCodingAgentSelection(selection)) return { ...legacy, codexPresentation: routing.initialCodingAgent === 'codex' ? routing.initialPresentation ?? 'terminal' : 'terminal' as const }
   const { agent, presentation } = codingAgentTargetForSelection(selection)
   return {
     ...legacy,
+    codexPresentation: agent === 'codex' ? presentation : 'terminal' as const,
     codingAgent: agent,
     ...(agent === 'pi' ? { piPresentation: presentation } : {}),
     ...(agent === 'claude' ? { claudePresentation: presentation } : {}),
@@ -51,7 +52,7 @@ export function useThreadWorkspaceState(projectId: string, thread: Thread, routi
   }, [projectId, thread.id])
   const initial = useRef({
     codingAgent: codingAgentSelectionForTarget(resolved.codingAgent,
-      resolved.codingAgent === 'claude' ? resolved.claudePresentation : resolved.piPresentation),
+      resolved.codingAgent === 'codex' ? resolved.codexPresentation : resolved.codingAgent === 'claude' ? resolved.claudePresentation : resolved.piPresentation),
     activeTab: routeTool,
   })
   useEffect(() => {

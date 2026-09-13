@@ -84,7 +84,7 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 			IsGitRepo: true,
 			CreatedAt: fixtureTime,
 			Threads: []project.Thread{{
-				ID: "thread-1", Title: "Fixture thread", Cwd: "/workspace/fixture", CreatedAt: fixtureTime,
+				ID: "thread-1", Title: "Fixture thread", Cwd: "/workspace/fixture", CreatedAt: fixtureTime, SettledAt: &fixtureTime, LastActivityAt: &fixtureTime,
 			}},
 			WorktreeBranchPrefix: project.DefaultWorktreeBranchPrefix,
 			RelatedProjects:      []string{},
@@ -131,7 +131,6 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 			WorktreeBasePath:              "/workspace/worktrees",
 			DefaultWorktreeBasePath:       "/workspace/worktrees",
 			UsingDefault:                  true,
-			ArchivedThreadRetentionDays:   30,
 			OrphanedWorktreeRetentionDays: 30,
 			CodingAgents: []project.CodingAgentSetting{{
 				ID: project.CodingAgentKindPiNative, Name: "Pi Native",
@@ -158,13 +157,7 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 		}},
 		stateTopicCleanup: project.CleanupOverview{
 			GeneratedAt:                   fixtureTime,
-			ArchivedThreadRetentionDays:   30,
 			OrphanedWorktreeRetentionDays: 30,
-			Threads: []project.ThreadCleanupOverview{{
-				ProjectID: "project-1", ProjectName: "Fixture project",
-				ThreadID: "thread-archived", ThreadTitle: "Archived fixture thread",
-				ArchivedAt: fixtureTime, ScheduledDeletionAt: &scheduledDeletionAt,
-			}},
 			Worktrees: []project.WorktreeCleanupOverview{{
 				ProjectID: "project-1", ProjectName: "Fixture project",
 				ThreadID: "thread-orphaned", ThreadTitle: "Orphaned fixture thread",

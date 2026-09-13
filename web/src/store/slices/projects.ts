@@ -2,7 +2,7 @@ import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/tool
 import {
   deleteProject,
   deleteThread,
-  setThreadArchived,
+  setThreadSettled,
   updateProjectOrder,
   updateThreadOrder,
 } from '@/api'
@@ -26,7 +26,7 @@ export type ProjectsState = {
   hydrated: boolean
   deletingProjectId: string | null
   deletingThreadId: string | null
-  archivingThreadId: string | null
+  settlingThreadId: string | null
 }
 
 export const initialProjectsState: ProjectsState = {
@@ -34,7 +34,7 @@ export const initialProjectsState: ProjectsState = {
   hydrated: false,
   deletingProjectId: null,
   deletingThreadId: null,
-  archivingThreadId: null,
+  settlingThreadId: null,
 }
 
 // --- pure helpers, lifted out of App unchanged -----------------------------
@@ -59,12 +59,13 @@ function sameThreads(current: readonly Thread[], next: readonly Thread[]) {
       && candidate.cwd === thread.cwd
       && candidate.createdAt === thread.createdAt
       && candidate.lastPromptAt === thread.lastPromptAt
+      && candidate.settledAt === thread.settledAt
+      && candidate.unsettledAt === thread.unsettledAt
       && candidate.worktree === thread.worktree
       && candidate.branch === thread.branch
       && candidate.worktreePath === thread.worktreePath
       && candidate.autoNamed === thread.autoNamed
       && candidate.titleLocked === thread.titleLocked
-      && candidate.archivedAt === thread.archivedAt
       && candidate.tokenLimit === thread.tokenLimit
       && candidate.costLimitUsd === thread.costLimitUsd
       && candidate.rollbackPending === thread.rollbackPending
@@ -206,18 +207,15 @@ export const projectRemoved = createAsyncThunk<string, string, ThunkConfig>(
   },
 )
 
-export const threadArchived = createAsyncThunk<
+export const threadSettled = createAsyncThunk<
   { projectId: string; thread: Thread },
-  { projectId: string; threadId: string; archived: boolean },
+  { projectId: string; threadId: string; settled: boolean },
   ThunkConfig
->('projects/threadArchived', async ({ projectId, threadId, archived }, { rejectWithValue }) => {
+>('projects/threadSettled', async ({ projectId, threadId, settled }, { rejectWithValue }) => {
   try {
-    return { projectId, thread: await setThreadArchived(projectId, threadId, archived) }
+    return { projectId, thread: await setThreadSettled(projectId, threadId, settled) }
   } catch (reason) {
-    return rejectWithValue(errorMessage(
-      reason,
-      `Could not ${archived ? 'archive' : 'restore'} that thread.`,
-    ))
+    return rejectWithValue(errorMessage(reason, `Could not ${settled ? 'settle' : 'un-settle'} that thread.`))
   }
 })
 
@@ -293,17 +291,16 @@ export const projectsSlice = createSlice({
         state.deletingProjectId = null
       })
 
-      .addCase(threadArchived.pending, (state, action) => {
-        state.archivingThreadId = action.meta.arg.threadId
+      .addCase(threadSettled.pending, (state, action) => {
+        state.settlingThreadId = action.meta.arg.threadId
       })
-      .addCase(threadArchived.fulfilled, (state, action) => {
+      .addCase(threadSettled.fulfilled, (state, action) => {
         state.projects = withThread(state.projects, action.payload.projectId, action.payload.thread)
-        state.archivingThreadId = null
+        state.settlingThreadId = null
       })
-      .addCase(threadArchived.rejected, (state) => {
-        state.archivingThreadId = null
+      .addCase(threadSettled.rejected, (state) => {
+        state.settlingThreadId = null
       })
-
       .addCase(threadRemoved.pending, (state, action) => {
         state.deletingThreadId = action.meta.arg.threadId
       })
@@ -337,4 +334,5 @@ export const selectProjects = (state: RootState) => state.projects.projects
 export const selectProjectsHydrated = (state: RootState) => state.projects.hydrated
 export const selectDeletingProjectId = (state: RootState) => state.projects.deletingProjectId
 export const selectDeletingThreadId = (state: RootState) => state.projects.deletingThreadId
-export const selectArchivingThreadId = (state: RootState) => state.projects.archivingThreadId
+
+export const selectSettlingThreadId = (state: RootState) => state.projects.settlingThreadId

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Archive, Clock3, FolderGit2, LoaderCircle, Save } from 'lucide-react'
+import { Clock3, FolderGit2, LoaderCircle, Save } from 'lucide-react'
 import { updateSettings } from '@/api'
 import { useAsyncFeedback } from '@/lib/useAsyncFeedback'
 import { useAppDispatch } from '@/store/hooks'
@@ -17,27 +17,18 @@ type CleanupSectionProps = {
 
 export function CleanupSection({ settings }: CleanupSectionProps) {
   const dispatch = useAppDispatch()
-  const [archivedThreadRetentionDays, setArchivedThreadRetentionDays] = useState(
-    String(settings.archivedThreadRetentionDays),
-  )
   const [orphanedWorktreeRetentionDays, setOrphanedWorktreeRetentionDays] = useState(
     String(settings.orphanedWorktreeRetentionDays),
   )
   const action = useAsyncFeedback()
 
-  const parsedArchivedDays = Number(archivedThreadRetentionDays)
   const parsedOrphanedDays = Number(orphanedWorktreeRetentionDays)
-  const valuesValid = archivedThreadRetentionDays.trim() !== ''
-    && orphanedWorktreeRetentionDays.trim() !== ''
-    && Number.isInteger(parsedArchivedDays)
+  const valuesValid = orphanedWorktreeRetentionDays.trim() !== ''
     && Number.isInteger(parsedOrphanedDays)
-    && parsedArchivedDays >= 0
     && parsedOrphanedDays >= 0
-    && parsedArchivedDays <= MAX_CLEANUP_RETENTION_DAYS
     && parsedOrphanedDays <= MAX_CLEANUP_RETENTION_DAYS
   const dirty = valuesValid && (
-    parsedArchivedDays !== settings.archivedThreadRetentionDays
-    || parsedOrphanedDays !== settings.orphanedWorktreeRetentionDays
+    parsedOrphanedDays !== settings.orphanedWorktreeRetentionDays
   )
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
@@ -51,7 +42,6 @@ export function CleanupSection({ settings }: CleanupSectionProps) {
     const next = await action.run(
       'default',
       () => updateSettings({
-        archivedThreadRetentionDays: parsedArchivedDays,
         orphanedWorktreeRetentionDays: parsedOrphanedDays,
       }),
       {
@@ -61,7 +51,6 @@ export function CleanupSection({ settings }: CleanupSectionProps) {
     )
     if (!next) return
     dispatch(settingsReceived(next))
-    setArchivedThreadRetentionDays(String(next.archivedThreadRetentionDays))
     setOrphanedWorktreeRetentionDays(String(next.orphanedWorktreeRetentionDays))
   }
 
@@ -75,39 +64,11 @@ export function CleanupSection({ settings }: CleanupSectionProps) {
       <SectionHeader
         icon={<Clock3 size={16} />}
         title="Automatic cleanup"
-        description="Choose how long archived threads and unattached worktrees are retained."
+        description="Threads settle after three idle days. Settled threads are kept until you delete them."
         tone="yellow"
       />
 
       <div className="space-y-4 p-4 sm:p-5">
-        <label className="block rounded-xl border border-ghost-border/55 bg-ghost-black/25 p-3.5">
-          <span className="flex items-center gap-2 text-[10px] font-semibold text-ghost-bright-white">
-            <Archive size={14} className="text-ghost-yellow" />
-            Delete archived threads after
-          </span>
-          <span className="mt-3 flex items-center gap-2">
-            <TextInput
-              type="number"
-              min={0}
-              max={MAX_CLEANUP_RETENTION_DAYS}
-              step={1}
-              value={archivedThreadRetentionDays}
-              onChange={(event) => {
-                setArchivedThreadRetentionDays(event.target.value)
-                action.clearFeedback()
-              }}
-              required
-              inputMode="numeric"
-              className="max-w-28 font-mono"
-              aria-describedby="archived-thread-retention-help"
-            />
-            <span className="text-[10px] text-ghost-muted">days</span>
-          </span>
-          <span id="archived-thread-retention-help" className="mt-2 block text-[9px] leading-4 text-ghost-faint">
-            Deletion stops the thread’s tmux sessions. Enter 0 to keep archived threads forever.
-          </span>
-        </label>
-
         <label className="block rounded-xl border border-ghost-border/55 bg-ghost-black/25 p-3.5">
           <span className="flex items-center gap-2 text-[10px] font-semibold text-ghost-bright-white">
             <FolderGit2 size={14} className="text-ghost-green" />

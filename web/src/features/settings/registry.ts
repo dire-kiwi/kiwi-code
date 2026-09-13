@@ -54,7 +54,7 @@ export const GLOBAL_SETTINGS_SECTIONS: Array<SettingsSectionMeta<GlobalSettingsS
   {
     id: 'cleanup',
     label: 'Cleanup',
-    keywords: ['retention', 'archived threads', 'unattached worktrees', 'days', 'delete'],
+    keywords: ['retention', 'settled threads', 'unattached worktrees', 'days', 'delete'],
     icon: Clock3,
     tone: 'yellow',
   },

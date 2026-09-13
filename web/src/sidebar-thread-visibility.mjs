@@ -9,7 +9,7 @@ function parsedTime(value) {
 }
 
 function threadRecency(thread) {
-  return parsedTime(thread.lastPromptAt) ?? parsedTime(thread.createdAt) ?? 0
+  return Math.max(parsedTime(thread.unsettledAt) ?? 0, parsedTime(thread.lastPromptAt) ?? parsedTime(thread.createdAt) ?? 0)
 }
 
 export function defaultVisibleRootThreadIds(
@@ -19,7 +19,7 @@ export function defaultVisibleRootThreadIds(
   limit = collapsedRootThreadLimit,
   tree = createThreadTreeIndex(threads),
 ) {
-  const activeRoots = tree.roots.filter((thread) => !thread.archivedAt)
+  const activeRoots = tree.roots.filter((thread) => !thread.settledAt)
   const boundedLimit = Number.isInteger(limit) && limit > 0 ? limit : 0
   const recentIds = new Set(
     activeRoots

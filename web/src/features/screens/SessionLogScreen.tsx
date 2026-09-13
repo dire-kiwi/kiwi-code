@@ -101,7 +101,7 @@ export function SessionLogScreen({ onOpenSidebar, onBack }: SessionLogScreenProp
         </div>
 
         <PageIntro icon={<History size={20} />} title="Closed tmux sessions">
-          See when Kiwi Code stopped a thread’s Shell and Tools sessions after inactivity.
+          See when Kiwi Code stopped a thread’s Shell and Tools sessions on settlement.
         </PageIntro>
 
         {loading && !overview ? (
@@ -117,7 +117,7 @@ export function SessionLogScreen({ onOpenSidebar, onBack }: SessionLogScreenProp
             )}
 
             <InfoCallout>
-              Kiwi Code checks at startup and once per hour. It closes a thread’s tmux sessions after {overview.inactivityHours} hours without workspace use, tmux activity, attachment, or a new prompt. Attached sessions and working coding agents are kept. Opening the thread again creates fresh sessions.
+              Kiwi Code checks at startup and once per hour. Threads settle after {overview.inactivityHours} idle hours, closing their sessions while retaining saved conversations. Working agents are kept active. Un-settle a thread to resume its saved conversation when opened.
             </InfoCallout>
 
             <Surface as="section" variant="elevated-panel" className="overflow-hidden">

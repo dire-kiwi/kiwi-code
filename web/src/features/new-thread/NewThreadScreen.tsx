@@ -9,13 +9,13 @@ import {
   type KeyboardEvent,
 } from 'react'
 import {
+  ArrowUp,
   Bot,
   GitBranch,
   GitFork,
   ImagePlus,
   Laptop,
   LoaderCircle,
-  Plus,
   X,
 } from 'lucide-react'
 import { createThread, rememberNewThreadSelection, uploadPiImage } from '@/api'
@@ -70,12 +70,14 @@ import { selectSettings, settingsReceived } from '@/store/slices/settings'
 import { useSubscription } from '@/wire/react'
 import { CodingAgentsTopic, GitBranchesTopic } from '@/wire/topics'
 import { GhostButton, PrimaryButton } from '@/ui/buttons'
-import { Select, TextArea } from '@/ui/inputs'
-import { FormScreenTemplate, ScreenHeader, Surface } from '@/ui/layout'
+import { Select, BaseTextArea } from '@/ui/inputs'
+import { ScreenHeader } from '@/ui/layout'
 import { FeedbackMessage } from '@/ui/feedback'
 
 type NewThreadScreenProps = {
   project: Project
+  projects?: Project[]
+  onSelectProject?: (projectId: string) => void
   onOpenSidebar: () => void
   onCancel: () => void
   onCreated: (thread: Thread, start: CodingAgentStart) => void
@@ -85,7 +87,7 @@ const INITIAL_PROMPT_MAX_LENGTH = 12_000
 
 // Matches the Pi composer footer treatment: dim mono label beside a borderless
 // inline Select, with hairline dividers between neighbouring controls.
-const inlineSettingClass = 'flex h-[26px] min-w-0 items-center gap-1 whitespace-nowrap font-mono text-[8px] text-ghost-dim'
+const inlineSettingClass = 'flex h-8 min-w-0 items-center gap-1 whitespace-nowrap text-xs text-ghost-dim'
 const inlineDividerClass = 'ml-[7px] border-l border-ghost-border/55 pl-[7px]'
 
 function initialPromptWithImages(prompt: string, imagePaths: string[]) {
@@ -94,6 +96,8 @@ function initialPromptWithImages(prompt: string, imagePaths: string[]) {
 
 export function NewThreadScreen({
   project,
+  projects,
+  onSelectProject,
   onOpenSidebar,
   onCancel,
   onCreated,
@@ -516,104 +520,203 @@ export function NewThreadScreen({
   }
 
   return (
-    <FormScreenTemplate
-      header={(
-        <ScreenHeader
-          title="New thread"
-          subtitle={project.name}
-          backLabel="Cancel new thread"
-          backDisabled={submitting}
-          onOpenSidebar={onOpenSidebar}
-          onBack={onCancel}
-        />
-      )}
-    >
-      <form
-        onSubmit={(event) => void handleSubmit(event)}
-        className="relative mx-auto w-full max-w-[38rem]"
-      >
-        <Surface variant="elevated-panel" className="p-4 sm:p-5">
-          <div className="min-w-0 border-b border-ghost-border/45 px-0.5 pb-2">
-            <div className="flex min-w-0 flex-wrap items-center gap-y-1">
-              <div className="flex h-[26px] min-w-0 items-center">
-                <Select
-                  id="thread-coding-agent"
-                  variant="inline"
-                  aria-label="Coding agent"
-                  value={codingAgent}
-                  options={configuredAgentOptions}
-                  onChange={(agent) => handleCodingAgentChange(agent as CodingAgentSelection)}
-                  disabled={submitting}
-                  leadingIcon={<Bot size={11} />}
-                />
+    <div className="flex h-full min-w-0 flex-col bg-ghost-black">
+      <ScreenHeader
+        title="New thread"
+        subtitle={project.name}
+        backLabel="Cancel new thread"
+        backDisabled={submitting}
+        onOpenSidebar={onOpenSidebar}
+        onBack={onCancel}
+      />
+      <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-8 sm:px-8">
+        <form
+          onSubmit={(event) => void handleSubmit(event)}
+          className="my-auto w-full max-w-3xl self-center pb-12"
+        >
+          <h1 className="mb-8 text-center text-2xl font-normal tracking-tight text-ghost-bright-white sm:text-3xl">
+            What should we build in{' '}
+            {projects && onSelectProject ? (
+              <Select variant="inline" aria-label="Change project" value={project.id}
+                options={projects.map((item) => ({ value: item.id, label: item.name }))}
+                onChange={onSelectProject} disabled={submitting} searchable searchPlaceholder="Find a project…"
+                className="!h-auto !max-w-full !rounded-none border-b! border-dotted! border-ghost-dim/50! !font-sans !text-2xl !tracking-tight sm:!text-3xl" />
+            ) : <span className="text-ghost-muted">{project.name}</span>}?
+          </h1>
+          <div className="relative flex flex-col rounded-3xl border border-ghost-border/70 bg-ghost-panel p-3 shadow-sm focus-within:border-ghost-green/40 sm:p-4">
+            <label htmlFor="thread-initial-prompt" className="sr-only">
+              Initial prompt (optional)
+            </label>
+            <BaseTextArea
+              id="thread-initial-prompt"
+              value={initialPrompt}
+              onChange={(event) => handleInitialPromptChange(event.target.value)}
+              onPaste={handleInitialPromptPaste}
+              onKeyDown={handleInitialPromptKeyDown}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={handleInitialPromptDrop}
+              disabled={submitting}
+              rows={4}
+              maxLength={INITIAL_PROMPT_MAX_LENGTH}
+              placeholder="Describe what you want to build, investigate, or change…"
+              aria-describedby="thread-initial-prompt-help"
+              className="min-h-32 w-full resize-y border-0 bg-transparent px-1 py-2 text-sm leading-6 text-ghost-bright-white outline-none placeholder:text-ghost-faint disabled:opacity-55"
+              autoFocus
+            />
+
+            {initialPromptImages.length > 0 && (
+              <ul className="mt-2 grid gap-2 sm:grid-cols-2" aria-label="Attached images">
+                {initialPromptImages.map((image) => (
+                  <li
+                    key={image.id}
+                    className="flex min-w-0 items-center gap-2.5 rounded-lg border border-ghost-border/70 bg-ghost-black/35 p-2"
+                  >
+                    <img
+                      src={image.previewUrl}
+                      alt=""
+                      className="size-11 shrink-0 rounded-md border border-ghost-border/65 object-cover"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[10px] text-ghost-bright-white" title={image.file.name}>
+                        {image.file.name || 'Pasted image'}
+                      </span>
+                      <span className="mt-0.5 block text-[9px] text-ghost-faint">
+                        {formatImageSize(image.file.size)}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (submitting) return
+                        removeInitialPromptImage(image.id)
+                        setError('')
+                      }}
+                      disabled={submitting}
+                      aria-label={`Remove ${image.file.name || 'pasted image'}`}
+                      className="grid size-7 shrink-0 place-items-center rounded-md text-ghost-faint transition hover:bg-ghost-raised hover:text-ghost-bright-white disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <X size={13} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 flex-wrap items-center gap-y-1">
+                  <div className="flex h-[26px] min-w-0 items-center">
+                    <Select
+                      id="thread-coding-agent"
+                      variant="inline"
+                      className="!font-sans !text-xs"
+                      aria-label="Coding agent"
+                      value={codingAgent}
+                      options={configuredAgentOptions}
+                      onChange={(agent) => handleCodingAgentChange(agent as CodingAgentSelection)}
+                      disabled={submitting}
+                      leadingIcon={<Bot size={11} />}
+                    />
+                  </div>
+                  <label className={classNames(inlineSettingClass, inlineDividerClass)}>
+                    <span>Model</span>
+                    <Select
+                      id="thread-agent-model"
+                      variant="inline"
+                      className="!font-sans !text-xs"
+                      aria-label="Model"
+                      value={model}
+                      options={modelSelectOptions.some((option) => option.value === model)
+                        ? modelSelectOptions
+                        : [{ value: model, label: 'Select model' }, ...modelSelectOptions]}
+                      onChange={handleModelChange}
+                      disabled={submitting || selectedAgentModelsUnavailable}
+                      style={{ maxWidth: '7.5rem' }}
+                    />
+                  </label>
+                  <label className={classNames(inlineSettingClass, inlineDividerClass)}>
+                    <span>Thinking</span>
+                    <Select
+                      id="thread-agent-thinking"
+                      variant="inline"
+                      className="!font-sans !text-xs"
+                      aria-label="Thinking"
+                      value={thinkingLevel}
+                      options={thinkingSelectOptions.some((option) => option.value === thinkingLevel)
+                        ? thinkingSelectOptions
+                        : [{ value: thinkingLevel, label: 'Default' }, ...thinkingSelectOptions]}
+                      onChange={handleThinkingLevelChange}
+                      disabled={submitting}
+                      style={{ maxWidth: '90px' }}
+                    />
+                  </label>
+                </div>
               </div>
-              <label className={classNames(inlineSettingClass, inlineDividerClass)}>
-                <span>Model</span>
-                <Select
-                  id="thread-agent-model"
-                  variant="inline"
-                  aria-label="Model"
-                  value={model}
-                  options={modelSelectOptions.some((option) => option.value === model)
-                    ? modelSelectOptions
-                    : [{ value: model, label: 'Select model' }, ...modelSelectOptions]}
-                  onChange={handleModelChange}
-                  disabled={submitting || selectedAgentModelsUnavailable}
-                  style={{ maxWidth: '7.5rem' }}
-                />
-              </label>
-              <label className={classNames(inlineSettingClass, inlineDividerClass)}>
-                <span>Thinking</span>
-                <Select
-                  id="thread-agent-thinking"
-                  variant="inline"
-                  aria-label="Thinking"
-                  value={thinkingLevel}
-                  options={thinkingSelectOptions.some((option) => option.value === thinkingLevel)
-                    ? thinkingSelectOptions
-                    : [{ value: thinkingLevel, label: 'Default' }, ...thinkingSelectOptions]}
-                  onChange={handleThinkingLevelChange}
+              <label
+                title="Paste or drop images into the prompt · PNG, JPEG, GIF, WebP · 50 MB max"
+                className={classNames(
+                  'flex h-6 items-center gap-1 rounded-[5px] px-1 font-mono text-[9px] transition',
+                  submitting
+                    ? 'cursor-not-allowed text-ghost-muted opacity-55'
+                    : 'cursor-pointer text-ghost-muted hover:bg-ghost-raised/70 hover:text-ghost-bright-white',
+                )}
+              >
+                <ImagePlus size={11} className="text-ghost-green" />
+                <span className="sr-only">Add images</span>
+                <input
+                  type="file"
+                  accept={PI_IMAGE_ACCEPT}
+                  multiple
                   disabled={submitting}
-                  style={{ maxWidth: '90px' }}
+                  onChange={handleImageInput}
+                  className="sr-only"
                 />
               </label>
-            </div>
-            <div className="mt-1 flex h-[26px] min-w-0 items-center gap-1.5">
-              <Select
-                id="thread-location"
-                variant="inline"
-                aria-label="Start in"
-                value={location}
-                options={locationOptions}
-                onChange={(value) => {
-                  setLocation(value as ThreadLocation)
-                  setError('')
-                }}
-                disabled={submitting}
-                rootClassName="w-[8.5rem]"
-                className="w-full !max-w-none"
-                menuClassName="min-w-[11rem]"
-              />
-              <Select
-                id="thread-base-branch"
-                variant="inline"
-                aria-label="Base branch"
-                value={baseBranch}
-                options={branchOptions}
-                onChange={(branch) => {
-                  if (branch) setBaseBranch(branch)
-                  setError('')
-                }}
-                disabled={submitting || branchesLoading || !worktreeAvailable}
-                leadingIcon={<GitBranch size={11} />}
-                rootClassName="w-[9rem] sm:w-[12rem]"
-                className="w-full !max-w-none"
-                searchable
-                searchPlaceholder="Search branches…"
-              />
+              <PrimaryButton
+                type="submit"
+                disabled={submitDisabled}
+                aria-label={startsAgent ? `Start ${selectedAgentLabel}` : 'Create thread'}
+                title={submitting ? 'Creating thread…' : 'Create thread (⌘/Ctrl+Enter)'}
+                className="grid !size-9 shrink-0 place-items-center !rounded-full !p-0"
+              >
+                {submitting ? <LoaderCircle size={17} className="animate-spin" /> : <ArrowUp size={17} />}
+              </PrimaryButton>
             </div>
           </div>
-
+          <div className="mx-4 flex min-w-0 items-center justify-between gap-2 rounded-b-2xl border border-t-0 border-ghost-border/60 bg-ghost-panel/60 px-3 py-1">
+            <Select
+              id="thread-location"
+              variant="inline"
+              aria-label="Start in"
+              value={location}
+              options={locationOptions}
+              onChange={(value) => {
+                setLocation(value as ThreadLocation)
+                setError('')
+              }}
+              disabled={submitting}
+              rootClassName="min-w-0 max-w-[50%]"
+              className="w-full !max-w-none !font-sans !text-xs"
+              menuClassName="min-w-[11rem]"
+            />
+            <Select
+              id="thread-base-branch"
+              variant="inline"
+              aria-label="Base branch"
+              value={baseBranch}
+              options={branchOptions}
+              onChange={(branch) => {
+                if (branch) setBaseBranch(branch)
+                setError('')
+              }}
+              disabled={submitting || branchesLoading || !worktreeAvailable}
+              leadingIcon={<GitBranch size={11} />}
+              rootClassName="min-w-0 max-w-[50%]"
+              className="w-full !max-w-none !font-sans !text-xs"
+              searchable
+              searchPlaceholder="Search branches…"
+            />
+          </div>
           {settingsNotice && (
             <p className="mt-2 text-[9px] leading-4 text-ghost-faint">
               {settingsNotice}
@@ -629,89 +732,7 @@ export function NewThreadScreen({
             </p>
           )}
 
-          <label htmlFor="thread-initial-prompt" className="sr-only">
-            Initial prompt (optional)
-          </label>
-          <TextArea
-            id="thread-initial-prompt"
-            value={initialPrompt}
-            onChange={(event) => handleInitialPromptChange(event.target.value)}
-            onPaste={handleInitialPromptPaste}
-            onKeyDown={handleInitialPromptKeyDown}
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={handleInitialPromptDrop}
-            disabled={submitting}
-            rows={6}
-            maxLength={INITIAL_PROMPT_MAX_LENGTH}
-            placeholder="Describe what you want to build, investigate, or change…"
-            aria-describedby="thread-initial-prompt-help"
-            className="mt-3 min-h-40"
-            autoFocus
-          />
-
-          {initialPromptImages.length > 0 && (
-            <ul className="mt-2 grid gap-2 sm:grid-cols-2" aria-label="Attached images">
-              {initialPromptImages.map((image) => (
-                <li
-                  key={image.id}
-                  className="flex min-w-0 items-center gap-2.5 rounded-lg border border-ghost-border/70 bg-ghost-black/35 p-2"
-                >
-                  <img
-                    src={image.previewUrl}
-                    alt=""
-                    className="size-11 shrink-0 rounded-md border border-ghost-border/65 object-cover"
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[10px] text-ghost-bright-white" title={image.file.name}>
-                      {image.file.name || 'Pasted image'}
-                    </span>
-                    <span className="mt-0.5 block text-[9px] text-ghost-faint">
-                      {formatImageSize(image.file.size)}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (submitting) return
-                      removeInitialPromptImage(image.id)
-                      setError('')
-                    }}
-                    disabled={submitting}
-                    aria-label={`Remove ${image.file.name || 'pasted image'}`}
-                    className="grid size-7 shrink-0 place-items-center rounded-md text-ghost-faint transition hover:bg-ghost-raised hover:text-ghost-bright-white disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <X size={13} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-y-1 px-0.5">
-            <label
-              title="Paste or drop images into the prompt · PNG, JPEG, GIF, WebP · 50 MB max"
-              className={classNames(
-                'flex h-6 items-center gap-1 rounded-[5px] px-1 font-mono text-[9px] transition',
-                submitting
-                  ? 'cursor-not-allowed text-ghost-muted opacity-55'
-                  : 'cursor-pointer text-ghost-muted hover:bg-ghost-raised/70 hover:text-ghost-bright-white',
-              )}
-            >
-              <ImagePlus size={11} className="text-ghost-green" />
-              Add images
-              <input
-                type="file"
-                accept={PI_IMAGE_ACCEPT}
-                multiple
-                disabled={submitting}
-                onChange={handleImageInput}
-                className="sr-only"
-              />
-            </label>
-            <span className="ml-auto pl-3 font-mono text-[8px] text-ghost-faint">⌘Enter to create</span>
-          </div>
-
-          <p id="thread-initial-prompt-help" className="mt-2 px-0.5 text-[9px] leading-4 text-ghost-faint">
+          <p id="thread-initial-prompt-help" className="mt-3 px-4 text-center text-[10px] leading-4 text-ghost-faint">
             {agentNamesThread
               ? `${selectedAgentLabel} uses the first prompt to name the thread${location === 'worktree' ? ' and its branch' : ''}. `
               : ''}
@@ -724,36 +745,12 @@ export function NewThreadScreen({
             </FeedbackMessage>
           )}
 
-          <div className="mt-6 flex items-center justify-end gap-2 border-t border-ghost-border/55 pt-4">
-            <GhostButton
-              type="button"
-              size="md"
-              onClick={onCancel}
-              disabled={submitting}
-              className="px-3.5 disabled:opacity-40"
-            >
-              Cancel
-            </GhostButton>
-            <PrimaryButton
-              type="submit"
-              size="md"
-              disabled={submitDisabled}
-              className="flex min-w-36 items-center justify-center gap-2"
-            >
-              {submitting
-                ? <LoaderCircle size={14} className="animate-spin" />
-                : startsAgent ? <Bot size={14} /> : <Plus size={14} />}
-              {submitting
-                ? uploadingImages
-                  ? initialPromptImages.length === 1 ? 'Uploading image…' : 'Uploading images…'
-                  : location === 'worktree'
-                    ? 'Creating worktree…'
-                    : startsAgent ? 'Starting agent…' : 'Creating thread…'
-                : startsAgent ? `Start ${selectedAgentLabel}` : 'Create thread'}
-            </PrimaryButton>
+          <div className="mt-3 flex items-center justify-center gap-3 text-xs text-ghost-faint">
+            <GhostButton type="button" onClick={onCancel} disabled={submitting}>Cancel</GhostButton>
+            <span>{submitting ? (uploadingImages ? 'Uploading images…' : 'Creating thread…') : '⌘ / Ctrl + Enter to create'}</span>
           </div>
-        </Surface>
-      </form>
-    </FormScreenTemplate>
+        </form>
+      </main>
+    </div>
   )
 }

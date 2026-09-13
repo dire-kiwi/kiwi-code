@@ -20,8 +20,8 @@ import (
 
 const (
 	apiRouteGoldenFile      = "testdata/api_routes.txt"
-	expectedAPIRouteCount   = 61
-	expectedTotalRouteCount = 62
+	expectedAPIRouteCount   = 62
+	expectedTotalRouteCount = 63
 )
 
 type websocketRouteContract struct {
@@ -32,6 +32,7 @@ type websocketRouteContract struct {
 // websocketRouteContracts documents the routes that require a real upgraded
 // connection and therefore must not be invoked with an httptest.ResponseRecorder.
 var websocketRouteContracts = []websocketRouteContract{
+	{pattern: "GET /api/projects/{id}/threads/{threadId}/codex/native", protocol: "native Codex chat"},
 	{
 		pattern:  "GET /api/projects/{id}/threads/{threadId}/browser/stream",
 		protocol: "browser frame and input stream",
@@ -387,8 +388,8 @@ func assertUniqueRoutes(t *testing.T, source string, routes []string) {
 
 func assertDocumentedWebSocketRoutes(t *testing.T, routes []string) {
 	t.Helper()
-	if len(websocketRouteContracts) != 6 {
-		t.Fatalf("documented WebSocket route count = %d, want 6", len(websocketRouteContracts))
+	if len(websocketRouteContracts) != 7 {
+		t.Fatalf("documented WebSocket route count = %d, want 7", len(websocketRouteContracts))
 	}
 
 	routeSet := make(map[string]struct{}, len(routes))

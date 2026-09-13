@@ -2,7 +2,7 @@ import type { SidebarThreadIndex, ThreadTreeIndex } from './sidebar-thread-index
 
 export type SidebarActivityThread = {
   id: string
-  archivedAt?: string
+  settledAt?: string
 }
 
 export type SidebarThreadActivity = {

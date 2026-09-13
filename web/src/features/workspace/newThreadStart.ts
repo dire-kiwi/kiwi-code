@@ -34,7 +34,7 @@ export function newThreadStartFromState(state: unknown): NewThreadStart | null {
     || (candidate.presentation !== undefined
       && candidate.presentation !== 'native'
       && candidate.presentation !== 'terminal')
-    || (candidate.agent !== 'pi' && candidate.agent !== 'claude'
+    || (candidate.agent !== 'pi' && candidate.agent !== 'claude' && candidate.agent !== 'codex'
       && candidate.presentation !== undefined
       && candidate.presentation !== 'terminal')
     || typeof candidate.model !== 'string'
@@ -42,7 +42,7 @@ export function newThreadStartFromState(state: unknown): NewThreadStart | null {
     || typeof candidate.prompt !== 'string'
     || (candidate.imagePaths !== undefined && !hasImagePaths)
     || (hasImagePaths && (
-      (candidate.agent !== 'pi' && candidate.agent !== 'claude') || candidate.presentation !== 'native'
+      (candidate.agent !== 'pi' && candidate.agent !== 'claude' && candidate.agent !== 'codex') || candidate.presentation !== 'native'
     ))
   ) {
     return null

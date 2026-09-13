@@ -4,7 +4,8 @@ export type SidebarVisibilityThread = {
   id: string
   createdAt: string
   lastPromptAt?: string
-  archivedAt?: string
+  unsettledAt?: string
+  settledAt?: string
 }
 
 export type SidebarVisibilityActivity = {

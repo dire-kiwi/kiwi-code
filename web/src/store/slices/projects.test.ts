@@ -4,10 +4,10 @@ import {
   projectsReceived,
   projectsReordered,
   sameProjects,
-  selectArchivingThreadId,
+  selectSettlingThreadId,
   selectDeletingProjectId,
   selectProjects,
-  threadArchived,
+  threadSettled,
   threadsReordered,
   type ProjectsState,
 } from './projects'
@@ -18,7 +18,7 @@ import type { Project, Thread } from '@/types'
 vi.mock('@/api', () => ({
   deleteProject: vi.fn(),
   deleteThread: vi.fn(),
-  setThreadArchived: vi.fn(),
+  setThreadSettled: vi.fn(),
   updateProjectOrder: vi.fn(),
   updateThreadOrder: vi.fn(),
 }))
@@ -26,7 +26,7 @@ vi.mock('@/api', () => ({
 // The socket retry is a no-op without a live client, which is what we want here.
 vi.mock('@/store/socketAccess', () => ({ retryTopic: vi.fn() }))
 
-const { updateProjectOrder, updateThreadOrder, setThreadArchived } = await import('@/api')
+const { updateProjectOrder, updateThreadOrder, setThreadSettled } = await import('@/api')
 
 const reduce = projectsSlice.reducer
 
@@ -64,7 +64,7 @@ function projectsRoot(projects: ProjectsState) {
 beforeEach(() => {
   vi.mocked(updateProjectOrder).mockReset()
   vi.mocked(updateThreadOrder).mockReset()
-  vi.mocked(setThreadArchived).mockReset()
+  vi.mocked(setThreadSettled).mockReset()
 })
 
 describe('projects slice', () => {
@@ -153,23 +153,23 @@ describe('optimistic mutations', () => {
     store.dispatch(projectsReceived([project('a', [thread('t1')])]))
 
     let release: (value: Thread) => void = () => {}
-    vi.mocked(setThreadArchived).mockReturnValueOnce(
+    vi.mocked(setThreadSettled).mockReturnValueOnce(
       new Promise<Thread>((resolve) => { release = resolve }) as never,
     )
 
-    const pending = store.dispatch(threadArchived({
+    const pending = store.dispatch(threadSettled({
       projectId: 'a',
       threadId: 't1',
-      archived: true,
+      settled: true,
     }))
     // The sidebar's spinner is this flag; it must be set while the call is out.
-    expect(selectArchivingThreadId(store.getState())).toBe('t1')
+    expect(selectSettlingThreadId(store.getState())).toBe('t1')
 
-    release(thread('t1', { archivedAt: '2026-07-27T01:00:00Z' }))
+    release(thread('t1', { settledAt: '2026-07-27T01:00:00Z' }))
     await pending
 
-    expect(selectArchivingThreadId(store.getState())).toBeNull()
-    expect(selectProjects(store.getState())[0]!.threads[0]!.archivedAt).toBe('2026-07-27T01:00:00Z')
+    expect(selectSettlingThreadId(store.getState())).toBeNull()
+    expect(selectProjects(store.getState())[0]!.threads[0]!.settledAt).toBe('2026-07-27T01:00:00Z')
   })
 
   it('clears the deleting flag even when the request fails', async () => {

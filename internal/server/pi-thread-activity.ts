@@ -1,3 +1,5 @@
+import { mkdir, writeFile, rename } from "node:fs/promises";
+import { dirname } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import threadUsageExtension from "./kiwi-code-thread-usage.ts";
 import browserExtension from "./kiwi-code-browser.ts";
@@ -49,6 +51,17 @@ export default function (pi: ExtensionAPI) {
 		if (heartbeat) clearInterval(heartbeat);
 		heartbeat = undefined;
 	}
+
+ pi.on("session_start", async (_event, ctx) => {
+  const marker = process.env.KIWI_CODE_AGENT_SESSION_FILE;
+  const session = ctx.sessionManager.getSessionFile();
+  if (marker && session) {
+   await mkdir(dirname(marker), { recursive: true, mode: 0o700 });
+   const temporary = `${marker}.${process.pid}.tmp`;
+   await writeFile(temporary, `${session}\n`, { mode: 0o600 });
+   await rename(temporary, marker);
+  }
+ });
 
 	pi.on("agent_start", () => {
 		working = true;

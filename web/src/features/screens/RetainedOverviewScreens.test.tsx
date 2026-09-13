@@ -72,20 +72,18 @@ describe('overview screens', () => {
         seq: 1,
         data: {
           generatedAt: '2026-07-26T00:00:00Z',
-          archivedThreadRetentionDays: 7,
           orphanedWorktreeRetentionDays: 7,
-          threads: [],
           worktrees: [],
         },
       })
     })
-    expect(screen.getAllByText('Archived threads')).toHaveLength(2)
+    expect(screen.getAllByText('Unattached worktrees')).toHaveLength(2)
 
     act(() => {
       socket.receive({ t: 'subend', id: 1, reason: 'Cleanup updates stopped.' })
     })
     expect(screen.getByText(/cleanup updates stopped.*last loaded queue is still shown/i)).toBeTruthy()
-    expect(screen.getAllByText('Archived threads')).toHaveLength(2)
+    expect(screen.getAllByText('Unattached worktrees')).toHaveLength(2)
     view.unmount()
   })
 

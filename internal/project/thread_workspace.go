@@ -27,7 +27,7 @@ func (u ThreadWorkspaceUpdate) Validate() error {
 	}
 	if u.CodingAgent != "" {
 		switch u.CodingAgent {
-		case "pi", "pi-native", "codex", "grok", "claude", "claude-native", "claude-gpt":
+		case "pi", "pi-native", "codex", "codex-native", "grok", "claude", "claude-native", "claude-gpt":
 		default:
 			id := strings.TrimPrefix(strings.TrimPrefix(u.CodingAgent, "claude-gpt-profile-"), "claude-profile-")
 			if id == u.CodingAgent || id == "" || len(id) > maxCodingAgentIDLength {

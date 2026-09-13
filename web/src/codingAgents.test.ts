@@ -14,6 +14,7 @@ describe('native coding-agent selection mappings', () => {
   it.each([
     ['pi-native', 'pi', 'native'],
     ['claude-native', 'claude', 'native'],
+    ['codex-native', 'codex', 'native'],
     ['pi', 'pi', 'terminal'],
     ['claude', 'claude', 'terminal'],
     ['grok', 'grok', 'terminal'],

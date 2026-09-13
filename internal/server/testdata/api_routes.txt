@@ -17,6 +17,7 @@ GET /api/projects/{id}/threads/{threadId}/browser/frame
 GET /api/projects/{id}/threads/{threadId}/browser/stream
 GET /api/projects/{id}/threads/{threadId}/budget
 GET /api/projects/{id}/threads/{threadId}/claude/native
+GET /api/projects/{id}/threads/{threadId}/codex/native
 GET /api/projects/{id}/threads/{threadId}/git/branches
 GET /api/projects/{id}/threads/{threadId}/pi/native
 GET /api/projects/{id}/threads/{threadId}/processes

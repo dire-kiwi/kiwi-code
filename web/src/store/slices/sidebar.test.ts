@@ -18,12 +18,12 @@ describe('sidebar slice', () => {
     expect(expanded.expandedMoreProjectIds).toEqual(['project'])
   })
 
-  it('reveals a selected archived thread and its project', () => {
+  it('reveals a selected settled thread and its project', () => {
     const hidden = {
       ...initialSidebarState,
       collapsedProjectIds: ['project', 'other'],
     }
-    const revealed = reduce(hidden, threadRevealed({ projectId: 'project', expandArchived: true }))
+    const revealed = reduce(hidden, threadRevealed({ projectId: 'project', expandSettled: true }))
     expect(revealed.collapsedProjectIds).toEqual(['other'])
     expect(revealed.expandedMoreProjectIds).toEqual(['project'])
   })

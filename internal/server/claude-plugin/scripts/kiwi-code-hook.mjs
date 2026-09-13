@@ -200,6 +200,15 @@ async function heartbeat(input) {
 
 async function startActivity(input) {
   if (!threadEndpoint()) return
+  // UserPromptSubmit identifies the conversation driven by this terminal.
+  // Stop/heartbeat events from child agents must never replace this marker.
+  const marker = process.env.KIWI_CODE_AGENT_SESSION_FILE
+  if (marker && input.session_id && !input.agent_id) {
+    await fs.mkdir(path.dirname(marker), { recursive: true, mode: 0o700 })
+    const temporary = `${marker}.${process.pid}.tmp`
+    await fs.writeFile(temporary, `${input.session_id}\n`, { mode: 0o600 })
+    await fs.rename(temporary, marker)
+  }
   const token = String(input.prompt_id || `${Date.now()}-${process.pid}`)
   const promptStartedAt = new Date().toISOString()
   // The managed lifecycle hooks do not provide a reliable per-prompt ID.

@@ -94,10 +94,10 @@ export const sidebarSlice = createSlice({
     },
     threadRevealed(state, action: PayloadAction<{
       projectId: string
-      expandArchived: boolean
+      expandSettled: boolean
     }>) {
-      const { projectId, expandArchived } = action.payload
-      if (expandArchived && !state.expandedMoreProjectIds.includes(projectId)) {
+      const { projectId, expandSettled } = action.payload
+      if (expandSettled && !state.expandedMoreProjectIds.includes(projectId)) {
         state.expandedMoreProjectIds.push(projectId)
       }
       const projects = state.collapsedProjectIds.filter((id) => id !== projectId)

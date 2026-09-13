@@ -112,7 +112,7 @@ export async function waitForApplicationRestart(instanceId: string, timeoutMs = 
 
 export function updateSettings(input: string | Partial<Pick<
   AppSettings,
-  'newThreadSelection' | 'worktreeBasePath' | 'archivedThreadRetentionDays' | 'orphanedWorktreeRetentionDays' | 'codingAgents' | 'titleModel' | 'titleThinking' | 'theme'
+  'newThreadSelection' | 'worktreeBasePath' | 'orphanedWorktreeRetentionDays' | 'codingAgents' | 'titleModel' | 'titleThinking' | 'theme'
 >>) {
   return jsonRequest<AppSettings>(
     '/api/settings',
@@ -231,9 +231,10 @@ export function updateThreadLimits(
   return jsonRequest<Thread>(`${threadPath(projectId, threadId)}/limits`, 'PUT', limits)
 }
 
-export function setThreadArchived(projectId: string, threadId: string, archived: boolean) {
-  return jsonRequest<Thread>(threadPath(projectId, threadId), 'PATCH', { archived })
+export function setThreadSettled(projectId: string, threadId: string, settled: boolean) {
+  return jsonRequest<Thread>(threadPath(projectId, threadId), 'PATCH', { settled })
 }
+
 
 export function deleteThread(projectId: string, threadId: string) {
   return request<void>(threadPath(projectId, threadId), { method: 'DELETE' })

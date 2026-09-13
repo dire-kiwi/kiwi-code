@@ -15,7 +15,6 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		NewThreadSelection            *project.NewThreadSelection   `json:"newThreadSelection"`
 		WorktreeBasePath              *string                       `json:"worktreeBasePath"`
-		ArchivedThreadRetentionDays   *int                          `json:"archivedThreadRetentionDays"`
 		OrphanedWorktreeRetentionDays *int                          `json:"orphanedWorktreeRetentionDays"`
 		CodingAgents                  *[]project.CodingAgentSetting `json:"codingAgents"`
 		TitleModel                    *string                       `json:"titleModel"`
@@ -25,7 +24,6 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil || (input.WorktreeBasePath == nil &&
-		input.ArchivedThreadRetentionDays == nil &&
 		input.OrphanedWorktreeRetentionDays == nil && input.CodingAgents == nil &&
 		input.TitleModel == nil && input.TitleThinking == nil && input.Theme == nil && input.NewThreadSelection == nil) {
 		writeError(w, http.StatusBadRequest, "Invalid settings.")
@@ -34,7 +32,6 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	settings, err := s.projects.UpdateSettingsFields(project.SettingsUpdate{
 		NewThreadSelection:            input.NewThreadSelection,
 		WorktreeBasePath:              input.WorktreeBasePath,
-		ArchivedThreadRetentionDays:   input.ArchivedThreadRetentionDays,
 		OrphanedWorktreeRetentionDays: input.OrphanedWorktreeRetentionDays,
 		CodingAgents:                  input.CodingAgents,
 		TitleModel:                    input.TitleModel,

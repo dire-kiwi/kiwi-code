@@ -60,6 +60,7 @@ type piNativeProcess struct {
 	runMu            sync.RWMutex
 	nextRun          uint64
 	activeRun        uint64
+	promptPending    atomic.Bool
 	runs             map[uint64]piNativeRunSnapshot
 	usageReporter    func(piNativeProcessKey, string, threadUsageTotals)
 }
@@ -355,9 +356,18 @@ func (h *terminalHandler) servePiNative(w http.ResponseWriter, r *http.Request) 
 					continue
 				}
 			}
-			if err := process.sendClientCommand(command); err != nil {
-				_ = writeStatus("pi_native_error", "Could not send the message to Pi.")
+			_, sendErr := withTerminalThreadMutation(h, item, thread, func() (struct{}, error) {
+				if command.Type == "prompt" {
+					if _, err := h.projects.RecordThreadPrompt(item.ID, thread.ID, time.Now().UTC()); err != nil {
+						return struct{}{}, err
+					}
+				}
+				return struct{}{}, process.sendClientCommand(command)
+			}, nil)
+			if sendErr != nil {
+				_ = writeStatus("pi_native_error", "Could not send the message to Pi: "+sendErr.Error())
 			}
+
 		case <-process.done:
 			message := process.exitMessage()
 			_ = writeStatus("pi_native_exit", message)
@@ -933,8 +943,12 @@ func (p *piNativeProcess) publishPiEvent(payload []byte) {
 			_ = p.requestSnapshot("get_entries")
 		}
 	case "agent_start", "agent_settled":
+		p.promptPending.Store(false)
 		_ = p.requestSnapshot("get_state")
 	case "response":
+		if event.Command == "prompt" && !event.Success {
+			p.promptPending.Store(false)
+		}
 		if event.Success && event.Command == "get_session_stats" {
 			p.reportSessionUsage(event.Data)
 		}
@@ -1314,8 +1328,15 @@ func (p *piNativeProcess) requestSnapshot(command string) error {
 }
 
 func (p *piNativeProcess) sendClientCommand(command piNativeRPCCommand) error {
+	if command.Type == "prompt" {
+		p.promptPending.Store(true)
+	}
 	command.ID = fmt.Sprintf("kiwi-code-client-%s-%d", strings.ReplaceAll(command.Type, "_", "-"), p.request.Add(1))
-	return p.send(command)
+	err := p.send(command)
+	if err != nil && command.Type == "prompt" {
+		p.promptPending.Store(false)
+	}
+	return err
 }
 
 func (p *piNativeProcess) refresh() error {
