@@ -45,6 +45,8 @@ type codexNativeManager struct {
 type codexNativeProcess struct {
 	*nativeProcessCore
 	mu               sync.Mutex
+	promptMu         sync.Mutex
+	queued           []chatClientMessage
 	pending          map[string]chan codexRPC
 	state            chatState
 	sequence         uint64
@@ -275,6 +277,7 @@ func (p *codexNativeProcess) receive(data []byte) {
 			p.state.Error = params.Turn.Error.Message
 		}
 		p.emitLocked("chat_state", p.state)
+		go p.advanceQueue()
 	case "serverRequest/resolved":
 		for i, r := range p.state.Requests {
 			if string(r.ID) == string(params.RequestID) {
@@ -424,7 +427,67 @@ func (h *terminalHandler) startCodexNativeProcess(item project.Project, thread p
 	})
 }
 
+// Serialize submissions with queue advancement, including the turn/start reply.
 func (p *codexNativeProcess) prompt(message chatClientMessage) error {
+	p.promptMu.Lock()
+	defer p.promptMu.Unlock()
+	if strings.TrimSpace(message.Message) == "" && len(message.Images) == 0 {
+		return errors.New("Enter a message")
+	}
+	if len(message.Images) > 20 {
+		return errors.New("Too many images")
+	}
+	if _, err := normalizeCodingAgentLaunchOptions(codingAgentCodex, message.Model, message.Effort); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	if p.stopping.Load() || channelClosed(p.done) {
+		p.mu.Unlock()
+		return errors.New("Codex has stopped. Reconnect to resume.")
+	}
+	if p.state.Working || len(p.queued) > 0 {
+		p.queued = append(p.queued, message)
+		p.emitQueueLocked()
+		p.mu.Unlock()
+		return nil
+	}
+	p.mu.Unlock()
+	return p.startPrompt(message)
+}
+
+func (p *codexNativeProcess) emitQueueLocked() {
+	p.state.QueuedMessages = make([]string, len(p.queued))
+	for i, message := range p.queued {
+		p.state.QueuedMessages[i] = message.Message
+		if len(message.Images) > 0 {
+			p.state.QueuedMessages[i] += " [Attached images]"
+		}
+	}
+	p.emitLocked("chat_state", p.state)
+}
+
+func (p *codexNativeProcess) advanceQueue() {
+	p.promptMu.Lock()
+	defer p.promptMu.Unlock()
+	p.mu.Lock()
+	if p.state.Working || len(p.queued) == 0 || p.stopping.Load() || channelClosed(p.done) {
+		p.mu.Unlock()
+		return
+	}
+	message := p.queued[0]
+	p.queued = p.queued[1:]
+	p.emitQueueLocked()
+	p.mu.Unlock()
+	if err := p.startPrompt(message); err != nil {
+		p.mu.Lock()
+		p.queued = append([]chatClientMessage{message}, p.queued...)
+		p.state.Error = "Queued message failed: " + err.Error()
+		p.emitQueueLocked()
+		p.mu.Unlock()
+	}
+}
+
+func (p *codexNativeProcess) startPrompt(message chatClientMessage) error {
 	if strings.TrimSpace(message.Message) == "" && len(message.Images) == 0 {
 		return errors.New("Enter a message")
 	}
@@ -582,6 +645,9 @@ func (h *terminalHandler) serveCodexNative(w http.ResponseWriter, r *http.Reques
 						return false, err
 					}
 					return true, p.prompt(message)
+				case "retry_queue":
+					go p.advanceQueue()
+					return true, nil
 				case "abort":
 					p.mu.Lock()
 					turnID := p.turnID
