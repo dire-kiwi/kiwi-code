@@ -985,6 +985,11 @@ class BrowserWorkspaceManager {
     this.disposePromise = null
   }
 
+  addProtectedOrigin(origin) {
+    // Sessions share this set, so existing guests also receive the protection.
+    this.protectedOrigins.add(new URL(origin).origin)
+  }
+
   key(projectId, threadId) {
     return `${projectId}\u0000${threadId}`
   }

@@ -289,6 +289,48 @@ test('atomically writes mode-0600 config and removes only a matching config', as
   }
 })
 
+test('provider starts with the real workspace and protects its origin in existing and new sessions', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'kiwi-code-provider-workspace-'))
+  const configPath = path.join(directory, 'provider.json')
+  const workspace = new BrowserWorkspaceManager({
+    WebContentsView: class {}, hostWindow: {}, appView: {},
+    desktopOrigin: 'http://127.0.0.1:41231',
+    apiOrigin: 'http://127.0.0.1:41232',
+    onState() {},
+  })
+  const existingSession = workspace.createSession({ projectId: 'p', threadId: 'existing' }, 'existing')
+  const provider = new BrowserProviderServer({
+    app: {}, workspace,
+    environment: { KIWI_CODE_BROWSER_PROVIDER_CONFIG: configPath },
+  })
+  try {
+    const config = await provider.start()
+    assert.deepEqual(JSON.parse(await fs.readFile(configPath, 'utf8')), config)
+    const newSession = workspace.createSession({ projectId: 'p', threadId: 'new' }, 'new')
+    for (const session of [existingSession, newSession]) {
+      for (const origin of [
+        `http://127.0.0.1:${config.port}`,
+        `http://localhost:${config.port}`,
+        'http://127.0.0.1:41231',
+        'http://127.0.0.1:41232',
+      ]) {
+        assert.equal(isProtectedRequest(`${origin}/api`, session.protectedOrigins), true)
+      }
+      assert.equal(isProtectedRequest('https://example.com/', session.protectedOrigins), false)
+    }
+    const response = await request(config.port, {
+      token: config.token,
+      body: JSON.stringify({ projectId: 'p', threadId: 'absent', operation: 'session.status' }),
+    })
+    assert.equal(response.status, 200)
+    assert.equal(response.body.ok, true)
+    assert.equal(response.body.result.running, false)
+  } finally {
+    await provider.stop()
+    await fs.rm(directory, { recursive: true, force: true })
+  }
+})
+
 test('provider binds loopback dynamically, authenticates, and uses the action envelope', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'kiwi-code-provider-http-'))
   const configPath = path.join(directory, 'exact-provider.json')
