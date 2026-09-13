@@ -6,6 +6,7 @@ import (
 	"github.com/gorilla/websocket"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,6 +26,11 @@ func codexFixtureManager(t *testing.T) (*codexNativeManager, project.Project, pr
 	if err := os.WriteFile(path, script, 0700); err != nil {
 		t.Fatal(err)
 	}
+	fakePi := filepath.Join(directory, "pi")
+	if err := os.WriteFile(fakePi, []byte("#!/bin/sh\nprintf 'Fix Native Thread Naming\\n'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KIWI_CODE_PI_PATH", fakePi)
 	m := newCodexNativeManager(t.TempDir())
 	m.codexPath = path
 	t.Cleanup(func() { _ = m.stopMatching(func(nativeProcessKey) bool { return true }) })
@@ -311,6 +317,125 @@ func TestCodexNativeReportsCumulativeUsageWithoutDoubleCountingCache(t *testing.
 	awaitCodexState(t, p, func(s chatState) bool { return s.Usage != nil && s.Usage.TotalTokens == 15 })
 }
 
+func TestCodexNativeNamesFirstAcceptedPrompt(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node is not installed")
+	}
+	for _, scenario := range []string{"text", "image", "locked", "already named", "generator failure"} {
+		t.Run(scenario, func(t *testing.T) {
+			fixture, _, fixtureThread := codexFixtureManager(t)
+			if scenario == "generator failure" {
+				if err := os.WriteFile(os.Getenv("KIWI_CODE_PI_PATH"), []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			item, err := store.Add("Native naming", fixtureThread.Cwd)
+			if err != nil {
+				t.Fatal(err)
+			}
+			thread := item.Threads[0]
+			if scenario == "locked" || scenario == "already named" {
+				thread, err = store.UpdateThreadTitle(item.ID, thread.ID, "Keep this title", scenario == "already named")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if scenario == "locked" {
+					thread, err = store.SetThreadTitleLocked(item.ID, thread.ID, true)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			handler, err := newIsolatedServerHandler(t, store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s := handler.(*Server)
+			s.terminal.nativeCodex.codexPath = fixture.codexPath
+			server := httptest.NewServer(handler)
+			defer server.Close()
+			endpoint := server.URL + "/api/projects/" + item.ID + "/threads/" + thread.ID
+			p, err := s.terminal.startCodexNativeProcess(item, thread, endpoint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = s.terminal.nativeCodex.stopThread(item.ID, thread.ID) })
+			named := make(chan struct{}, 4)
+			releaseNamer := make(chan struct{})
+			p.mu.Lock()
+			original := p.nameThread
+			p.nameThread = func(sessionID, prompt string) {
+				<-releaseNamer
+				original(sessionID, prompt)
+				named <- struct{}{}
+			}
+			p.mu.Unlock()
+			if err := p.prompt(chatClientMessage{Message: "reject"}); err == nil {
+				t.Fatal("expected rejection")
+			}
+			message := chatClientMessage{Message: "fix native naming"}
+			if scenario == "image" {
+				message = chatClientMessage{Images: []piNativeClientImage{{Path: "/tmp/fixture.png"}}}
+			}
+			if err := p.prompt(message); err != nil {
+				t.Fatal(err)
+			}
+			// The response must finish even while naming is blocked.
+			awaitCodexState(t, p, func(s chatState) bool { return !s.Working && len(s.Items) == 2 })
+			close(releaseNamer)
+			select {
+			case <-named:
+			case <-time.After(5 * time.Second):
+				t.Fatal("native title hook did not finish")
+			}
+			_, updated, err := store.GetThread(item.ID, thread.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "Fix Native Thread Naming"
+			if scenario == "locked" || scenario == "already named" {
+				want = "Keep this title"
+			}
+			if scenario == "generator failure" {
+				want = thread.Title
+			}
+			if updated.Title != want {
+				t.Fatalf("title = %q, want %q", updated.Title, want)
+			}
+			if scenario != "locked" && scenario != "generator failure" && !updated.AutoNamed {
+				t.Fatal("title was not marked auto-generated")
+			}
+			awaitCodexState(t, p, func(s chatState) bool { return !s.Working })
+			if err := p.prompt(chatClientMessage{Message: "second prompt"}); err != nil {
+				t.Fatal(err)
+			}
+			awaitCodexState(t, p, func(s chatState) bool { return !s.Working })
+			if err := p.stop(); err != nil {
+				t.Fatal(err)
+			}
+			resumed, err := s.terminal.startCodexNativeProcess(item, thread, endpoint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resumed.mu.Lock()
+			resumed.nameThread = func(string, string) { named <- struct{}{} }
+			resumed.mu.Unlock()
+			if err := resumed.prompt(chatClientMessage{Message: "resumed prompt"}); err != nil {
+				t.Fatal(err)
+			}
+			awaitCodexState(t, resumed, func(s chatState) bool { return !s.Working })
+			select {
+			case <-named:
+				t.Fatal("namer ran for a rejected, subsequent, or resumed prompt")
+			case <-time.After(50 * time.Millisecond):
+			}
+		})
+	}
+}
 func TestCodexNativeQueueSurvivesReconnectAndRunsInOrder(t *testing.T) {
 	m, item, thread := codexFixtureManager(t)
 	p, err := m.getOrStart(item, thread, nil)
