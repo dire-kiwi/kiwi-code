@@ -1,5 +1,21 @@
 export const TERMINAL_ESCAPE_SEQUENCE = '\x1b'
 
+export function terminalClipboardAction(event, hasSelection) {
+  if (event.altKey) return null
+  const key = event.key.toLowerCase()
+  if (key === 'insert' && !event.metaKey) {
+    if (event.shiftKey && !event.ctrlKey) return 'paste'
+    if (event.ctrlKey && !event.shiftKey && hasSelection) return 'copy'
+  }
+  if (!event.ctrlKey && !event.metaKey) return null
+  if (key === 'v') return 'paste'
+  // With no selection, preserve terminal interrupt (Ctrl-C) and Ctrl-X.
+  if (hasSelection && (key === 'c' || key === 'x')) {
+    return key === 'c' ? 'copy' : 'cut'
+  }
+  return null
+}
+
 export function isTerminalEscapeKey(event) {
   return event.key === 'Escape'
     || event.key === 'Esc'

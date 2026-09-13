@@ -12,6 +12,7 @@ import {
   shouldBridgeTerminalControl,
   shouldForwardTerminalBlurAsEscape,
   TERMINAL_ESCAPE_SEQUENCE,
+  terminalClipboardAction,
   terminalControlSequence,
 } from '@/terminalKeyBridge.mjs'
 import { toTerminalTheme, useTheme } from '@/theme'
@@ -214,6 +215,26 @@ export function TerminalSession({
       terminal.open(host)
       terminal.loadAddon(new CanvasAddon())
       terminal.textarea?.setAttribute('aria-label', `${threadTitleRef.current} ${sessionLabel} terminal input`)
+      terminal.attachCustomKeyEventHandler((event) => {
+        const action = terminalClipboardAction(event, terminal.hasSelection())
+        if (!action) return true
+        // Omarchy sends Ctrl-C/X/V to browser windows. Let the browser's native
+        // paste event reach xterm (and the Pi image handler), without sending ^V.
+        if (action === 'paste') return false
+        event.preventDefault()
+        if (event.type === 'keydown') {
+          const selection = terminal.getSelection()
+          void writeSystemClipboard(selection).then(() => {
+            // Terminal output is immutable; cut copies and dismisses selection.
+            if (!disposed && action === 'cut' && terminal.getSelection() === selection) {
+              terminal.clearSelection()
+            }
+          }).catch((reason) => {
+            console.warn('Could not copy the terminal selection to the system clipboard.', reason)
+          })
+        }
+        return false
+      })
       const terminalHost: HTMLDivElement = host
       // tmux forwards completed copy-mode selections with OSC 52. xterm leaves
       // clipboard access to its embedder, so bridge that sequence to the browser.
