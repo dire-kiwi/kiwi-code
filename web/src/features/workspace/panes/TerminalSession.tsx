@@ -7,6 +7,7 @@ import { LoaderCircle, RefreshCw } from 'lucide-react'
 import { uploadPiImage } from '@/api'
 import { apiWebSocketUrl } from '@/apiUrl'
 import { imageFilesFromClipboard, validateImageAdditions } from '@/lib/promptImages'
+import { installTerminalMousePaste } from '@/lib/terminalMousePaste'
 import {
   isTerminalEscapeKey,
   shouldBridgeTerminalControl,
@@ -213,6 +214,7 @@ export function TerminalSession({
       terminal.loadAddon(fit)
       terminal.loadAddon(new WebLinksAddon())
       terminal.open(host)
+      const disposeMousePaste = installTerminalMousePaste(host, () => terminal.focus())
       terminal.loadAddon(new CanvasAddon())
       terminal.textarea?.setAttribute('aria-label', `${threadTitleRef.current} ${sessionLabel} terminal input`)
       terminal.attachCustomKeyEventHandler((event) => {
@@ -638,6 +640,7 @@ export function TerminalSession({
         window.removeEventListener('pointerdown', handlePagePointerDown, true)
         terminalHost.removeEventListener('focusout', handleTerminalFocusOut, true)
         host.removeEventListener('paste', handlePaste, true)
+        disposeMousePaste()
         observer.disconnect()
         clipboardDisposable.dispose()
         inputDisposable.dispose()
