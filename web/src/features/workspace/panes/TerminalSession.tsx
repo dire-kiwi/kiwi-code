@@ -7,11 +7,13 @@ import { LoaderCircle, RefreshCw } from 'lucide-react'
 import { uploadPiImage } from '@/api'
 import { apiWebSocketUrl } from '@/apiUrl'
 import { imageFilesFromClipboard, validateImageAdditions } from '@/lib/promptImages'
+import { installTerminalMousePaste } from '@/lib/terminalMousePaste'
 import {
   isTerminalEscapeKey,
   shouldBridgeTerminalControl,
   shouldForwardTerminalBlurAsEscape,
   TERMINAL_ESCAPE_SEQUENCE,
+  terminalClipboardAction,
   terminalControlSequence,
 } from '@/terminalKeyBridge.mjs'
 import { toTerminalTheme, useTheme } from '@/theme'
@@ -212,8 +214,29 @@ export function TerminalSession({
       terminal.loadAddon(fit)
       terminal.loadAddon(new WebLinksAddon())
       terminal.open(host)
+      const disposeMousePaste = installTerminalMousePaste(host, () => terminal.focus())
       terminal.loadAddon(new CanvasAddon())
       terminal.textarea?.setAttribute('aria-label', `${threadTitleRef.current} ${sessionLabel} terminal input`)
+      terminal.attachCustomKeyEventHandler((event) => {
+        const action = terminalClipboardAction(event, terminal.hasSelection())
+        if (!action) return true
+        // Omarchy sends Ctrl-C/X/V to browser windows. Let the browser's native
+        // paste event reach xterm (and the Pi image handler), without sending ^V.
+        if (action === 'paste') return false
+        event.preventDefault()
+        if (event.type === 'keydown') {
+          const selection = terminal.getSelection()
+          void writeSystemClipboard(selection).then(() => {
+            // Terminal output is immutable; cut copies and dismisses selection.
+            if (!disposed && action === 'cut' && terminal.getSelection() === selection) {
+              terminal.clearSelection()
+            }
+          }).catch((reason) => {
+            console.warn('Could not copy the terminal selection to the system clipboard.', reason)
+          })
+        }
+        return false
+      })
       const terminalHost: HTMLDivElement = host
       // tmux forwards completed copy-mode selections with OSC 52. xterm leaves
       // clipboard access to its embedder, so bridge that sequence to the browser.
@@ -617,6 +640,7 @@ export function TerminalSession({
         window.removeEventListener('pointerdown', handlePagePointerDown, true)
         terminalHost.removeEventListener('focusout', handleTerminalFocusOut, true)
         host.removeEventListener('paste', handlePaste, true)
+        disposeMousePaste()
         observer.disconnect()
         clipboardDisposable.dispose()
         inputDisposable.dispose()

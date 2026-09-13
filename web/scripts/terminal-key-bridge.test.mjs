@@ -5,6 +5,7 @@ import {
   shouldBridgeTerminalControl,
   shouldForwardTerminalBlurAsEscape,
   terminalControlSequence,
+  terminalClipboardAction,
 } from '../src/terminalKeyBridge.mjs'
 
 function key(overrides = {}) {
@@ -19,6 +20,25 @@ function key(overrides = {}) {
     ...overrides,
   }
 }
+
+test('Omarchy clipboard chords copy and cut selections, preserving terminal controls otherwise', () => {
+  for (const [letter, action] of [['c', 'copy'], ['x', 'cut']]) {
+    const event = key({ key: letter, ctrlKey: true })
+    assert.equal(terminalClipboardAction(event, true), action)
+    assert.equal(terminalClipboardAction(event, false), null)
+  }
+  assert.equal(terminalClipboardAction(key({ key: 'v', ctrlKey: true }), false), 'paste')
+})
+
+test('supports native clipboard alternatives without stealing plain typing or Alt chords', () => {
+  assert.equal(terminalClipboardAction(key({ key: 'Insert', ctrlKey: true }), true), 'copy')
+  assert.equal(terminalClipboardAction(key({ key: 'Insert', shiftKey: true }), false), 'paste')
+  assert.equal(terminalClipboardAction(key({ key: 'C', ctrlKey: true, shiftKey: true }), true), 'copy')
+  assert.equal(terminalClipboardAction(key({ key: 'v', metaKey: true }), false), 'paste')
+  assert.equal(terminalClipboardAction(key({ key: 'c', metaKey: true }), true), 'copy')
+  assert.equal(terminalClipboardAction(key({ key: 'v' }), true), null)
+  assert.equal(terminalClipboardAction(key({ key: 'v', ctrlKey: true, altKey: true }), true), null)
+})
 
 test('normalizes modern and legacy browser Escape events', () => {
   for (const event of [

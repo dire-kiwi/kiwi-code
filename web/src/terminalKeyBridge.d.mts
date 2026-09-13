@@ -4,6 +4,10 @@ type TerminalKeyboardEvent = Pick<
 >
 
 export const TERMINAL_ESCAPE_SEQUENCE: '\x1b'
+export function terminalClipboardAction(
+  event: TerminalKeyboardEvent,
+  hasSelection: boolean,
+): 'copy' | 'cut' | 'paste' | null
 export function isTerminalEscapeKey(event: TerminalKeyboardEvent): boolean
 export function terminalControlSequence(event: TerminalKeyboardEvent): string | null
 export function shouldBridgeTerminalControl(
