@@ -356,7 +356,7 @@ export function NativeChatPane(props: Props) {
   }, [draft])
 
   async function submit() {
-    if (submitting.current || state.working || (!draft.trim() && !images.attachments.length)) return
+    if (submitting.current || (!draft.trim() && !images.attachments.length)) return
     submitting.current = true
     const controller = new AbortController()
     abortUpload.current = controller
@@ -483,6 +483,26 @@ export function NativeChatPane(props: Props) {
               )}
             </div>
           )}
+          {!!state.queuedMessages?.length && (
+            <div
+              aria-label="Queued prompts"
+              className="max-h-28 overflow-auto border-b border-ghost-border px-4 py-2 text-xs text-ghost-muted"
+            >
+              <span className="font-medium text-ghost-green">Queued</span>
+              {state.queuedMessages.map((message, index) => (
+                <p key={index} className="truncate">{message}</p>
+              ))}
+              {!state.working && (
+                <button
+                  className={control}
+                  disabled={!connected}
+                  onClick={() => send({ type: 'retry_queue' })}
+                >
+                  Retry queued messages
+                </button>
+              )}
+            </div>
+          )}
           {images.attachments.length > 0 && (
             <div className="flex gap-2 overflow-x-auto px-4 pt-3">
               {images.attachments.map((image) => (
@@ -571,9 +591,22 @@ export function NativeChatPane(props: Props) {
                 </option>
               ))}
             </select>
+            {state.working && (
+              <button
+                aria-label="Queue message"
+                className={`${control} ml-auto`}
+                disabled={!connected || uploading || (!draft.trim() && !images.attachments.length)}
+                onClick={() => void submit()}
+              >
+                <ArrowUp size={18} />
+              </button>
+            )}
             <button
               aria-label={state.working ? `Stop ${agentName}` : 'Send message'}
-              className="ml-auto flex size-8 shrink-0 items-center justify-center rounded-full bg-ghost-green text-ghost-black disabled:opacity-30"
+              className={classNames(
+                'flex size-8 shrink-0 items-center justify-center rounded-full bg-ghost-green text-ghost-black disabled:opacity-30',
+                !state.working && 'ml-auto',
+              )}
               disabled={
                 !connected ||
                 uploading ||
@@ -593,7 +626,7 @@ export function NativeChatPane(props: Props) {
         </div>
         <p className="mx-auto mt-2 max-w-3xl px-3 text-center text-[10px] text-ghost-dim">
           {state.working
-            ? `${agentName} is working · Stop to change direction`
+            ? 'Enter to queue · Shift+Enter for a new line'
             : 'Enter to send · Shift+Enter for a new line'}
           {state.usage && (
             <span className="ml-2">· {state.usage.totalTokens.toLocaleString()} tokens</span>
