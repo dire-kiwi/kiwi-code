@@ -25,13 +25,14 @@ type chatUsage struct {
 	TotalTokens       int64 `json:"totalTokens"`
 }
 type chatState struct {
-	Items    []chatItem    `json:"items"`
-	Requests []chatRequest `json:"requests"`
-	Working  bool          `json:"working"`
-	Error    string        `json:"error,omitempty"`
-	Model    string        `json:"model,omitempty"`
-	Effort   string        `json:"effort,omitempty"`
-	Usage    *chatUsage    `json:"usage,omitempty"`
+	QueuedMessages []string      `json:"queuedMessages"`
+	Items          []chatItem    `json:"items"`
+	Requests       []chatRequest `json:"requests"`
+	Working        bool          `json:"working"`
+	Error          string        `json:"error,omitempty"`
+	Model          string        `json:"model,omitempty"`
+	Effort         string        `json:"effort,omitempty"`
+	Usage          *chatUsage    `json:"usage,omitempty"`
 }
 type chatClientMessage struct {
 	Type      string                `json:"type"`

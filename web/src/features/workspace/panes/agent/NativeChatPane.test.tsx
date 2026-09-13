@@ -73,6 +73,26 @@ describe('native chat', () => {
     socket.receive({ type: 'chat_sent' })
     expect((screen.getByLabelText('Message Codex') as HTMLTextAreaElement).value).toBe('')
   })
+  it('queues with Enter and the queue button while keeping Stop available', async () => {
+    render(<NativeChatPane {...props} />)
+    const socket = Socket.instances[0]
+    socket.receive({ ...snapshot, value: { ...snapshot.value, working: true } })
+    const input = screen.getByLabelText('Message Codex')
+    fireEvent.change(input, { target: { value: 'first follow-up' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(socket.sent).toHaveLength(1))
+    expect(socket.sent[0]).toMatchObject({ type: 'prompt', message: 'first follow-up' })
+    socket.receive({ type: 'chat_sent' })
+    expect((input as HTMLTextAreaElement).value).toBe('')
+    socket.receive({ ...snapshot, sequence: 1, value: { ...snapshot.value, working: true, queuedMessages: ['first follow-up'] } })
+    expect(screen.getByLabelText('Queued prompts').textContent).toContain('first follow-up')
+    fireEvent.change(input, { target: { value: 'second follow-up' } })
+    fireEvent.click(screen.getByLabelText('Queue message'))
+    await waitFor(() => expect(socket.sent).toHaveLength(2))
+    expect(socket.sent[1]).toMatchObject({ type: 'prompt', message: 'second follow-up' })
+    fireEvent.click(screen.getByLabelText('Stop Codex'))
+    expect(socket.sent[2]).toEqual({ type: 'abort' })
+  })
   it('reconnects with history without sending the initial prompt twice', () => {
     render(<NativeChatPane {...props} initialPrompt="hello" />)
     const first = Socket.instances[0]

@@ -95,9 +95,6 @@ func TestCodexNativeApprovalQuestionAndInterrupt(t *testing.T) {
 		if !state.Working {
 			t.Fatal("pending approval must keep thread busy")
 		}
-		if err := p.prompt(chatClientMessage{Message: "duplicate"}); err == nil {
-			t.Fatal("accepted simultaneous turn")
-		}
 		response := chatClientMessage{RequestID: state.Requests[0].ID, Decision: "accept"}
 		if err := p.respond(response); err != nil {
 			t.Fatal(err)
@@ -312,4 +309,63 @@ func TestCodexNativeReportsCumulativeUsageWithoutDoubleCountingCache(t *testing.
 		t.Fatal("usage was not reported")
 	}
 	awaitCodexState(t, p, func(s chatState) bool { return s.Usage != nil && s.Usage.TotalTokens == 15 })
+}
+
+func TestCodexNativeQueueSurvivesReconnectAndRunsInOrder(t *testing.T) {
+	m, item, thread := codexFixtureManager(t)
+	p, err := m.getOrStart(item, thread, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.prompt(chatClientMessage{Message: "approval"}); err != nil {
+		t.Fatal(err)
+	}
+	awaitCodexState(t, p, func(s chatState) bool { return len(s.Requests) == 1 })
+	for _, message := range []string{"first follow-up", "second follow-up"} {
+		if err := p.prompt(chatClientMessage{Message: message}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reconnected, err := m.getOrStart(item, thread, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := awaitCodexState(t, reconnected, func(s chatState) bool { return len(s.QueuedMessages) == 2 })
+	if state.QueuedMessages[0] != "first follow-up" || state.QueuedMessages[1] != "second follow-up" {
+		t.Fatalf("queue order: %+v", state)
+	}
+	if err := p.respond(chatClientMessage{RequestID: json.RawMessage("900"), Decision: "accept"}); err != nil {
+		t.Fatal(err)
+	}
+	state = awaitCodexState(t, p, func(s chatState) bool { return !s.Working && len(s.QueuedMessages) == 0 && len(s.Items) == 7 })
+	var users []string
+	for _, item := range state.Items {
+		if item.Kind == "user" {
+			users = append(users, item.Text)
+		}
+	}
+	if strings.Join(users, ",") != "approval,first follow-up,second follow-up" {
+		t.Fatalf("transcript order: %v", users)
+	}
+}
+
+func TestCodexNativeRetainsRejectedQueuedPrompt(t *testing.T) {
+	m, item, thread := codexFixtureManager(t)
+	p, err := m.getOrStart(item, thread, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.prompt(chatClientMessage{Message: "approval"}); err != nil {
+		t.Fatal(err)
+	}
+	awaitCodexState(t, p, func(s chatState) bool { return len(s.Requests) == 1 })
+	if err := p.prompt(chatClientMessage{Message: "reject"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.respond(chatClientMessage{RequestID: json.RawMessage("900"), Decision: "accept"}); err != nil {
+		t.Fatal(err)
+	}
+	awaitCodexState(t, p, func(s chatState) bool {
+		return !s.Working && len(s.QueuedMessages) == 1 && strings.Contains(s.Error, "Queued message failed")
+	})
 }

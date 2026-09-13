@@ -26,6 +26,7 @@ export type ChatUsage = { inputTokens: number; outputTokens: number; totalTokens
 export type ChatState = {
   items: ChatItem[]
   requests: ChatRequest[]
+  queuedMessages?: string[]
   working: boolean
   error?: string
   usage?: ChatUsage
