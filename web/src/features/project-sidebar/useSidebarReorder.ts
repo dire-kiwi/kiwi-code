@@ -2,7 +2,7 @@
 // a new position: the in-flight drag, the drop indicator, the save-in-progress
 // latch, and the six handlers the rows attach.
 //
-// Threads reorder within their active roots only. Archived roots keep their
+// Threads reorder within their active roots only. Settled roots keep their
 // relative order at the end, and the tree flattens the result back into the
 // parent-child order the server stores.
 import { useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
@@ -20,7 +20,7 @@ import {
 } from './sidebarDragAndDrop'
 
 type ThreadTree = {
-  roots: Array<{ id: string; archivedAt?: string | null }>
+  roots: Array<{ id: string; settledAt?: string | null }>
   orderedTreeIds: (rootIds: string[]) => string[]
 }
 
@@ -81,14 +81,14 @@ export function useSidebarReorder({
       .finally(() => setSavingOrder(false))
   }
 
-  /** Active roots first, archived roots after, both in their current order. */
+  /** Active roots first, settled roots after, both in their current order. */
   function partitionedRootIds(projectId: string) {
     const tree = treeFor(projectId)
     if (!tree) return null
     return {
       tree,
-      active: tree.roots.filter((thread) => !thread.archivedAt).map((thread) => thread.id),
-      archived: tree.roots.filter((thread) => thread.archivedAt).map((thread) => thread.id),
+      active: tree.roots.filter((thread) => !thread.settledAt).map((thread) => thread.id),
+      settled: tree.roots.filter((thread) => thread.settledAt).map((thread) => thread.id),
     }
   }
 
@@ -168,7 +168,7 @@ export function useSidebarReorder({
       verticalDropPosition(event),
     )
     setActiveDrag(null)
-    saveThreadOrder(project, partitioned.tree.orderedTreeIds([...threadIds, ...partitioned.archived]))
+    saveThreadOrder(project, partitioned.tree.orderedTreeIds([...threadIds, ...partitioned.settled]))
   }
 
   function handleProjectHandleKeyDown(event: KeyboardEvent<HTMLButtonElement>, projectId: string) {
@@ -199,7 +199,7 @@ export function useSidebarReorder({
     if (index < 0 || targetIndex < 0 || targetIndex >= partitioned.active.length) return
     const reordered = [...partitioned.active]
     ;[reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]]
-    saveThreadOrder(project, partitioned.tree.orderedTreeIds([...reordered, ...partitioned.archived]))
+    saveThreadOrder(project, partitioned.tree.orderedTreeIds([...reordered, ...partitioned.settled]))
   }
 
   return {

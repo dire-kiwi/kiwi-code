@@ -1,6 +1,6 @@
 export type IndexedThread = {
   id: string
-  archivedAt?: string
+  settledAt?: string
 }
 
 export type IndexedProject<Thread extends IndexedThread = IndexedThread> = {
@@ -19,7 +19,7 @@ export type ThreadTreeIndex<Thread extends IndexedThread = IndexedThread> = {
   byId: Map<string, Thread>
   roots: Thread[]
   rootId: (threadId: string) => string | null
-  activityDisplayThread: (activity: IndexedActivity, rejectArchived?: boolean) => Thread | null
+  activityDisplayThread: (activity: IndexedActivity, rejectSettled?: boolean) => Thread | null
   orderedTreeIds: (rootIds: readonly string[]) => string[]
 }
 

@@ -8,9 +8,9 @@ export function createThreadTreeIndex(threads) {
   const byId = new Map(threads.map((thread) => [thread.id, thread]))
   const roots = [...threads]
   const rootId = (threadId) => byId.has(threadId) ? threadId : null
-  const activityDisplayThread = (activity, rejectArchived = true) => {
+  const activityDisplayThread = (activity, rejectSettled = true) => {
     const thread = byId.get(activity.threadId)
-    return thread && (!rejectArchived || !thread.archivedAt) ? thread : null
+    return thread && (!rejectSettled || !thread.settledAt) ? thread : null
   }
   const orderedTreeIds = (rootIds) => {
     const ordered = []
@@ -52,7 +52,7 @@ export function createSidebarThreadIndex(projects, activities) {
   const finishedActivitiesByKey = new Map()
   for (const activity of activities) {
     const entry = entryByKey.get(sidebarThreadKey(activity.projectId, activity.threadId))
-    if (!entry || entry.thread.archivedAt) continue
+    if (!entry || entry.thread.settledAt) continue
     const key = sidebarThreadKey(activity.projectId, activity.threadId)
     const displayed = activitiesByKey.get(key) ?? []
     displayed.push(activity)

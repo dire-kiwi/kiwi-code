@@ -288,9 +288,16 @@ func (h *terminalHandler) serveClaudeNative(w http.ResponseWriter, r *http.Reque
 					continue
 				}
 			}
-			if err := process.sendPrompt(message.Message, message.Images); err != nil {
-				_ = writeStatus("claude_native_error", "Could not send the message to Claude.")
+			_, sendErr := withTerminalThreadMutation(h, item, thread, func() (struct{}, error) {
+				if _, err := h.projects.RecordThreadPrompt(item.ID, thread.ID, time.Now().UTC()); err != nil {
+					return struct{}{}, err
+				}
+				return struct{}{}, process.sendPrompt(message.Message, message.Images)
+			}, nil)
+			if sendErr != nil {
+				_ = writeStatus("claude_native_error", "Could not send the message to Claude: "+sendErr.Error())
 			}
+
 		case <-process.done:
 			message := process.exitMessage()
 			_ = writeStatus("claude_native_exit", message)

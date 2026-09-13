@@ -4,7 +4,8 @@ export type ActivityGroupThread = {
   id: string
   createdAt: string
   lastPromptAt?: string
-  archivedAt?: string
+  settledAt?: string
+  unsettledAt?: string
 }
 
 export type ActivityGroupProject = {
@@ -30,6 +31,7 @@ export type ActivityViewGroups = {
   working: ActivityGroupEntry[]
   needsReview: ActivityGroupEntry[]
   recent: ActivityGroupEntry[]
+  settled: ActivityGroupEntry[]
   hiddenRecentCount: number
 }
 

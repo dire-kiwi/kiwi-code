@@ -1198,92 +1198,6 @@ func TestStoreAddsNewRootThreadsAtTop(t *testing.T) {
 	}
 }
 
-func TestStoreArchivesRestoresAndExpiresThreads(t *testing.T) {
-	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
-	store, err := NewStore(dataFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	item, err := store.Add("Demo", t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := store.AddThread(item.ID, "Second")
-	if err != nil {
-		t.Fatal(err)
-	}
-	third, err := store.AddThread(item.ID, "Third")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	archivedAt := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
-	archived, err := store.setThreadArchivedAt(item.ID, second.ID, true, archivedAt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if archived.ArchivedAt == nil || !archived.ArchivedAt.Equal(archivedAt) {
-		t.Fatalf("archived thread = %#v", archived)
-	}
-	persisted, err := store.Get(item.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := []string{persisted.Threads[0].ID, persisted.Threads[1].ID, persisted.Threads[2].ID}; got[0] != third.ID || got[1] != item.Threads[0].ID || got[2] != second.ID {
-		t.Fatalf("archived thread order = %v", got)
-	}
-	fourth, err := store.AddThread(item.ID, "Fourth")
-	if err != nil {
-		t.Fatal(err)
-	}
-	persisted, err = store.Get(item.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(persisted.Threads) != 4 || persisted.Threads[0].ID != fourth.ID || persisted.Threads[3].ID != second.ID {
-		t.Fatalf("new active thread was not inserted first and before archived threads: %#v", persisted.Threads)
-	}
-
-	retentionDays := 7
-	if _, err := store.UpdateSettingsValues(SettingsUpdate{ArchivedThreadRetentionDays: &retentionDays}); err != nil {
-		t.Fatal(err)
-	}
-	due, err := store.ArchivedThreadsDue(archivedAt.Add(8 * 24 * time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(due) != 1 || due[0].ProjectID != item.ID || due[0].ThreadID != second.ID {
-		t.Fatalf("expired archived threads = %#v", due)
-	}
-	if err := store.DeleteArchivedThread(item.ID, second.ID, archivedAt.Add(-time.Second)); !errors.Is(err, ErrThreadNotArchived) {
-		t.Fatalf("early archived deletion error = %v, want ErrThreadNotArchived", err)
-	}
-
-	restored, err := store.SetThreadArchived(item.ID, second.ID, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if restored.ArchivedAt != nil {
-		t.Fatalf("restored thread remained archived: %#v", restored)
-	}
-	persisted, err = store.Get(item.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if persisted.Threads[3].ID != second.ID {
-		t.Fatalf("restored thread was not placed after active threads: %#v", persisted.Threads)
-	}
-
-	reloaded, err := NewStore(dataFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	settings := reloaded.GetSettings()
-	if settings.ArchivedThreadRetentionDays != retentionDays || settings.OrphanedWorktreeRetentionDays != defaultOrphanedWorktreeRetentionDays {
-		t.Fatalf("reloaded cleanup settings = %#v", settings)
-	}
-}
-
 func TestStoreCleansOnlyUnattachedWorktreesWithoutChanges(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
@@ -1531,10 +1445,8 @@ func TestStorePersistsWorktreeBaseLocation(t *testing.T) {
 	if info, err := os.Stat(customBase); err != nil || !info.IsDir() {
 		t.Fatalf("custom worktree directory was not created: %v", err)
 	}
-	archivedDays := 14
 	orphanedDays := 0
 	if _, err := store.UpdateSettingsValues(SettingsUpdate{
-		ArchivedThreadRetentionDays:   &archivedDays,
 		OrphanedWorktreeRetentionDays: &orphanedDays,
 	}); err != nil {
 		t.Fatal(err)
@@ -1545,7 +1457,7 @@ func TestStorePersistsWorktreeBaseLocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if settings := reloaded.GetSettings(); settings.WorktreeBasePath != customBase || settings.UsingDefault ||
-		settings.ArchivedThreadRetentionDays != archivedDays || settings.OrphanedWorktreeRetentionDays != orphanedDays {
+		settings.OrphanedWorktreeRetentionDays != orphanedDays {
 		t.Fatalf("custom settings were not persisted: %#v", settings)
 	}
 	settings, err = reloaded.UpdateSettings("")
@@ -1553,7 +1465,7 @@ func TestStorePersistsWorktreeBaseLocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if settings.WorktreeBasePath != wantDefault || !settings.UsingDefault ||
-		settings.ArchivedThreadRetentionDays != archivedDays || settings.OrphanedWorktreeRetentionDays != orphanedDays {
+		settings.OrphanedWorktreeRetentionDays != orphanedDays {
 		t.Fatalf("settings were not reset to defaults: %#v", settings)
 	}
 }

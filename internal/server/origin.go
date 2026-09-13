@@ -37,7 +37,7 @@ type Options struct {
 	// provide an isolated name so they cannot access the user's sessions.
 	TmuxSocketName string
 
-	// CleanupContext controls the periodic archived-thread and unattached-
+	// CleanupContext controls the periodic idle settlement and unattached-
 	// worktree cleanup loop. A nil context uses context.Background().
 	CleanupContext context.Context
 

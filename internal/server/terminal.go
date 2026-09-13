@@ -1489,6 +1489,15 @@ func (h *terminalHandler) ensureTerminalThreadActiveLocked(projectID, threadID s
 	if stopped {
 		return errTerminalStopping
 	}
+	if h.projects != nil {
+		_, thread, err := h.projects.GetThreadPersisted(projectID, threadID)
+		if err != nil {
+			return errors.Join(errTerminalStopping, err)
+		}
+		if thread.SettledAt != nil {
+			return errTerminalStopping
+		}
+	}
 	return nil
 }
 
@@ -3466,10 +3475,18 @@ func (h *terminalHandler) commandForTmuxTarget(
 		args = append(pluginArguments, args...)
 	}
 
+	var resumeEnvironment []string
+	if notice == "" {
+		args, resumeEnvironment, err = h.terminalAgentResume(item, thread, tool, args)
+		if err != nil {
+			return "", nil, "", err
+		}
+	}
 	environment := []string{
 		"KIWI_CODE_TMUX_SESSION=" + sessionName,
 		"KIWI_CODE_TMUX_WINDOW=" + windowName,
 	}
+	environment = append(environment, resumeEnvironment...)
 	if isTerminalCodingAgent(tool) && threadEndpoint != "" {
 		environment = append(environment, kiwiCodeThreadEnvironment(threadEndpoint, item.ID, thread.ID, h.titleGenerationSettings())...)
 	}

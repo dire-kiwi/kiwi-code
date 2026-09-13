@@ -22,8 +22,8 @@ import (
 )
 
 var ErrNotFound = errors.New("project not found")
+var ErrThreadSettled = errors.New("un-settle the thread before starting an agent")
 var ErrThreadNotFound = errors.New("thread not found")
-var ErrThreadNotArchived = errors.New("thread is not archived for deletion")
 var ErrThreadRollbackPending = errors.New("thread creation rollback is pending")
 var ErrThreadTitleLocked = errors.New("thread title is locked")
 var ErrProfileNotFound = errors.New("profile not found")
@@ -31,7 +31,6 @@ var ErrInvalidOrder = errors.New("invalid order")
 
 const (
 	defaultThreadTitle                   = "New thread"
-	defaultArchivedThreadRetentionDays   = 30
 	defaultOrphanedWorktreeRetentionDays = 30
 	maxCleanupRetentionDays              = 3650
 	DefaultWorktreeBranchPrefix          = "kiwi-code/"
@@ -64,7 +63,9 @@ type Thread struct {
 	RollbackCleanupReady   bool       `json:"rollbackCleanupReady,omitempty"`
 	AutoNamed              bool       `json:"autoNamed,omitempty"`
 	TitleLocked            bool       `json:"titleLocked,omitempty"`
-	ArchivedAt             *time.Time `json:"archivedAt,omitempty"`
+	SettledAt              *time.Time `json:"settledAt,omitempty"`
+	LastActivityAt         *time.Time `json:"lastActivityAt,omitempty"`
+	UnsettledAt            *time.Time `json:"unsettledAt,omitempty"`
 	TokenLimit             *int64     `json:"tokenLimit,omitempty"`
 	CostLimitUSD           *float64   `json:"costLimitUsd,omitempty"`
 	CodingAgent            string     `json:"codingAgent,omitempty"`
@@ -215,7 +216,6 @@ type Settings struct {
 	WorktreeBasePath              string               `json:"worktreeBasePath"`
 	DefaultWorktreeBasePath       string               `json:"defaultWorktreeBasePath"`
 	UsingDefault                  bool                 `json:"usingDefault"`
-	ArchivedThreadRetentionDays   int                  `json:"archivedThreadRetentionDays"`
 	OrphanedWorktreeRetentionDays int                  `json:"orphanedWorktreeRetentionDays"`
 	CodingAgents                  []CodingAgentSetting `json:"codingAgents"`
 	// TitleModel is the pi provider/model used to auto-generate thread
@@ -233,7 +233,6 @@ type Settings struct {
 type SettingsUpdate struct {
 	NewThreadSelection            *NewThreadSelection
 	WorktreeBasePath              *string
-	ArchivedThreadRetentionDays   *int
 	OrphanedWorktreeRetentionDays *int
 	CodingAgents                  *[]CodingAgentSetting
 	TitleModel                    *string
@@ -244,7 +243,6 @@ type SettingsUpdate struct {
 type persistedSettings struct {
 	NewThreadSelection            *NewThreadSelection   `json:"newThreadSelection,omitempty"`
 	WorktreeBasePath              string                `json:"worktreeBasePath,omitempty"`
-	ArchivedThreadRetentionDays   *int                  `json:"archivedThreadRetentionDays,omitempty"`
 	OrphanedWorktreeRetentionDays *int                  `json:"orphanedWorktreeRetentionDays,omitempty"`
 	CodingAgents                  *[]CodingAgentSetting `json:"codingAgents,omitempty"`
 	LegacyClaudeCodeProfiles      *[]ClaudeCodeProfile  `json:"claudeCodeProfiles,omitempty"`
@@ -277,7 +275,6 @@ type Store struct {
 	orphanedWorktreesFilePath     string
 	defaultWorktreeBasePath       string
 	worktreeBasePath              string
-	archivedThreadRetentionDays   int
 	orphanedWorktreeRetentionDays int
 	codingAgents                  []CodingAgentSetting
 	titleModel                    string
@@ -375,7 +372,6 @@ func NewStore(filePath string) (*Store, error) {
 		settingsFilePath:              filepath.Join(dataDirectory, "settings.json"),
 		orphanedWorktreesFilePath:     filepath.Join(dataDirectory, "orphaned-worktrees.json"),
 		defaultWorktreeBasePath:       filepath.Join(dataDirectory, "worktrees"),
-		archivedThreadRetentionDays:   defaultArchivedThreadRetentionDays,
 		orphanedWorktreeRetentionDays: defaultOrphanedWorktreeRetentionDays,
 		codingAgents:                  defaultCodingAgentSettings(),
 		theme:                         DefaultTheme(),
@@ -503,10 +499,19 @@ func cloneThread(source Thread) Thread {
 		lastPromptAt := *source.LastPromptAt
 		thread.LastPromptAt = &lastPromptAt
 	}
-	if source.ArchivedAt != nil {
-		archivedAt := *source.ArchivedAt
-		thread.ArchivedAt = &archivedAt
+	if source.LastActivityAt != nil {
+		value := *source.LastActivityAt
+		thread.LastActivityAt = &value
 	}
+	if source.SettledAt != nil {
+		settledAt := *source.SettledAt
+		thread.SettledAt = &settledAt
+	}
+	if source.UnsettledAt != nil {
+		unsettledAt := *source.UnsettledAt
+		thread.UnsettledAt = &unsettledAt
+	}
+
 	if source.TokenLimit != nil {
 		tokenLimit := *source.TokenLimit
 		thread.TokenLimit = &tokenLimit
@@ -734,10 +739,13 @@ func (s *Store) RecordThreadPrompt(projectID, threadID string, promptedAt time.T
 				if thread.LastPromptAt != nil && !promptedAt.After(*thread.LastPromptAt) {
 					return cloneThread(*thread), nil
 				}
-				previous := thread.LastPromptAt
+				if thread.SettledAt != nil {
+					return Thread{}, ErrThreadSettled
+				}
+				previous := cloneThread(*thread)
 				thread.LastPromptAt = &promptedAt
 				return saveProjectMutationResult(s, cloneThread(*thread), func() {
-					thread.LastPromptAt = previous
+					*thread = previous
 				})
 			}
 			return Thread{}, ErrThreadNotFound
@@ -848,59 +856,6 @@ func (s *Store) SetThreadTitleLocked(projectID, threadID string, locked bool) (T
 	})
 }
 
-func (s *Store) SetThreadArchived(projectID, threadID string, archived bool) (Thread, error) {
-	return s.setThreadArchivedAt(projectID, threadID, archived, time.Now().UTC())
-}
-
-func (s *Store) setThreadArchivedAt(projectID, threadID string, archived bool, now time.Time) (Thread, error) {
-	now = now.UTC()
-	return withProjectMutationResult(s, func() (Thread, error) {
-		for projectIndex := range s.projects {
-			if s.projects[projectIndex].ID != projectID {
-				continue
-			}
-			threads := s.projects[projectIndex].Threads
-			for threadIndex := range threads {
-				thread := threads[threadIndex]
-				if thread.ID != threadID {
-					continue
-				}
-				if thread.RollbackPending {
-					return Thread{}, ErrThreadRollbackPending
-				}
-				if archived == (thread.ArchivedAt != nil) {
-					return cloneThread(thread), nil
-				}
-
-				previous := append([]Thread(nil), threads...)
-				threads = append(threads[:threadIndex], threads[threadIndex+1:]...)
-				if archived {
-					thread.ArchivedAt = &now
-					threads = append(threads, thread)
-				} else {
-					thread.ArchivedAt = nil
-					insertAt := len(threads)
-					for index, candidate := range threads {
-						if candidate.ArchivedAt != nil {
-							insertAt = index
-							break
-						}
-					}
-					threads = append(threads, Thread{})
-					copy(threads[insertAt+1:], threads[insertAt:])
-					threads[insertAt] = thread
-				}
-				s.projects[projectIndex].Threads = threads
-				return saveProjectMutationResult(s, cloneThread(thread), func() {
-					s.projects[projectIndex].Threads = previous
-				})
-			}
-			return Thread{}, ErrThreadNotFound
-		}
-		return Thread{}, ErrNotFound
-	})
-}
-
 func (s *Store) DataDirectory() string {
 	return filepath.Dir(s.defaultWorktreeBasePath)
 }
@@ -924,7 +879,7 @@ func (s *Store) UpdateSettingsValues(update SettingsUpdate) (Settings, error) {
 }
 
 func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
-	if update.WorktreeBasePath == nil && update.ArchivedThreadRetentionDays == nil &&
+	if update.WorktreeBasePath == nil &&
 		update.OrphanedWorktreeRetentionDays == nil && update.CodingAgents == nil &&
 		update.TitleModel == nil && update.TitleThinking == nil && update.Theme == nil && update.NewThreadSelection == nil {
 		return Settings{}, errors.New("at least one setting is required")
@@ -950,11 +905,7 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 		}
 		normalizedPath = &value
 	}
-	if update.ArchivedThreadRetentionDays != nil {
-		if err := validateCleanupRetentionDays(*update.ArchivedThreadRetentionDays); err != nil {
-			return Settings{}, fmt.Errorf("archived thread retention: %w", err)
-		}
-	}
+
 	if update.OrphanedWorktreeRetentionDays != nil {
 		if err := validateCleanupRetentionDays(*update.OrphanedWorktreeRetentionDays); err != nil {
 			return Settings{}, fmt.Errorf("unattached worktree retention: %w", err)
@@ -1014,7 +965,6 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	previousPath := s.worktreeBasePath
-	previousArchivedDays := s.archivedThreadRetentionDays
 	previousOrphanedDays := s.orphanedWorktreeRetentionDays
 	previousCodingAgents := s.codingAgents
 	previousTitleModel := s.titleModel
@@ -1029,9 +979,7 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 			s.worktreeBasePath = *normalizedPath
 		}
 	}
-	if update.ArchivedThreadRetentionDays != nil {
-		s.archivedThreadRetentionDays = *update.ArchivedThreadRetentionDays
-	}
+
 	if update.OrphanedWorktreeRetentionDays != nil {
 		s.orphanedWorktreeRetentionDays = *update.OrphanedWorktreeRetentionDays
 	}
@@ -1054,7 +1002,6 @@ func (s *Store) UpdateSettingsFields(update SettingsUpdate) (Settings, error) {
 	}
 	if err := s.saveSettingsLocked(); err != nil {
 		s.worktreeBasePath = previousPath
-		s.archivedThreadRetentionDays = previousArchivedDays
 		s.orphanedWorktreeRetentionDays = previousOrphanedDays
 		s.codingAgents = previousCodingAgents
 		s.titleModel = previousTitleModel
@@ -1085,7 +1032,6 @@ func (s *Store) settingsLocked() Settings {
 		WorktreeBasePath:              s.effectiveWorktreeBasePathLocked(),
 		DefaultWorktreeBasePath:       s.defaultWorktreeBasePath,
 		UsingDefault:                  s.worktreeBasePath == "",
-		ArchivedThreadRetentionDays:   s.archivedThreadRetentionDays,
 		OrphanedWorktreeRetentionDays: s.orphanedWorktreeRetentionDays,
 		CodingAgents:                  append([]CodingAgentSetting{}, s.codingAgents...),
 		TitleModel:                    s.titleModel,
@@ -1694,15 +1640,15 @@ func (s *Store) ReorderThreads(projectID string, threadIDs []string) error {
 			}
 
 			active := make([]Thread, 0, len(ordered))
-			archived := make([]Thread, 0, len(ordered))
+			settled := make([]Thread, 0, len(ordered))
 			for _, thread := range ordered {
-				if thread.ArchivedAt == nil {
+				if thread.SettledAt == nil {
 					active = append(active, thread)
 				} else {
-					archived = append(archived, thread)
+					settled = append(settled, thread)
 				}
 			}
-			ordered = append(active, archived...)
+			ordered = append(active, settled...)
 
 			previous := s.projects[projectIndex].Threads
 			s.projects[projectIndex].Threads = ordered
@@ -2415,17 +2361,10 @@ func localHostname() string {
 }
 
 func (s *Store) DeleteThread(projectID, threadID string) error {
-	return s.deleteThread(projectID, threadID, nil)
+	return s.deleteThread(projectID, threadID)
 }
 
-func (s *Store) DeleteArchivedThread(projectID, threadID string, archivedBefore time.Time) error {
-	archivedBefore = archivedBefore.UTC()
-	return s.deleteThread(projectID, threadID, func(thread Thread) bool {
-		return thread.ArchivedAt != nil && !thread.ArchivedAt.After(archivedBefore)
-	})
-}
-
-func (s *Store) deleteThread(projectID, threadID string, canDelete func(Thread) bool) error {
+func (s *Store) deleteThread(projectID, threadID string) error {
 	return s.withProjectMutation(func() error {
 		for projectIndex := range s.projects {
 			if s.projects[projectIndex].ID != projectID {
@@ -2438,9 +2377,7 @@ func (s *Store) deleteThread(projectID, threadID string, canDelete func(Thread) 
 				if thread.RollbackPending {
 					return ErrThreadRollbackPending
 				}
-				if canDelete != nil && !canDelete(thread) {
-					return ErrThreadNotArchived
-				}
+
 				if thread.Worktree {
 					s.rememberOrphanedWorktreeLocked(s.projects[projectIndex], thread, time.Now().UTC())
 					if err := s.saveOrphanedWorktreesLocked(); err != nil {
@@ -2631,12 +2568,7 @@ func (s *Store) loadSettings() error {
 	if normalizedPath != s.defaultWorktreeBasePath {
 		s.worktreeBasePath = normalizedPath
 	}
-	if settings.ArchivedThreadRetentionDays != nil {
-		if err := validateCleanupRetentionDays(*settings.ArchivedThreadRetentionDays); err != nil {
-			return fmt.Errorf("decode archived thread retention: %w", err)
-		}
-		s.archivedThreadRetentionDays = *settings.ArchivedThreadRetentionDays
-	}
+
 	if settings.OrphanedWorktreeRetentionDays != nil {
 		if err := validateCleanupRetentionDays(*settings.OrphanedWorktreeRetentionDays); err != nil {
 			return fmt.Errorf("decode unattached worktree retention: %w", err)
@@ -2836,12 +2768,10 @@ func (s *Store) saveSettingsLocked() error {
 	if err := os.MkdirAll(filepath.Dir(s.settingsFilePath), 0o700); err != nil {
 		return fmt.Errorf("create settings directory: %w", err)
 	}
-	archivedDays := s.archivedThreadRetentionDays
 	orphanedDays := s.orphanedWorktreeRetentionDays
 	codingAgents := append([]CodingAgentSetting{}, s.codingAgents...)
 	settings := persistedSettings{
 		WorktreeBasePath:              s.worktreeBasePath,
-		ArchivedThreadRetentionDays:   &archivedDays,
 		OrphanedWorktreeRetentionDays: &orphanedDays,
 		CodingAgents:                  &codingAgents,
 		TitleModel:                    s.titleModel,

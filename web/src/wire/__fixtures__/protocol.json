@@ -88,18 +88,7 @@
     },
     "cleanup": {
       "generatedAt": "2026-07-26T12:34:56Z",
-      "archivedThreadRetentionDays": 30,
       "orphanedWorktreeRetentionDays": 30,
-      "threads": [
-        {
-          "projectId": "project-1",
-          "projectName": "Fixture project",
-          "threadId": "thread-archived",
-          "threadTitle": "Archived fixture thread",
-          "archivedAt": "2026-07-26T12:34:56Z",
-          "scheduledDeletionAt": "2026-07-27T12:34:56Z"
-        }
-      ],
       "worktrees": [
         {
           "projectId": "project-1",
@@ -171,7 +160,9 @@
             "id": "thread-1",
             "title": "Fixture thread",
             "cwd": "/workspace/fixture",
-            "createdAt": "2026-07-26T12:34:56Z"
+            "createdAt": "2026-07-26T12:34:56Z",
+            "settledAt": "2026-07-26T12:34:56Z",
+            "lastActivityAt": "2026-07-26T12:34:56Z"
           }
         ],
         "worktreeBranchPrefix": "kiwi-code/",
@@ -220,7 +211,6 @@
       "worktreeBasePath": "/workspace/worktrees",
       "defaultWorktreeBasePath": "/workspace/worktrees",
       "usingDefault": true,
-      "archivedThreadRetentionDays": 30,
       "orphanedWorktreeRetentionDays": 30,
       "codingAgents": [
         {

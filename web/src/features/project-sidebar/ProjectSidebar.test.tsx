@@ -30,7 +30,7 @@ function renderSidebar() {
   renderWithStore(
     <MemoryRouter>
       <ProjectSidebar onSelectProfile={() => {}} onProfileCreated={() => {}} onProjectCreated={() => {}}
-        onSelectThread={onSelectThread} onDeleteProject={() => {}} onArchiveThread={() => {}} onDeleteThread={() => {}} />
+        onSelectThread={onSelectThread} onDeleteProject={() => {}} onDeleteThread={() => {}} />
       <Location />
     </MemoryRouter>, { store },
   )

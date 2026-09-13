@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	tmuxSessionInactivityLimit = 24 * time.Hour
+	tmuxSessionInactivityLimit = threadSettlementIdleLimit
 	sessionClosureLogFileName  = "tmux-session-closures.json"
 	maxSessionClosureEvents    = 500
 	tmuxLastUsedOption         = "@kiwi-code-last-used"
@@ -184,7 +184,7 @@ func (l *sessionClosureLog) read() ([]sessionClosureEvent, error) {
 func validSessionClosureEvent(event sessionClosureEvent) bool {
 	return event.ID != "" && event.ProjectID != "" && event.ThreadID != "" &&
 		event.ProjectName != "" && event.ThreadTitle != "" && len(event.SessionNames) > 0 &&
-		!event.LastActivityAt.IsZero() && !event.ClosedAt.IsZero() && event.Reason == "inactivity"
+		!event.LastActivityAt.IsZero() && !event.ClosedAt.IsZero() && (event.Reason == "inactivity" || event.Reason == "settlement")
 }
 
 func newSessionClosureEvent(item project.Project, thread project.Thread, sessions inactiveThreadSessions, closedAt time.Time) (sessionClosureEvent, error) {
@@ -211,7 +211,13 @@ func (s *Server) touchThreadTmuxActivity(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusNotFound, "Thread not found.")
 		return
 	}
-	if s.terminal.tmuxPath == "" {
+	if thread.SettledAt == nil {
+		if err := s.projects.RecordThreadActivity(item.ID, thread.ID, time.Now()); err != nil {
+			writeError(w, http.StatusInternalServerError, "Could not record thread activity.")
+			return
+		}
+	}
+	if thread.SettledAt != nil || s.terminal.tmuxPath == "" {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -476,6 +482,9 @@ func inactiveSessionsForThread(item project.Project, thread project.Thread, acti
 	result := inactiveThreadSessions{LastActivityAt: thread.CreatedAt.UTC()}
 	if thread.LastPromptAt != nil && thread.LastPromptAt.After(result.LastActivityAt) {
 		result.LastActivityAt = thread.LastPromptAt.UTC()
+	}
+	if thread.LastActivityAt != nil && thread.LastActivityAt.After(result.LastActivityAt) {
+		result.LastActivityAt = *thread.LastActivityAt
 	}
 	for _, activity := range activities {
 		if _, canonical := names[activity.Name]; !canonical {

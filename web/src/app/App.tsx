@@ -1,3 +1,4 @@
+import { SettledWorkspace } from '@/features/workspace/SettledWorkspace'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useMatch, useNavigate } from 'react-router-dom'
 import { piActivityKey } from '@/pi-activity-reconciliation.mjs'
@@ -14,7 +15,6 @@ import {
   DEFAULT_PROJECT_SETTINGS_SECTION,
 } from '@/features/settings/registry'
 import { TmuxScreen } from '@/features/screens/TmuxScreen'
-import { TerminalWorkspace } from '@/features/workspace/TerminalWorkspace'
 import {
   CLEANUP_ROUTE,
   NEW_THREAD_ROUTE,
@@ -40,12 +40,10 @@ import {
   projectCreated,
   projectRemoved,
   projectUpdated,
-  selectArchivingThreadId,
   selectDeletingProjectId,
   selectDeletingThreadId,
   selectProjects,
   selectProjectsHydrated,
-  threadArchived,
   threadCreated,
   threadRemoved,
 } from '@/store/slices/projects'
@@ -91,13 +89,13 @@ function firstWorkspacePath(projects: Project[], preferredProjectId?: string): s
   const preferredProject = preferredProjectId
     ? projects.find((project) => project.id === preferredProjectId)
     : undefined
-  const preferredActiveThread = preferredProject?.threads.find((thread) => !thread.archivedAt)
+  const preferredActiveThread = preferredProject?.threads.find((thread) => !thread.settledAt)
   if (preferredProject && preferredActiveThread) {
     return workspacePath(preferredProject.id, preferredActiveThread.id, preferredActiveThread.activeTab ?? defaultWorkspaceTool)
   }
 
-  const activeProject = projects.find((project) => project.threads.some((thread) => !thread.archivedAt))
-  const activeThread = activeProject?.threads.find((thread) => !thread.archivedAt)
+  const activeProject = projects.find((project) => project.threads.some((thread) => !thread.settledAt))
+  const activeThread = activeProject?.threads.find((thread) => !thread.settledAt)
   if (activeProject && activeThread) {
     return workspacePath(activeProject.id, activeThread.id, activeThread.activeTab ?? defaultWorkspaceTool)
   }
@@ -160,7 +158,6 @@ export default function App() {
   const threadIndex = useAppSelector(selectThreadIndex)
   const deletingId = useAppSelector(selectDeletingProjectId)
   const deletingThreadId = useAppSelector(selectDeletingThreadId)
-  const archivingThreadId = useAppSelector(selectArchivingThreadId)
   const lastWorkspacesRef = useRef<Record<string, LastWorkspace>>({})
   const previousActiveThreadRef = useRef<string | null>(null)
 
@@ -390,25 +387,6 @@ export default function App() {
     if (projectRemoved.rejected.match(result)) window.alert(result.payload)
   }
 
-  async function handleThreadArchived(project: Project, thread: Thread, archived: boolean) {
-    if (archivingThreadId) return
-    const result = await dispatch(threadArchived({
-      projectId: project.id,
-      threadId: thread.id,
-      archived,
-    }))
-    if (threadArchived.rejected.match(result)) {
-      window.alert(result.payload)
-      return
-    }
-    // Archiving the thread you are looking at has to move you somewhere real.
-    if (archived && selectedProject?.id === project.id && selectedThread?.id === thread.id) {
-      const nextThread = project.threads.find((candidate) => candidate.id !== thread.id && !candidate.archivedAt)
-      navigate(nextThread
-        ? workspacePath(project.id, nextThread.id, nextThread.activeTab ?? defaultWorkspaceTool)
-        : newThreadPath(project.id))
-    }
-  }
 
   async function handleDeleteThread(project: Project, thread: Thread) {
     const worktreeNotice = thread.worktree
@@ -429,7 +407,7 @@ export default function App() {
   const legacyDestination = legacyProject && legacyThread
     ? workspacePath(legacyProject.id, legacyThread.id, legacyThread.activeTab ?? defaultWorkspaceTool)
     : defaultWorkspacePath ?? '/'
-  const landingThread = landingProject?.threads.find((thread) => !thread.archivedAt)
+  const landingThread = landingProject?.threads.find((thread) => !thread.settledAt)
     ?? landingProject?.threads[0]
   const projectDestination = landingProject
     ? landingThread
@@ -478,7 +456,6 @@ export default function App() {
         onSelectThread={handleThreadSelected}
         onProjectCreated={handleCreated}
         onDeleteProject={handleDelete}
-        onArchiveThread={(project, thread, archived) => void handleThreadArchived(project, thread, archived)}
         onDeleteThread={(project, thread) => void handleDeleteThread(project, thread)}
       />
 
@@ -572,7 +549,7 @@ export default function App() {
             <Route
               path={WORKSPACE_ROUTE}
               element={selectedProject && selectedThread && activeTool ? (
-                <TerminalWorkspace
+                <SettledWorkspace
                   key={`${selectedProject.id}:${selectedThread.id}`}
                   project={selectedProject}
                   thread={selectedThread}

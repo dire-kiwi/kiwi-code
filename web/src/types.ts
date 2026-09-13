@@ -36,7 +36,6 @@ export type {
   ThemeColors,
   ThemeSettings,
   Thread,
-  ThreadCleanupOverview,
   ThreadStatusErrors,
   ThreadStatusSnapshot,
   ThreadUsageSnapshot,

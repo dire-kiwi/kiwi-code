@@ -12,7 +12,7 @@ function parsedTime(value) {
 }
 
 function threadRecency(thread) {
-  return parsedTime(thread.lastPromptAt) ?? parsedTime(thread.createdAt) ?? 0
+  return Math.max(parsedTime(thread.unsettledAt) ?? 0, parsedTime(thread.lastPromptAt) ?? parsedTime(thread.createdAt) ?? 0)
 }
 
 function entryKey(projectId, threadId) {
@@ -48,9 +48,11 @@ export function activityViewGroups(
   recentLimit = recentThreadLimit,
   index = createSidebarThreadIndex(projects, activities),
 ) {
+  const projectIds = new Set(projects.map((project) => project.id))
   const threadsByKey = new Map()
   let order = 0
   for (const [key, { project, thread }] of index.entryByKey) {
+    if (!projectIds.has(project.id)) continue
     threadsByKey.set(key, { projectId: project.id, thread, order: order++ })
   }
 
@@ -63,7 +65,7 @@ export function activityViewGroups(
       if (!displayThread) continue
       const key = sidebarThreadKey(activity.projectId, displayThread.id)
       const found = threadsByKey.get(key)
-      if (!found || found.thread.archivedAt || included.has(key)) continue
+      if (!found || found.thread.settledAt || included.has(key)) continue
       const promptAt = threadRecency(found.thread)
       const entry = {
         projectId: found.projectId,
@@ -88,8 +90,13 @@ export function activityViewGroups(
   const needsReview = collectActivityEntries('finished')
 
   const remaining = []
+  const settled = []
   for (const [key, { projectId, thread, order: threadOrder }] of threadsByKey) {
-    if (included.has(key) || thread.archivedAt) continue
+    if (included.has(key)) continue
+    if (thread.settledAt) {
+      settled.push({ projectId, threadId: thread.id, at: parsedTime(thread.settledAt) ?? 0, order: threadOrder })
+      continue
+    }
     remaining.push({ projectId, threadId: thread.id, at: threadRecency(thread), order: threadOrder })
   }
   remaining.sort(byNewestFirst)
@@ -100,6 +107,7 @@ export function activityViewGroups(
     working: working.map(publicEntry),
     needsReview: needsReview.map(publicEntry),
     recent: recent.map(publicEntry),
+    settled: orderEntries(settled).map(publicEntry),
     hiddenRecentCount: remaining.length - recent.length,
   }
 }

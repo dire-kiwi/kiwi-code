@@ -1,6 +1,6 @@
 ---
 name: kiwi-code-threads
-description: Creates, lists, renames, archives, restores, inspects, and closes Kiwi Code threads, including reading bounded tmux output from Pi, Codex CLI, Grok CLI, Claude Code, shell, tool, and process panes. Use when coordinating work across Kiwi Code threads or checking another thread's agent or process output.
+description: Creates, lists, renames, settles, un-settles, inspects, and closes Kiwi Code threads, including reading bounded tmux output from Pi, Codex CLI, Grok CLI, Claude Code, shell, tool, and process panes. Use when coordinating work across Kiwi Code threads or checking another thread's agent or process output.
 compatibility: Requires Node.js 20+ and a Kiwi Code agent session with KIWI_CODE_THREAD_ENDPOINT set.
 metadata:
   author: kiwi-code
@@ -17,7 +17,7 @@ Use the dependency-free scripts in `scripts/` to manage threads through the Kiwi
 - List threads first when a target is ambiguous. Use immutable project and thread IDs for mutations, never a title alone.
 - When explicitly asked to create a thread, create a normal thread unless the user asks for Git isolation. For a worktree thread, pass `--worktree` and optionally `--base-branch`.
 - Do not start a coding agent merely because the user requested a new thread. Only pass `--agent` when the user also explicitly asks to start an agent in it or supplies an initial task for that new thread; `--model`, `--thinking`, and `--prompt` configure that new agent process.
-- Archive a completed thread when it should leave the active list but remain recoverable. Archiving keeps its record and tmux sessions, but starts the configured archived-thread retention period. Restore it to return it to the active list.
+- Settle a completed thread to close its sessions and retain its saved conversation and worktree. Idle threads settle automatically after three days. Un-settle to return it to active work and resume the saved agent conversation when opened. Never settle the current thread without an explicit user request, because doing so terminates this agent.
 - Treat closing as destructive: it removes the thread record and stops both of its persistent tmux sessions, including its coding agents and process shells. It does not immediately delete an existing worktree, branch, or project files; a clean managed worktree may be removed later according to automatic cleanup settings.
 - Never close the current thread unless the user explicitly requests it. The helper refuses by default because closing it terminates this agent; only then use `--allow-current`.
 - Read a bounded amount of tmux output. Avoid tight polling loops and increase the line count only when needed.
@@ -46,7 +46,7 @@ node "$HOME/.agents/skills/kiwi-code-threads/scripts/list-threads.mjs" --project
 node "$HOME/.agents/skills/kiwi-code-threads/scripts/list-threads.mjs" --all
 ```
 
-The output includes each thread's ID, title, working directory, worktree state, branch when present, and `archivedAt` timestamp when archived.
+The output includes each thread's ID, title, working directory, worktree state, branch when present, and `settledAt` timestamp when settled.
 
 ## Create a thread
 
@@ -77,21 +77,21 @@ node "$HOME/.agents/skills/kiwi-code-threads/scripts/rename-thread.mjs" <thread-
 
 Add `--project <project-id>` for another project. This is a manual rename. It changes the managed worktree branch only when Kiwi Code performs the first automatic title generation, not for later manual renames.
 
-## Archive or restore a thread
+## Settle or un-settle a thread
 
-After confirming the exact thread ID, archive it:
-
-```bash
-node "$HOME/.agents/skills/kiwi-code-threads/scripts/archive-thread.mjs" <thread-id>
-```
-
-Restore an archived thread:
+After confirming the exact thread ID, settle it:
 
 ```bash
-node "$HOME/.agents/skills/kiwi-code-threads/scripts/archive-thread.mjs" <thread-id> --restore
+node "$HOME/.agents/skills/kiwi-code-threads/scripts/settle-thread.mjs" <thread-id>
 ```
 
-Add `--project <project-id>` when the thread belongs to another project. Archiving moves the thread beneath the project's **Show more** section without stopping its tmux sessions; restoring returns it to the active list. Both operations are safe to repeat. Run the helper with `--help` for its command-line summary.
+Un-settle a thread:
+
+```bash
+node "$HOME/.agents/skills/kiwi-code-threads/scripts/settle-thread.mjs" <thread-id> --unsettle
+```
+
+Add `--project <project-id>` when the thread belongs to another project. Settlement moves the thread into **Settled** and closes all of its sessions; un-settling returns it to the active list. Both operations are safe to repeat. Run the helper with `--help` for its command-line summary.
 
 ## Read tmux lines
 

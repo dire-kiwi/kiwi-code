@@ -21,15 +21,6 @@ func TestCleanupOverviewListsScheduledAndDirtyResourcesWithoutDeletingThem(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	archivedThread, err := store.AddThread(item.ID, "Archived task")
-	if err != nil {
-		t.Fatal(err)
-	}
-	archivedAt := time.Date(2026, time.March, 2, 3, 4, 5, 0, time.UTC)
-	if _, err := store.setThreadArchivedAt(item.ID, archivedThread.ID, true, archivedAt); err != nil {
-		t.Fatal(err)
-	}
-
 	cleanThread, err := store.AddThread(item.ID, "Clean worktree", true)
 	if err != nil {
 		t.Fatal(err)
@@ -48,10 +39,8 @@ func TestCleanupOverviewListsScheduledAndDirtyResourcesWithoutDeletingThem(t *te
 		t.Fatal(err)
 	}
 
-	archivedDays := 7
 	worktreeDays := 2
 	if _, err := store.UpdateSettingsValues(SettingsUpdate{
-		ArchivedThreadRetentionDays:   &archivedDays,
 		OrphanedWorktreeRetentionDays: &worktreeDays,
 	}); err != nil {
 		t.Fatal(err)
@@ -61,16 +50,8 @@ func TestCleanupOverviewListsScheduledAndDirtyResourcesWithoutDeletingThem(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !overview.GeneratedAt.Equal(overviewAt) || overview.ArchivedThreadRetentionDays != archivedDays || overview.OrphanedWorktreeRetentionDays != worktreeDays {
+	if !overview.GeneratedAt.Equal(overviewAt) || overview.OrphanedWorktreeRetentionDays != worktreeDays {
 		t.Fatalf("unexpected cleanup overview metadata: %#v", overview)
-	}
-	if len(overview.Threads) != 1 {
-		t.Fatalf("scheduled threads = %#v", overview.Threads)
-	}
-	threadEntry := overview.Threads[0]
-	wantThreadDeletion := archivedAt.Add(7 * 24 * time.Hour)
-	if threadEntry.ProjectName != item.Name || threadEntry.ThreadTitle != archivedThread.Title || threadEntry.ScheduledDeletionAt == nil || !threadEntry.ScheduledDeletionAt.Equal(wantThreadDeletion) {
-		t.Fatalf("scheduled thread = %#v, want deletion at %v", threadEntry, wantThreadDeletion)
 	}
 	if len(overview.Worktrees) != 2 {
 		t.Fatalf("scheduled worktrees = %#v", overview.Worktrees)
@@ -99,7 +80,6 @@ func TestCleanupOverviewListsScheduledAndDirtyResourcesWithoutDeletingThem(t *te
 
 	disabled := 0
 	if _, err := store.UpdateSettingsValues(SettingsUpdate{
-		ArchivedThreadRetentionDays:   &disabled,
 		OrphanedWorktreeRetentionDays: &disabled,
 	}); err != nil {
 		t.Fatal(err)
@@ -107,9 +87,6 @@ func TestCleanupOverviewListsScheduledAndDirtyResourcesWithoutDeletingThem(t *te
 	disabledOverview, err := store.CleanupOverview(overviewAt)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if disabledOverview.Threads[0].ScheduledDeletionAt != nil {
-		t.Fatalf("disabled archived-thread deletion time = %v", disabledOverview.Threads[0].ScheduledDeletionAt)
 	}
 	for _, entry := range disabledOverview.Worktrees {
 		if entry.ScheduledDeletionAt != nil {

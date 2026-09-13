@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Inbox, LoaderCircle } from 'lucide-react'
+import { ChevronDown, ChevronRight, Inbox, LoaderCircle } from 'lucide-react'
 import { useMatch } from 'react-router-dom'
 import { WORKSPACE_ROUTE } from '@/app/routes'
 import { usageDescription } from '@/lib/formatUsage'
@@ -8,23 +8,22 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { selectActiveProjects, selectActiveThreadIndex } from '@/store/selectors/workspace'
 import { selectPiActivities } from '@/store/slices/agentActivity'
 import {
-  selectArchivingThreadId,
   selectDeletingThreadId,
 } from '@/store/slices/projects'
 import { sidebarViewChanged } from '@/store/slices/sidebar'
 import type { Project, Thread } from '@/types'
 import { Button, SelectionButton } from '@/ui/buttons'
 import { useThreadUsage } from '@/wire/serverData'
+import { useThreadSettlement } from './useThreadSettlement'
 import { ThreadActionsMenu } from './ThreadActionsMenu'
 
-type SectionKind = 'working' | 'needsReview' | 'recent'
+type SectionKind = 'working' | 'needsReview' | 'recent' | 'settled'
 
 // Sibling of ProjectSidebar, rendered in its place when the view is switched.
 // It was handed eight of the sidebar's own props; it selects the same state.
 type SidebarActivityViewProps = {
   onSelectThread: (projectId: string, threadId: string) => void
   projectScope?: string
-  onArchiveThread: (project: Project, thread: Thread, archived: boolean) => void
   onDeleteThread: (project: Project, thread: Thread) => void
 }
 
@@ -32,22 +31,23 @@ const sectionStateDescriptions: Record<SectionKind, string> = {
   working: 'Coding agent is working',
   needsReview: 'Coding agent finished — needs review',
   recent: '',
+  settled: 'Settled thread',
 }
 
 export function SidebarActivityView({
   onSelectThread,
   projectScope,
-  onArchiveThread,
   onDeleteThread,
 }: SidebarActivityViewProps) {
   const dispatch = useAppDispatch()
+  const { settlingThreadId, toggleSettlement } = useThreadSettlement()
+  const [settledOpen, setSettledOpen] = useState(false)
   const projects = useAppSelector(selectActiveProjects)
   const piActivities = useAppSelector(selectPiActivities)
   const threadIndex = useAppSelector(selectActiveThreadIndex)
   const usageSnapshots = useThreadUsage()
   const selectedThreadId = useMatch(WORKSPACE_ROUTE)?.params.threadId ?? null
   const deletingThreadId = useAppSelector(selectDeletingThreadId)
-  const archivingThreadId = useAppSelector(selectArchivingThreadId)
   const onShowAllThreads = () => dispatch(sidebarViewChanged('tree'))
   const [now, setNow] = useState(() => Date.now())
   const [threadMenuKey, setThreadMenuKey] = useState<string | null>(null)
@@ -60,6 +60,9 @@ export function SidebarActivityView({
     () => activityViewGroups(projectScope ? projects.filter((project) => project.id === projectScope) : projects, piActivities, undefined, threadIndex),
     [piActivities, projects, projectScope, threadIndex],
   )
+  useEffect(() => {
+    if (groups.settled.some((entry) => entry.threadId === selectedThreadId)) setSettledOpen(true)
+  }, [groups.settled, selectedThreadId])
   const usageByKey = useMemo(() => new Map(
     usageSnapshots.map((snapshot) => [`${snapshot.projectId}\0${snapshot.threadId}`, snapshot]),
   ), [usageSnapshots])
@@ -83,7 +86,6 @@ export function SidebarActivityView({
       usage ? `Usage: ${usageDescription(usage.own)}${usage.limitReached ? ' — limit reached' : ''}` : '',
     ].filter(Boolean).join('\n')
     const elapsed = formatRelativeShort(entry.at, now)
-    const archived = Boolean(thread.archivedAt)
     const menuOpen = threadMenuKey === key
     // The open menu needs its row on top; an opacity below 1 would create a
     // stacking context that traps the menu behind later rows.
@@ -98,7 +100,7 @@ export function SidebarActivityView({
             onClick={() => onSelectThread(project.id, thread.id)}
             aria-current={selected ? 'page' : undefined}
             title={title}
-            className="!h-auto min-h-14 pl-3 pr-10"
+            className="!h-auto min-h-14 pl-3 pr-14"
           >
             <span className="pointer-events-none absolute right-2.5 top-2.5 flex h-3 items-center justify-end">
               {kind === 'working' ? (
@@ -122,13 +124,14 @@ export function SidebarActivityView({
           <div className="absolute bottom-1 right-1 flex items-center">
             <ThreadActionsMenu
               threadTitle={thread.title}
-              archived={archived}
-              archiving={archivingThreadId === thread.id}
+              settled={Boolean(thread.settledAt)}
+              working={kind === 'working'}
+              settling={settlingThreadId === thread.id}
+              onSettle={() => void toggleSettlement(project, thread)}
               deleting={deletingThreadId === thread.id}
-              disabled={Boolean(archivingThreadId || deletingThreadId)}
+              disabled={Boolean(deletingThreadId || settlingThreadId)}
               open={menuOpen}
               onOpenChange={(open) => setThreadMenuKey(open ? key : null)}
-              onArchive={() => onArchiveThread(project, thread, !archived)}
               onDelete={() => onDeleteThread(project, thread)}
               triggerClassName={menuOpen || selected
                 ? undefined
@@ -187,6 +190,17 @@ export function SidebarActivityView({
           )}
         </>
       )}
+      <section aria-label="Settled threads" className="mt-3 border-t border-ghost-border/45 pt-1">
+        <button type="button" aria-expanded={settledOpen} onClick={() => setSettledOpen((open) => !open)}
+          className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-ghost-dim hover:bg-ghost-raised/40">
+          <span className="flex-1">Settled ({groups.settled.length})</span>
+          {settledOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        </button>
+        {settledOpen && (
+          groups.settled.length ? <ul className="space-y-0.5">{groups.settled.map((entry) => renderEntry('settled', entry))}</ul>
+            : <p className="px-2 py-3 text-xs text-ghost-faint">No settled threads</p>
+        )}
+      </section>
     </div>
   )
 }

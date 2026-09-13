@@ -83,7 +83,7 @@ export function SkillsSection() {
         </div>
 
         <InfoCallout className="mt-4">
-          The dependency-free Node.js helpers can create, rename, archive, restore, inspect, and close threads; read Pi,
+          The dependency-free Node.js helpers can create, rename, settle, un-settle, inspect, and close threads; read Pi,
           Claude, shell, tool, and process output; and manage persistent process shells. Claude Code launched through
           Kiwi Code already receives the process skill from its bundled plugin. Use{' '}
           <span className="font-mono text-ghost-blue">/reload</span> in an existing Pi session after installation.

@@ -12,12 +12,6 @@ import (
 	"time"
 )
 
-type ArchivedThreadRef struct {
-	ProjectID      string
-	ThreadID       string
-	ArchivedBefore time.Time
-}
-
 type WorktreeCleanupResult struct {
 	Deleted             []string
 	RetainedWithChanges []string
@@ -25,19 +19,8 @@ type WorktreeCleanupResult struct {
 
 type CleanupOverview struct {
 	GeneratedAt                   time.Time                 `json:"generatedAt"`
-	ArchivedThreadRetentionDays   int                       `json:"archivedThreadRetentionDays"`
 	OrphanedWorktreeRetentionDays int                       `json:"orphanedWorktreeRetentionDays"`
-	Threads                       []ThreadCleanupOverview   `json:"threads"`
 	Worktrees                     []WorktreeCleanupOverview `json:"worktrees"`
-}
-
-type ThreadCleanupOverview struct {
-	ProjectID           string     `json:"projectId"`
-	ProjectName         string     `json:"projectName"`
-	ThreadID            string     `json:"threadId"`
-	ThreadTitle         string     `json:"threadTitle"`
-	ArchivedAt          time.Time  `json:"archivedAt"`
-	ScheduledDeletionAt *time.Time `json:"scheduledDeletionAt"`
 }
 
 type WorktreeCleanupOverview struct {
@@ -68,40 +51,10 @@ type orphanedWorktree struct {
 	CleanupVariables        []EnvironmentVariable `json:"cleanupVariables,omitempty"`
 }
 
-func (s *Store) ArchivedThreadsDue(now time.Time) ([]ArchivedThreadRef, error) {
-	s.mu.RLock()
-	retentionDays := s.archivedThreadRetentionDays
-	s.mu.RUnlock()
-	if retentionDays == 0 {
-		return nil, nil
-	}
-
-	projects, err := s.ListPersisted()
-	if err != nil {
-		return nil, err
-	}
-	cutoff := now.UTC().Add(-time.Duration(retentionDays) * 24 * time.Hour)
-	var due []ArchivedThreadRef
-	for _, item := range projects {
-		for _, thread := range item.Threads {
-			if thread.ArchivedAt == nil || thread.ArchivedAt.After(cutoff) {
-				continue
-			}
-			due = append(due, ArchivedThreadRef{
-				ProjectID:      item.ID,
-				ThreadID:       thread.ID,
-				ArchivedBefore: cutoff,
-			})
-		}
-	}
-	return due, nil
-}
-
 func (s *Store) CleanupOverview(now time.Time) (CleanupOverview, error) {
 	now = now.UTC()
 
 	s.mu.RLock()
-	archivedRetentionDays := s.archivedThreadRetentionDays
 	worktreeRetentionDays := s.orphanedWorktreeRetentionDays
 	projects, projectsErr := readProjectsFile(s.filePath)
 	var records []orphanedWorktree
@@ -119,9 +72,7 @@ func (s *Store) CleanupOverview(now time.Time) (CleanupOverview, error) {
 
 	overview := CleanupOverview{
 		GeneratedAt:                   now,
-		ArchivedThreadRetentionDays:   archivedRetentionDays,
 		OrphanedWorktreeRetentionDays: worktreeRetentionDays,
-		Threads:                       []ThreadCleanupOverview{},
 		Worktrees:                     []WorktreeCleanupOverview{},
 	}
 	projectNames := make(map[string]string, len(projects))
@@ -130,17 +81,7 @@ func (s *Store) CleanupOverview(now time.Time) (CleanupOverview, error) {
 	for _, item := range projects {
 		projectNames[item.ID] = item.Name
 		for _, thread := range item.Threads {
-			if thread.ArchivedAt != nil {
-				archivedAt := thread.ArchivedAt.UTC()
-				overview.Threads = append(overview.Threads, ThreadCleanupOverview{
-					ProjectID:           item.ID,
-					ProjectName:         item.Name,
-					ThreadID:            thread.ID,
-					ThreadTitle:         thread.Title,
-					ArchivedAt:          archivedAt,
-					ScheduledDeletionAt: cleanupScheduledDeletionAt(archivedAt, archivedRetentionDays),
-				})
-			}
+
 			if !thread.Worktree {
 				continue
 			}
@@ -193,24 +134,6 @@ func (s *Store) CleanupOverview(now time.Time) (CleanupOverview, error) {
 		overview.Worktrees = append(overview.Worktrees, entry)
 	}
 
-	sort.Slice(overview.Threads, func(left, right int) bool {
-		leftTime := overview.Threads[left].ScheduledDeletionAt
-		rightTime := overview.Threads[right].ScheduledDeletionAt
-		if leftTime == nil || rightTime == nil {
-			if leftTime == nil && rightTime != nil {
-				return false
-			}
-			if leftTime != nil && rightTime == nil {
-				return true
-			}
-		} else if !leftTime.Equal(*rightTime) {
-			return leftTime.Before(*rightTime)
-		}
-		if overview.Threads[left].ProjectName != overview.Threads[right].ProjectName {
-			return overview.Threads[left].ProjectName < overview.Threads[right].ProjectName
-		}
-		return overview.Threads[left].ThreadTitle < overview.Threads[right].ThreadTitle
-	})
 	sort.Slice(overview.Worktrees, func(left, right int) bool {
 		leftTime := overview.Worktrees[left].ScheduledDeletionAt
 		rightTime := overview.Worktrees[right].ScheduledDeletionAt

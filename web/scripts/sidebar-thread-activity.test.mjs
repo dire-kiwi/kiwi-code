@@ -7,7 +7,7 @@ import {
   sidebarThreadActivity,
 } from '../src/sidebar-thread-activity.mjs'
 
-const threads = [{ id: 'one' }, { id: 'two', archivedAt: '2026-01-01T00:00:00Z' }]
+const threads = [{ id: 'one' }, { id: 'two', settledAt: '2026-01-01T00:00:00Z' }]
 
 test('activity stays on the thread that emitted it', () => {
   const activity = { projectId: 'p1', threadId: 'one', state: 'finished' }
@@ -16,7 +16,7 @@ test('activity stays on the thread that emitted it', () => {
   assert.equal(sidebarThreadActivity(threads, [activity], 'p1', 'one').activity, activity)
 })
 
-test('archived and unknown activity is excluded from sidebar counts', () => {
+test('settled and unknown activity is excluded from sidebar counts', () => {
   const projects = [{ id: 'p1', threads }]
   const activities = [
     { projectId: 'p1', threadId: 'one', state: 'working' },

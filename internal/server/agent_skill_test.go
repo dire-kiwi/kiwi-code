@@ -69,18 +69,18 @@ func TestAgentSkillInstallerInstallsAndUpdatesBundle(t *testing.T) {
 	for _, expected := range []string{
 		"name: kiwi-code-threads",
 		"scripts/create-thread.mjs",
-		"scripts/archive-thread.mjs",
+		"scripts/settle-thread.mjs",
 		"scripts/close-thread.mjs",
 		"scripts/read-tmux-lines.mjs",
 		"Never create a main thread unless the user explicitly asks",
-		"--restore",
+		"--unsettle",
 		"--help",
 	} {
 		if !strings.Contains(string(threadSkill), expected) {
 			t.Fatalf("thread SKILL.md does not contain %q", expected)
 		}
 	}
-	for _, name := range []string{"archive-thread.mjs", "read-tmux-lines.mjs"} {
+	for _, name := range []string{"settle-thread.mjs", "read-tmux-lines.mjs"} {
 		info, err := os.Stat(filepath.Join(threadsPath, "scripts", name))
 		if err != nil {
 			t.Fatal(err)
@@ -247,7 +247,7 @@ func TestBundledCreateThreadHelperStartsSelectedAgent(t *testing.T) {
 	}
 }
 
-func TestBundledArchiveThreadHelper(t *testing.T) {
+func TestBundledSettleThreadHelper(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is not available")
@@ -256,30 +256,30 @@ func TestBundledArchiveThreadHelper(t *testing.T) {
 	type capturedRequest struct {
 		method   string
 		path     string
-		archived bool
+		settled bool
 		bodyErr  error
 	}
 	requests := make(chan capturedRequest, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Archived bool `json:"archived"`
+			Settled bool `json:"settled"`
 		}
 		bodyErr := json.NewDecoder(r.Body).Decode(&body)
 		requests <- capturedRequest{
 			method:   r.Method,
 			path:     r.URL.Path,
-			archived: body.Archived,
+			settled: body.Settled,
 			bodyErr:  bodyErr,
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"id":         "target-thread",
 			"title":      "Target thread",
-			"archivedAt": "2026-07-16T00:00:00Z",
+			"settledAt": "2026-07-16T00:00:00Z",
 		})
 	}))
 	defer server.Close()
 
-	script, err := filepath.Abs(filepath.Join("agent-skill", "kiwi-code-threads", "scripts", "archive-thread.mjs"))
+	script, err := filepath.Abs(filepath.Join("agent-skill", "kiwi-code-threads", "scripts", "settle-thread.mjs"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,39 +295,39 @@ func TestBundledArchiveThreadHelper(t *testing.T) {
 		)
 		output, runErr := command.CombinedOutput()
 		if ctx.Err() != nil {
-			t.Fatalf("archive helper timed out: %v", ctx.Err())
+			t.Fatalf("settle helper timed out: %v", ctx.Err())
 		}
 		if runErr != nil {
-			t.Fatalf("archive helper failed: %v\n%s", runErr, output)
+			t.Fatalf("settle helper failed: %v\n%s", runErr, output)
 		}
 		return string(output)
 	}
 
 	endpoint := server.URL + "/api/projects/current-project/threads/current-thread"
 	if output := runHelper(endpoint, "target-thread"); !strings.Contains(output, `"id": "target-thread"`) {
-		t.Fatalf("archive helper output = %q", output)
+		t.Fatalf("settle helper output = %q", output)
 	}
-	archived := <-requests
-	if archived.bodyErr != nil {
-		t.Fatal(archived.bodyErr)
+	settled := <-requests
+	if settled.bodyErr != nil {
+		t.Fatal(settled.bodyErr)
 	}
-	if archived.method != http.MethodPatch || archived.path != "/api/projects/current-project/threads/target-thread" || !archived.archived {
-		t.Fatalf("archive request = %#v", archived)
+	if settled.method != http.MethodPatch || settled.path != "/api/projects/current-project/threads/target-thread" || !settled.settled {
+		t.Fatalf("settle request = %#v", settled)
 	}
 
-	runHelper(endpoint, "target-thread", "--restore", "--project", "other-project")
+	runHelper(endpoint, "target-thread", "--unsettle", "--project", "other-project")
 	restored := <-requests
 	if restored.bodyErr != nil {
 		t.Fatal(restored.bodyErr)
 	}
-	if restored.method != http.MethodPatch || restored.path != "/api/projects/other-project/threads/target-thread" || restored.archived {
+	if restored.method != http.MethodPatch || restored.path != "/api/projects/other-project/threads/target-thread" || restored.settled {
 		t.Fatalf("restore request = %#v", restored)
 	}
 
 	help := runHelper("", "--help")
-	for _, expected := range []string{"Usage:", "--restore", "--project <project-id>", "retention period"} {
+	for _, expected := range []string{"Usage:", "--unsettle", "--project <project-id>", "saved conversations"} {
 		if !strings.Contains(help, expected) {
-			t.Fatalf("archive helper help does not contain %q: %s", expected, help)
+			t.Fatalf("settle helper help does not contain %q: %s", expected, help)
 		}
 	}
 }

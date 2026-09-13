@@ -12,11 +12,11 @@ import {
 } from "./common.mjs";
 
 const help = `Usage:
-  archive-thread.mjs <thread-id> [--project <project-id>]
-  archive-thread.mjs <thread-id> --restore [--project <project-id>]
+  settle-thread.mjs <thread-id> [--project <project-id>]
+  settle-thread.mjs <thread-id> --unsettle [--project <project-id>]
 
-Archive a Kiwi Code thread, or restore it with --restore. Archiving keeps the
-thread and its tmux sessions but starts its configured archive-retention period.`;
+Settle a Kiwi Code thread, or unsettle it with --unsettle. Settling closes its
+sessions and retains its saved conversations and workspace.`;
 
 run(async () => {
   const args = process.argv.slice(2);
@@ -28,7 +28,7 @@ run(async () => {
   }
 
   const explicitProject = readOption(args, "--project") || "";
-  const restore = readFlag(args, "--restore");
+  const unsettle = readFlag(args, "--unsettle");
   rejectUnknownOptions(args);
   const [threadId] = args;
   if (!threadId || args.length !== 1) {
@@ -39,6 +39,6 @@ run(async () => {
   const projectId = currentProjectId(explicitProject);
   print(await request(threadPath(projectId, threadId), {
     method: "PATCH",
-    body: JSON.stringify({ archived: !restore }),
+    body: JSON.stringify({ settled: !unsettle }),
   }));
 });
