@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -52,6 +53,7 @@ type codexNativeProcess struct {
 	turnID           string
 	sessionDirectory string
 	attempted        bool
+	nameThread       func(sessionID, prompt string)
 }
 
 func newCodexNativeManager(directory string) *codexNativeManager {
@@ -416,12 +418,50 @@ func (h *terminalHandler) startCodexNativeProcess(item project.Project, thread p
 		if figmaURL := h.figmaMCPURLForProject(item); figmaURL != "" {
 			arguments = append(arguments, "-c", "mcp_servers.kiwi-code-figma.url="+strconv.Quote(figmaURL))
 		}
-		return h.nativeCodex.getOrStart(item, thread, env, arguments...)
+		p, err := h.nativeCodex.getOrStart(item, thread, env, arguments...)
+		if err != nil {
+			return nil, err
+		}
+		// Native chat does not load the CLI plugin's UserPromptSubmit hooks.
+		// Invoke the shared namer ourselves after the first accepted prompt.
+		if endpoint != "" && h.codexPlugin.PluginRoot != "" {
+			script := filepath.Join(h.codexPlugin.PluginRoot, "scripts", "kiwi-code-hook.mjs")
+			titleEnv := append(os.Environ(), env...)
+			titleEnv = append(titleEnv, "KIWI_CODE_CODEX_STATE_DIR="+p.sessionDirectory)
+			p.mu.Lock()
+			p.nameThread = func(sessionID, prompt string) {
+				if err := runCodexNativeTitleHook(script, titleEnv, sessionID, prompt); err != nil {
+					log.Printf("name native Codex thread: project=%q thread=%q error=%v", item.ID, thread.ID, err)
+				}
+			}
+			p.mu.Unlock()
+		}
+		return p, nil
 	}, func(p *codexNativeProcess) {
 		if p != nil {
 			_ = p.stop()
 		}
 	})
+}
+
+func runCodexNativeTitleHook(script string, env []string, sessionID, prompt string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	input, _ := json.Marshal(map[string]string{"session_id": sessionID, "prompt": prompt})
+	command := exec.CommandContext(ctx, "node", script, "title")
+	command.Env = env
+	command.Dir = os.TempDir()
+	command.Stdin = strings.NewReader(string(input))
+	command.WaitDelay = time.Second
+	output, err := command.Output()
+	if err != nil {
+		return err
+	}
+	var result struct{ SystemMessage string }
+	if json.Unmarshal(output, &result) == nil && result.SystemMessage != "" {
+		return errors.New(result.SystemMessage)
+	}
+	return nil
 }
 
 func (p *codexNativeProcess) prompt(message chatClientMessage) error {
@@ -445,6 +485,7 @@ func (p *codexNativeProcess) prompt(message chatClientMessage) error {
 		return errors.New("Wait for Codex to finish or stop the current turn")
 	}
 	firstPrompt := !p.attempted
+	nameThread := p.nameThread
 	if firstPrompt {
 		if err := writeFileAtomically(filepath.Join(p.sessionDirectory, "prompt-attempted"), []byte("1\n"), serverAtomicFileOptions{Mode: 0600, SyncFile: true, SyncDirectory: true}); err != nil {
 			p.mu.Unlock()
@@ -484,6 +525,8 @@ func (p *codexNativeProcess) prompt(message chatClientMessage) error {
 		p.state.Error = err.Error()
 		p.emitLocked("chat_state", p.state)
 		p.mu.Unlock()
+	} else if firstPrompt && nameThread != nil {
+		go nameThread(p.threadID, message.Message)
 	}
 	return err
 }
