@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useMatch, useNavigate } from 'react-router-dom'
 import { piActivityKey } from '@/pi-activity-reconciliation.mjs'
 import { WorkspaceLoadingState } from './WorkspaceLoadingState'
 import { ProjectSidebar } from '@/features/project-sidebar/ProjectSidebar'
 import { CleanupScreen } from '@/features/screens/CleanupScreen'
 import { EmptyWorkspace } from '@/features/screens/EmptyWorkspace'
+import { NewThreadProjectDialog } from '@/features/new-thread/NewThreadProjectDialog'
 import { NewThreadScreen } from '@/features/new-thread/NewThreadScreen'
 import { SessionLogScreen } from '@/features/screens/SessionLogScreen'
 import { SettingsShell } from '@/features/settings/SettingsShell'
@@ -119,6 +120,7 @@ function rememberedWorkspacePath(projects: Project[], lastWorkspace: LastWorkspa
 
 export default function App() {
   const navigate = useNavigate()
+  const [newThreadPickerProjectId, setNewThreadPickerProjectId] = useState<string | null>(null)
   const desktopApp = window.kiwiCodeDesktopApp ?? window.direMuxDesktopApp
   const desktopShellClassName = desktopApp
     ? `desktop-shell desktop-shell-${desktopApp.platform || 'unknown'}`
@@ -282,13 +284,14 @@ export default function App() {
       event.stopPropagation()
       if (event.repeat || newThreadProjectId === projectId) return
 
-      navigate(newThreadPath(projectId))
+      if (activeProjects.length > 1) setNewThreadPickerProjectId(projectId)
+      else navigate(newThreadPath(projectId))
       dispatch(sidebarDismissed())
     }
 
     window.addEventListener('keydown', handleNewThreadShortcut, true)
     return () => window.removeEventListener('keydown', handleNewThreadShortcut, true)
-  }, [navigate, newThreadProjectId, routedProjectId])
+  }, [navigate, newThreadProjectId, routedProjectId, activeProjects.length])
 
   useEffect(() => {
     if (activeThreadIdentity && previousActiveThreadRef.current !== activeThreadIdentity && selectedProject && selectedThread) {
@@ -455,7 +458,21 @@ export default function App() {
           )}
         </div>
       )}
+      {newThreadPickerProjectId && (
+        <NewThreadProjectDialog projects={activeProjects} preferredProjectId={newThreadPickerProjectId}
+          onClose={() => setNewThreadPickerProjectId(null)}
+          onSelect={(projectId) => {
+            setNewThreadPickerProjectId(null)
+            navigate(newThreadPath(projectId))
+            dispatch(sidebarDismissed())
+          }} />
+      )}
       <ProjectSidebar
+        onNewThreadRequested={(projectId, skipPicker) => {
+          if (activeProjects.length > 1 && !skipPicker) setNewThreadPickerProjectId(projectId)
+          else navigate(newThreadPath(projectId))
+          dispatch(sidebarDismissed())
+        }}
         onSelectProfile={handleProfileSelected}
         onProfileCreated={handleProfileCreated}
         onSelectThread={handleThreadSelected}
@@ -540,8 +557,9 @@ export default function App() {
               path={NEW_THREAD_ROUTE}
               element={newThreadProject ? (
                 <NewThreadScreen
-                  key={newThreadProject.id}
                   project={newThreadProject}
+                  projects={activeProjects}
+                  onSelectProject={(projectId) => navigate(newThreadPath(projectId), { replace: true })}
                   onOpenSidebar={() => dispatch(sidebarOpened())}
                   onCancel={() => navigate(workspaceReturnDestination(newThreadProject.id), { replace: true })}
                   onCreated={(thread, start) =>

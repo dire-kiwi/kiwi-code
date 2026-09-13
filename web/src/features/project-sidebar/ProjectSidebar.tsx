@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
+  Search,
+  SquarePen,
+  FolderPlus,
+  X,
   Archive,
   ChevronDown,
   ChevronUp,
@@ -17,7 +21,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useMatch } from 'react-router-dom'
-import { WORKSPACE_ROUTE, newThreadPath, projectSettingsPath } from '@/app/routes'
+import { NEW_THREAD_ROUTE, WORKSPACE_ROUTE, newThreadPath, projectSettingsPath } from '@/app/routes'
 import { DEFAULT_PROJECT_SETTINGS_SECTION } from '@/features/settings/registry'
 import { formatCompactTokens, formatCompactUsd, usageDescription } from '@/lib/formatUsage'
 import { defaultVisibleRootThreadIds } from '@/sidebar-thread-visibility.mjs'
@@ -51,6 +55,7 @@ import {
 import { selectSidebarOpen, sidebarClosed } from '@/store/slices/ui'
 import type { Profile, Project, Thread } from '@/types'
 import { useThreadUsage } from '@/wire/serverData'
+import { Select } from '@/ui/inputs'
 import { Button, IconButton, SelectionButton } from '@/ui/buttons'
 import { SidebarActivityView } from './SidebarActivityView'
 import { SidebarAddProjectForm } from './SidebarAddProjectForm'
@@ -64,6 +69,7 @@ import { useSidebarReorder } from './useSidebarReorder'
 // each either confirms with the user first or navigates afterwards, and neither
 // belongs inside a thunk. Everything else the sidebar shows it now selects.
 type ProjectSidebarProps = {
+  onNewThreadRequested?: (projectId: string, skipPicker: boolean) => void
   onSelectProfile: (profileId: string) => void
   onProfileCreated: (profile: Profile) => void
   onSelectThread: (projectId: string, threadId: string) => void
@@ -75,6 +81,7 @@ type ProjectSidebarProps = {
 
 
 export function ProjectSidebar({
+  onNewThreadRequested,
   onSelectProfile,
   onProfileCreated,
   onSelectThread,
@@ -84,11 +91,14 @@ export function ProjectSidebar({
   onDeleteThread,
 }: ProjectSidebarProps) {
   const [showProjectForm, setShowProjectForm] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [projectScope, setProjectScope] = useState('')
   const dispatch = useAppDispatch()
   const { navigateAndClose } = useSidebarNavigation()
   // The router already holds which thread is open; App used to re-derive this
   // with useMatch and pass it down, which made the URL a two-copy fact.
   const selectedThreadId = useMatch(WORKSPACE_ROUTE)?.params.threadId ?? null
+  const newThreadProjectId = useMatch(NEW_THREAD_ROUTE)?.params.projectId
   const activeProfileId = useAppSelector(selectActiveProfileId)
   const profiles = useAppSelector(selectProfiles)
   const projects = useAppSelector(selectActiveProjects)
@@ -112,6 +122,17 @@ export function ProjectSidebar({
     usageSnapshots.map((snapshot) => [`${snapshot.projectId}\0${snapshot.threadId}`, snapshot]),
   ), [usageSnapshots])
   const projectActivityCounts = threadIndex.projectActivityCounts
+
+  const effectiveScope = projects.some((project) => project.id === projectScope) ? projectScope : ''
+  const scopedProjects = effectiveScope ? projects.filter((project) => project.id === effectiveScope) : projects
+  const query = searchQuery.trim().toLocaleLowerCase()
+  const searchResults = useMemo(() => !query ? [] : projects.flatMap((project) =>
+    effectiveScope && project.id !== effectiveScope ? [] : project.threads
+      .filter((thread) => `${thread.title} ${project.name} ${thread.branch ?? ''}`.toLocaleLowerCase().includes(query))
+      .map((thread) => ({ project, thread }))), [projects, effectiveScope, query])
+  const defaultNewProject = projects.find((project) => project.id === projectScope)
+    ?? projects.find((project) => project.id === newThreadProjectId || project.threads.some((thread) => thread.id === selectedThreadId))
+    ?? projects[0]
 
   const openNewThread = (projectId: string) => navigateAndClose(newThreadPath(projectId))
   const openProjectSettings = (projectId: string) =>
@@ -220,11 +241,14 @@ export function ProjectSidebar({
             onClick={() => onSelectThread(project.id, thread.id)}
             aria-current={selected ? 'page' : undefined}
             title={`${locationTitle}${archivedTitle}${activityTitle}${usageTitle}`}
-            className={`${selectionPadding} pr-12`}
+            className={`${selectionPadding} pr-12 ${query ? "!h-auto min-h-12" : ""}`}
           >
             {thread.worktree && <GitBranch size={11} className="shrink-0 text-ghost-green" />}
             {archived && !thread.worktree && <Archive size={11} className="shrink-0 text-ghost-faint" />}
-            <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+            <span className="min-w-0 flex-1 truncate">
+              {query && <span className="block truncate text-[10px] text-ghost-dim">{project.name}</span>}
+              <span className="block truncate">{thread.title}</span>
+            </span>
             {piActivity?.state === 'working' ? (
               <>
                 <LoaderCircle size={11} className="shrink-0 animate-spin text-ghost-green" aria-hidden="true" />
@@ -348,71 +372,46 @@ export function ProjectSidebar({
           isOpen ? 'visible translate-x-0' : 'invisible -translate-x-full'
         }`}
       >
-        <header className="desktop-titlebar-drag-region flex h-[4.5rem] shrink-0 flex-col justify-center gap-1 border-b border-ghost-border/70 px-3">
-          <div className="desktop-titlebar-left-safe flex items-center justify-between gap-2">
-            <h1 className="min-w-0 truncate text-xs font-semibold text-ghost-bright-white">
-              {viewMode === 'activity' ? 'Threads' : 'Projects'}
-            </h1>
-            <div className="flex shrink-0 items-center gap-0.5">
-            <div
-              role="group"
-              aria-label="Sidebar view"
-              className="mr-0.5 flex items-center gap-0.5 rounded-md border border-ghost-border/55 p-0.5"
-            >
-              <IconButton
-                type="button"
-                size="xs"
-                variant="subtle"
-                onClick={() => dispatch(sidebarViewChanged('activity'))}
-                aria-pressed={viewMode === 'activity'}
-                aria-label="Activity view"
-                title="Activity view: working, needs review, recent"
-                className={viewMode === 'activity' ? 'bg-ghost-green/10 text-ghost-green' : undefined}
-              >
-                <Activity size={12} />
-              </IconButton>
-              <IconButton
-                type="button"
-                size="xs"
-                variant="subtle"
-                onClick={() => dispatch(sidebarViewChanged('tree'))}
-                aria-pressed={viewMode === 'tree'}
-                aria-label="Projects view"
-                title="Projects view: the full project and thread tree"
-                className={viewMode === 'tree' ? 'bg-ghost-green/10 text-ghost-green' : undefined}
-              >
-                <ListTree size={12} />
-              </IconButton>
-            </div>
-            <IconButton
-              type="button"
-              size="sm"
-              variant="subtle"
-              onClick={() => setShowProjectForm(true)}
-              aria-label="Add a project"
-              title="Add project"
-            >
-              <Plus size={15} />
-            </IconButton>
-            <IconButton
-              type="button"
-              size="sm"
-              variant="subtle"
-              onClick={() => dispatch(sidebarClosed())}
-              className="md:hidden"
-              aria-label="Close sidebar"
-            >
-              <PanelLeftClose size={15} />
-            </IconButton>
+        <header className="desktop-titlebar-drag-region flex h-14 shrink-0 items-center justify-between gap-2 px-4">
+          <span className="desktop-titlebar-left-safe flex gap-1 text-sm font-semibold tracking-tight text-ghost-bright-white">Kiwi <span className="font-normal text-ghost-dim">Code</span></span>
+          <IconButton type="button" size="sm" variant="subtle" onClick={() => dispatch(sidebarClosed())} className="md:hidden" aria-label="Close sidebar">
+            <PanelLeftClose size={15} />
+          </IconButton>
+        </header>
+        <div className="px-3 pb-2">
+          <div className="flex items-center gap-1">
+            <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-ghost-dim focus-within:bg-ghost-raised/45 hover:bg-ghost-raised/30">
+              <Search size={15} className="shrink-0" />
+              <input type="search" aria-label="Search threads" placeholder="Search" value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') setSearchQuery('')
+                  if (event.key === 'Enter' && query && searchResults[0]) {
+                    onSelectThread(searchResults[0].project.id, searchResults[0].thread.id)
+                  }
+                }}
+                className="min-w-0 w-full bg-transparent text-xs text-ghost-white outline-none placeholder:text-ghost-dim" />
+              {query && <button type="button" aria-label="Clear thread search" onClick={() => setSearchQuery('')}><X size={12} /></button>}
+            </label>
+            <div className="flex shrink-0 items-center rounded-md bg-ghost-raised/40 p-0.5">
+              <IconButton type="button" size="sm" variant="subtle" onClick={() => setShowProjectForm((open) => !open)} aria-label="Add a project" title="New project"><FolderPlus size={15} /></IconButton>
+              <IconButton type="button" size="sm" variant="subtle" disabled={!defaultNewProject} onClick={(event) => {
+                if (!defaultNewProject) return
+                if (onNewThreadRequested) onNewThreadRequested(defaultNewProject.id, event.shiftKey)
+                else openNewThread(defaultNewProject.id)
+              }} aria-label="New thread" title="New thread"><SquarePen size={15} /></IconButton>
             </div>
           </div>
-          <SidebarProfileSwitcher
-            profiles={profiles}
-            activeProfileId={activeProfileId}
-            onSelectProfile={onSelectProfile}
-            onProfileCreated={onProfileCreated}
-          />
-        </header>
+          <div className="mt-2 flex min-w-0 items-center justify-between gap-1">
+            <Select variant="inline" aria-label="Filter threads by project" value={effectiveScope}
+              options={[{ value: '', label: 'All projects' }, ...projects.map((project) => ({ value: project.id, label: project.name }))]}
+              onChange={setProjectScope} leadingIcon={<Folder size={12} />} searchable searchPlaceholder="Find a project…" />
+            <div role="group" aria-label="Sidebar view" className="flex shrink-0 gap-0.5">
+              <IconButton type="button" size="xs" variant="subtle" onClick={() => dispatch(sidebarViewChanged('activity'))} aria-pressed={viewMode === 'activity'} aria-label="Activity view" title="Activity view" className={viewMode === 'activity' ? 'text-ghost-green bg-ghost-green/10' : undefined}><Activity size={12} /></IconButton>
+              <IconButton type="button" size="xs" variant="subtle" onClick={() => dispatch(sidebarViewChanged('tree'))} aria-pressed={viewMode === 'tree'} aria-label="Projects view" title="Projects view" className={viewMode === 'tree' ? 'text-ghost-green bg-ghost-green/10' : undefined}><ListTree size={12} /></IconButton>
+            </div>
+          </div>
+        </div>
 
         {showProjectForm && (
           <SidebarAddProjectForm
@@ -431,16 +430,21 @@ export function ProjectSidebar({
                 No projects{activeProfile ? ` in ${activeProfile.name}` : ' yet'}
               </p>
             </div>
+          ) : query ? (
+            <section aria-label="Search results">
+              <p role="status" className="px-2 py-2 text-xs text-ghost-dim">{searchResults.length ? `${searchResults.length} ${searchResults.length === 1 ? "result" : "results"}` : 'No threads found'}</p>
+              <ul className="space-y-1">{searchResults.map(({ project, thread }) => renderThreadRow(project, thread, 0))}</ul>
+            </section>
           ) : viewMode === 'activity' ? (
             <SidebarActivityView
               onSelectThread={onSelectThread}
-              onNewThread={openNewThread}
+              projectScope={effectiveScope}
               onArchiveThread={onArchiveThread}
               onDeleteThread={onDeleteThread}
             />
           ) : (
             <ul className="space-y-2.5">
-              {projects.map((project) => (
+              {scopedProjects.map((project) => (
                 <li
                   key={project.id}
                   data-project-row
@@ -574,6 +578,9 @@ export function ProjectSidebar({
           )}
         </nav>
 
+        <div className="flex items-center border-t border-ghost-border/40 px-3 pt-2">
+          <SidebarProfileSwitcher profiles={profiles} activeProfileId={activeProfileId} onSelectProfile={onSelectProfile} onProfileCreated={onProfileCreated} />
+        </div>
         <SidebarFooterNav />
 
         <div

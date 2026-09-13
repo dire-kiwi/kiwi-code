@@ -42,48 +42,56 @@ export function SidebarFooterNav() {
   }
 
   return (
-    <div className="shrink-0 space-y-0.5 border-t border-ghost-border/70 bg-ghost-panel/25 p-2">
+    <div className="flex shrink-0 items-center gap-1 p-3">
       <SelectionButton
         type="button"
         selected={cleanupSelected}
+        title="Cleanup"
         selectionVariant="navigation-compact"
+        className="!w-8 justify-center !px-0"
         onClick={() => navigateAndClose(CLEANUP_ROUTE)}
         aria-current={cleanupSelected ? 'page' : undefined}
       >
         <Clock3 size={13} className={cleanupSelected ? 'text-ghost-green' : 'text-ghost-dim'} />
-        <span>Cleanup</span>
+        <span className="sr-only">Cleanup</span>
       </SelectionButton>
       <SelectionButton
         type="button"
         selected={sessionLogSelected}
+        title="Session log"
         selectionVariant="navigation-compact"
+        className="!w-8 justify-center !px-0"
         onClick={() => navigateAndClose(SESSION_LOG_ROUTE)}
         aria-current={sessionLogSelected ? 'page' : undefined}
       >
         <History size={13} className={sessionLogSelected ? 'text-ghost-green' : 'text-ghost-dim'} />
-        <span>Session log</span>
+        <span className="sr-only">Session log</span>
       </SelectionButton>
       <SelectionButton
         type="button"
         selected={tmuxSelected}
+        title="tmux"
         selectionVariant="navigation-compact"
+        className="!w-8 justify-center !px-0"
         onClick={() => navigateAndClose(TMUX_ROUTE)}
         aria-current={tmuxSelected ? 'page' : undefined}
       >
         <PanelsTopLeft size={13} className={tmuxSelected ? 'text-ghost-green' : 'text-ghost-dim'} />
-        <span>tmux</span>
+        <span className="sr-only">tmux</span>
       </SelectionButton>
-      <div className="flex items-center gap-0.5">
+      <div className="ml-auto flex items-center gap-0.5">
         <div className="min-w-0 flex-1">
           <SelectionButton
             type="button"
             selected={settingsSelected}
+            title="Settings"
             selectionVariant="navigation-compact"
+            className="!w-8 justify-center !px-0"
             onClick={() => navigateAndClose(settingsPath(DEFAULT_GLOBAL_SETTINGS_SECTION))}
             aria-current={settingsSelected ? 'page' : undefined}
           >
             <Settings2 size={13} className={settingsSelected ? 'text-ghost-green' : 'text-ghost-dim'} />
-            <span>Settings</span>
+            <span className="sr-only">Settings</span>
           </SelectionButton>
         </div>
         <Button
