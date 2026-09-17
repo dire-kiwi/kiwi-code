@@ -1,3 +1,4 @@
+import { useFileUpload } from './useFileUpload'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useMatch, useNavigate } from 'react-router-dom'
 import {
@@ -407,6 +408,13 @@ export function TerminalWorkspace({
         : contextStatuses['pi-terminal'] ?? null
   const hasSecondaryTabs = activeTool === 'terminal' || activeTool === 'process'
 
+  const fileUpload = useFileUpload(project.id, thread.id)
+  const cliAgentActive = activeTool === 'pi' && (
+    codingAgent === 'pi' ? piPresentation === 'terminal'
+      : codingAgent === 'claude' ? claudePresentation === 'terminal'
+        : codingAgent === 'codex' ? codexPresentation === 'terminal' : true
+  )
+
   // The runtime slice still holds the previous thread for the one render before
   // workspaceEntered commits. Rendering then would flash that thread's branch
   // name, process list and tab dots, so hold off for a frame instead.
@@ -417,6 +425,9 @@ export function TerminalWorkspace({
       className={`relative flex h-full min-w-0 bg-ghost-black ${
         detailsExpanded ? 'thread-details-expanded' : ''
       }`}
+      onPasteCapture={cliAgentActive ? fileUpload.onPasteCapture : undefined}
+      onDragOverCapture={cliAgentActive ? fileUpload.onDragOverCapture : undefined}
+      onDropCapture={cliAgentActive ? fileUpload.onDropCapture : undefined}
       onKeyDownCapture={onThreadInteraction}
       onPointerDownCapture={onThreadInteraction}
       onWheelCapture={onThreadInteraction}
@@ -784,6 +795,7 @@ export function TerminalWorkspace({
       </main>
 
         <GitBranchBar
+          fileUpload={cliAgentActive ? fileUpload.control : undefined}
           projectId={project.id}
           threadId={thread.id}
           worktree={thread.worktree}

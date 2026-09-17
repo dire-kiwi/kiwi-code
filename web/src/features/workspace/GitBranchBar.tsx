@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type ReactNode,
 } from 'react'
 import {
   ArrowLeft,
@@ -35,6 +36,7 @@ import { FeedbackMessage } from '@/ui/feedback'
 // their embedded surfaces. Both are slice state now; neither is this
 // component's to relay.
 type GitBranchBarProps = {
+  fileUpload?: ReactNode
   projectId: string
   threadId: string
   worktree?: boolean
@@ -49,6 +51,7 @@ function messageFrom(reason: unknown) {
 }
 
 export function GitBranchBar({
+  fileUpload,
   projectId,
   threadId,
   worktree = false,
@@ -198,6 +201,7 @@ export function GitBranchBar({
       ref={containerRef}
       className="relative z-30 flex h-8 shrink-0 items-center border-t border-ghost-border/70 bg-ghost-panel/95 px-2.5"
     >
+      {fileUpload}
       <Button
         type="button"
         onClick={() => {

@@ -10,7 +10,8 @@ import {
   Activity,
   ArrowUp,
   CircleAlert,
-  ImagePlus,
+  Paperclip,
+  File,
   LoaderCircle,
   Square,
   X,
@@ -18,7 +19,7 @@ import {
 import { classNames } from '@/lib/classNames'
 import {
   formatImageSize,
-  PI_IMAGE_ACCEPT,
+  isSupportedPiImageType,
 } from '@/lib/promptImages'
 import type { ImageAttachment } from '@/lib/useImageAttachments'
 import { AgentModelControls, type AgentModelOption } from './AgentModelControls'
@@ -187,10 +188,10 @@ export function PiNativeComposer({
         )}
 
         {attachments.length > 0 && (
-          <ul className={piNativeStyles.attachments} aria-label="Images attached to this prompt">
+          <ul className={piNativeStyles.attachments} aria-label="Files attached to this prompt">
             {attachments.map((image) => (
               <li className={piNativeStyles.attachment} key={image.id}>
-                <img src={image.previewUrl} alt="" />
+                {isSupportedPiImageType(image.file.type) ? <img src={image.previewUrl} alt="" /> : <File size={24} />}
                 <span>
                   <strong title={image.file.name}>{image.file.name || 'Pasted image'}</strong>
                   <small>{formatImageSize(image.file.size)}</small>
@@ -221,7 +222,7 @@ export function PiNativeComposer({
             : undefined}
           data-testid="pi-native-composer"
           className={piNativeStyles.textarea}
-          placeholder={`Ask ${agentName} to inspect the repo, paste an image, or continue this thread…`}
+          placeholder={`Ask ${agentName} to inspect the repo, attach files, or continue this thread…`}
           disabled={isUploadingImages}
           onChange={(event) => onDraftChange(event.target.value)}
           onPaste={onPaste}
@@ -245,14 +246,14 @@ export function PiNativeComposer({
           />
           <label
             className={piNativeStyles.attach}
-            title="Attach images"
-            aria-label="Attach images"
+            title="Attach files"
+            aria-label="Attach files"
           >
-            <ImagePlus size={13} />
+            <Paperclip size={13} />
             <input
               type="file"
-              aria-label="Attach images"
-              accept={PI_IMAGE_ACCEPT}
+              aria-label="Attach files"
+
               multiple
               disabled={isUploadingImages}
               onChange={onImageInput}
@@ -266,7 +267,7 @@ export function PiNativeComposer({
               primaryActionIsStop ? piNativeStyles.primaryStop : piNativeStyles.primarySend,
             )}
             aria-label={isUploadingImages
-              ? 'Uploading images'
+              ? 'Uploading files'
               : primaryActionIsStop
                 ? `Stop ${agentName}`
                 : 'Send message'}

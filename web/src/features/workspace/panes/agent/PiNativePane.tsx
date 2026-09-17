@@ -1,3 +1,4 @@
+import { isSupportedPiImageType, promptWithFiles } from '@/lib/promptImages'
 import {
   useCallback,
   useEffect,
@@ -10,12 +11,12 @@ import {
   type KeyboardEvent,
 } from 'react'
 import { ArrowDown, Bot } from 'lucide-react'
-import { uploadPiImage } from '@/api'
+import { uploadPiImage, uploadFile } from '@/api'
 import { apiWebSocketUrl } from '@/apiUrl'
 import { supportedThinkingLevelIds, thinkingLevelLabel } from '@/codingAgents'
 import { classNames } from '@/lib/classNames'
 import { formatDuration } from '@/lib/formatDuration'
-import { imageFilesFromClipboard, piNativePromptImagePolicy } from '@/lib/promptImages'
+import { filesFromClipboard, promptFilePolicy } from '@/lib/promptImages'
 import {
   readPiNativeDraft,
   readPiNativePastes,
@@ -238,7 +239,7 @@ export function PiNativePane({
           appendActivity(
             'prompt',
             imagePaths.length > 0
-              ? `Initial prompt sent to Pi with ${imagePaths.length} image${imagePaths.length === 1 ? '' : 's'}.`
+              ? `Initial prompt sent to Pi with ${imagePaths.length} attachment${imagePaths.length === 1 ? '' : 's'}.`
               : 'Initial prompt sent to Pi.',
             receivedAt,
           )
@@ -679,15 +680,15 @@ export function PiNativePane({
     setError('')
     try {
       const uploads = await Promise.all(images.map((image) =>
-        uploadPiImage(projectId, image.file, uploadController.signal),
+        (isSupportedPiImageType(image.file.type) ? uploadPiImage : uploadFile)(projectId, image.file, uploadController.signal),
       ))
       if (uploadController.signal.aborted) return
 
       const wasStreaming = isStreamingRef.current
       if (!sendSocketCommand({
         type: 'prompt',
-        message,
-        ...(uploads.length > 0 ? { images: uploads.map(({ path }) => ({ path })) } : {}),
+        message: promptWithFiles(message, uploads.filter((_, i) => !isSupportedPiImageType(images[i].file.type)).map(({ path }) => path)),
+        ...(uploads.length > 0 ? { images: uploads.filter((_, i) => isSupportedPiImageType(images[i].file.type)).map(({ path }) => ({ path })) } : {}),
         ...(queueMode ? { streamingBehavior: queueMode } : {}),
       })) return
 
@@ -699,15 +700,15 @@ export function PiNativePane({
       appendActivity(
         queueMode ? 'prompt_queued' : 'prompt',
         queueMode
-          ? `Prompt${uploads.length > 0 ? ' with images' : ''} queued for the active run.`
-          : `Prompt sent to Pi${uploads.length > 0 ? ` with ${uploads.length} image${uploads.length === 1 ? '' : 's'}` : ''}.`,
+          ? `Prompt${uploads.length > 0 ? ' with attachments' : ''} queued for the active run.`
+          : `Prompt sent to Pi${uploads.length > 0 ? ` with ${uploads.length} attachment${uploads.length === 1 ? '' : 's'}` : ''}.`,
         sentAt,
       )
       clearSubmittedDraft()
       setNotice('')
     } catch (reason) {
       if (!uploadController.signal.aborted) {
-        setError(reason instanceof Error ? reason.message : 'Could not attach the selected images.')
+        setError(reason instanceof Error ? reason.message : 'Could not attach the selected files.')
       }
     } finally {
       if (imageUploadControllerRef.current === uploadController) {
@@ -743,7 +744,7 @@ export function PiNativePane({
 
   function addDraftImages(files: File[]) {
     if (files.length === 0 || isUploadingImages) return
-    setError(addDraftImageFiles(files, piNativePromptImagePolicy))
+    setError(addDraftImageFiles(files, promptFilePolicy))
   }
 
   function handleImageInput(event: ChangeEvent<HTMLInputElement>) {
@@ -752,7 +753,7 @@ export function PiNativePane({
   }
 
   function handleComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    addDraftImages(imageFilesFromClipboard(event.clipboardData))
+    addDraftImages(filesFromClipboard(event.clipboardData))
     const pastedText = event.clipboardData.getData('text/plain')
     if (!pastedText) return
     const textarea = event.currentTarget
@@ -932,7 +933,7 @@ export function PiNativePane({
     return identifier ? [{ value: identifier, label: model.name || identifier }] : []
   })
   const composerHint = isUploadingImages
-    ? `Uploading ${draftImages.length} image${draftImages.length === 1 ? '' : 's'}…`
+    ? `Uploading ${draftImages.length} attachment${draftImages.length === 1 ? '' : 's'}…`
     : connectionStatus !== 'open'
       ? 'Connecting to Pi…'
       : isStreaming

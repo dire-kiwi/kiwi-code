@@ -12,10 +12,12 @@ import { PiNativePane } from './PiNativePane'
 
 const mocks = vi.hoisted(() => ({
   uploadPiImage: vi.fn(),
+  uploadFile: vi.fn(),
 }))
 
 vi.mock('@/api', () => ({
   uploadPiImage: mocks.uploadPiImage,
+  uploadFile: mocks.uploadFile,
 }))
 
 type NativePaneKind = 'Pi' | 'Claude'
@@ -137,7 +139,7 @@ function renderPane(kind: NativePaneKind) {
 
 function attachImage(name = 'screen.png') {
   const image = new File(['pixels'], name, { type: 'image/png' })
-  const input = screen.getByLabelText('Attach images', {
+  const input = screen.getByLabelText('Attach files', {
     selector: 'input',
   }) as HTMLInputElement
   fireEvent.change(input, { target: { files: [image] } })
@@ -390,7 +392,7 @@ describe('PiNativePane prompt lifecycle', () => {
     writePrompt('This upload will be cancelled')
     await submitPrompt()
     expect(uploadSignal?.aborted).toBe(false)
-    expect(screen.getByRole('button', { name: 'Uploading images' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Uploading files' })).toBeDefined()
 
     await act(async () => {
       unmount()
@@ -507,3 +509,20 @@ describe('PiNativePane thinking levels', () => {
     expect(thinkingOptions()).toEqual(['Off'])
   })
 })
+
+for (const kind of ['Pi', 'Claude'] as const) {
+  it(`sends uploaded document paths to ${kind} without treating them as images`, async () => {
+    mocks.uploadFile.mockResolvedValue({ path: '/uploaded/notes.txt' })
+    renderPane(kind)
+    const socket = sockets[0]
+    act(() => { socket.open(); socket.receive(readyEvent(kind)) })
+    const file = new File(['notes'], 'notes.txt', { type: 'text/plain' })
+    fireEvent.change(screen.getByLabelText('Attach files', { selector: 'input' }), { target: { files: [file] } })
+    writePrompt('Read this')
+    await submitPrompt()
+    expect(mocks.uploadFile).toHaveBeenCalledWith('project/a', file, expect.any(AbortSignal))
+    const prompt = messagesOfType(socket, 'prompt').at(-1)
+    expect(prompt?.message).toContain('/uploaded/notes.txt')
+    expect(prompt?.images).toEqual([])
+  })
+}

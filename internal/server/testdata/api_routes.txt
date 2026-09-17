@@ -37,6 +37,7 @@ PATCH /api/projects/{id}/threads/{threadId}
 PATCH /api/projects/{id}/threads/{threadId}/workspace
 POST /api/profiles
 POST /api/projects
+POST /api/projects/{id}/files
 POST /api/projects/{id}/pi/images
 POST /api/projects/{id}/threads
 POST /api/projects/{id}/threads/{threadId}/browser/actions

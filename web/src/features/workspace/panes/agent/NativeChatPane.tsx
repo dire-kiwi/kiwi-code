@@ -1,3 +1,4 @@
+import { isSupportedPiImageType, promptWithFiles } from '@/lib/promptImages'
 import { memo, useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import {
   ArrowDown,
@@ -9,16 +10,15 @@ import {
   Square,
   X,
 } from 'lucide-react'
-import { uploadPiImage } from '@/api'
+import { uploadPiImage, uploadFile } from '@/api'
 import { apiWebSocketUrl } from '@/apiUrl'
 import { fallbackCodingAgentConfigs, thinkingChoicesForModel } from '@/codingAgents'
 import { AgentMarkdown } from '@/ui/markdown'
 import { classNames } from '@/lib/classNames'
 import { useImageAttachments } from '@/lib/useImageAttachments'
 import {
-  imageFilesFromClipboard,
-  PI_IMAGE_ACCEPT,
-  piNativePromptImagePolicy,
+  filesFromClipboard,
+  promptFilePolicy,
 } from '@/lib/promptImages'
 import type { CodingAgentConfig, ConnectionStatus } from '@/types'
 import { CodingAgentsTopic } from '@/wire/topics'
@@ -363,17 +363,17 @@ export function NativeChatPane(props: Props) {
     setUploading(true)
     try {
       const uploaded = await Promise.all(
-        images.attachments.map((image) => uploadPiImage(projectId, image.file, controller.signal)),
+        images.attachments.map((image) => (isSupportedPiImageType(image.file.type) ? uploadPiImage : uploadFile)(projectId, image.file, controller.signal)),
       )
       if (controller.signal.aborted) return
       pendingDraft.current = draft
       if (
         send({
           type: 'prompt',
-          message: draft.trim(),
+          message: promptWithFiles(draft.trim(), uploaded.filter((_, i) => !isSupportedPiImageType(images.attachments[i].file.type)).map(({ path }) => path)),
           images: [
             ...initialImages.current.map((path) => ({ path })),
-            ...uploaded.map(({ path }) => ({ path })),
+            ...uploaded.filter((_, i) => isSupportedPiImageType(images.attachments[i].file.type)).map(({ path }) => ({ path })),
           ],
           model,
           effort,
@@ -388,13 +388,13 @@ export function NativeChatPane(props: Props) {
       submitting.current = false
       pendingDraft.current = null
       if (!controller.signal.aborted)
-        error(reason instanceof Error ? reason.message : 'Could not upload images.')
+        error(reason instanceof Error ? reason.message : 'Could not upload files.')
     } finally {
       if (!controller.signal.aborted) setUploading(false)
     }
   }
   function addImages(files: File[]) {
-    const problem = images.addFiles(files, piNativePromptImagePolicy)
+    const problem = images.addFiles(files, promptFilePolicy)
     if (problem) error(problem)
   }
   const connected = status === 'open'
@@ -507,11 +507,11 @@ export function NativeChatPane(props: Props) {
             <div className="flex gap-2 overflow-x-auto px-4 pt-3">
               {images.attachments.map((image) => (
                 <div className="relative shrink-0" key={image.id}>
-                  <img
+                  {isSupportedPiImageType(image.file.type) ? <img
                     className="h-16 w-20 rounded-lg object-cover"
                     src={image.previewUrl}
                     alt={image.file.name}
-                  />
+                  /> : <span className="block max-w-48 truncate p-3 text-xs">{image.file.name}</span>}
                   <button
                     aria-label={`Remove ${image.file.name}`}
                     className="absolute right-0 top-0 rounded-full bg-ghost-panel p-1"
@@ -530,7 +530,7 @@ export function NativeChatPane(props: Props) {
             className="block max-h-[220px] min-h-[72px] w-full resize-none bg-transparent px-4 pb-2 pt-4 text-sm leading-6 outline-none placeholder:text-ghost-dim"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            onPaste={(event) => addImages(imageFilesFromClipboard(event.clipboardData))}
+            onPaste={(event) => addImages(filesFromClipboard(event.clipboardData))}
             onDragOver={(event) => {
               if (event.dataTransfer.types.includes('Files')) event.preventDefault()
             }}
@@ -546,13 +546,12 @@ export function NativeChatPane(props: Props) {
             }}
           />
           <div className="flex min-w-0 items-center gap-1 px-3 pb-3">
-            <label className={`${control} cursor-pointer`} title="Attach images">
+            <label className={`${control} cursor-pointer`} title="Attach files">
               <ImagePlus size={16} />
-              <span className="sr-only">Attach images</span>
+              <span className="sr-only">Attach files</span>
               <input
                 className="sr-only"
                 type="file"
-                accept={PI_IMAGE_ACCEPT}
                 multiple
                 disabled={uploading}
                 onChange={(event) => {

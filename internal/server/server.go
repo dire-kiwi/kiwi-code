@@ -215,6 +215,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("POST /api/projects/{id}/threads/{threadId}/processes/{processId}/interrupt", server.terminal.interruptProcess)
 	mux.HandleFunc("DELETE /api/projects/{id}/threads/{threadId}/processes/{processId}", server.terminal.deleteProcess)
 	mux.HandleFunc("POST /api/projects/{id}/pi/images", server.uploadPiImage)
+	mux.HandleFunc("POST /api/projects/{id}/files", server.uploadFile)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/pi/native", server.terminal.servePiNative)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/claude/native", server.terminal.serveClaudeNative)
 	mux.HandleFunc("GET /api/projects/{id}/threads/{threadId}/codex/native", server.terminal.serveCodexNative)
