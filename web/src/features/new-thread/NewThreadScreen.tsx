@@ -13,12 +13,12 @@ import {
   Bot,
   GitBranch,
   GitFork,
-  ImagePlus,
+  Paperclip,
   Laptop,
   LoaderCircle,
   X,
 } from 'lucide-react'
-import { createThread, rememberNewThreadSelection, uploadPiImage } from '@/api'
+import { createThread, rememberNewThreadSelection, uploadPiImage, uploadFile } from '@/api'
 import {
   codingAgentSelectionForSetting,
   codingAgentTargetForSelection,
@@ -32,9 +32,10 @@ import {
 } from '@/codingAgents'
 import {
   formatImageSize,
-  imageFilesFromClipboard,
-  PI_IMAGE_ACCEPT,
-  piNativePromptImagePolicy,
+  filesFromClipboard,
+  isSupportedPiImageType,
+  promptWithFiles,
+  promptFilePolicy,
   validateImageAdditions,
 } from '@/lib/promptImages'
 import { classNames } from '@/lib/classNames'
@@ -256,7 +257,7 @@ export function NewThreadScreen({
       const validation = validateImageAdditions(
         [],
         initialPromptImages.map(({ file }) => file),
-        piNativePromptImagePolicy,
+        promptFilePolicy,
       )
       if (validation.error) {
         setError(validation.error)
@@ -269,12 +270,12 @@ export function NewThreadScreen({
     setError('')
     try {
       const imagePaths = await Promise.all(initialPromptImages.map(async ({ file }) => {
-        const upload = await uploadPiImage(project.id, file)
+        const upload = await (isSupportedPiImageType(file.type) ? uploadPiImage : uploadFile)(project.id, file)
         return upload.path
       }))
       setUploadingImages(false)
       const nativeAgent = agentTarget.presentation === 'native'
-      const firstTask = nativeAgent ? prompt : initialPromptWithImages(prompt, imagePaths)
+      const firstTask = nativeAgent ? promptWithFiles(prompt, imagePaths.filter((_, i) => !isSupportedPiImageType(initialPromptImages[i].file.type))) : initialPromptWithImages(prompt, imagePaths)
       const thread = await createThread(project.id, {
         worktree: creatingWorktree,
         baseBranch: creatingWorktree ? baseBranch : undefined,
@@ -299,7 +300,7 @@ export function NewThreadScreen({
         model,
         thinkingLevel,
         prompt: firstTask,
-        imagePaths: nativeAgent && imagePaths.length > 0 ? imagePaths : undefined,
+        imagePaths: nativeAgent ? imagePaths.filter((_, i) => isSupportedPiImageType(initialPromptImages[i].file.type)) : undefined,
       })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not create that thread.')
@@ -312,7 +313,7 @@ export function NewThreadScreen({
     if (files.length === 0 || submitting) return
     setError(addInitialPromptImageFiles(
       files,
-      codingAgent === 'pi-native' ? piNativePromptImagePolicy : undefined,
+      promptFilePolicy,
     ))
   }
 
@@ -322,7 +323,7 @@ export function NewThreadScreen({
   }
 
   function handleInitialPromptPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    addInitialPromptImages(imageFilesFromClipboard(event.clipboardData))
+    addInitialPromptImages(filesFromClipboard(event.clipboardData))
     const pastedText = event.clipboardData.getData('text/plain')
     if (!pastedText) return
     const textarea = event.currentTarget
@@ -565,17 +566,17 @@ export function NewThreadScreen({
             />
 
             {initialPromptImages.length > 0 && (
-              <ul className="mt-2 grid gap-2 sm:grid-cols-2" aria-label="Attached images">
+              <ul className="mt-2 grid gap-2 sm:grid-cols-2" aria-label="Attached files">
                 {initialPromptImages.map((image) => (
                   <li
                     key={image.id}
                     className="flex min-w-0 items-center gap-2.5 rounded-lg border border-ghost-border/70 bg-ghost-black/35 p-2"
                   >
-                    <img
+                    {isSupportedPiImageType(image.file.type) ? <img
                       src={image.previewUrl}
                       alt=""
                       className="size-11 shrink-0 rounded-md border border-ghost-border/65 object-cover"
-                    />
+                    /> : <span className="block max-w-48 truncate p-2 text-xs">{image.file.name}</span>}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[10px] text-ghost-bright-white" title={image.file.name}>
                         {image.file.name || 'Pasted image'}
@@ -653,7 +654,7 @@ export function NewThreadScreen({
                 </div>
               </div>
               <label
-                title="Paste or drop images into the prompt · PNG, JPEG, GIF, WebP · 50 MB max"
+                title="Paste or drop files into the prompt · 50 MB max"
                 className={classNames(
                   'flex h-6 items-center gap-1 rounded-[5px] px-1 font-mono text-[9px] transition',
                   submitting
@@ -661,11 +662,10 @@ export function NewThreadScreen({
                     : 'cursor-pointer text-ghost-muted hover:bg-ghost-raised/70 hover:text-ghost-bright-white',
                 )}
               >
-                <ImagePlus size={11} className="text-ghost-green" />
-                <span className="sr-only">Add images</span>
+                <Paperclip size={11} className="text-ghost-green" />
+                <span className="sr-only">Add files</span>
                 <input
                   type="file"
-                  accept={PI_IMAGE_ACCEPT}
                   multiple
                   disabled={submitting}
                   onChange={handleImageInput}
@@ -747,7 +747,7 @@ export function NewThreadScreen({
 
           <div className="mt-3 flex items-center justify-center gap-3 text-xs text-ghost-faint">
             <GhostButton type="button" onClick={onCancel} disabled={submitting}>Cancel</GhostButton>
-            <span>{submitting ? (uploadingImages ? 'Uploading images…' : 'Creating thread…') : '⌘ / Ctrl + Enter to create'}</span>
+            <span>{submitting ? (uploadingImages ? 'Uploading files…' : 'Creating thread…') : '⌘ / Ctrl + Enter to create'}</span>
           </div>
         </form>
       </main>

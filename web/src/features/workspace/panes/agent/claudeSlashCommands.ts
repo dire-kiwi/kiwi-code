@@ -35,7 +35,7 @@ export function runClaudeSlashCommand(
   const commandName = match[1]
   const argument = (match[2] ?? '').trim()
   if (context.hasImageAttachments) {
-    context.setError(`Remove image attachments before running /${commandName}.`)
+    context.setError(`Remove attachments before running /${commandName}.`)
     return true
   }
   if (context.isStreaming && commandName !== 'session') {

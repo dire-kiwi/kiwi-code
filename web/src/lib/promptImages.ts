@@ -16,6 +16,7 @@ export function isSupportedPiImageType(value: string): value is typeof PI_IMAGE_
 }
 
 export type ImageValidationPolicy = {
+  allowFiles?: boolean
   maxFiles?: number
   maxTotalBytes?: number
 }
@@ -45,24 +46,24 @@ export function validateImageAdditions(
   let error = ''
 
   for (const file of additions) {
-    if (!isSupportedPiImageType(file.type)) {
+    if (!policy.allowFiles && !isSupportedPiImageType(file.type)) {
       error ||= 'Attach PNG, JPEG, GIF, or WebP images.'
       continue
     }
-    if (file.size === 0) {
+    if (!policy.allowFiles && file.size === 0) {
       error ||= 'Attached images cannot be empty.'
       continue
     }
     if (file.size > MAX_PI_IMAGE_BYTES) {
-      error ||= 'Each image must be 50 MB or smaller.'
+      error ||= 'Each file must be 50 MB or smaller.'
       continue
     }
     if (policy.maxFiles !== undefined && existing.length + accepted.length >= policy.maxFiles) {
-      error ||= `Attach at most ${policy.maxFiles} images to one Pi prompt.`
+      error ||= `Attach at most ${policy.maxFiles} files to one prompt.`
       continue
     }
     if (policy.maxTotalBytes !== undefined && totalBytes + file.size > policy.maxTotalBytes) {
-      error ||= 'Images in one Pi prompt must total 50 MB or smaller.'
+      error ||= 'Attachments in one prompt must total 50 MB or smaller.'
       continue
     }
     accepted.push(file)
@@ -81,4 +82,16 @@ export function formatImageSize(bytes: number): string {
 export const piNativePromptImagePolicy: ImageValidationPolicy = {
   maxFiles: MAX_PI_NATIVE_PROMPT_IMAGES,
   maxTotalBytes: MAX_PI_IMAGE_BYTES,
+}
+
+export const promptFilePolicy: ImageValidationPolicy = { ...piNativePromptImagePolicy, allowFiles: true }
+
+export function filesFromClipboard(data: DataTransfer): File[] {
+  const files = Array.from(data.items).filter((item) => item.kind === 'file')
+    .map((item) => item.getAsFile()).filter((file): file is File => file !== null)
+  return files.length ? files : Array.from(data.files)
+}
+
+export function promptWithFiles(message: string, paths: string[]): string {
+  return paths.length ? `${message}${message ? '\n\n' : ''}Attached files (local paths):\n${paths.map((path) => JSON.stringify(path)).join('\n')}` : message
 }

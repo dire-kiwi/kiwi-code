@@ -342,3 +342,10 @@ export function rememberNewThreadSelection(selection: NonNullable<AppSettings['n
   newThreadSelectionSave = save.then(() => {}, () => {})
   return save
 }
+
+export function uploadFile(id: string, file: File, signal?: AbortSignal) {
+  return request<{ path: string }>(`/api/projects/${encodeURIComponent(id)}/files?name=${encodeURIComponent(file.name)}`, {
+    method: 'POST', body: file, signal,
+    headers: { 'Content-Type': 'application/octet-stream' },
+  })
+}
