@@ -851,8 +851,8 @@ func TestConfiguredClaudeCodeProfileUsesTheDefaultClaudeLaunchConfiguration(t *t
 		"CLAUDE_CONFIG_DIR=" + profileDirectory,
 		"CLAUDE_CODE_PLUGIN_CACHE_DIR=" + pluginDirectory,
 		"--plugin-dir\n/plugin/kiwi-code",
-		"--dangerously-skip-permissions",
-		`{"skipDangerousModePermissionPrompt":true}`,
+		"--permission-mode\nauto",
+		`{"skipAutoPermissionPrompt":true}`,
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("configured Claude args %#v do not contain %q", profileArgs, expected)
