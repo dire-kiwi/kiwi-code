@@ -55,6 +55,7 @@ export const ThreadSchema = Schema.Struct({
   worktreePath: Schema.optional(Schema.String),
   autoNamed: Schema.optional(Schema.Boolean),
   titleLocked: Schema.optional(Schema.Boolean),
+  pinned: Schema.optional(Schema.Boolean),
   settledAt: Schema.optional(Schema.String),
   lastActivityAt: Schema.optional(Schema.String),
   unsettledAt: Schema.optional(Schema.String),

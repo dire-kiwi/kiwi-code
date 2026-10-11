@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Inbox, LoaderCircle } from 'lucide-react'
+import { ChevronDown, ChevronRight, Inbox, LoaderCircle, Pin } from 'lucide-react'
 import { useMatch } from 'react-router-dom'
 import { WORKSPACE_ROUTE } from '@/app/routes'
 import { usageDescription } from '@/lib/formatUsage'
@@ -40,7 +40,7 @@ export function SidebarActivityView({
   onDeleteThread,
 }: SidebarActivityViewProps) {
   const dispatch = useAppDispatch()
-  const { settlingThreadId, toggleSettlement } = useThreadSettlement()
+  const { settlingThreadId, toggleSettlement, pinningThreadId, togglePin } = useThreadSettlement()
   const [settledOpen, setSettledOpen] = useState(false)
   const projects = useAppSelector(selectActiveProjects)
   const piActivities = useAppSelector(selectPiActivities)
@@ -83,6 +83,7 @@ export function SidebarActivityView({
       project.name,
       thread.cwd,
       stateDescription,
+      thread.pinned ? 'Pinned; never settles' : '',
       usage ? `Usage: ${usageDescription(usage.own)}${usage.limitReached ? ' — limit reached' : ''}` : '',
     ].filter(Boolean).join('\n')
     const elapsed = formatRelativeShort(entry.at, now)
@@ -117,7 +118,11 @@ export function SidebarActivityView({
             )}
             <span className="min-w-0 flex-1">
               <span className="mb-1 block truncate text-[10px] text-ghost-dim">{project.name}</span>
-              <span className="block truncate text-xs text-ghost-white">{thread.title}</span>
+              <span className="flex items-center gap-1 text-xs text-ghost-white">
+                <span className="min-w-0 truncate">{thread.title}</span>
+                {thread.pinned && <Pin size={10} className="shrink-0 text-ghost-faint" aria-hidden="true" />}
+                {thread.pinned && <span className="sr-only">Pinned</span>}
+              </span>
             </span>
             {stateDescription && <span className="sr-only">{stateDescription}</span>}
           </SelectionButton>
@@ -128,8 +133,11 @@ export function SidebarActivityView({
               working={kind === 'working'}
               settling={settlingThreadId === thread.id}
               onSettle={() => void toggleSettlement(project, thread)}
+              pinned={thread.pinned}
+              pinning={pinningThreadId === thread.id}
+              onPin={() => void togglePin(project, thread)}
               deleting={deletingThreadId === thread.id}
-              disabled={Boolean(deletingThreadId || settlingThreadId)}
+              disabled={Boolean(deletingThreadId || settlingThreadId || pinningThreadId)}
               open={menuOpen}
               onOpenChange={(open) => setThreadMenuKey(open ? key : null)}
               onDelete={() => onDeleteThread(project, thread)}

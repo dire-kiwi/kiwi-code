@@ -235,6 +235,10 @@ export function setThreadSettled(projectId: string, threadId: string, settled: b
   return jsonRequest<Thread>(threadPath(projectId, threadId), 'PATCH', { settled })
 }
 
+export function setThreadPinned(projectId: string, threadId: string, pinned: boolean) {
+  return jsonRequest<Thread>(threadPath(projectId, threadId), 'PATCH', { pinned })
+}
+
 
 export function deleteThread(projectId: string, threadId: string) {
   return request<void>(threadPath(projectId, threadId), { method: 'DELETE' })

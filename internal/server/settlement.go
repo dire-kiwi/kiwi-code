@@ -26,6 +26,9 @@ func (s *Server) setThreadSettlementLocked(projectID, threadID string, settled b
 	if !settled {
 		return s.projects.SetThreadSettled(projectID, threadID, false)
 	}
+	if thread.Pinned {
+		return project.Thread{}, project.ErrThreadPinned
+	}
 	if s.piActivity != nil {
 		for _, activity := range s.piActivity.list(now) {
 			if activity.ProjectID == projectID && activity.ThreadID == threadID && activity.State == piActivityWorking {
@@ -132,7 +135,7 @@ func (s *Server) settleIdleThreads(now time.Time) error {
 	var failures []error
 	for _, item := range items {
 		for _, thread := range item.Threads {
-			if thread.RollbackPending {
+			if thread.RollbackPending || thread.Pinned {
 				continue
 			}
 			latest := inactiveSessionsForThread(item, thread, activities).LastActivityAt

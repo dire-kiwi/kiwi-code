@@ -6,6 +6,7 @@ export type SidebarVisibilityThread = {
   lastPromptAt?: string
   unsettledAt?: string
   settledAt?: string
+  pinned?: boolean
 }
 
 export type SidebarVisibilityActivity = {

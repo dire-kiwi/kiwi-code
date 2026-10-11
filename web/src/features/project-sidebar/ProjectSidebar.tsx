@@ -16,6 +16,7 @@ import {
   ListTree,
   LoaderCircle,
   PanelLeftClose,
+  Pin,
   Plus,
   Settings2,
   Trash2,
@@ -92,7 +93,7 @@ export function ProjectSidebar({
   const [searchQuery, setSearchQuery] = useState('')
   const [projectScope, setProjectScope] = useState('')
   const dispatch = useAppDispatch()
-  const { settlingThreadId, toggleSettlement } = useThreadSettlement()
+  const { settlingThreadId, toggleSettlement, pinningThreadId, togglePin } = useThreadSettlement()
   const { navigateAndClose } = useSidebarNavigation()
   // The router already holds which thread is open; App used to re-derive this
   // with useMatch and pass it down, which made the URL a two-copy fact.
@@ -192,7 +193,7 @@ export function ProjectSidebar({
       : ''
     const settledTitle = thread.settledAt
       ? `\nSettled ${new Date(thread.settledAt).toLocaleString()}`
-      : ''
+      : thread.pinned ? '\nPinned; never settles' : ''
     const selectionPadding = 'pl-8'
     const menuOpen = threadMenuId === thread.id
     // While the actions menu is open the row must stay fully opaque: any opacity below 1 turns the
@@ -247,6 +248,12 @@ export function ProjectSidebar({
               {query && <span className="block truncate text-[10px] text-ghost-dim">{project.name}</span>}
               <span className="block truncate">{thread.title}</span>
             </span>
+            {thread.pinned && (
+              <>
+                <Pin size={10} className="shrink-0 text-ghost-faint" aria-hidden="true" />
+                <span className="sr-only">Pinned</span>
+              </>
+            )}
             {piActivity?.state === 'working' ? (
               <>
                 <LoaderCircle size={11} className="shrink-0 animate-spin text-ghost-green" aria-hidden="true" />
@@ -277,8 +284,11 @@ export function ProjectSidebar({
               working={piActivity?.state === 'working'}
               settling={settlingThreadId === thread.id}
               onSettle={() => void toggleSettlement(project, thread)}
+              pinned={thread.pinned}
+              pinning={pinningThreadId === thread.id}
+              onPin={() => void togglePin(project, thread)}
               deleting={deletingThreadId === thread.id}
-              disabled={Boolean(deletingThreadId || settlingThreadId)}
+              disabled={Boolean(deletingThreadId || settlingThreadId || pinningThreadId)}
               open={menuOpen}
               onOpenChange={(open) => setThreadMenuId(open ? thread.id : null)}
               onDelete={() => onDeleteThread(project, thread)}

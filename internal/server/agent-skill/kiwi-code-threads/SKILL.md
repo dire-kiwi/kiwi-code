@@ -17,7 +17,7 @@ Use the dependency-free scripts in `scripts/` to manage threads through the Kiwi
 - List threads first when a target is ambiguous. Use immutable project and thread IDs for mutations, never a title alone.
 - When explicitly asked to create a thread, create a normal thread unless the user asks for Git isolation. For a worktree thread, pass `--worktree` and optionally `--base-branch`.
 - Do not start a coding agent merely because the user requested a new thread. Only pass `--agent` when the user also explicitly asks to start an agent in it or supplies an initial task for that new thread; `--model`, `--thinking`, and `--prompt` configure that new agent process.
-- Settle a completed thread to close its sessions and retain its saved conversation and worktree. Idle threads settle automatically after three days. Un-settle to return it to active work and resume the saved agent conversation when opened. Never settle the current thread without an explicit user request, because doing so terminates this agent.
+- Settle a completed thread to close its sessions and retain its saved conversation and worktree. Idle threads settle automatically after three days. Threads the user has pinned never settle, and settling one fails until the user unpins it from the sidebar. Un-settle to return it to active work and resume the saved agent conversation when opened. Never settle the current thread without an explicit user request, because doing so terminates this agent.
 - Treat closing as destructive: it removes the thread record and stops both of its persistent tmux sessions, including its coding agents and process shells. It does not immediately delete an existing worktree, branch, or project files; a clean managed worktree may be removed later according to automatic cleanup settings.
 - Never close the current thread unless the user explicitly requests it. The helper refuses by default because closing it terminates this agent; only then use `--allow-current`.
 - Read a bounded amount of tmux output. Avoid tight polling loops and increase the line count only when needed.
@@ -46,7 +46,7 @@ node "$HOME/.agents/skills/kiwi-code-threads/scripts/list-threads.mjs" --project
 node "$HOME/.agents/skills/kiwi-code-threads/scripts/list-threads.mjs" --all
 ```
 
-The output includes each thread's ID, title, working directory, worktree state, branch when present, and `settledAt` timestamp when settled.
+The output includes each thread's ID, title, working directory, worktree state, branch when present, `settledAt` timestamp when settled, and `pinned: true` when pinned.
 
 ## Create a thread
 

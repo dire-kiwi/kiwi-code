@@ -2,6 +2,7 @@ import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/tool
 import {
   deleteProject,
   deleteThread,
+  setThreadPinned,
   setThreadSettled,
   updateProjectOrder,
   updateThreadOrder,
@@ -11,7 +12,7 @@ import { retryTopic } from '@/store/socketAccess'
 import type { Project, Thread } from '@/types'
 import { ProjectsTopic } from '@/wire/topics'
 
-// The project tree, and the three "one of these is in flight" ids the sidebar
+// The project tree, and the "one of these is in flight" ids the sidebar
 // uses to show spinners.
 //
 // Every mutation here is optimistic: the list moves first and rolls back if the
@@ -27,6 +28,7 @@ export type ProjectsState = {
   deletingProjectId: string | null
   deletingThreadId: string | null
   settlingThreadId: string | null
+  pinningThreadId: string | null
 }
 
 export const initialProjectsState: ProjectsState = {
@@ -35,6 +37,7 @@ export const initialProjectsState: ProjectsState = {
   deletingProjectId: null,
   deletingThreadId: null,
   settlingThreadId: null,
+  pinningThreadId: null,
 }
 
 // --- pure helpers, lifted out of App unchanged -----------------------------
@@ -66,6 +69,7 @@ function sameThreads(current: readonly Thread[], next: readonly Thread[]) {
       && candidate.worktreePath === thread.worktreePath
       && candidate.autoNamed === thread.autoNamed
       && candidate.titleLocked === thread.titleLocked
+      && candidate.pinned === thread.pinned
       && candidate.tokenLimit === thread.tokenLimit
       && candidate.costLimitUsd === thread.costLimitUsd
       && candidate.rollbackPending === thread.rollbackPending
@@ -219,6 +223,18 @@ export const threadSettled = createAsyncThunk<
   }
 })
 
+export const threadPinned = createAsyncThunk<
+  { projectId: string; thread: Thread },
+  { projectId: string; threadId: string; pinned: boolean },
+  ThunkConfig
+>('projects/threadPinned', async ({ projectId, threadId, pinned }, { rejectWithValue }) => {
+  try {
+    return { projectId, thread: await setThreadPinned(projectId, threadId, pinned) }
+  } catch (reason) {
+    return rejectWithValue(errorMessage(reason, `Could not ${pinned ? 'pin' : 'unpin'} that thread.`))
+  }
+})
+
 export const threadRemoved = createAsyncThunk<
   { projectId: string; threadIds: string[] },
   { projectId: string; threadId: string },
@@ -301,6 +317,16 @@ export const projectsSlice = createSlice({
       .addCase(threadSettled.rejected, (state) => {
         state.settlingThreadId = null
       })
+      .addCase(threadPinned.pending, (state, action) => {
+        state.pinningThreadId = action.meta.arg.threadId
+      })
+      .addCase(threadPinned.fulfilled, (state, action) => {
+        state.projects = withThread(state.projects, action.payload.projectId, action.payload.thread)
+        state.pinningThreadId = null
+      })
+      .addCase(threadPinned.rejected, (state) => {
+        state.pinningThreadId = null
+      })
       .addCase(threadRemoved.pending, (state, action) => {
         state.deletingThreadId = action.meta.arg.threadId
       })
@@ -336,3 +362,4 @@ export const selectDeletingProjectId = (state: RootState) => state.projects.dele
 export const selectDeletingThreadId = (state: RootState) => state.projects.deletingThreadId
 
 export const selectSettlingThreadId = (state: RootState) => state.projects.settlingThreadId
+export const selectPinningThreadId = (state: RootState) => state.projects.pinningThreadId

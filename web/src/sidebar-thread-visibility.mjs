@@ -40,6 +40,6 @@ export function defaultVisibleRootThreadIds(
     if (rootId && activeRootIds.has(rootId)) attentionRootIds.add(rootId)
   }
   return activeRoots
-    .filter((thread) => recentIds.has(thread.id) || attentionRootIds.has(thread.id))
+    .filter((thread) => thread.pinned || recentIds.has(thread.id) || attentionRootIds.has(thread.id))
     .map((thread) => thread.id)
 }

@@ -109,3 +109,49 @@ func TestIdleSettlementRechecksPersistedActivity(t *testing.T) {
 		t.Fatalf("stale idle settle = %v", err)
 	}
 }
+
+func TestPinnedThreadsCannotSettle(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "projects.json")
+	store, err := NewStore(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := item.Threads[0]
+	pinned, err := store.SetThreadPinned(item.ID, thread.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pinned.Pinned {
+		t.Fatal("not pinned")
+	}
+	reloaded, err := NewStore(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, current, _ := reloaded.GetThread(item.ID, thread.ID); !current.Pinned {
+		t.Fatal("pin was not persisted")
+	}
+	if _, err := reloaded.SetThreadSettled(item.ID, thread.ID, true); !errors.Is(err, ErrThreadPinned) {
+		t.Fatalf("pinned settle = %v", err)
+	}
+	if _, err := reloaded.SetThreadSettledIfIdle(item.ID, thread.ID, time.Now().UTC().Add(time.Hour)); !errors.Is(err, ErrThreadPinned) {
+		t.Fatalf("pinned idle settle = %v", err)
+	}
+	if _, err := reloaded.SetThreadPinned(item.ID, thread.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	settled, err := reloaded.SetThreadSettled(item.ID, thread.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settled.SettledAt == nil {
+		t.Fatal("unpinned thread did not settle")
+	}
+	if _, err := reloaded.SetThreadPinned(item.ID, thread.ID, true); !errors.Is(err, ErrThreadSettledPin) {
+		t.Fatalf("settled pin = %v", err)
+	}
+}
