@@ -16,6 +16,18 @@ const defaultTitleModel = 'openai-codex/gpt-5.6-luna'
 const defaultTitleThinking = 'low'
 const supportedTitleThinking = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
 
+// Background work that reports back to the main agent. Claude ends the turn
+// while these run and starts a new one (firing UserPromptSubmit) when they
+// finish, so the thread is still busy in between. Shells and monitors are left
+// out: they can run indefinitely, such as a dev server, and would pin the
+// thread on working. Claude labels task types, falling back to the raw kind.
+const backgroundAgentTaskTypes = new Set([
+  'subagent', 'local_agent',
+  'workflow', 'local_workflow',
+  'cloud session', 'remote_agent',
+])
+const inFlightTaskStatuses = new Set(['running', 'pending'])
+
 // KIWI_CODE_TITLE_MODEL and KIWI_CODE_TITLE_THINKING carry the model
 // ("provider/model") and thinking level configured in Kiwi Code's settings;
 // the model is handed to `pi --model` unchanged.
@@ -257,6 +269,19 @@ async function transitionActivity(input, state) {
   )
 }
 
+function awaitingBackgroundAgents(input) {
+  const tasks = Array.isArray(input.background_tasks) ? input.background_tasks : []
+  return tasks.some((task) =>
+    backgroundAgentTaskTypes.has(task?.type) && inFlightTaskStatuses.has(task?.status))
+}
+
+async function finishActivity(input) {
+  // Leaving the working state in place keeps the heartbeat refreshing the
+  // indicator until the turn that handles the agents' results stops.
+  if (awaitingBackgroundAgents(input)) return
+  await transitionActivity(input, 'finished')
+}
+
 async function endSession(input) {
   const current = await readState(input)
   if (current?.state === 'working') await transitionActivity(input, 'idle')
@@ -411,7 +436,7 @@ async function main() {
       await heartbeat(input)
       break
     case 'finished':
-      await transitionActivity(input, 'finished')
+      await finishActivity(input)
       break
     case 'session-end':
       await endSession(input)
