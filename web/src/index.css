@@ -97,12 +97,10 @@ input:focus-visible {
   -webkit-app-region: no-drag;
 }
 
-.desktop-shell .desktop-titlebar-left-safe {
-  padding-left: max(0.75rem, calc(env(titlebar-area-x, 0px) + 0.75rem));
-}
-
-.desktop-shell-darwin .desktop-titlebar-left-safe {
-  padding-left: 4rem;
+/* The profile rail is the window's left edge, so on macOS its first icon has to
+   start below the traffic lights rather than beside them. */
+.desktop-shell-darwin .desktop-profile-rail-titlebar-safe {
+  height: 2.25rem;
 }
 
 .desktop-shell .desktop-titlebar-right-safe {

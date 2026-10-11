@@ -35,3 +35,23 @@ export const selectActiveProjectIds = createSelector(
   [selectActiveProjects],
   (projects) => new Set(projects.map((project) => project.id)),
 )
+
+/**
+ * Working and finished agent counts summed per profile, so the profile rail can
+ * flag activity in profiles other than the one on screen.
+ */
+export const selectProfileActivityCounts = createSelector(
+  [selectThreadIndex],
+  (index) => {
+    const counts = new Map<string, { working: number; finished: number }>()
+    for (const project of index.projects) {
+      const projectCounts = index.projectActivityCounts.get(project.id)
+      if (!projectCounts) continue
+      const current = counts.get(project.profileId) ?? { working: 0, finished: 0 }
+      current.working += projectCounts.working
+      current.finished += projectCounts.finished
+      counts.set(project.profileId, current)
+    }
+    return counts
+  },
+)
