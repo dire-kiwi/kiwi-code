@@ -3491,7 +3491,7 @@ func (h *terminalHandler) commandForTmuxTarget(
 			pluginArguments = append(pluginArguments, "--mcp-config", figmaConfig)
 		}
 		pluginArguments = append(pluginArguments,
-			"--dangerously-skip-permissions",
+			"--permission-mode", "auto",
 			"--settings", claudeLaunchSettings,
 		)
 		args = append(pluginArguments, args...)
@@ -3541,6 +3541,9 @@ func (h *terminalHandler) commandForTmuxTarget(
 				"CLAUDE_CONFIG_DIR="+claudeProfile.ConfigDirectory,
 				"CLAUDE_CODE_PLUGIN_CACHE_DIR="+h.claudePluginRootPath,
 			)
+			h.trustClaudeLaunchWorkspace(claudeProfile.ConfigDirectory, thread.Cwd)
+		} else if !gptAgent {
+			h.trustClaudeLaunchWorkspace("", thread.Cwd)
 		}
 		piPath := codingAgentPi
 		if resolvedPiPath, err := exec.LookPath(codingAgentPi); err == nil {
@@ -3560,6 +3563,7 @@ func (h *terminalHandler) commandForTmuxTarget(
 		if err != nil {
 			return "", nil, "", err
 		}
+		h.trustClaudeLaunchWorkspace(profilePath, thread.Cwd)
 		unsetArguments := make([]string, 0, len(claudeGPTUnsetEnvironment)*2+len(environment))
 		for _, name := range claudeGPTUnsetEnvironment {
 			unsetArguments = append(unsetArguments, "-u", name)

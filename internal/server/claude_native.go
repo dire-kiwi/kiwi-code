@@ -552,7 +552,7 @@ func claudeNativeArguments(
 		arguments = append(arguments, relatedDirectories...)
 	}
 	arguments = append(arguments,
-		"--dangerously-skip-permissions",
+		"--permission-mode", "auto",
 		"--settings", claudeLaunchSettings,
 	)
 	if pluginPath != "" {

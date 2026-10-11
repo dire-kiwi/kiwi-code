@@ -21,7 +21,7 @@ const (
 	defaultClaudeGPTHaikuModel    = "gpt-5.6-luna"
 	claudeGPTProfileDirectoryName = "claude-code-gpt-profile"
 	claudeSettingsFileName        = "settings.json"
-	claudeLaunchSettings          = `{"skipDangerousModePermissionPrompt":true}`
+	claudeLaunchSettings          = `{"skipAutoPermissionPrompt":true}`
 	maxCLIProxyAPIModelsResponse  = 1 << 20
 	cliProxyAPIBaseURLEnvironment = "KIWI_CODE_CLIPROXY_BASE_URL"
 	cliProxyAPIKeyEnvironment     = "KIWI_CODE_CLIPROXY_API_KEY"
