@@ -29,3 +29,12 @@ test('working and finished threads remain visible', () => {
     'finished',
   ])
 })
+
+test('pinned threads remain visible beyond the recent limit', () => {
+  const threads = [
+    thread('recent', '2026-01-03T00:00:00Z'),
+    thread('pinned', '2026-01-01T00:00:00Z', { pinned: true }),
+    thread('old', '2026-01-02T00:00:00Z'),
+  ]
+  assert.deepEqual(defaultVisibleRootThreadIds(threads, [], 'p1', 1), ['recent', 'pinned'])
+})

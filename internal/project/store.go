@@ -26,6 +26,8 @@ var ErrThreadSettled = errors.New("un-settle the thread before starting an agent
 var ErrThreadNotFound = errors.New("thread not found")
 var ErrThreadRollbackPending = errors.New("thread creation rollback is pending")
 var ErrThreadTitleLocked = errors.New("thread title is locked")
+var ErrThreadPinned = errors.New("unpin the thread before settling it")
+var ErrThreadSettledPin = errors.New("un-settle the thread before pinning it")
 var ErrProfileNotFound = errors.New("profile not found")
 var ErrInvalidOrder = errors.New("invalid order")
 
@@ -63,6 +65,7 @@ type Thread struct {
 	RollbackCleanupReady   bool       `json:"rollbackCleanupReady,omitempty"`
 	AutoNamed              bool       `json:"autoNamed,omitempty"`
 	TitleLocked            bool       `json:"titleLocked,omitempty"`
+	Pinned                 bool       `json:"pinned,omitempty"`
 	SettledAt              *time.Time `json:"settledAt,omitempty"`
 	LastActivityAt         *time.Time `json:"lastActivityAt,omitempty"`
 	UnsettledAt            *time.Time `json:"unsettledAt,omitempty"`

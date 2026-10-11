@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { CircleCheck, RotateCcw, EllipsisVertical, LoaderCircle, Trash2 } from 'lucide-react'
+import { CircleCheck, RotateCcw, EllipsisVertical, LoaderCircle, Pin, PinOff, Trash2 } from 'lucide-react'
 import { Button, IconButton } from '@/ui/buttons'
 
 type ThreadActionsMenuProps = {
@@ -8,6 +8,10 @@ type ThreadActionsMenuProps = {
   working?: boolean
   settling?: boolean
   onSettle?: () => void
+  /** Pinned threads never settle, so settlement stays unavailable until unpinned. */
+  pinned?: boolean
+  pinning?: boolean
+  onPin?: () => void
   deleting: boolean
   /** Blocks every action while another thread mutation is still in flight. */
   disabled: boolean
@@ -18,7 +22,7 @@ type ThreadActionsMenuProps = {
 }
 
 /**
- * Settle/un-settle and delete actions for a single sidebar thread row. The open
+ * Settle/un-settle, pin/unpin, and delete actions for a single sidebar thread row. The open
  * row is owned by the caller so only one menu can be open across a view.
  */
 export function ThreadActionsMenu({
@@ -27,6 +31,9 @@ export function ThreadActionsMenu({
   working,
   settling,
   onSettle,
+  pinned,
+  pinning,
+  onPin,
   deleting,
   disabled,
   open,
@@ -34,6 +41,7 @@ export function ThreadActionsMenu({
   onDelete,
   triggerClassName,
 }: ThreadActionsMenuProps) {
+  const settleBlocked = !settled && (working || pinned)
   const onOpenChangeRef = useRef(onOpenChange)
   onOpenChangeRef.current = onOpenChange
 
@@ -53,9 +61,11 @@ export function ThreadActionsMenu({
   return (
     <div className="relative flex items-center gap-0.5" data-thread-menu>
       {onSettle && (
-        <IconButton type="button" size="xs" variant="subtle" disabled={disabled || (!settled && working)}
+        <IconButton type="button" size="xs" variant="subtle" disabled={disabled || settleBlocked}
           onClick={onSettle} aria-label={`${settled ? 'Un-settle' : 'Settle'} ${threadTitle}`}
-          title={!settled && working ? 'Wait for the agent to finish' : settled ? 'Un-settle thread' : 'Settle thread'}
+          title={settled ? 'Un-settle thread'
+            : pinned ? 'Pinned threads never settle; unpin to settle'
+              : working ? 'Wait for the agent to finish' : 'Settle thread'}
           className={triggerClassName}>
           {settling ? <LoaderCircle size={12} className="animate-spin" /> : settled ? <RotateCcw size={12} /> : <CircleCheck size={12} />}
         </IconButton>
@@ -85,11 +95,19 @@ export function ThreadActionsMenu({
           className="absolute right-0 top-[calc(100%+2px)] z-30 w-40 rounded-lg border border-ghost-border/90 bg-ghost-panel p-1 shadow-2xl"
         >
           {onSettle && (
-            <Button role="menuitem" type="button" variant="subtle" disabled={disabled || (!settled && working)}
+            <Button role="menuitem" type="button" variant="subtle" disabled={disabled || settleBlocked}
               onClick={() => { onOpenChange(false); onSettle() }}
               className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px]">
               {settled ? <RotateCcw size={12} /> : <CircleCheck size={12} />}
               {settled ? 'Un-settle thread' : 'Settle thread'}
+            </Button>
+          )}
+          {onPin && !settled && (
+            <Button role="menuitem" type="button" variant="subtle" disabled={disabled}
+              onClick={() => { onOpenChange(false); onPin() }}
+              className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px]">
+              {pinning ? <LoaderCircle size={12} className="animate-spin" /> : pinned ? <PinOff size={12} /> : <Pin size={12} />}
+              {pinned ? 'Unpin thread' : 'Pin thread'}
             </Button>
           )}
           <Button

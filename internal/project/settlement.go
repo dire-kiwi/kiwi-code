@@ -52,6 +52,9 @@ func (s *Store) setThreadSettledAt(projectID, threadID string, settled bool, now
 				if settled == (thread.SettledAt != nil) {
 					return cloneThread(*thread), nil
 				}
+				if settled && thread.Pinned {
+					return Thread{}, ErrThreadPinned
+				}
 				if settled && len(idleBefore) > 0 {
 					latest := thread.CreatedAt
 					for _, at := range []*time.Time{thread.LastPromptAt, thread.LastActivityAt, thread.UnsettledAt} {
@@ -72,6 +75,36 @@ func (s *Store) setThreadSettledAt(projectID, threadID string, settled bool, now
 					thread.UnsettledAt = &now
 				}
 				return saveProjectMutationResult(s, cloneThread(*thread), func() { *thread = previous })
+			}
+			return Thread{}, ErrThreadNotFound
+		}
+		return Thread{}, ErrNotFound
+	})
+}
+
+// SetThreadPinned exempts an active thread from manual and idle settlement.
+func (s *Store) SetThreadPinned(projectID, threadID string, pinned bool) (Thread, error) {
+	return withProjectMutationResult(s, func() (Thread, error) {
+		for pi := range s.projects {
+			if s.projects[pi].ID != projectID {
+				continue
+			}
+			for ti := range s.projects[pi].Threads {
+				thread := &s.projects[pi].Threads[ti]
+				if thread.ID != threadID {
+					continue
+				}
+				if thread.RollbackPending {
+					return Thread{}, ErrThreadRollbackPending
+				}
+				if thread.Pinned == pinned {
+					return cloneThread(*thread), nil
+				}
+				if pinned && thread.SettledAt != nil {
+					return Thread{}, ErrThreadSettledPin
+				}
+				thread.Pinned = pinned
+				return saveProjectMutationResult(s, cloneThread(*thread), func() { thread.Pinned = !pinned })
 			}
 			return Thread{}, ErrThreadNotFound
 		}

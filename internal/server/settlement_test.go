@@ -120,3 +120,56 @@ func TestIdleSettlementBoundaryAndRetention(t *testing.T) {
 		t.Fatal("unsettle did not reset idle period")
 	}
 }
+
+func TestPinnedThreadsAreNeverSettled(t *testing.T) {
+	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Add("Demo", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := item.Threads[0]
+	handler, err := newIsolatedServerHandler(t, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := handler.(*Server)
+	patch := func(body string) *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPatch, "/api/projects/"+item.ID+"/threads/"+thread.ID, strings.NewReader(body)))
+		return response
+	}
+	if response := patch(`{"pinned":true}`); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"pinned":true`) {
+		t.Fatalf("pin status = %d body = %s", response.Code, response.Body)
+	}
+	session := tmuxSessionName(item.ID, thread.ID, "terminal")
+	if err := s.terminal.tmuxCommand("new-session", "-d", "-s", session).Run(); err != nil {
+		t.Fatal(err)
+	}
+	if response := patch(`{"settled":true}`); response.Code != http.StatusConflict {
+		t.Fatalf("pinned settle status = %d", response.Code)
+	}
+	if err := s.settleIdleThreads(thread.CreatedAt.Add(365 * 24 * time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, current, _ := store.GetThread(item.ID, thread.ID); current.SettledAt != nil {
+		t.Fatal("pinned thread settled")
+	}
+	if exists, err := s.terminal.tmuxExactSessionExists(session); err != nil || !exists {
+		t.Fatalf("pinned session exists=%v err=%v", exists, err)
+	}
+	if response := patch(`{"pinned":false}`); response.Code != http.StatusOK {
+		t.Fatalf("unpin status = %d", response.Code)
+	}
+	if err := s.settleIdleThreads(thread.CreatedAt.Add(365 * 24 * time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, current, _ := store.GetThread(item.ID, thread.ID); current.SettledAt == nil {
+		t.Fatal("unpinned idle thread did not settle")
+	}
+	if response := patch(`{"pinned":true}`); response.Code != http.StatusConflict {
+		t.Fatalf("settled pin status = %d", response.Code)
+	}
+}
