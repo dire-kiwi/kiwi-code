@@ -39,3 +39,7 @@ Pass `-mode development` plus the isolated socket with `-tmux-socket <name>` (or
 Go tests that execute real tmux commands must use `isolatedTmuxServer(t)` or an equivalent per-test socket allocated before the first tmux command. Do not construct a handler on the default socket and overwrite its socket afterward.
 
 If a rename ever becomes unavoidable, do not simply change the lookup string. First implement and test a backward-compatible migration that adopts existing live windows without restarting their processes or losing terminal state. Cleanup must recognize both schemas during the migration period. A deployment must never silently create a fresh session while an old-name session still contains the user's process.
+
+## Feature UAT
+
+Once a feature has been completed, open a pr, and leave a dev server running for the user to test on. Once the pr is merged, cleanup dev server and fast forward main.
