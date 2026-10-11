@@ -620,6 +620,99 @@ func TestClaudePluginDelayedHeartbeatCannotReplaceNewerPromptState(t *testing.T)
 	}
 }
 
+func TestClaudePluginStaysWorkingWhileBackgroundAgentsRun(t *testing.T) {
+	nodePath, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	pluginRoot, err := materializeClaudePlugin(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type activityUpdate struct {
+		State string `json:"state"`
+		Token string `json:"token"`
+	}
+	updates := make(chan activityUpdate, 16)
+	activityServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var update activityUpdate
+		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+			t.Errorf("decode Claude activity: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		select {
+		case updates <- update:
+		default:
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer activityServer.Close()
+
+	stateDirectory := t.TempDir()
+	hookEnvironment := append(testEnvironmentWithoutColorConflicts(),
+		"KIWI_CODE_THREAD_ENDPOINT="+activityServer.URL,
+		"KIWI_CODE_PROJECT_ID=project",
+		"KIWI_CODE_THREAD_ID=thread",
+		"KIWI_CODE_CLAUDE_STATE_DIR="+stateDirectory,
+	)
+	scriptPath := filepath.Join(pluginRoot, "scripts", "kiwi-code-hook.mjs")
+	runHook := func(action, input string) {
+		t.Helper()
+		command := exec.Command(nodePath, scriptPath, action)
+		command.Stdin = strings.NewReader(input)
+		command.Env = hookEnvironment
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("%s Claude hook: %v: %s", action, err, output)
+		}
+	}
+	statePath := filepath.Join(stateDirectory, "project-thread-session-1.activity.json")
+	readActivity := func() activityUpdate {
+		t.Helper()
+		contents, err := os.ReadFile(statePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var activity activityUpdate
+		if err := json.Unmarshal(contents, &activity); err != nil {
+			t.Fatal(err)
+		}
+		return activity
+	}
+
+	// Claude ends the delegating turn while its background subagent still runs.
+	runHook("start", `{"session_id":"session-1","prompt_id":"prompt-a","hook_event_name":"UserPromptSubmit","prompt":"delegate the research"}`)
+	runHook("finished", `{"session_id":"session-1","prompt_id":"prompt-a","hook_event_name":"Stop","stop_hook_active":false,`+
+		`"background_tasks":[{"id":"agent-1","type":"subagent","status":"running","description":"Research","agent_type":"general-purpose"}],"session_crons":[]}`)
+	if activity := readActivity(); activity.State != "working" || activity.Token != "prompt-a" {
+		t.Fatalf("Stop with a running background agent changed the activity to %#v", activity)
+	}
+
+	// The agent's task notification starts a new turn. When that turn stops,
+	// only work that does not report back to Claude remains in flight.
+	runHook("start", `{"session_id":"session-1","prompt_id":"prompt-b","hook_event_name":"UserPromptSubmit","prompt":"<task-notification>"}`)
+	runHook("finished", `{"session_id":"session-1","prompt_id":"prompt-b","hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[`+
+		`{"id":"agent-1","type":"subagent","status":"completed","description":"Research","agent_type":"general-purpose"},`+
+		`{"id":"shell-1","type":"shell","status":"running","description":"Dev server","command":"npm run dev"}],"session_crons":[]}`)
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.State != "finished" {
+				continue
+			}
+			if update.Token != "prompt-b" {
+				t.Fatalf("finished reported for the turn still waiting on its agent: %#v", update)
+			}
+			return
+		case <-deadline:
+			t.Fatal("Stop without running background agents did not report finished")
+		}
+	}
+}
+
 func TestClaudePluginNamesThreadWithPiFromFirstPrompt(t *testing.T) {
 	nodePath, err := exec.LookPath("node")
 	if err != nil {
