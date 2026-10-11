@@ -42,7 +42,7 @@ export function SidebarFooterNav() {
   }
 
   return (
-    <div className="flex shrink-0 items-center gap-1 p-3">
+    <div className="flex shrink-0 items-center gap-1 border-t border-ghost-border/40 p-3">
       <SelectionButton
         type="button"
         selected={cleanupSelected}

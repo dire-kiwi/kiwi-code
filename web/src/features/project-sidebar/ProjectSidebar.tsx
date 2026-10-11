@@ -59,7 +59,7 @@ import { Button, IconButton, SelectionButton } from '@/ui/buttons'
 import { SidebarActivityView } from './SidebarActivityView'
 import { SidebarAddProjectForm } from './SidebarAddProjectForm'
 import { SidebarFooterNav } from './SidebarFooterNav'
-import { SidebarProfileSwitcher } from './SidebarProfileSwitcher'
+import { SidebarProfileRail } from './SidebarProfileRail'
 import { useThreadSettlement } from './useThreadSettlement'
 import { ThreadActionsMenu } from './ThreadActionsMenu'
 import { useSidebarNavigation } from './useSidebarNavigation'
@@ -114,7 +114,7 @@ export function ProjectSidebar({
   // from the memoised index.
   const piActivities = useAppSelector(selectPiActivities)
   const [threadMenuId, setThreadMenuId] = useState<string | null>(null)
-  const asideRef = useRef<HTMLElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0]
   const usageByThread = useMemo(() => new Map(
     usageSnapshots.map((snapshot) => [`${snapshot.projectId}\0${snapshot.threadId}`, snapshot]),
@@ -366,221 +366,220 @@ export function ProjectSidebar({
       />
 
       <aside
-        ref={asideRef}
-        style={{ width: sidebarWidth }}
-        className={`fixed inset-y-0 left-0 z-40 flex max-w-[calc(100vw-2rem)] shrink-0 flex-col border-r border-ghost-border/70 bg-ghost-sidebar shadow-2xl transition-[transform,visibility] duration-300 md:relative md:z-auto md:visible md:max-w-none md:translate-x-0 md:shadow-none ${
+        className={`fixed inset-y-0 left-0 z-40 flex max-w-[calc(100vw-2rem)] shrink-0 border-r border-ghost-border/70 bg-ghost-sidebar shadow-2xl transition-[transform,visibility] duration-300 md:relative md:z-auto md:visible md:max-w-none md:translate-x-0 md:shadow-none ${
           isOpen ? 'visible translate-x-0' : 'invisible -translate-x-full'
         }`}
       >
-        <header className="desktop-titlebar-drag-region flex h-14 shrink-0 items-center justify-between gap-2 px-4">
-          <span className="desktop-titlebar-left-safe flex gap-1 text-sm font-semibold tracking-tight text-ghost-bright-white">Kiwi <span className="font-normal text-ghost-dim">Code</span></span>
-          <IconButton type="button" size="sm" variant="subtle" onClick={() => dispatch(sidebarClosed())} className="md:hidden" aria-label="Close sidebar">
-            <PanelLeftClose size={15} />
-          </IconButton>
-        </header>
-        <div className="px-3 pb-2">
-          <div className="flex items-center gap-1">
-            <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-ghost-dim focus-within:bg-ghost-raised/45 hover:bg-ghost-raised/30">
-              <Search size={15} className="shrink-0" />
-              <input type="search" aria-label="Search threads" placeholder="Search" value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape') setSearchQuery('')
-                  if (event.key === 'Enter' && query && searchResults[0]) {
-                    onSelectThread(searchResults[0].project.id, searchResults[0].thread.id)
-                  }
-                }}
-                className="min-w-0 w-full bg-transparent text-xs text-ghost-white outline-none placeholder:text-ghost-dim" />
-              {query && <button type="button" aria-label="Clear thread search" onClick={() => setSearchQuery('')}><X size={12} /></button>}
-            </label>
-            <div className="flex shrink-0 items-center rounded-md bg-ghost-raised/40 p-0.5">
-              <IconButton type="button" size="sm" variant="subtle" onClick={() => setShowProjectForm((open) => !open)} aria-label="Add a project" title="New project"><FolderPlus size={15} /></IconButton>
-              <IconButton type="button" size="sm" variant="subtle" disabled={!defaultNewProject} onClick={(event) => {
-                if (!defaultNewProject) return
-                if (onNewThreadRequested) onNewThreadRequested(defaultNewProject.id, event.shiftKey)
-                else openNewThread(defaultNewProject.id)
-              }} aria-label="New thread" title="New thread"><SquarePen size={15} /></IconButton>
+        <SidebarProfileRail profiles={profiles} activeProfileId={activeProfileId} onSelectProfile={onSelectProfile} onProfileCreated={onProfileCreated} />
+        {/* The rail sits outside the resizable width, so resizing only ever moves the thread list's edge. */}
+        <div ref={panelRef} style={{ width: sidebarWidth }} className="flex min-w-0 flex-col">
+          <header className="desktop-titlebar-drag-region flex h-14 shrink-0 items-center justify-between gap-2 px-4">
+            <h2 className="min-w-0 truncate text-sm font-semibold tracking-tight text-ghost-bright-white">{activeProfile?.name ?? 'Kiwi Code'}</h2>
+            <IconButton type="button" size="sm" variant="subtle" onClick={() => dispatch(sidebarClosed())} className="md:hidden" aria-label="Close sidebar">
+              <PanelLeftClose size={15} />
+            </IconButton>
+          </header>
+          <div className="px-3 pb-2">
+            <div className="flex items-center gap-1">
+              <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-ghost-dim focus-within:bg-ghost-raised/45 hover:bg-ghost-raised/30">
+                <Search size={15} className="shrink-0" />
+                <input type="search" aria-label="Search threads" placeholder="Search" value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') setSearchQuery('')
+                    if (event.key === 'Enter' && query && searchResults[0]) {
+                      onSelectThread(searchResults[0].project.id, searchResults[0].thread.id)
+                    }
+                  }}
+                  className="min-w-0 w-full bg-transparent text-xs text-ghost-white outline-none placeholder:text-ghost-dim" />
+                {query && <button type="button" aria-label="Clear thread search" onClick={() => setSearchQuery('')}><X size={12} /></button>}
+              </label>
+              <div className="flex shrink-0 items-center rounded-md bg-ghost-raised/40 p-0.5">
+                <IconButton type="button" size="sm" variant="subtle" onClick={() => setShowProjectForm((open) => !open)} aria-label="Add a project" title="New project"><FolderPlus size={15} /></IconButton>
+                <IconButton type="button" size="sm" variant="subtle" disabled={!defaultNewProject} onClick={(event) => {
+                  if (!defaultNewProject) return
+                  if (onNewThreadRequested) onNewThreadRequested(defaultNewProject.id, event.shiftKey)
+                  else openNewThread(defaultNewProject.id)
+                }} aria-label="New thread" title="New thread"><SquarePen size={15} /></IconButton>
+              </div>
+            </div>
+            <div className="mt-2 flex min-w-0 items-center justify-between gap-1">
+              <Select variant="inline" aria-label="Filter threads by project" value={effectiveScope}
+                options={[{ value: '', label: 'All projects' }, ...projects.map((project) => ({ value: project.id, label: project.name }))]}
+                onChange={setProjectScope} leadingIcon={<Folder size={12} />} searchable searchPlaceholder="Find a project…" />
+              <div role="group" aria-label="Sidebar view" className="flex shrink-0 gap-0.5">
+                <IconButton type="button" size="xs" variant="subtle" onClick={() => dispatch(sidebarViewChanged('activity'))} aria-pressed={viewMode === 'activity'} aria-label="Activity view" title="Activity view" className={viewMode === 'activity' ? 'text-ghost-green bg-ghost-green/10' : undefined}><Activity size={12} /></IconButton>
+                <IconButton type="button" size="xs" variant="subtle" onClick={() => dispatch(sidebarViewChanged('tree'))} aria-pressed={viewMode === 'tree'} aria-label="Projects view" title="Projects view" className={viewMode === 'tree' ? 'text-ghost-green bg-ghost-green/10' : undefined}><ListTree size={12} /></IconButton>
+              </div>
             </div>
           </div>
-          <div className="mt-2 flex min-w-0 items-center justify-between gap-1">
-            <Select variant="inline" aria-label="Filter threads by project" value={effectiveScope}
-              options={[{ value: '', label: 'All projects' }, ...projects.map((project) => ({ value: project.id, label: project.name }))]}
-              onChange={setProjectScope} leadingIcon={<Folder size={12} />} searchable searchPlaceholder="Find a project…" />
-            <div role="group" aria-label="Sidebar view" className="flex shrink-0 gap-0.5">
-              <IconButton type="button" size="xs" variant="subtle" onClick={() => dispatch(sidebarViewChanged('activity'))} aria-pressed={viewMode === 'activity'} aria-label="Activity view" title="Activity view" className={viewMode === 'activity' ? 'text-ghost-green bg-ghost-green/10' : undefined}><Activity size={12} /></IconButton>
-              <IconButton type="button" size="xs" variant="subtle" onClick={() => dispatch(sidebarViewChanged('tree'))} aria-pressed={viewMode === 'tree'} aria-label="Projects view" title="Projects view" className={viewMode === 'tree' ? 'text-ghost-green bg-ghost-green/10' : undefined}><ListTree size={12} /></IconButton>
-            </div>
-          </div>
-        </div>
 
-        {showProjectForm && (
-          <SidebarAddProjectForm
-            activeProfile={activeProfile}
-            activeProfileId={activeProfileId}
-            onProjectCreated={onProjectCreated}
-            onCancel={() => setShowProjectForm(false)}
-          />
-        )}
-
-        <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-2" aria-label="Projects and threads">
-          {projects.length === 0 ? (
-            <div className="mx-1 mt-2 rounded-lg border border-dashed border-ghost-border/70 px-3 py-6 text-center">
-              <Folder size={17} className="mx-auto text-ghost-faint" />
-              <p className="mt-2.5 text-[10px] text-ghost-muted">
-                No projects{activeProfile ? ` in ${activeProfile.name}` : ' yet'}
-              </p>
-            </div>
-          ) : query ? (
-            <section aria-label="Search results">
-              <p role="status" className="px-2 py-2 text-xs text-ghost-dim">{searchResults.length ? `${searchResults.length} ${searchResults.length === 1 ? "result" : "results"}` : 'No threads found'}</p>
-              <ul className="space-y-1">{searchResults.map(({ project, thread }) => renderThreadRow(project, thread, 0))}</ul>
-            </section>
-          ) : viewMode === 'activity' ? (
-            <SidebarActivityView
-              onSelectThread={onSelectThread}
-              projectScope={effectiveScope}
-              onDeleteThread={onDeleteThread}
+          {showProjectForm && (
+            <SidebarAddProjectForm
+              activeProfile={activeProfile}
+              activeProfileId={activeProfileId}
+              onProjectCreated={onProjectCreated}
+              onCancel={() => setShowProjectForm(false)}
             />
-          ) : (
-            <ul className="space-y-2.5">
-              {scopedProjects.map((project) => (
-                <li
-                  key={project.id}
-                  data-project-row
-                  data-project-id={project.id}
-                  onDragOver={(event) => handleProjectDragOver(event, project.id)}
-                  onDrop={(event) => handleProjectDrop(event, project.id)}
-                  className={`group/project relative transition-opacity ${
-                    draggedItem?.kind === 'project' && draggedItem.id === project.id ? 'opacity-45' : ''
-                  }`}
-                >
-                  {dropTarget?.kind === 'project' && dropTarget.id === project.id && dropTarget.position === 'before' && (
-                    <span className="pointer-events-none absolute inset-x-2 top-0 z-20 h-0.5 rounded-full bg-ghost-green shadow-[0_0_7px_rgba(181,189,104,0.8)]" />
-                  )}
-                  <div
-                    data-project-drag-image
-                    className={`flex h-8 items-center gap-1 px-1.5 ${
-                      project.threads.some((thread) => thread.id === selectedThreadId)
-                        ? 'text-ghost-bright-white'
-                        : 'text-ghost-muted'
+          )}
+
+          <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-2" aria-label="Projects and threads">
+            {projects.length === 0 ? (
+              <div className="mx-1 mt-2 rounded-lg border border-dashed border-ghost-border/70 px-3 py-6 text-center">
+                <Folder size={17} className="mx-auto text-ghost-faint" />
+                <p className="mt-2.5 text-[10px] text-ghost-muted">
+                  No projects{activeProfile ? ` in ${activeProfile.name}` : ' yet'}
+                </p>
+              </div>
+            ) : query ? (
+              <section aria-label="Search results">
+                <p role="status" className="px-2 py-2 text-xs text-ghost-dim">{searchResults.length ? `${searchResults.length} ${searchResults.length === 1 ? "result" : "results"}` : 'No threads found'}</p>
+                <ul className="space-y-1">{searchResults.map(({ project, thread }) => renderThreadRow(project, thread, 0))}</ul>
+              </section>
+            ) : viewMode === 'activity' ? (
+              <SidebarActivityView
+                onSelectThread={onSelectThread}
+                projectScope={effectiveScope}
+                onDeleteThread={onDeleteThread}
+              />
+            ) : (
+              <ul className="space-y-2.5">
+                {scopedProjects.map((project) => (
+                  <li
+                    key={project.id}
+                    data-project-row
+                    data-project-id={project.id}
+                    onDragOver={(event) => handleProjectDragOver(event, project.id)}
+                    onDrop={(event) => handleProjectDrop(event, project.id)}
+                    className={`group/project relative transition-opacity ${
+                      draggedItem?.kind === 'project' && draggedItem.id === project.id ? 'opacity-45' : ''
                     }`}
                   >
-                    <button
-                      type="button"
-                      draggable={!savingOrder && projects.length > 1}
-                      disabled={savingOrder || projects.length < 2}
-                      data-reorder-handle="project"
-                      data-project-id={project.id}
-                      onDragStart={(event) => startProjectDrag(event, project.id)}
-                      onDragEnd={() => clearDrag()}
-                      onKeyDown={(event) => handleProjectHandleKeyDown(event, project.id)}
-                      className="-ml-1 grid size-5 shrink-0 cursor-grab place-items-center rounded text-ghost-faint opacity-0 transition hover:bg-ghost-raised hover:text-ghost-white group-hover/project:opacity-100 focus:opacity-100 active:cursor-grabbing disabled:cursor-default disabled:opacity-0"
-                      aria-label={`Reorder project ${project.name}; drag or use the arrow keys`}
-                      title="Drag to reorder; arrow keys also work"
-                    >
-                      <GripVertical size={11} />
-                    </button>
-                    <Button
-                      type="button"
-                      onClick={() => dispatch(projectCollapseToggled(project.id))}
-                      aria-expanded={!collapsedProjectIds.has(project.id)}
-                      aria-controls={`project-${project.id}-threads`}
-                      title={collapsedProjectIds.has(project.id) ? `Expand ${project.name}` : `Collapse ${project.name}`}
-                      className="flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md text-left outline-none transition hover:text-ghost-foreground focus-visible:ring-1 focus-visible:ring-ghost-green/45"
-                    >
-                      <span className={`relative grid size-5 shrink-0 place-items-center ${
+                    {dropTarget?.kind === 'project' && dropTarget.id === project.id && dropTarget.position === 'before' && (
+                      <span className="pointer-events-none absolute inset-x-2 top-0 z-20 h-0.5 rounded-full bg-ghost-green shadow-[0_0_7px_rgba(181,189,104,0.8)]" />
+                    )}
+                    <div
+                      data-project-drag-image
+                      className={`flex h-8 items-center gap-1 px-1.5 ${
                         project.threads.some((thread) => thread.id === selectedThreadId)
-                          ? 'text-ghost-green'
-                          : 'text-ghost-dim'
-                      }`}>
-                        {collapsedProjectIds.has(project.id)
-                          ? <Folder size={16} strokeWidth={1.7} />
-                          : <FolderOpen size={16} strokeWidth={1.7} />}
-                        <Globe2 size={7} strokeWidth={1.9} className="absolute bottom-0 right-0 rounded-full bg-ghost-sidebar" />
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-xs font-semibold">{project.name}</span>
-                    </Button>
-                    {(() => {
-                      const counts = projectActivityCounts.get(project.id)
-                      if (!counts || (counts.working === 0 && counts.finished === 0)) return null
-                      return (
-                        <span className="flex shrink-0 items-center gap-1 group-hover/project:hidden">
-                          {counts.working > 0 && (
-                            <span
-                              className="rounded-full border border-ghost-green/40 px-1.5 py-0.5 font-mono text-[9px] leading-none text-ghost-green"
-                              title={`${counts.working} coding ${counts.working === 1 ? 'agent is' : 'agents are'} working`}
-                            >
-                              {counts.working} live
-                            </span>
-                          )}
-                          {counts.finished > 0 && (
-                            <span
-                              className="rounded-full border border-ghost-border/65 px-1.5 py-0.5 font-mono text-[9px] leading-none text-ghost-green"
-                              title={`${counts.finished} ${counts.finished === 1 ? 'thread needs' : 'threads need'} review`}
-                            >
-                              {counts.finished} done
-                            </span>
-                          )}
+                          ? 'text-ghost-bright-white'
+                          : 'text-ghost-muted'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        draggable={!savingOrder && projects.length > 1}
+                        disabled={savingOrder || projects.length < 2}
+                        data-reorder-handle="project"
+                        data-project-id={project.id}
+                        onDragStart={(event) => startProjectDrag(event, project.id)}
+                        onDragEnd={() => clearDrag()}
+                        onKeyDown={(event) => handleProjectHandleKeyDown(event, project.id)}
+                        className="-ml-1 grid size-5 shrink-0 cursor-grab place-items-center rounded text-ghost-faint opacity-0 transition hover:bg-ghost-raised hover:text-ghost-white group-hover/project:opacity-100 focus:opacity-100 active:cursor-grabbing disabled:cursor-default disabled:opacity-0"
+                        aria-label={`Reorder project ${project.name}; drag or use the arrow keys`}
+                        title="Drag to reorder; arrow keys also work"
+                      >
+                        <GripVertical size={11} />
+                      </button>
+                      <Button
+                        type="button"
+                        onClick={() => dispatch(projectCollapseToggled(project.id))}
+                        aria-expanded={!collapsedProjectIds.has(project.id)}
+                        aria-controls={`project-${project.id}-threads`}
+                        title={collapsedProjectIds.has(project.id) ? `Expand ${project.name}` : `Collapse ${project.name}`}
+                        className="flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md text-left outline-none transition hover:text-ghost-foreground focus-visible:ring-1 focus-visible:ring-ghost-green/45"
+                      >
+                        <span className={`relative grid size-5 shrink-0 place-items-center ${
+                          project.threads.some((thread) => thread.id === selectedThreadId)
+                            ? 'text-ghost-green'
+                            : 'text-ghost-dim'
+                        }`}>
+                          {collapsedProjectIds.has(project.id)
+                            ? <Folder size={16} strokeWidth={1.7} />
+                            : <FolderOpen size={16} strokeWidth={1.7} />}
+                          <Globe2 size={7} strokeWidth={1.9} className="absolute bottom-0 right-0 rounded-full bg-ghost-sidebar" />
                         </span>
-                      )
-                    })()}
-                    <IconButton
-                      type="button"
-                      size="xs"
-                      shrink
-                      variant="subtle-white"
-                      onClick={() => openNewThread(project.id)}
-                      className="opacity-0 group-hover/project:opacity-100 focus:opacity-100"
-                      aria-label={`New thread in ${project.name}`}
-                      title="New thread"
-                    >
-                      <Plus size={12} />
-                    </IconButton>
-                    <IconButton
-                      type="button"
-                      size="xs"
-                      shrink
-                      variant="subtle-white"
-                      onClick={() => openProjectSettings(project.id)}
-                      className="opacity-0 group-hover/project:opacity-100 focus:opacity-100"
-                      aria-label={`Settings for ${project.name}`}
-                      title="Project settings"
-                    >
-                      <Settings2 size={12} />
-                    </IconButton>
-                    <IconButton
-                      type="button"
-                      size="xs"
-                      shrink
-                      variant="danger"
-                      onClick={() => onDeleteProject(project)}
-                      className="opacity-0 group-hover/project:opacity-100 focus:opacity-100"
-                      aria-label={`Remove ${project.name}`}
-                    >
-                      {deletingProjectId === project.id ? <LoaderCircle size={11} className="animate-spin" /> : <Trash2 size={11} />}
-                    </IconButton>
-                  </div>
+                        <span className="min-w-0 flex-1 truncate text-xs font-semibold">{project.name}</span>
+                      </Button>
+                      {(() => {
+                        const counts = projectActivityCounts.get(project.id)
+                        if (!counts || (counts.working === 0 && counts.finished === 0)) return null
+                        return (
+                          <span className="flex shrink-0 items-center gap-1 group-hover/project:hidden">
+                            {counts.working > 0 && (
+                              <span
+                                className="rounded-full border border-ghost-green/40 px-1.5 py-0.5 font-mono text-[9px] leading-none text-ghost-green"
+                                title={`${counts.working} coding ${counts.working === 1 ? 'agent is' : 'agents are'} working`}
+                              >
+                                {counts.working} live
+                              </span>
+                            )}
+                            {counts.finished > 0 && (
+                              <span
+                                className="rounded-full border border-ghost-border/65 px-1.5 py-0.5 font-mono text-[9px] leading-none text-ghost-green"
+                                title={`${counts.finished} ${counts.finished === 1 ? 'thread needs' : 'threads need'} review`}
+                              >
+                                {counts.finished} done
+                              </span>
+                            )}
+                          </span>
+                        )
+                      })()}
+                      <IconButton
+                        type="button"
+                        size="xs"
+                        shrink
+                        variant="subtle-white"
+                        onClick={() => openNewThread(project.id)}
+                        className="opacity-0 group-hover/project:opacity-100 focus:opacity-100"
+                        aria-label={`New thread in ${project.name}`}
+                        title="New thread"
+                      >
+                        <Plus size={12} />
+                      </IconButton>
+                      <IconButton
+                        type="button"
+                        size="xs"
+                        shrink
+                        variant="subtle-white"
+                        onClick={() => openProjectSettings(project.id)}
+                        className="opacity-0 group-hover/project:opacity-100 focus:opacity-100"
+                        aria-label={`Settings for ${project.name}`}
+                        title="Project settings"
+                      >
+                        <Settings2 size={12} />
+                      </IconButton>
+                      <IconButton
+                        type="button"
+                        size="xs"
+                        shrink
+                        variant="danger"
+                        onClick={() => onDeleteProject(project)}
+                        className="opacity-0 group-hover/project:opacity-100 focus:opacity-100"
+                        aria-label={`Remove ${project.name}`}
+                      >
+                        {deletingProjectId === project.id ? <LoaderCircle size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                      </IconButton>
+                    </div>
 
-                  <ul
-                    id={`project-${project.id}-threads`}
-                    hidden={collapsedProjectIds.has(project.id)}
-                    className="mt-0.5 space-y-0.5"
-                  >
-                    {renderProjectThreadRows(project)}
-                  </ul>
-                  {dropTarget?.kind === 'project' && dropTarget.id === project.id && dropTarget.position === 'after' && (
-                    <span className="pointer-events-none absolute inset-x-2 bottom-0 z-20 h-0.5 rounded-full bg-ghost-green shadow-[0_0_7px_rgba(181,189,104,0.8)]" />
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </nav>
+                    <ul
+                      id={`project-${project.id}-threads`}
+                      hidden={collapsedProjectIds.has(project.id)}
+                      className="mt-0.5 space-y-0.5"
+                    >
+                      {renderProjectThreadRows(project)}
+                    </ul>
+                    {dropTarget?.kind === 'project' && dropTarget.id === project.id && dropTarget.position === 'after' && (
+                      <span className="pointer-events-none absolute inset-x-2 bottom-0 z-20 h-0.5 rounded-full bg-ghost-green shadow-[0_0_7px_rgba(181,189,104,0.8)]" />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </nav>
 
-        <div className="flex items-center border-t border-ghost-border/40 px-3 pt-2">
-          <SidebarProfileSwitcher profiles={profiles} activeProfileId={activeProfileId} onSelectProfile={onSelectProfile} onProfileCreated={onProfileCreated} />
+          <SidebarFooterNav />
         </div>
-        <SidebarFooterNav />
 
         <div
           role="separator"
@@ -594,7 +593,7 @@ export function ProjectSidebar({
           }}
           onPointerMove={(event) => {
             if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
-            const left = asideRef.current?.getBoundingClientRect().left ?? 0
+            const left = panelRef.current?.getBoundingClientRect().left ?? 0
             dispatch(sidebarWidthChanged(event.clientX - left))
           }}
           onDoubleClick={() => dispatch(sidebarWidthReset())}

@@ -2,7 +2,7 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
 import type { RootState } from '@/store/rootReducer'
 import type { Profile } from '@/types'
 
-// Profiles are read by the sidebar, the profile switcher, the settings shell and
+// Profiles are read by the sidebar, the profile rail, the settings shell and
 // the thread finder, and written by the socket plus "create profile". They were
 // App state handed down; they are server state with one owner now.
 //

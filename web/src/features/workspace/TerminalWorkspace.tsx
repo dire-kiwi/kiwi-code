@@ -363,7 +363,8 @@ export function TerminalWorkspace({
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (!event.metaKey && !event.ctrlKey) return
+      // Ctrl/Cmd+Alt+digit belongs to the profile rail.
+      if ((!event.metaKey && !event.ctrlKey) || event.altKey) return
       const index = Number(event.key) - 1
       const tool = tools[index]
       if (!tool) return
