@@ -96,6 +96,7 @@ export function TerminalSession({
   const themeRef = useRef(theme)
   const activeRef = useRef(active)
   const threadTitleRef = useRef(threadTitle)
+  const sessionLabelRef = useRef('')
   const onStatusChangeRef = useRef(onStatusChange)
   const initialModelRef = useRef(initialModel ?? '')
   const initialThinkingLevelRef = useRef(initialThinkingLevel ?? '')
@@ -122,6 +123,9 @@ export function TerminalSession({
   activeRef.current = active
   themeRef.current = theme
   threadTitleRef.current = threadTitle
+  // The label follows settings and agent renames. Reading it through a ref keeps
+  // a label change from disposing the terminal and reconnecting its socket.
+  sessionLabelRef.current = sessionLabel
   onStatusChangeRef.current = onStatusChange
   if (initialPrompt?.trim() && !initialPromptSentRef.current) {
     initialPromptRef.current = initialPrompt
@@ -180,7 +184,7 @@ export function TerminalSession({
       terminal.open(host)
       const disposeMousePaste = installTerminalMousePaste(host, () => terminal.focus())
       terminal.loadAddon(new CanvasAddon())
-      terminal.textarea?.setAttribute('aria-label', `${threadTitleRef.current} ${sessionLabel} terminal input`)
+      terminal.textarea?.setAttribute('aria-label', `${threadTitleRef.current} ${sessionLabelRef.current} terminal input`)
       terminal.attachCustomKeyEventHandler((event) => {
         const action = terminalClipboardAction(event, terminal.hasSelection())
         if (!action) return true
@@ -621,7 +625,7 @@ export function TerminalSession({
       cancelAnimationFrame(startFrame)
       disposeTerminal()
     }
-  }, [codingAgent, connectionAttempt, environmentSetup, processId, projectId, sessionLabel, threadId, tmuxSession, tmuxWindow, tool])
+  }, [codingAgent, connectionAttempt, environmentSetup, processId, projectId, threadId, tmuxSession, tmuxWindow, tool])
 
   useEffect(() => {
     const terminal = terminalRef.current
