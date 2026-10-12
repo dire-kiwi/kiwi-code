@@ -63,6 +63,7 @@ import { SidebarFooterNav } from './SidebarFooterNav'
 import { SidebarProfileRail } from './SidebarProfileRail'
 import { useThreadSettlement } from './useThreadSettlement'
 import { ThreadActionsMenu } from './ThreadActionsMenu'
+import { adjacentThread, threadCycleDirection, visibleThreadRows, type ThreadCycleDirection } from './threadCycleShortcut'
 import { useSidebarNavigation } from './useSidebarNavigation'
 import { useSidebarReorder } from './useSidebarReorder'
 
@@ -116,6 +117,12 @@ export function ProjectSidebar({
   const piActivities = useAppSelector(selectPiActivities)
   const [threadMenuId, setThreadMenuId] = useState<string | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
+  // Read through refs so the key and desktop listeners subscribe once rather
+  // than on every render, since App passes a fresh onSelectThread each time.
+  const onSelectThreadRef = useRef(onSelectThread)
+  onSelectThreadRef.current = onSelectThread
+  const selectedThreadIdRef = useRef(selectedThreadId)
+  selectedThreadIdRef.current = selectedThreadId
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0]
   const usageByThread = useMemo(() => new Map(
     usageSnapshots.map((snapshot) => [`${snapshot.projectId}\0${snapshot.threadId}`, snapshot]),
@@ -136,6 +143,37 @@ export function ProjectSidebar({
   const openNewThread = (projectId: string) => navigateAndClose(newThreadPath(projectId))
   const openProjectSettings = (projectId: string) =>
     navigateAndClose(projectSettingsPath(projectId, DEFAULT_PROJECT_SETTINGS_SECTION))
+
+  useEffect(() => {
+    // Steps through whatever the sidebar currently lists, like browser tabs.
+    function cycleThread(direction: ThreadCycleDirection) {
+      const panel = panelRef.current
+      if (!panel) return
+      const target = adjacentThread(visibleThreadRows(panel), selectedThreadIdRef.current, direction)
+      if (target && target.threadId !== selectedThreadIdRef.current) {
+        onSelectThreadRef.current(target.projectId, target.threadId)
+      }
+    }
+
+    function handleThreadCycleShortcut(event: KeyboardEvent) {
+      const direction = threadCycleDirection(event)
+      if (!direction) return
+      // Capture first so terminals, the browser canvas, and inputs never see it.
+      event.preventDefault()
+      event.stopPropagation()
+      cycleThread(direction)
+    }
+
+    window.addEventListener('keydown', handleThreadCycleShortcut, true)
+    // The native browser view keeps keyboard focus from this window, so the
+    // desktop shell forwards the same keys pressed there.
+    const desktopBridge = window.kiwiCodeDesktopBrowser ?? window.direMuxDesktopBrowser
+    const removeDesktopListener = desktopBridge?.onThreadShortcut?.(cycleThread)
+    return () => {
+      window.removeEventListener('keydown', handleThreadCycleShortcut, true)
+      removeDesktopListener?.()
+    }
+  }, [])
 
   useEffect(() => {
     if (!selectedThreadId) return

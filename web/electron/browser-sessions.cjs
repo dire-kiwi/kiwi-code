@@ -12,6 +12,7 @@ const {
   validateBounds,
 } = require('./browser-helpers.cjs')
 const { interceptFrontendReloadShortcut } = require('./frontend-reload.cjs')
+const { interceptThreadCycleShortcut } = require('./thread-shortcuts.cjs')
 
 const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024
 const MAX_EXPRESSION_CHARS = 100_000
@@ -261,7 +262,7 @@ async function waitForDocumentReady(tab, timeoutMs, expectedLoaderId) {
 }
 
 class BrowserSession {
-  constructor({ key, projectId, threadId, partition, WebContentsView, hostWindow, appView, protectedOrigins, onChanged, onPopup, onWorkspaceShortcut, onFrontendReload = () => {}, isViewActive }) {
+  constructor({ key, projectId, threadId, partition, WebContentsView, hostWindow, appView, protectedOrigins, onChanged, onPopup, onWorkspaceShortcut, onThreadShortcut = () => {}, onFrontendReload = () => {}, isViewActive }) {
     this.key = key
     this.projectId = projectId
     this.threadId = threadId
@@ -273,6 +274,7 @@ class BrowserSession {
     this.onChanged = onChanged
     this.onPopup = onPopup
     this.onWorkspaceShortcut = onWorkspaceShortcut
+    this.onThreadShortcut = onThreadShortcut
     this.onFrontendReload = onFrontendReload
     this.isViewActive = isViewActive
     this.tabs = new Map()
@@ -410,6 +412,7 @@ class BrowserSession {
     })
     view.webContents.on('before-input-event', (event, input) => {
       if (interceptFrontendReloadShortcut(event, input, this.onFrontendReload)) return
+      if (interceptThreadCycleShortcut(event, input, this.onThreadShortcut)) return
       const index = Number(input.key)
       if (
         input.type === 'keyDown' &&
@@ -966,12 +969,13 @@ class BrowserSession {
 }
 
 class BrowserWorkspaceManager {
-  constructor({ WebContentsView, hostWindow, appView, desktopOrigin, apiOrigin, onState, onWorkspaceShortcut = () => {}, onFrontendReload = () => {} }) {
+  constructor({ WebContentsView, hostWindow, appView, desktopOrigin, apiOrigin, onState, onWorkspaceShortcut = () => {}, onThreadShortcut = () => {}, onFrontendReload = () => {} }) {
     this.WebContentsView = WebContentsView
     this.hostWindow = hostWindow
     this.appView = appView
     this.onState = onState
     this.onWorkspaceShortcut = onWorkspaceShortcut
+    this.onThreadShortcut = onThreadShortcut
     this.onFrontendReload = onFrontendReload
     this.sessions = new Map()
     this.queues = new Map()
@@ -1029,6 +1033,7 @@ class BrowserWorkspaceManager {
         }).catch((error) => console.error('Could not open controlled browser tab:', error))
       },
       onWorkspaceShortcut: this.onWorkspaceShortcut,
+      onThreadShortcut: this.onThreadShortcut,
       onFrontendReload: this.onFrontendReload,
       isViewActive: (view) => this.attachedView === view,
     })

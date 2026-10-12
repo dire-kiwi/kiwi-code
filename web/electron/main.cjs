@@ -39,6 +39,7 @@ const browserIpcChannels = {
   setBounds: 'kiwi-code-desktop-browser:set-bounds',
   state: 'kiwi-code-desktop-browser:state',
   workspaceShortcut: 'kiwi-code-desktop-browser:workspace-shortcut',
+  threadShortcut: 'kiwi-code-desktop-browser:thread-shortcut',
 }
 const legacyBrowserIpcChannels = {
   show: 'dire-mux-desktop-browser:show',
@@ -199,6 +200,10 @@ async function createWindow() {
       if (!appView.webContents.isDestroyed()) {
         for (const channels of browserIpcChannelSets) appView.webContents.send(channels.workspaceShortcut, index)
       }
+    },
+    // Renderers from before the rename never listened for this, so it has no legacy channel.
+    onThreadShortcut: (direction) => {
+      if (!appView.webContents.isDestroyed()) appView.webContents.send(browserIpcChannels.threadShortcut, direction)
     },
     onFrontendReload: requestFrontendReload,
   })
