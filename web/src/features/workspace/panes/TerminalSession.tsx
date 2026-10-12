@@ -237,10 +237,13 @@ export function TerminalSession({
           if (environmentSetup) params.set('environmentSetup', '1')
           if (initialModelRef.current) params.set('model', initialModelRef.current)
           if (initialThinkingLevelRef.current) params.set('thinking', initialThinkingLevelRef.current)
-          if (initialPromptRef.current.trim()) {
+          // A restart launches a fresh agent; replaying the thread's first task
+          // would run it again, often with auto-approved tools.
+          if (connectionAttempt.restartCodingAgent) {
+            params.set('restart', '1')
+          } else if (initialPromptRef.current.trim()) {
             params.set('prompt', initialPromptRef.current.trim())
           }
-          if (connectionAttempt.restartCodingAgent) params.set('restart', '1')
         }
         terminalPath = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/terminal`
       }
@@ -409,6 +412,7 @@ export function TerminalSession({
           // launches Pi or Claude Code, so the first turn does not race TUI
           // startup through synthetic terminal input.
           initialPromptSentRef.current = true
+          initialPromptRef.current = ''
           onInitialPromptSentRef.current?.()
         }
       }

@@ -644,6 +644,11 @@ func (h *terminalHandler) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		restartCodingAgent = r.URL.Query().Get("restart") == "1"
+		if restartCodingAgent {
+			// A restart replaces an agent that already received the thread's
+			// first prompt. Replaying it would run that task a second time.
+			launchOptions.InitialPrompt = ""
+		}
 	}
 	processID := ""
 	if tool == "process" {
