@@ -1,6 +1,7 @@
 import {
   Clock3,
   FolderGit2,
+  Keyboard,
   Palette,
   Settings2,
   Sparkles,
@@ -25,6 +26,7 @@ export type GlobalSettingsSectionId =
   | 'titles'
   | 'cleanup'
   | 'appearance'
+  | 'shortcuts'
   | 'skills'
 
 export type ProjectSettingsSectionId = 'profile' | 'environment' | 'branches'
@@ -64,6 +66,13 @@ export const GLOBAL_SETTINGS_SECTIONS: Array<SettingsSectionMeta<GlobalSettingsS
     keywords: ['theme', 'font', 'colors', 'palette', 'ansi', 'terminal', 'canvas'],
     icon: Palette,
     tone: 'magenta',
+  },
+  {
+    id: 'shortcuts',
+    label: 'Shortcuts',
+    keywords: ['keyboard', 'hotkeys', 'keybindings', 'keys', 'new thread', 'switch tool', 'profile', 'terminal', 'copy', 'paste', 'composer'],
+    icon: Keyboard,
+    tone: 'yellow',
   },
   {
     id: 'skills',

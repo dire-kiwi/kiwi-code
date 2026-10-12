@@ -165,6 +165,7 @@ test('every Kiwi Code page renders and real Pi follows the deterministic chat fi
       ['global coding-agent settings page', 'profiles', 'Coding agents'],
       ['global cleanup settings page', 'cleanup', 'Automatic cleanup'],
       ['global appearance settings page', 'appearance', 'Appearance'],
+      ['global shortcuts settings page', 'shortcuts', 'Keyboard shortcuts'],
       ['global sandbox settings page', 'sandbox', 'Configuration file'],
       ['global skills settings page', 'skills', 'Agent skills'],
     ]

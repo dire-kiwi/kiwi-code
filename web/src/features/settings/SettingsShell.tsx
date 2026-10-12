@@ -30,6 +30,7 @@ import { ClaudeProfilesSection } from '@/features/settings/sections/ClaudeProfil
 import { CleanupSection } from '@/features/settings/sections/CleanupSection'
 import { ProjectBranchesSection } from '@/features/settings/sections/ProjectBranchesSection'
 import { ProjectGeneralSection } from '@/features/settings/sections/ProjectGeneralSection'
+import { ShortcutsSection } from '@/features/settings/sections/ShortcutsSection'
 import { SkillsSection } from '@/features/settings/sections/SkillsSection'
 import { ThreadTitlesSection } from '@/features/settings/sections/ThreadTitlesSection'
 import { WorktreesSection } from '@/features/settings/sections/WorktreesSection'
@@ -177,6 +178,8 @@ export function SettingsShell({
         return <CleanupSection settings={settings} />
       case 'appearance':
         return <AppearanceSection settings={settings} />
+      case 'shortcuts':
+        return <ShortcutsSection />
       case 'skills':
         return <SkillsSection />
     }
