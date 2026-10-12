@@ -244,6 +244,7 @@ func (s *Store) recoverWorktreeCreationIntentsLocked() error {
 	previous := append([]orphanedWorktree(nil), s.orphanedWorktrees...)
 	kept := make([]orphanedWorktree, 0, len(previous))
 	changed := false
+	var recoveryErrors []error
 	for _, record := range previous {
 		if !record.DeleteBranch {
 			kept = append(kept, record)
@@ -263,19 +264,23 @@ func (s *Store) recoverWorktreeCreationIntentsLocked() error {
 			WorktreePath: record.WorktreePath,
 		}
 		if err := removeWorktreeForRollback(record.ProjectPath, thread); err != nil {
-			return fmt.Errorf("recover unfinished worktree creation %q: %w", record.WorktreePath, err)
+			// Keep the intent, like pruneOrphanedWorktree does, so a later start
+			// or the periodic cleanup can retry once the repository is reachable.
+			recoveryErrors = append(recoveryErrors, fmt.Errorf("recover unfinished worktree creation %q: %w", record.WorktreePath, err))
+			kept = append(kept, record)
+			continue
 		}
 		changed = true
 	}
 	if !changed {
-		return nil
+		return errors.Join(recoveryErrors...)
 	}
 	s.orphanedWorktrees = kept
 	if err := s.saveOrphanedWorktreesLocked(); err != nil {
 		s.orphanedWorktrees = previous
-		return err
+		recoveryErrors = append(recoveryErrors, err)
 	}
-	return nil
+	return errors.Join(recoveryErrors...)
 }
 
 func (s *Store) loadOrphanedWorktreesLocked() error {

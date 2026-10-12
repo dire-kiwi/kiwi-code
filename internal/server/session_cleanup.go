@@ -81,10 +81,29 @@ func newSessionClosureLog(dataDirectory string) (*sessionClosureLog, error) {
 		path:     filepath.Join(dataDirectory, sessionClosureLogFileName),
 		lockPath: filepath.Join(dataDirectory, sessionClosureLogFileName+".lock"),
 	}
-	if _, err := log.list(); err != nil {
+	if err := log.quarantineIfCorrupt(); err != nil {
 		return nil, err
 	}
 	return log, nil
+}
+
+// quarantineIfCorrupt validates the log at startup. The closure log is
+// best-effort telemetry, so an undecodable file is moved aside instead of
+// preventing the server from starting.
+func (l *sessionClosureLog) quarantineIfCorrupt() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	file, err := l.lock(syscall.LOCK_EX)
+	if err != nil {
+		return err
+	}
+	defer unlockSessionClosureLog(file)
+	_, err = l.read()
+	var corrupt *corruptTelemetryFileError
+	if errors.As(err, &corrupt) {
+		return quarantineCorruptTelemetryFile(l.path, err)
+	}
+	return err
 }
 
 func (l *sessionClosureLog) list() ([]sessionClosureEvent, error) {
@@ -168,14 +187,14 @@ func (l *sessionClosureLog) read() ([]sessionClosureEvent, error) {
 	}
 	var persisted persistedSessionClosureLog
 	if err := json.Unmarshal(contents, &persisted); err != nil {
-		return nil, fmt.Errorf("decode tmux session closure log: %w", err)
+		return nil, &corruptTelemetryFileError{fmt.Errorf("decode tmux session closure log: %w", err)}
 	}
 	if persisted.Version != 1 || persisted.Events == nil {
-		return nil, errors.New("decode tmux session closure log: unsupported format")
+		return nil, &corruptTelemetryFileError{errors.New("decode tmux session closure log: unsupported format")}
 	}
 	for _, event := range persisted.Events {
 		if !validSessionClosureEvent(event) {
-			return nil, errors.New("decode tmux session closure log: invalid event")
+			return nil, &corruptTelemetryFileError{errors.New("decode tmux session closure log: invalid event")}
 		}
 	}
 	return append([]sessionClosureEvent(nil), persisted.Events...), nil

@@ -67,28 +67,47 @@ func newThreadUsageTracker(dataDirectory string) (*threadUsageTracker, error) {
 		sessions: make(map[threadUsageSessionKey]persistedThreadUsage),
 		changes:  broadcast.NewBroker[struct{}](broadcast.DefaultMaxPending),
 	}
-	contents, err := os.ReadFile(tracker.path)
-	if errors.Is(err, os.ErrNotExist) {
+	sessions, err := readThreadUsageFile(tracker.path)
+	var corrupt *corruptTelemetryFileError
+	if errors.As(err, &corrupt) {
+		// Usage is telemetry, so an undecodable file is moved aside instead of
+		// preventing the server from starting. Budgets count from zero again.
+		if quarantineErr := quarantineCorruptTelemetryFile(tracker.path, err); quarantineErr != nil {
+			return nil, quarantineErr
+		}
 		return tracker, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	tracker.sessions = sessions
+	return tracker, nil
+}
+
+func readThreadUsageFile(path string) (map[threadUsageSessionKey]persistedThreadUsage, error) {
+	sessions := make(map[threadUsageSessionKey]persistedThreadUsage)
+	contents, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return sessions, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read thread usage: %w", err)
 	}
 	var records []persistedThreadUsage
 	if err := json.Unmarshal(contents, &records); err != nil {
-		return nil, fmt.Errorf("decode thread usage: %w", err)
+		return nil, &corruptTelemetryFileError{fmt.Errorf("decode thread usage: %w", err)}
 	}
 	for _, record := range records {
 		if record.ProjectID == "" || record.ThreadID == "" || record.SessionID == "" || !validThreadUsageTotals(record.Totals) {
-			return nil, errors.New("decode thread usage: invalid usage record")
+			return nil, &corruptTelemetryFileError{errors.New("decode thread usage: invalid usage record")}
 		}
 		key := threadUsageSessionKey{record.ProjectID, record.ThreadID, record.SessionID}
-		if _, duplicate := tracker.sessions[key]; duplicate {
-			return nil, errors.New("decode thread usage: duplicate usage record")
+		if _, duplicate := sessions[key]; duplicate {
+			return nil, &corruptTelemetryFileError{errors.New("decode thread usage: duplicate usage record")}
 		}
-		tracker.sessions[key] = record
+		sessions[key] = record
 	}
-	return tracker, nil
+	return sessions, nil
 }
 
 func validThreadUsageTotals(totals threadUsageTotals) bool {
