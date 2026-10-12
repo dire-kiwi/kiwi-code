@@ -69,6 +69,12 @@ function decodeOscClipboard(data: string): string | null {
   }
 }
 
+// WebLinksAddon's default handler opens about:blank and then navigates it. The
+// desktop app denies that blank popup and only hands http(s) URLs to the system
+// browser, so pass the link to window.open directly; browsers open a tab.
+function openTerminalLink(_event: MouseEvent, uri: string) {
+  window.open(uri, '_blank', 'noopener,noreferrer')
+}
 
 export function TerminalSession({
   projectId,
@@ -176,7 +182,7 @@ export function TerminalSession({
       })
       const fit = new FitAddon()
       terminal.loadAddon(fit)
-      terminal.loadAddon(new WebLinksAddon())
+      terminal.loadAddon(new WebLinksAddon(openTerminalLink))
       terminal.open(host)
       const disposeMousePaste = installTerminalMousePaste(host, () => terminal.focus())
       terminal.loadAddon(new CanvasAddon())
