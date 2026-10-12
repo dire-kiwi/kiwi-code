@@ -8,6 +8,7 @@ import { LoaderCircle, RefreshCw } from 'lucide-react'
 import { uploadPiImage } from '@/api'
 import { apiWebSocketUrl } from '@/apiUrl'
 import { imageFilesFromClipboard, validateImageAdditions } from '@/lib/promptImages'
+import { openTerminalLink } from '@/lib/terminalLinks'
 import { installTerminalMousePaste } from '@/lib/terminalMousePaste'
 import {
   isTerminalEscapeKey,
@@ -158,6 +159,8 @@ export function TerminalSession({
         cursorBlink: true,
         cursorStyle: 'bar',
         cursorWidth: 2,
+        // OSC 8 hyperlinks; plain-text URLs go through WebLinksAddon below.
+        linkHandler: { activate: (_event, uri) => openTerminalLink(uri) },
         fontFamily: configuredTheme.fontFamily,
         fontSize: configuredTheme.fontSize,
         fontWeight: '400',
@@ -176,7 +179,7 @@ export function TerminalSession({
       })
       const fit = new FitAddon()
       terminal.loadAddon(fit)
-      terminal.loadAddon(new WebLinksAddon())
+      terminal.loadAddon(new WebLinksAddon((_event, uri) => openTerminalLink(uri)))
       terminal.open(host)
       const disposeMousePaste = installTerminalMousePaste(host, () => terminal.focus())
       terminal.loadAddon(new CanvasAddon())
