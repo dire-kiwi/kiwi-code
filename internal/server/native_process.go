@@ -70,11 +70,19 @@ func collectNativeProcesses[T any](processes map[nativeProcessKey]*T, include fu
 	return selected
 }
 
+// stopNativeProcessSet stops processes concurrently so one unresponsive agent
+// does not delay the others by its full stop timeout.
 func stopNativeProcessSet[T any](processes []*T, stop func(*T) error) error {
-	stopErrors := make([]error, 0, len(processes))
-	for _, process := range processes {
-		stopErrors = append(stopErrors, stop(process))
+	stopErrors := make([]error, len(processes))
+	var group sync.WaitGroup
+	for index, process := range processes {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			stopErrors[index] = stop(process)
+		}()
 	}
+	group.Wait()
 	return errors.Join(stopErrors...)
 }
 

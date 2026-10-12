@@ -984,11 +984,12 @@ func (m *claudeNativeManager) stopAll() {
 	m.mu.Lock()
 	processes := collectNativeProcesses(m.processes, func(nativeProcessKey) bool { return true })
 	m.mu.Unlock()
-	for _, process := range processes {
+	_ = stopNativeProcessSet(processes, func(process *claudeNativeProcess) error {
 		if err := process.stop(); err != nil {
 			log.Printf("stop native Claude: project=%q thread=%q error=%v", process.key.ProjectID, process.key.ThreadID, err)
 		}
-	}
+		return nil
+	})
 }
 
 func normalizeClaudeNativeClientMessage(payload []byte) (claudeNativeClientMessage, claudeNativeClientAction, error) {
