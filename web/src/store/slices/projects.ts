@@ -1,4 +1,4 @@
-import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/toolkit'
+import { createAsyncThunk, createSlice, original, type PayloadAction } from '@reduxjs/toolkit'
 import {
   deleteProject,
   deleteThread,
@@ -50,55 +50,77 @@ export function visibleProjectSnapshots(items: Project[]) {
   })
 }
 
-function sameThreads(current: readonly Thread[], next: readonly Thread[]) {
-  if (current.length !== next.length) return false
-  return current.every((thread, index) => {
-    const candidate = next[index]
-    return candidate
-      && candidate.id === thread.id
-      && candidate.title === thread.title
-      && candidate.codingAgent === thread.codingAgent
-      && candidate.activeTab === thread.activeTab
-      && candidate.cwd === thread.cwd
-      && candidate.createdAt === thread.createdAt
-      && candidate.lastPromptAt === thread.lastPromptAt
-      && candidate.settledAt === thread.settledAt
-      && candidate.unsettledAt === thread.unsettledAt
-      && candidate.worktree === thread.worktree
-      && candidate.branch === thread.branch
-      && candidate.worktreePath === thread.worktreePath
-      && candidate.autoNamed === thread.autoNamed
-      && candidate.titleLocked === thread.titleLocked
-      && candidate.pinned === thread.pinned
-      && candidate.tokenLimit === thread.tokenLimit
-      && candidate.costLimitUsd === thread.costLimitUsd
-      && candidate.rollbackPending === thread.rollbackPending
-      && candidate.rollbackCleanupReady === thread.rollbackCleanupReady
+/**
+ * Structural equality for decoded wire values: JSON primitives, arrays, and
+ * plain objects. A key holding `undefined` counts as absent.
+ */
+function sameWireValue(current: unknown, next: unknown): boolean {
+  if (current === next) return true
+  if (typeof current !== 'object' || typeof next !== 'object' || current === null || next === null) {
+    return false
+  }
+  if (Array.isArray(current) || Array.isArray(next)) {
+    if (!Array.isArray(current) || !Array.isArray(next) || current.length !== next.length) return false
+    return current.every((item, index) => sameWireValue(item, next[index]))
+  }
+  const currentRecord = current as Record<string, unknown>
+  const nextRecord = next as Record<string, unknown>
+  const keys = new Set([...Object.keys(currentRecord), ...Object.keys(nextRecord)])
+  for (const key of keys) {
+    if (!sameWireValue(currentRecord[key], nextRecord[key])) return false
+  }
+  return true
+}
+
+/**
+ * Builds `next`, but reuses each item of `current` that `reconcile` says is
+ * unchanged, and returns `current` itself when nothing changed at all.
+ */
+function reuseUnchanged<T extends { id: string }>(
+  current: T[],
+  next: T[],
+  reconcile: (previous: T, candidate: T) => T,
+) {
+  const byId = new Map(current.map((item) => [item.id, item]))
+  let changed = current.length !== next.length
+  const items = next.map((candidate, index) => {
+    const previous = byId.get(candidate.id)
+    const item = previous ? reconcile(previous, candidate) : candidate
+    if (item !== current[index]) changed = true
+    return item
   })
+  return changed ? items : current
+}
+
+function reconcileThread(previous: Thread, candidate: Thread) {
+  return sameWireValue(previous, candidate) ? previous : candidate
+}
+
+function reconcileProject(previous: Project, candidate: Project) {
+  const threads = reuseUnchanged(previous.threads, candidate.threads, reconcileThread)
+  if (threads === previous.threads && sameWireValue({ ...previous, threads: candidate.threads }, candidate)) {
+    return previous
+  }
+  return { ...candidate, threads }
 }
 
 /**
  * Identity guard for socket pushes. Load-bearing: without it every push replaces
  * the array and re-renders the whole sidebar tree, which under useSelector is
  * worse than it was under useState.
+ *
+ * The comparison covers every field structurally rather than a hand-kept list:
+ * a field missing from such a list made a push that changed only that field
+ * look identical, so the server's update was silently dropped. Unchanged
+ * projects and threads keep their previous object identity, so only what
+ * changed re-renders.
  */
-export function sameProjects(current: readonly Project[], next: readonly Project[]) {
-  if (current.length !== next.length) return false
-  return current.every((project, index) => {
-    const candidate = next[index]
-    return candidate
-      && candidate.id === project.id
-      && candidate.name === project.name
-      && candidate.path === project.path
-      && candidate.profileId === project.profileId
-      && candidate.host === project.host
-      && candidate.isGitRepo === project.isGitRepo
-      && candidate.createdAt === project.createdAt
-      && candidate.worktreeBranchPrefix === project.worktreeBranchPrefix
-      && candidate.figmaMCPEnabled === project.figmaMCPEnabled
-      && JSON.stringify(candidate.environment) === JSON.stringify(project.environment)
-      && sameThreads(project.threads, candidate.threads)
-  })
+export function reconcileProjects(current: Project[], next: Project[]) {
+  return reuseUnchanged(current, next, reconcileProject)
+}
+
+export function sameProjects(current: Project[], next: Project[]) {
+  return reconcileProjects(current, next) === current
 }
 
 export function projectsWithProfileOrder(current: Project[], profileId: string, projectIds: string[]) {
@@ -255,8 +277,11 @@ export const projectsSlice = createSlice({
   initialState: initialProjectsState,
   reducers: {
     projectsReceived(state, action: PayloadAction<Project[]>) {
-      const next = visibleProjectSnapshots(action.payload)
-      if (!sameProjects(state.projects, next)) state.projects = next
+      // Reconcile against the plain previous value, so reused projects and
+      // threads are the committed objects rather than draft proxies.
+      const current = original(state.projects) ?? state.projects
+      const next = reconcileProjects(current, visibleProjectSnapshots(action.payload))
+      if (next !== current) state.projects = next
       state.hydrated = true
     },
     projectCreated(state, action: PayloadAction<Project>) {
