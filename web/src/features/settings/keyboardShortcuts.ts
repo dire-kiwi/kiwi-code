@@ -40,6 +40,19 @@ export const KEYBOARD_SHORTCUT_GROUPS: KeyboardShortcutGroup[] = [
         detail: 'Opens the project picker when more than one project is active.',
       },
       {
+        id: 'thread-next',
+        label: 'Next thread',
+        keys: [['Ctrl', 'Tab'], ['Ctrl', 'PgDn']],
+        macKeys: [['Ctrl', 'Tab'], ['Mod', 'Alt', 'Right'], ['Mod', 'Shift', ']']],
+        detail: 'The keys browsers use to switch tabs. Follows the sidebar order and wraps at the end.',
+      },
+      {
+        id: 'thread-previous',
+        label: 'Previous thread',
+        keys: [['Ctrl', 'Shift', 'Tab'], ['Ctrl', 'PgUp']],
+        macKeys: [['Ctrl', 'Shift', 'Tab'], ['Mod', 'Alt', 'Left'], ['Mod', 'Shift', '[']],
+      },
+      {
         id: 'start-thread',
         label: 'Start the thread',
         keys: [['Mod', 'Enter']],
@@ -173,6 +186,8 @@ const otherKeyLabels: Record<string, string> = {
 const sharedKeyLabels: Record<string, string> = {
   Up: '↑',
   Down: '↓',
+  Left: '←',
+  Right: '→',
 }
 
 /** How one key of a combo is printed on a keycap for this platform. */

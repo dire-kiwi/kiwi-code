@@ -6,6 +6,7 @@ import { createTestStore, renderWithStore } from '@/store/testing'
 import { activitiesReceived } from '@/store/slices/agentActivity'
 import { profilesReceived } from '@/store/slices/profiles'
 import { projectsReceived } from '@/store/slices/projects'
+import { sidebarViewChanged } from '@/store/slices/sidebar'
 import type { Project } from '@/types'
 import { ProjectSidebar } from './ProjectSidebar'
 import { profileInitials } from './profileInitials'
@@ -37,7 +38,7 @@ function Location() {
   return <output data-testid="location">{useLocation().pathname}</output>
 }
 
-function renderSidebar() {
+function renderSidebar(initialPath = '/') {
   const store = createTestStore()
   store.dispatch(profilesReceived([{ id: 'personal', name: 'Personal' }, { id: 'work', name: 'Client work' }]))
   store.dispatch(projectsReceived([project('Alpha'), project('Beta'), project('Private', 'work')]))
@@ -45,7 +46,7 @@ function renderSidebar() {
   const onSelectProfile = vi.fn()
   const onProfileCreated = vi.fn()
   renderWithStore(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialPath]}>
       <ProjectSidebar onSelectProfile={onSelectProfile} onProfileCreated={onProfileCreated} onProjectCreated={() => {}}
         onSelectThread={onSelectThread} onDeleteProject={() => {}} onDeleteThread={() => {}} />
       <Location />
@@ -156,6 +157,58 @@ describe('profile rail', () => {
     fireEvent.submit(within(dialog).getByRole('textbox', { name: 'Profile name' }))
     expect((await within(dialog).findByRole('alert')).textContent).toBe('a profile with that name already exists')
     expect(onProfileCreated).not.toHaveBeenCalled()
+  })
+})
+
+describe('thread cycling', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'kiwiCodeDesktopBrowser')
+  })
+
+  it('steps through the listed threads with the browser tab keys, even from a terminal', () => {
+    const { store, onSelectThread } = renderSidebar('/projects/Alpha/threads/Alpha-thread/agent')
+    act(() => {
+      store.dispatch(sidebarViewChanged('tree'))
+    })
+    const terminalInput = document.createElement('textarea')
+    const terminalKeyDown = vi.fn()
+    terminalInput.addEventListener('keydown', terminalKeyDown)
+    document.body.append(terminalInput)
+
+    fireEvent.keyDown(terminalInput, { ctrlKey: true, key: 'Tab', code: 'Tab' })
+    expect(onSelectThread).toHaveBeenLastCalledWith('Beta', 'Beta-thread')
+    expect(terminalKeyDown).not.toHaveBeenCalled()
+    // Previous from the first thread wraps to the last.
+    fireEvent.keyDown(terminalInput, { ctrlKey: true, key: 'PageUp', code: 'PageUp' })
+    expect(onSelectThread).toHaveBeenLastCalledWith('Beta', 'Beta-thread')
+    expect(onSelectThread).toHaveBeenCalledTimes(2)
+
+    // A collapsed project's threads drop out, leaving nothing to step to.
+    fireEvent.click(screen.getByTitle('Collapse Beta'))
+    fireEvent.keyDown(terminalInput, { ctrlKey: true, shiftKey: true, key: 'Tab', code: 'Tab' })
+    expect(onSelectThread).toHaveBeenCalledTimes(2)
+    terminalInput.remove()
+  })
+
+  it('follows shortcuts the desktop shell forwards from the native browser view', () => {
+    let forward: ((direction: 1 | -1) => void) | undefined
+    const unsubscribe = vi.fn()
+    Object.assign(window, {
+      kiwiCodeDesktopBrowser: {
+        onThreadShortcut(callback: (direction: 1 | -1) => void) {
+          forward = callback
+          return unsubscribe
+        },
+      },
+    })
+    const { store, onSelectThread } = renderSidebar('/projects/Beta/threads/Beta-thread/agent')
+    act(() => {
+      store.dispatch(sidebarViewChanged('tree'))
+    })
+    act(() => forward?.(-1))
+    expect(onSelectThread).toHaveBeenLastCalledWith('Alpha', 'Alpha-thread')
+    cleanup()
+    expect(unsubscribe).toHaveBeenCalledOnce()
   })
 })
 

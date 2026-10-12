@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { profileShortcutLabel, profileShortcutTarget } from '@/features/project-sidebar/profileShortcuts'
+import { threadCycleDirection } from '@/features/project-sidebar/threadCycleShortcut'
 import { terminalClipboardAction, terminalControlSequence } from '@/terminalKeyBridge.mjs'
 import {
   KEYBOARD_SHORTCUT_GROUPS,
@@ -18,7 +19,15 @@ function shortcut(id: string): KeyboardShortcut {
 const namedKeys: Record<string, { key: string; code: string }> = {
   Up: { key: 'ArrowUp', code: 'ArrowUp' },
   Down: { key: 'ArrowDown', code: 'ArrowDown' },
+  Left: { key: 'ArrowLeft', code: 'ArrowLeft' },
+  Right: { key: 'ArrowRight', code: 'ArrowRight' },
   Insert: { key: 'Insert', code: 'Insert' },
+  Tab: { key: 'Tab', code: 'Tab' },
+  PgUp: { key: 'PageUp', code: 'PageUp' },
+  PgDn: { key: 'PageDown', code: 'PageDown' },
+  // Shift turns the brackets into braces.
+  '[': { key: '{', code: 'BracketLeft' },
+  ']': { key: '}', code: 'BracketRight' },
 }
 
 /** The keydown a user produces by pressing a documented combo. */
@@ -65,7 +74,7 @@ describe('documented shortcuts', () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it.each([true, false])('reach the profile and terminal handlers (mac: %s)', (mac) => {
+  it.each([true, false])('reach the profile, terminal, and thread handlers (mac: %s)', (mac) => {
     const profiles = [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }, { id: 'c', name: 'C' }]
     const target = (id: string) => profileShortcutTarget(keyEvent(shortcutCombos(shortcut(id), mac)[0], mac), profiles, 'b')
     expect(target('profile-previous')).toBe('a')
@@ -78,5 +87,10 @@ describe('documented shortcuts', () => {
     expect(clipboard('terminal-paste').every((action) => action === 'paste')).toBe(true)
 
     expect(terminalControlSequence(keyEvent(shortcutCombos(shortcut('terminal-word-erase'), mac)[0], mac))).toBe('\x17')
+
+    const cycle = (id: string) => shortcutCombos(shortcut(id), mac)
+      .map((combo) => threadCycleDirection(keyEvent(combo, mac), mac))
+    expect(cycle('thread-next').every((direction) => direction === 1)).toBe(true)
+    expect(cycle('thread-previous').every((direction) => direction === -1)).toBe(true)
   })
 })

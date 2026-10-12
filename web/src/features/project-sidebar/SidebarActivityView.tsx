@@ -92,7 +92,13 @@ export function SidebarActivityView({
     // stacking context that traps the menu behind later rows.
 
     return (
-      <li key={key} className={menuOpen ? 'relative z-40' : undefined}>
+      <li
+        key={key}
+        data-thread-row
+        data-project-id={project.id}
+        data-thread-id={thread.id}
+        className={menuOpen ? 'relative z-40' : undefined}
+      >
         <div className="group/thread relative">
           <SelectionButton
             type="button"

@@ -110,6 +110,7 @@ test('preload exposes only the narrow native view APIs', () => {
   assert.match(preload, /setBounds\(options\)/)
   assert.match(preload, /onState\(callback\)/)
   assert.match(preload, /onWorkspaceShortcut\(callback\)/)
+  assert.match(preload, /onThreadShortcut\(callback\)/)
   assert.match(preload, /process\.isMainFrame/)
   assert.doesNotMatch(preload, /exposeInMainWorld\([^\n]+ipcRenderer/)
   assert.doesNotMatch(preload + main, /setBackendOrigin|set-backend-origin/)

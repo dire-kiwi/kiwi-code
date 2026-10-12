@@ -35,6 +35,8 @@ interface KiwiCodeDesktopBrowserBridge {
   setBounds(input: KiwiCodeDesktopBrowserIdentity & { bounds: KiwiCodeDesktopBrowserBounds }): KiwiCodeDesktopBrowserResult
   onState(callback: (state: KiwiCodeDesktopBrowserState) => void): () => void
   onWorkspaceShortcut(callback: (index: number) => void): () => void
+  /** Absent from desktop shells that predate thread shortcuts. */
+  onThreadShortcut?(callback: (direction: 1 | -1) => void): () => void
 }
 
 interface Window {

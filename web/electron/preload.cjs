@@ -14,6 +14,7 @@ const browserIpcChannels = {
   setBounds: 'kiwi-code-desktop-browser:set-bounds',
   state: 'kiwi-code-desktop-browser:state',
   workspaceShortcut: 'kiwi-code-desktop-browser:workspace-shortcut',
+  threadShortcut: 'kiwi-code-desktop-browser:thread-shortcut',
 }
 const legacyBrowserIpcChannels = {
   show: 'dire-mux-desktop-browser:show',
@@ -84,6 +85,16 @@ function shortcutListener(channelSets, callback) {
   })
 }
 
+// Only the current channel exists, so nothing needs de-duplicating.
+function threadShortcutListener(callback) {
+  if (typeof callback !== 'function') throw new TypeError('callback must be a function')
+  const listener = (_event, direction) => {
+    if (direction === 1 || direction === -1) callback(direction)
+  }
+  ipcRenderer.on(browserIpcChannels.threadShortcut, listener)
+  return () => ipcRenderer.removeListener(browserIpcChannels.threadShortcut, listener)
+}
+
 function createBrowserBridge() {
   return Object.freeze({
     show(options) {
@@ -100,6 +111,9 @@ function createBrowserBridge() {
     },
     onWorkspaceShortcut(callback) {
       return shortcutListener(browserChannelSets, callback)
+    },
+    onThreadShortcut(callback) {
+      return threadShortcutListener(callback)
     },
   })
 }

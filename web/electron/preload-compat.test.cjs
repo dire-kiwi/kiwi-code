@@ -105,3 +105,17 @@ test('preload deduplicates state emitted on current and legacy aliases', () => {
 
   assert.deepEqual(states, [state])
 })
+
+test('preload forwards thread shortcuts with a valid direction', () => {
+  const runtime = loadPreload({}, async () => undefined)
+  const directions = []
+  const stop = runtime.bridges.get('kiwiCodeDesktopBrowser').onThreadShortcut((direction) => directions.push(direction))
+
+  runtime.emit('kiwi-code-desktop-browser:thread-shortcut', 1)
+  runtime.emit('kiwi-code-desktop-browser:thread-shortcut', -1)
+  runtime.emit('kiwi-code-desktop-browser:thread-shortcut', 2)
+  stop()
+  runtime.emit('kiwi-code-desktop-browser:thread-shortcut', 1)
+
+  assert.deepEqual(directions, [1, -1])
+})
