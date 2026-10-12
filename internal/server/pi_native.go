@@ -1445,11 +1445,12 @@ func (m *piNativeManager) stopAll() {
 	m.mu.Lock()
 	processes := collectNativeProcesses(m.processes, func(nativeProcessKey) bool { return true })
 	m.mu.Unlock()
-	for _, process := range processes {
+	_ = stopNativeProcessSet(processes, func(process *piNativeProcess) error {
 		if err := process.stop(); err != nil {
 			log.Printf("stop native Pi: project=%q thread=%q error=%v", process.key.ProjectID, process.key.ThreadID, err)
 		}
-	}
+		return nil
+	})
 }
 
 func normalizePiNativeClientMessage(payload []byte) (piNativeRPCCommand, piNativeClientAction, error) {

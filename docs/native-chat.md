@@ -51,7 +51,8 @@ existing conversation never silently creates a replacement.
 Settlement uses the existing launch/mutation fence, refuses working threads,
 stops the app-server, and preserves the ID. Unsettling resumes on next opening.
 Deleting a Kiwi thread removes its native mapping; it does not delete Codex's
-own global conversation history. Shutdown stops all native processes.
+own global conversation history. Shutdown (restart, `SIGINT`, or `SIGTERM`)
+stops all native processes and waits, within a bounded timeout, for them to exit.
 
 The adapter currently exposes one active turn per thread. Stop it before sending
 a different prompt. It uses workspace-write sandboxing and on-request approvals.
