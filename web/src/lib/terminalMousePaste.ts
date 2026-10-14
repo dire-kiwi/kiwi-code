@@ -8,24 +8,12 @@ export function installTerminalMousePaste(
 
     // Linux supplies PRIMARY through a native paste event. Forwarding this
     // press to tmux as well can invoke its MouseDown2Pane paste-buffer binding.
-    // Leave the default action intact so the browser still pastes.
+    // Leave the default action and auxclick intact so xterm can position its
+    // textarea under the pointer and receive the browser's selection paste.
     event.stopPropagation()
     focus()
   }
 
-  function handleAuxClick(event: MouseEvent) {
-    if (!platform.startsWith('Linux') || event.button !== 1) return
-
-    // Chromium pastes PRIMARY into the focused editable element after
-    // auxclick. The press itself can blur the terminal's hidden textarea, so
-    // focus it again here to receive the selection paste.
-    focus()
-  }
-
   host.addEventListener('mousedown', handleMouseDown, true)
-  host.addEventListener('auxclick', handleAuxClick, true)
-  return () => {
-    host.removeEventListener('mousedown', handleMouseDown, true)
-    host.removeEventListener('auxclick', handleAuxClick, true)
-  }
+  return () => host.removeEventListener('mousedown', handleMouseDown, true)
 }
