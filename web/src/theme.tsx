@@ -8,9 +8,8 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import type { TerminalThemeColors } from '@wterm/dom'
+import type { ITheme } from '@xterm/xterm'
 import { DEFAULT_THEME } from './defaultTheme.generated'
-import { isHexColor } from './lib/validation'
 import type { ThemeColors, ThemeSettings } from './types'
 import { useAppSelector } from '@/store/hooks'
 import { selectTheme } from '@/store/slices/settings'
@@ -55,37 +54,32 @@ export function themesEqual(left: ThemeSettings, right: ThemeSettings) {
     && themeColorKeys.every((key) => left.colors[key] === right.colors[key])
 }
 
-const terminalPaletteKeys = [
-  'black',
-  'red',
-  'green',
-  'yellow',
-  'blue',
-  'magenta',
-  'cyan',
-  'white',
-  'brightBlack',
-  'brightRed',
-  'brightGreen',
-  'brightYellow',
-  'brightBlue',
-  'brightMagenta',
-  'brightCyan',
-  'brightWhite',
-] as const satisfies readonly (keyof ThemeColors)[]
-
-export function toTerminalTheme(theme: ThemeSettings): TerminalThemeColors {
-  // wterm takes opaque 0xRRGGBB integers and rejects the whole theme when any
-  // value is invalid, so fall back per color instead of failing the terminal.
-  const color = (key: keyof ThemeColors) => {
-    const value = theme.colors[key]
-    return Number.parseInt((isHexColor(value) ? value : DEFAULT_THEME.colors[key]).slice(1), 16)
-  }
+export function toTerminalTheme(theme: ThemeSettings): ITheme {
+  const { colors } = theme
   return {
-    foreground: color('foreground'),
-    background: color('background'),
-    cursor: color('cursor'),
-    palette: terminalPaletteKeys.map(color),
+    background: colors.background,
+    foreground: colors.foreground,
+    cursor: colors.cursor,
+    cursorAccent: colors.background,
+    selectionBackground: colors.selectionBackground,
+    selectionForeground: colors.selectionForeground,
+    selectionInactiveBackground: colors.white,
+    black: colors.black,
+    red: colors.red,
+    green: colors.green,
+    yellow: colors.yellow,
+    blue: colors.blue,
+    magenta: colors.magenta,
+    cyan: colors.cyan,
+    white: colors.white,
+    brightBlack: colors.brightBlack,
+    brightRed: colors.brightRed,
+    brightGreen: colors.brightGreen,
+    brightYellow: colors.brightYellow,
+    brightBlue: colors.brightBlue,
+    brightMagenta: colors.brightMagenta,
+    brightCyan: colors.brightCyan,
+    brightWhite: colors.brightWhite,
   }
 }
 
