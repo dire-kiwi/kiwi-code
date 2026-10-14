@@ -71,8 +71,7 @@ function terminalRowHeight(element: HTMLElement, theme: ThemeSettings) {
   return Math.max(1, Math.floor(height * TERMINAL_LINE_HEIGHT))
 }
 
-// wterm re-measures its grid whenever these metrics change the size of its
-// probe cell, so typography updates resize the terminal without a manual fit.
+// Callers fit the grid on a later frame, once the new metrics have been laid out.
 function applyTerminalAppearance(terminal: WTerm, theme: ThemeSettings) {
   const { element } = terminal
   element.style.setProperty('--term-font-family', theme.fontFamily)
@@ -181,6 +180,10 @@ export function TerminalSession({
       terminalHost.appendChild(element)
       const terminal = new WTerm(element, {
         core,
+        // wterm's own resizing applies every observed size immediately. A size
+        // that blips for a single frame truncates the screen, and tmux never
+        // redraws it when the net size is unchanged, so the pane fits instead.
+        autoResize: false,
         // Inactive panes keep parsing output but skip painting until shown.
         renderingPaused: !activeRef.current,
       })
@@ -203,6 +206,9 @@ export function TerminalSession({
         releaseTerminal()
         return
       }
+      // Without autoResize, init pins the element to its initial grid height.
+      element.style.removeProperty('height')
+      terminal.fit()
       // The pane can switch while init awaits, before the active effect can
       // reach this terminal.
       terminal.setRenderingPaused(!activeRef.current)
@@ -625,13 +631,27 @@ export function TerminalSession({
         }
       }
 
+      // Fit on the next frame, so a size that only lasts a frame is ignored.
+      let fitFrame = 0
+      function scheduleFit() {
+        cancelAnimationFrame(fitFrame)
+        fitFrame = requestAnimationFrame(() => {
+          if (!disposed) terminal.fit()
+        })
+      }
+      const resizeObserver = new ResizeObserver(scheduleFit)
+      resizeObserver.observe(element)
+
       // Web fonts change the natural line box measured for the row height.
       void document.fonts.ready.then(() => {
-        if (!disposed) applyTerminalAppearance(terminal, themeRef.current)
+        if (disposed) return
+        applyTerminalAppearance(terminal, themeRef.current)
+        scheduleFit()
       })
 
       disposeTerminal = () => {
         disposed = true
+        cancelAnimationFrame(fitFrame)
         cancelAnimationFrame(terminalBlurFrame)
         if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
         if (reconnectStableTimer !== undefined) window.clearTimeout(reconnectStableTimer)
@@ -646,6 +666,7 @@ export function TerminalSession({
         element.removeEventListener('keydown', handleClipboardKeyDown, true)
         disposeMousePaste()
         disposeLinks()
+        resizeObserver.disconnect()
         if (socket.readyState < WebSocket.CLOSING) socket.close(1000, 'Terminal pane closed')
         terminalRef.current = null
         releaseTerminal()
@@ -660,7 +681,10 @@ export function TerminalSession({
 
   useEffect(() => {
     const terminal = terminalRef.current
-    if (terminal) applyTerminalAppearance(terminal, theme)
+    if (!terminal) return
+    applyTerminalAppearance(terminal, theme)
+    const frame = requestAnimationFrame(() => terminal.fit())
+    return () => cancelAnimationFrame(frame)
   }, [theme])
 
   useEffect(() => {
