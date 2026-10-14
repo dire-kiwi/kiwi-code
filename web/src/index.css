@@ -182,16 +182,9 @@ input:focus-visible {
   );
 }
 
-.terminal-host .xterm {
-  height: 100%;
-}
-
-.terminal-host .xterm-viewport {
-  background-color: transparent !important;
-}
-
-.terminal-host .xterm-screen canvas {
-  image-rendering: auto;
+/* ghostty-web makes the host itself the contenteditable input target. */
+.terminal-host {
+  caret-color: transparent;
 }
 
 .empty-grid {
