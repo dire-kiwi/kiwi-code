@@ -6,8 +6,9 @@ function setup(platform = 'Linux x86_64') {
   const terminal = host.appendChild(document.createElement('div'))
   const focus = vi.fn()
   const mouseReport = vi.fn()
-  terminal.addEventListener('mousedown', mouseReport)
   const dispose = installTerminalMousePaste(host, focus, platform)
+  // Mouse reporting listens on the same host, after the paste handler.
+  host.addEventListener('mousedown', mouseReport, true)
   return { terminal, focus, mouseReport, dispose }
 }
 

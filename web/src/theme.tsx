@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import type { ITheme } from '@xterm/xterm'
+import type { ITheme } from 'ghostty-web'
 import { DEFAULT_THEME } from './defaultTheme.generated'
 import type { ThemeColors, ThemeSettings } from './types'
 import { useAppSelector } from '@/store/hooks'
@@ -63,7 +63,6 @@ export function toTerminalTheme(theme: ThemeSettings): ITheme {
     cursorAccent: colors.background,
     selectionBackground: colors.selectionBackground,
     selectionForeground: colors.selectionForeground,
-    selectionInactiveBackground: colors.white,
     black: colors.black,
     red: colors.red,
     green: colors.green,

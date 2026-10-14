@@ -8,9 +8,10 @@ export function installTerminalMousePaste(
 
     // Linux supplies PRIMARY through a native paste event. Forwarding this
     // press to tmux as well can invoke its MouseDown2Pane paste-buffer binding.
-    // Leave the default action and auxclick intact so xterm can position its
-    // textarea under the pointer and receive the browser's selection paste.
-    event.stopPropagation()
+    // Stop the terminal's other host listeners too (install this first), but
+    // leave the default action and auxclick intact so the focused terminal
+    // receives the browser's selection paste.
+    event.stopImmediatePropagation()
     focus()
   }
 

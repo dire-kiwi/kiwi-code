@@ -25,12 +25,9 @@
   "dependencies": {
     "@fontsource-variable/jetbrains-mono": "latest",
     "@reduxjs/toolkit": "^2.12.0",
-    "@xterm/addon-canvas": "latest",
-    "@xterm/addon-fit": "latest",
-    "@xterm/addon-web-links": "latest",
-    "@xterm/xterm": "latest",
     "effect": "^3.22.0",
     "fzf": "^0.5.2",
+    "ghostty-web": "0.4.0-next.20.g1858a59",
     "katex": "^0.16.47",
     "lucide-react": "latest",
     "mermaid": "^11.16.0",
