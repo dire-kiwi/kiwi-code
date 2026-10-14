@@ -103,8 +103,9 @@ func (p *websocketPeer[T]) WritePing() error {
 }
 
 // terminalOutputCredit bounds bytes accepted by the browser WebSocket but not
-// yet parsed by xterm. Network-level backpressure alone is insufficient because
-// browsers can queue WebSocket messages much faster than xterm can render them.
+// yet parsed by the browser terminal. Network-level backpressure alone is
+// insufficient because browsers can queue WebSocket messages much faster than
+// the terminal can render them.
 type terminalOutputCredit struct {
 	mu          sync.Mutex
 	outstanding int

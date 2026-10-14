@@ -1,13 +1,14 @@
 import { writeSystemClipboard } from '@/lib/clipboard'
 import { useEffect, useRef, useState } from 'react'
-import { CanvasAddon } from '@xterm/addon-canvas'
-import { FitAddon } from '@xterm/addon-fit'
-import { WebLinksAddon } from '@xterm/addon-web-links'
-import { Terminal } from '@xterm/xterm'
+import { WTerm } from '@wterm/dom'
+import { GhosttyCore } from '@wterm/ghostty'
+import ghosttyWasmUrl from '@wterm/ghostty/ghostty-vt.wasm?url'
 import { LoaderCircle, RefreshCw } from 'lucide-react'
 import { uploadPiImage } from '@/api'
 import { apiWebSocketUrl } from '@/apiUrl'
 import { imageFilesFromClipboard, validateImageAdditions } from '@/lib/promptImages'
+import { withMinimumContrast } from '@/lib/terminalContrast'
+import { installTerminalLinks } from '@/lib/terminalLinks'
 import { installTerminalMousePaste } from '@/lib/terminalMousePaste'
 import {
   isTerminalEscapeKey,
@@ -18,7 +19,7 @@ import {
   terminalControlSequence,
 } from '@/terminalKeyBridge.mjs'
 import { toTerminalTheme, useTheme } from '@/theme'
-import type { CodingAgent, ConnectionStatus, TerminalTool } from '@/types'
+import type { CodingAgent, ConnectionStatus, TerminalTool, ThemeSettings } from '@/types'
 import { Button } from '@/ui/buttons'
 import { Surface } from '@/ui/layout'
 
@@ -47,26 +48,36 @@ type ImagePasteNotice = {
   message: string
 }
 
-const OSC_CLIPBOARD = 52
 const CODING_AGENT_ENDED_CLOSE_REASON = 'Coding agent ended'
 const ENVIRONMENT_SETUP_COMPLETED_CLOSE_REASON = 'Environment setup completed'
 const ENVIRONMENT_SETUP_FAILED_CLOSE_REASON = 'Environment setup failed'
 const RECONNECT_STABLE_AFTER_MS = 5_000
+const TERMINAL_LINE_HEIGHT = 1.28
+// Keep explicit agent colors (including RGB black) readable on the configured
+// background without changing the terminal's ANSI palette.
+const TERMINAL_MINIMUM_CONTRAST_RATIO = 4.5
 
-function decodeOscClipboard(data: string): string | null {
-  const separator = data.indexOf(';')
-  if (separator < 0) return null
+// Scale the font's natural line box like xterm's lineHeight option, rounding
+// down to whole pixels so rows stay crisp and the grid fits exactly.
+function terminalRowHeight(element: HTMLElement, theme: ThemeSettings) {
+  const probe = document.createElement('span')
+  probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;line-height:normal'
+  probe.style.fontFamily = theme.fontFamily
+  probe.style.fontSize = `${theme.fontSize}px`
+  probe.textContent = 'W'
+  element.appendChild(probe)
+  const height = probe.getBoundingClientRect().height || theme.fontSize * 1.2
+  probe.remove()
+  return Math.max(1, Math.floor(height * TERMINAL_LINE_HEIGHT))
+}
 
-  const encoded = data.slice(separator + 1)
-  if (encoded === '?') return null
-
-  try {
-    const binary = window.atob(encoded)
-    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
-    return new TextDecoder().decode(bytes)
-  } catch {
-    return null
-  }
+// Callers fit the grid on a later frame, once the new metrics have been laid out.
+function applyTerminalAppearance(terminal: WTerm, theme: ThemeSettings) {
+  const { element } = terminal
+  element.style.setProperty('--term-font-family', theme.fontFamily)
+  element.style.setProperty('--term-font-size', `${theme.fontSize}px`)
+  element.style.setProperty('--term-row-height', `${terminalRowHeight(element, theme)}px`)
+  terminal.setThemeColors(toTerminalTheme(theme))
 }
 
 
@@ -91,8 +102,7 @@ export function TerminalSession({
 }: TerminalSessionProps) {
   const { theme } = useTheme()
   const hostRef = useRef<HTMLDivElement>(null)
-  const fitRef = useRef<FitAddon | null>(null)
-  const terminalRef = useRef<Terminal | null>(null)
+  const terminalRef = useRef<WTerm | null>(null)
   const themeRef = useRef(theme)
   const activeRef = useRef(active)
   const threadTitleRef = useRef(threadTitle)
@@ -139,84 +149,116 @@ export function TerminalSession({
     setImagePasteNotice(null)
     onStatusChangeRef.current('connecting')
 
-    // xterm schedules work with a timer when it opens. Deferring initialization
-    // lets React's development-only Strict Mode effect probe finish first, so
-    // that timer never runs against an already-disposed terminal instance.
-    const startFrame = requestAnimationFrame(() => {
+    void startTerminal().catch((reason) => {
       if (disposed) return
+      console.error('Could not start the terminal.', reason)
+      setStatus('error')
+      onStatusChangeRef.current('error')
+    })
 
-      let resizeFrame = 0
+    async function startTerminal() {
+      // React's development-only Strict Mode probe disposes this effect before
+      // the asynchronous setup finishes, so every await rechecks disposal.
+      const core = withMinimumContrast(
+        await GhosttyCore.load({ wasmPath: ghosttyWasmUrl }),
+        TERMINAL_MINIMUM_CONTRAST_RATIO,
+        toTerminalTheme(themeRef.current),
+      )
+      if (disposed || !host) {
+        core.dispose()
+        return
+      }
+
       let socketErrored = false
       let reconnectTimer: ReturnType<typeof window.setTimeout> | undefined
       let reconnectStableTimer: ReturnType<typeof window.setTimeout> | undefined
       let pasteNoticeTimer: ReturnType<typeof window.setTimeout> | undefined
       const uploadController = new AbortController()
-      const configuredTheme = themeRef.current
-      const terminal = new Terminal({
-        allowTransparency: false,
-        convertEol: false,
-        cursorBlink: true,
-        cursorStyle: 'bar',
-        cursorWidth: 2,
-        fontFamily: configuredTheme.fontFamily,
-        fontSize: configuredTheme.fontSize,
-        fontWeight: '400',
-        fontWeightBold: 650,
-        letterSpacing: 0,
-        lineHeight: 1.28,
-        macOptionIsMeta: true,
-        // Keep explicit agent colors (including RGB black) readable on the
-        // configured background without changing the terminal's ANSI palette.
-        minimumContrastRatio: 4.5,
-        overviewRulerWidth: 0,
-        rightClickSelectsWord: true,
-        scrollback: 10_000,
-        smoothScrollDuration: 0,
-        theme: toTerminalTheme(configuredTheme),
-      })
-      const fit = new FitAddon()
-      terminal.loadAddon(fit)
-      terminal.loadAddon(new WebLinksAddon())
-      terminal.open(host)
-      const disposeMousePaste = installTerminalMousePaste(host, () => terminal.focus())
-      terminal.loadAddon(new CanvasAddon())
-      terminal.textarea?.setAttribute('aria-label', `${threadTitleRef.current} ${sessionLabel} terminal input`)
-      terminal.attachCustomKeyEventHandler((event) => {
-        const action = terminalClipboardAction(event, terminal.hasSelection())
-        if (!action) return true
-        // Omarchy sends Ctrl-C/X/V to browser windows. Let the browser's native
-        // paste event reach xterm (and the Pi image handler), without sending ^V.
-        if (action === 'paste') return false
-        event.preventDefault()
-        if (event.type === 'keydown') {
-          const selection = terminal.getSelection()
-          void writeSystemClipboard(selection).then(() => {
-            // Terminal output is immutable; cut copies and dismisses selection.
-            if (!disposed && action === 'cut' && terminal.getSelection() === selection) {
-              terminal.clearSelection()
-            }
-          }).catch((reason) => {
-            console.warn('Could not copy the terminal selection to the system clipboard.', reason)
-          })
-        }
-        return false
-      })
       const terminalHost: HTMLDivElement = host
-      // tmux forwards completed copy-mode selections with OSC 52. xterm leaves
-      // clipboard access to its embedder, so bridge that sequence to the browser.
-      const clipboardDisposable = terminal.parser.registerOscHandler(OSC_CLIPBOARD, (data) => {
-        const text = decodeOscClipboard(data)
-        if (text !== null) {
-          void writeSystemClipboard(text).catch((reason) => {
-            console.warn('Could not copy the tmux selection to the system clipboard.', reason)
-          })
+      const element = document.createElement('div')
+      element.setAttribute('aria-label', `${threadTitleRef.current} ${sessionLabel} terminal input`)
+      terminalHost.appendChild(element)
+      const terminal = new WTerm(element, {
+        core,
+        // wterm's own resizing applies every observed size immediately. A size
+        // that blips for a single frame truncates the screen, and tmux never
+        // redraws it when the net size is unchanged, so the pane fits instead.
+        autoResize: false,
+        // Inactive panes keep parsing output but skip painting until shown.
+        renderingPaused: !activeRef.current,
+      })
+      applyTerminalAppearance(terminal, themeRef.current)
+
+      function releaseTerminal() {
+        terminal.destroy()
+        core.dispose()
+        element.remove()
+      }
+
+      const focusBeforeInit = document.activeElement
+      try {
+        await terminal.init()
+      } catch (reason) {
+        releaseTerminal()
+        throw reason
+      }
+      if (disposed) {
+        releaseTerminal()
+        return
+      }
+      // Without autoResize, init pins the element to its initial grid height.
+      element.style.removeProperty('height')
+      terminal.fit()
+      // The pane can switch while init awaits, before the active effect can
+      // reach this terminal.
+      terminal.setRenderingPaused(!activeRef.current)
+      // WTerm focuses its input during init. Background panes must not take
+      // focus from the pane, prompt, or control the user is working in.
+      if (!activeRef.current && element.contains(document.activeElement)) {
+        if (focusBeforeInit instanceof HTMLElement && focusBeforeInit.isConnected) {
+          focusBeforeInit.focus({ preventScroll: true })
+        } else if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur()
         }
-        return true
+      }
+
+      const disposeMousePaste = installTerminalMousePaste(terminalHost, () => terminal.focus())
+      const disposeLinks = installTerminalLinks(element, () => terminal.bridge, (url) => {
+        window.open(url, '_blank', 'noopener,noreferrer')
       })
 
-      fitRef.current = fit
+      function handleClipboardKeyDown(event: KeyboardEvent) {
+        const selection = terminal.getSelectionText()
+        const action = terminalClipboardAction(event, Boolean(selection))
+        if (!action) return
+        // Keep clipboard shortcuts away from wterm, which would otherwise send
+        // Ctrl-X or an encoded Shift+Insert to the application.
+        event.stopPropagation()
+        // Omarchy sends Ctrl-C/X/V to browser windows. Let the browser's native
+        // paste reach the terminal input (and the Pi image handler) without ^V.
+        if (action === 'paste' || selection === null) return
+        event.preventDefault()
+        void writeSystemClipboard(selection).then(() => {
+          // Terminal output is immutable; cut copies and dismisses selection.
+          if (!disposed && action === 'cut' && terminal.getSelectionText() === selection) {
+            terminal.clearSelection()
+          }
+        }).catch((reason) => {
+          console.warn('Could not copy the terminal selection to the system clipboard.', reason)
+        })
+      }
+      // Capture on the wterm element so this runs before its input's handler.
+      element.addEventListener('keydown', handleClipboardKeyDown, true)
+
+      // tmux forwards completed copy-mode selections with OSC 52. wterm leaves
+      // clipboard access to its embedder, so bridge those writes to the browser.
+      terminal.onClipboardWrite = (text) => {
+        void writeSystemClipboard(text).catch((reason) => {
+          console.warn('Could not copy the tmux selection to the system clipboard.', reason)
+        })
+      }
+
       terminalRef.current = terminal
-      fit.fit()
 
       const params = new URLSearchParams({
         cols: String(terminal.cols),
@@ -324,7 +366,7 @@ export function TerminalSession({
         if (data === TERMINAL_ESCAPE_SEQUENCE) lastEscapeKeyboardEventAt = performance.now()
         if (!activeRef.current || data === null || !terminalShouldHandle(data, event)) return
 
-        // Capture browser-reserved keys before the browser or xterm can handle
+        // Capture browser-reserved keys before the browser or wterm can handle
         // them, then write directly to the terminal socket. Meta+W is included
         // for macOS browsers, while Escape needs an explicit bridge in web mode.
         if (data === TERMINAL_ESCAPE_SEQUENCE) escapeHandledOnKeyDown = true
@@ -367,7 +409,7 @@ export function TerminalSession({
           })) return
 
           // Full Chrome can consume the first Escape before dispatching any
-          // keyboard event, leaving xterm's hidden textarea focused on <body>.
+          // keyboard event, leaving the terminal's hidden textarea focused on <body>.
           // A keyboard-caused blur with no pointer or window focus change is the
           // only observable signal, so forward that swallowed Escape once.
           escapeHandledOnKeyDown = true
@@ -461,7 +503,10 @@ export function TerminalSession({
             })
           }
         }
-        terminal.write(output, () => acknowledgeOutput(output.byteLength))
+        // wterm parses synchronously and coalesces painting into the next
+        // frame, so output is consumed as soon as write returns.
+        terminal.write(output)
+        acknowledgeOutput(output.byteLength)
       })
 
       socket.addEventListener('error', () => {
@@ -516,6 +561,13 @@ export function TerminalSession({
         }, delay)
       })
 
+      function pasteTerminalText(text: string) {
+        // Match wterm's own paste handling: honor bracketed paste, and strip ESC
+        // so pasted text cannot end the bracket early.
+        const safe = text.replace(/\x1b/g, '')
+        sendTerminalInput(terminal.bridge?.bracketedPaste() ? `\x1b[200~${safe}\x1b[201~` : safe)
+      }
+
       function showImagePasteError(message: string) {
         if (pasteNoticeTimer !== undefined) window.clearTimeout(pasteNoticeTimer)
         setImagePasteNotice({ kind: 'error', message })
@@ -540,7 +592,7 @@ export function TerminalSession({
             throw new Error('The Pi terminal disconnected before the image could be added.')
           }
           // Pi's native clipboard handler also inserts a temporary image path into its editor.
-          terminal.paste(uploads.map((upload) => upload.path).join(' '))
+          pasteTerminalText(uploads.map((upload) => upload.path).join(' '))
           terminal.focus()
           setImagePasteNotice(null)
         } catch (reason) {
@@ -566,33 +618,40 @@ export function TerminalSession({
         }
         void pasteImages(validation.accepted)
       }
-      host.addEventListener('paste', handlePaste, true)
+      terminalHost.addEventListener('paste', handlePaste, true)
 
-      const inputDisposable = terminal.onData((data) => sendTerminalInput(data))
-
-      const resizeDisposable = terminal.onResize(({ cols, rows }) => {
+      terminal.onData = sendTerminalInput
+      // X10 mouse reports can contain bytes that are not valid UTF-8 text.
+      terminal.onBinary = (data) => {
+        if (socket.readyState === WebSocket.OPEN) socket.send(Uint8Array.from(data))
+      }
+      terminal.onResize = (cols, rows) => {
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(JSON.stringify({ type: 'resize', cols, rows }))
         }
-      })
+      }
 
-      const observer = new ResizeObserver(() => {
-        cancelAnimationFrame(resizeFrame)
-        resizeFrame = requestAnimationFrame(() => {
-          if (!disposed && host.clientWidth > 0 && host.clientHeight > 0) fit.fit()
+      // Fit on the next frame, so a size that only lasts a frame is ignored.
+      let fitFrame = 0
+      function scheduleFit() {
+        cancelAnimationFrame(fitFrame)
+        fitFrame = requestAnimationFrame(() => {
+          if (!disposed) terminal.fit()
         })
-      })
-      observer.observe(host)
+      }
+      const resizeObserver = new ResizeObserver(scheduleFit)
+      resizeObserver.observe(element)
 
+      // Web fonts change the natural line box measured for the row height.
       void document.fonts.ready.then(() => {
         if (disposed) return
-        fit.fit()
-        terminal.refresh(0, terminal.rows - 1)
+        applyTerminalAppearance(terminal, themeRef.current)
+        scheduleFit()
       })
 
       disposeTerminal = () => {
         disposed = true
-        cancelAnimationFrame(resizeFrame)
+        cancelAnimationFrame(fitFrame)
         cancelAnimationFrame(terminalBlurFrame)
         if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
         if (reconnectStableTimer !== undefined) window.clearTimeout(reconnectStableTimer)
@@ -603,22 +662,19 @@ export function TerminalSession({
         window.removeEventListener('keyup', handleTerminalKeyUp, true)
         window.removeEventListener('pointerdown', handlePagePointerDown, true)
         terminalHost.removeEventListener('focusout', handleTerminalFocusOut, true)
-        host.removeEventListener('paste', handlePaste, true)
+        terminalHost.removeEventListener('paste', handlePaste, true)
+        element.removeEventListener('keydown', handleClipboardKeyDown, true)
         disposeMousePaste()
-        observer.disconnect()
-        clipboardDisposable.dispose()
-        inputDisposable.dispose()
-        resizeDisposable.dispose()
+        disposeLinks()
+        resizeObserver.disconnect()
         if (socket.readyState < WebSocket.CLOSING) socket.close(1000, 'Terminal pane closed')
-        fitRef.current = null
         terminalRef.current = null
-        terminal.dispose()
+        releaseTerminal()
       }
-    })
+    }
 
     return () => {
       disposed = true
-      cancelAnimationFrame(startFrame)
       disposeTerminal()
     }
   }, [codingAgent, connectionAttempt, environmentSetup, processId, projectId, sessionLabel, threadId, tmuxSession, tmuxWindow, tool])
@@ -626,21 +682,21 @@ export function TerminalSession({
   useEffect(() => {
     const terminal = terminalRef.current
     if (!terminal) return
-    terminal.options.fontFamily = theme.fontFamily
-    terminal.options.fontSize = theme.fontSize
-    terminal.options.theme = toTerminalTheme(theme)
-    const frame = requestAnimationFrame(() => fitRef.current?.fit())
+    applyTerminalAppearance(terminal, theme)
+    const frame = requestAnimationFrame(() => terminal.fit())
     return () => cancelAnimationFrame(frame)
   }, [theme])
 
   useEffect(() => {
-    terminalRef.current?.textarea?.setAttribute('aria-label', `${threadTitle} ${sessionLabel} terminal input`)
+    // wterm names its input from the host element's label.
+    terminalRef.current?.element.setAttribute('aria-label', `${threadTitle} ${sessionLabel} terminal input`)
   }, [sessionLabel, threadTitle])
 
   useEffect(() => {
+    terminalRef.current?.setRenderingPaused(!active)
     if (!active) return
     const frame = requestAnimationFrame(() => {
-      fitRef.current?.fit()
+      terminalRef.current?.fit()
       terminalRef.current?.focus()
     })
     return () => cancelAnimationFrame(frame)
