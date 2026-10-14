@@ -17,9 +17,9 @@ function mouseDown(button: number) {
 
 it('keeps Linux selection paste without also reporting a middle press to tmux', () => {
   const { terminal, focus, mouseReport } = setup()
-  const positionTextarea = vi.fn()
+  const auxClick = vi.fn()
   const paste = vi.fn()
-  terminal.addEventListener('auxclick', positionTextarea)
+  terminal.addEventListener('auxclick', auxClick)
   terminal.addEventListener('paste', paste)
 
   // Repeat immediately: separate clicks must still paste independently.
@@ -32,8 +32,9 @@ it('keeps Linux selection paste without also reporting a middle press to tmux', 
   }
 
   expect(mouseReport).not.toHaveBeenCalled()
-  expect(focus).toHaveBeenCalledTimes(2)
-  expect(positionTextarea).toHaveBeenCalledTimes(2)
+  // Focus on both the press and the auxclick that precedes the native paste.
+  expect(focus).toHaveBeenCalledTimes(4)
+  expect(auxClick).toHaveBeenCalledTimes(2)
   expect(paste).toHaveBeenCalledTimes(2)
 })
 
@@ -51,10 +52,11 @@ it.each(['MacIntel', 'Win32'])('preserves middle mouse reporting on %s', (platfo
   expect(mouseReport).toHaveBeenCalledOnce()
 })
 
-it('removes the capture listener when the terminal is disposed', () => {
+it('removes the capture listeners when the terminal is disposed', () => {
   const { terminal, focus, mouseReport, dispose } = setup()
   dispose()
   terminal.dispatchEvent(mouseDown(1))
+  terminal.dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true }))
   expect(mouseReport).toHaveBeenCalledOnce()
   expect(focus).not.toHaveBeenCalled()
 })

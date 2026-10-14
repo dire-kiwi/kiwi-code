@@ -182,16 +182,22 @@ input:focus-visible {
   );
 }
 
-.terminal-host .xterm {
+.terminal-host .wterm {
+  /* wterm's standalone card styling; the pane provides its own frame. */
   height: 100%;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+  --term-selection-bg: color-mix(in srgb, var(--theme-color-selection-background) 30%, transparent);
 }
 
-.terminal-host .xterm-viewport {
-  background-color: transparent !important;
+.terminal-host .wterm ::selection {
+  background: var(--theme-color-selection-background);
+  color: var(--theme-color-selection-foreground);
 }
 
-.terminal-host .xterm-screen canvas {
-  image-rendering: auto;
+.terminal-host .wterm.terminal-url-hover {
+  cursor: pointer;
 }
 
 .empty-grid {
