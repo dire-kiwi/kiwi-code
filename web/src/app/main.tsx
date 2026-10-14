@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client'
 import { Provider } from 'react-redux'
 import { BrowserRouter } from 'react-router-dom'
 import '@fontsource-variable/jetbrains-mono/wght.css'
+// Terminal text is DOM text and the app disables font synthesis, so italic
+// output needs the real italic face.
+import '@fontsource-variable/jetbrains-mono/wght-italic.css'
 import '@wterm/dom/src/terminal.css'
 import '@/index.css'
 import App from './App'
