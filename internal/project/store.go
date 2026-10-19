@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"os/exec"
@@ -398,10 +399,15 @@ func NewStore(filePath string) (*Store, error) {
 			err = store.loadOrphanedWorktreesLocked()
 		}
 		if err == nil {
-			err = store.recoverThreadCreationRollbacksLocked()
-		}
-		if err == nil {
-			err = store.recoverWorktreeCreationIntentsLocked()
+			// Recovery is retried on every start. Records that still cannot be
+			// cleaned up, for example because their project repository was moved
+			// or deleted, are kept and must not prevent the store from opening.
+			if recoveryErr := store.recoverThreadCreationRollbacksLocked(); recoveryErr != nil {
+				log.Printf("recover thread creation rollbacks: %v", recoveryErr)
+			}
+			if recoveryErr := store.recoverWorktreeCreationIntentsLocked(); recoveryErr != nil {
+				log.Printf("recover unfinished worktree creations: %v", recoveryErr)
+			}
 		}
 		err = errors.Join(err, mutation.Release())
 	}
@@ -1981,10 +1987,15 @@ func (s *Store) CommitThreadCreation(projectID, threadID string) (Thread, error)
 	})
 }
 
+// recoverThreadCreationRollbacksLocked finishes rollbacks whose teardown stage
+// was published before the previous process exited. A rollback whose worktree
+// still cannot be removed stays quarantined for a later retry and is reported
+// in the returned error without blocking the remaining recoveries.
 func (s *Store) recoverThreadCreationRollbacksLocked() error {
 	previous := cloneProjects(s.projects)
 	updated := cloneProjects(s.projects)
 	changed := false
+	var recoveryErrors []error
 	for projectIndex := range updated {
 		item := &updated[projectIndex]
 		kept := make([]Thread, 0, len(item.Threads))
@@ -1995,7 +2006,9 @@ func (s *Store) recoverThreadCreationRollbacksLocked() error {
 			}
 			if thread.Worktree {
 				if err := s.removeRollbackWorktree(item.Path, thread); err != nil {
-					return err
+					recoveryErrors = append(recoveryErrors, fmt.Errorf("recover project %q thread %q: %w", item.ID, thread.ID, err))
+					kept = append(kept, thread)
+					continue
 				}
 			}
 			changed = true
@@ -2003,16 +2016,16 @@ func (s *Store) recoverThreadCreationRollbacksLocked() error {
 		item.Threads = kept
 	}
 	if !changed {
-		return nil
+		return errors.Join(recoveryErrors...)
 	}
 	s.projects = updated
 	if err := s.saveRollbackStateLocked("recover"); err != nil {
 		if !projectSaveWasPublished(err) {
 			s.projects = previous
 		}
-		return err
+		recoveryErrors = append(recoveryErrors, err)
 	}
-	return nil
+	return errors.Join(recoveryErrors...)
 }
 
 func (s *Store) createWorktreeThread(item Project, thread Thread, baseBranch, baseRevision string, deferEnvironmentSetup bool) (Thread, error) {

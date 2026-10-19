@@ -153,7 +153,10 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 		}
 	}
 	if err := server.recoverPendingThreadCreationRollbacks(); err != nil {
-		return nil, fmt.Errorf("recover pending thread creation rollbacks: %w", err)
+		// Unfinished rollbacks stay quarantined and are retried on the next
+		// start, so a project repository that was moved or deleted must not
+		// prevent the server from starting.
+		log.Printf("recover pending thread creation rollbacks: %v", err)
 	}
 
 	mux := http.NewServeMux()
