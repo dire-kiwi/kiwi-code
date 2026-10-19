@@ -622,6 +622,55 @@ func TestCodingAgentExitTombstoneRequiresExplicitRestart(t *testing.T) {
 	}
 }
 
+func TestCodingAgentRestartDoesNotReplayInitialPrompt(t *testing.T) {
+	handler, item := newIsolatedTmuxHandler(t)
+	thread := item.Threads[0]
+	argumentsPath := filepath.Join(t.TempDir(), "arguments")
+	setMockPi(t, "#!/bin/sh\nprintf 'launch\\n' >> "+shellQuote(argumentsPath)+"\nprintf '%s\\n' \"$@\" >> "+shellQuote(argumentsPath)+"\nexit 7\n")
+	server := newTerminalTestServer(handler)
+	defer server.Close()
+
+	prompt := "Delete the generated fixtures"
+	connect := func(restart bool) {
+		t.Helper()
+		query := url.Values{
+			"tool":   {"pi"},
+			"agent":  {codingAgentPi},
+			"prompt": {prompt},
+			"cols":   {"80"},
+			"rows":   {"24"},
+		}
+		if restart {
+			query.Set("restart", "1")
+		}
+		connection := dialTerminalWithQuery(t, server.URL, item.ID, thread.ID, query.Encode())
+		defer connection.Close()
+		if code, reason := readTerminalClose(t, connection); code != websocket.CloseNormalClosure || reason != "Coding agent ended" {
+			t.Fatalf("coding-agent close = (%d, %q), want (%d, %q)", code, reason, websocket.CloseNormalClosure, "Coding agent ended")
+		}
+	}
+	connect(false)
+	connect(true)
+
+	arguments, err := os.ReadFile(argumentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(arguments)), "\n")
+	launches, prompts := 0, 0
+	for _, line := range lines {
+		switch line {
+		case "launch":
+			launches++
+		case prompt:
+			prompts++
+		}
+	}
+	if launches != 2 || prompts != 1 {
+		t.Fatalf("Pi launches = %d with %d initial prompts, want 2 launches and 1 prompt; arguments:\n%s", launches, prompts, arguments)
+	}
+}
+
 func TestCodingAgentExitTombstoneSurvivesHandlerRestart(t *testing.T) {
 	handler, item := newIsolatedTmuxHandler(t)
 	thread := item.Threads[0]
