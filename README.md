@@ -2,7 +2,7 @@
 
 Kiwi Code is a local, terminal-first project workspace. Add folders from your machine, create threads beneath each project, then switch between a regular shell, Neovim, Lazygit, a process console, Pi, Codex CLI, Grok CLI, or Claude Code without leaving the browser.
 
-The backend is written in Go and provides persistent project storage plus tmux-backed terminal sessions over WebSockets. The frontend uses Vite, React, Tailwind CSS, and xterm.js with the canvas renderer. JetBrains Mono and Nerd Font symbols are configured for icon-heavy terminal applications.
+The backend is written in Go and provides persistent project storage plus tmux-backed terminal sessions over WebSockets. The frontend uses Vite, React, Tailwind CSS, and [ghostty-web](https://github.com/coder/ghostty-web), which runs Ghostty's terminal emulator as WebAssembly with a canvas renderer. JetBrains Mono and Nerd Font symbols are configured for icon-heavy terminal applications.
 
 ## Requirements
 

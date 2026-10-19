@@ -1,14 +1,13 @@
 import { writeSystemClipboard } from '@/lib/clipboard'
-import { useEffect, useRef, useState } from 'react'
-import { CanvasAddon } from '@xterm/addon-canvas'
-import { FitAddon } from '@xterm/addon-fit'
-import { WebLinksAddon } from '@xterm/addon-web-links'
-import { Terminal } from '@xterm/xterm'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { init as initGhostty, Terminal } from 'ghostty-web'
 import { LoaderCircle, RefreshCw } from 'lucide-react'
 import { uploadPiImage } from '@/api'
 import { apiWebSocketUrl } from '@/apiUrl'
+import { createOscClipboardScanner } from '@/lib/oscClipboard'
 import { imageFilesFromClipboard, validateImageAdditions } from '@/lib/promptImages'
 import { installTerminalMousePaste } from '@/lib/terminalMousePaste'
+import { installTerminalMouseReporting, type TerminalMouseGeometry } from '@/lib/terminalMouseReporting'
 import {
   isTerminalEscapeKey,
   shouldBridgeTerminalControl,
@@ -18,7 +17,7 @@ import {
   terminalControlSequence,
 } from '@/terminalKeyBridge.mjs'
 import { toTerminalTheme, useTheme } from '@/theme'
-import type { CodingAgent, ConnectionStatus, TerminalTool } from '@/types'
+import type { CodingAgent, ConnectionStatus, TerminalTool, ThemeSettings } from '@/types'
 import { Button } from '@/ui/buttons'
 import { Surface } from '@/ui/layout'
 
@@ -47,28 +46,64 @@ type ImagePasteNotice = {
   message: string
 }
 
-const OSC_CLIPBOARD = 52
 const CODING_AGENT_ENDED_CLOSE_REASON = 'Coding agent ended'
 const ENVIRONMENT_SETUP_COMPLETED_CLOSE_REASON = 'Environment setup completed'
 const ENVIRONMENT_SETUP_FAILED_CLOSE_REASON = 'Environment setup failed'
 const RECONNECT_STABLE_AFTER_MS = 5_000
 
-function decodeOscClipboard(data: string): string | null {
-  const separator = data.indexOf(';')
-  if (separator < 0) return null
+let ghosttyReady: Promise<void> | undefined
 
-  const encoded = data.slice(separator + 1)
-  if (encoded === '?') return null
+// Every terminal shares one Ghostty WASM instance; retry after a failed load.
+function loadGhostty() {
+  ghosttyReady ??= initGhostty().catch((reason: unknown) => {
+    ghosttyReady = undefined
+    throw reason
+  })
+  return ghosttyReady
+}
 
+// ghostty-web measures its cell size from the font when the terminal opens or
+// its font changes, so load the configured faces first.
+async function loadTerminalFont({ fontFamily, fontSize }: Pick<ThemeSettings, 'fontFamily' | 'fontSize'>) {
   try {
-    const binary = window.atob(encoded)
-    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
-    return new TextDecoder().decode(bytes)
+    await document.fonts.load(`${fontSize}px ${fontFamily}`)
   } catch {
-    return null
+    // An unparsable font family falls back like any other CSS font.
   }
 }
 
+// ghostty-web's FitAddon ignores fit() for 50 ms after each resize, which drops
+// the final size of a continuous pane resize.
+function fitTerminal(terminal: Terminal) {
+  const metrics = terminal.renderer?.getMetrics()
+  const element = terminal.element
+  if (!metrics || !element || metrics.width <= 0 || metrics.height <= 0) return
+  const { clientWidth, clientHeight } = element
+  if (clientWidth <= 0 || clientHeight <= 0) return
+  terminal.resize(
+    Math.max(2, Math.floor(clientWidth / metrics.width)),
+    Math.max(1, Math.floor(clientHeight / metrics.height)),
+  )
+}
+
+function terminalGeometry(terminal: Terminal): TerminalMouseGeometry | null {
+  const renderer = terminal.renderer
+  if (!renderer) return null
+  const { left, top } = renderer.getCanvas().getBoundingClientRect()
+  return {
+    left,
+    top,
+    cellWidth: renderer.charWidth,
+    cellHeight: renderer.charHeight,
+    cols: terminal.cols,
+    rows: terminal.rows,
+  }
+}
+
+function labelTerminalInput(terminal: Terminal, label: string) {
+  terminal.element?.setAttribute('aria-label', label)
+  terminal.textarea?.setAttribute('aria-label', label)
+}
 
 export function TerminalSession({
   projectId,
@@ -91,7 +126,6 @@ export function TerminalSession({
 }: TerminalSessionProps) {
   const { theme } = useTheme()
   const hostRef = useRef<HTMLDivElement>(null)
-  const fitRef = useRef<FitAddon | null>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const themeRef = useRef(theme)
   const activeRef = useRef(active)
@@ -119,6 +153,10 @@ export function TerminalSession({
             : 'Pi'
     : tool === 'terminal' ? 'shell' : tool)
 
+  // Cell colors are resolved inside the WASM terminal when it is created, so a
+  // palette change needs a fresh terminal; tmux redraws it on reattach.
+  const terminalColors = useMemo(() => JSON.stringify(toTerminalTheme(theme)), [theme])
+
   activeRef.current = active
   themeRef.current = theme
   threadTitleRef.current = threadTitle
@@ -139,12 +177,18 @@ export function TerminalSession({
     setImagePasteNotice(null)
     onStatusChangeRef.current('connecting')
 
-    // xterm schedules work with a timer when it opens. Deferring initialization
-    // lets React's development-only Strict Mode effect probe finish first, so
-    // that timer never runs against an already-disposed terminal instance.
-    const startFrame = requestAnimationFrame(() => {
+    // Waiting for the WASM module and font also lets React's development-only
+    // Strict Mode effect probe finish before any terminal or socket exists.
+    void Promise.all([loadGhostty(), loadTerminalFont(themeRef.current)]).then(() => {
+      if (!disposed) startTerminal(host)
+    }, (reason: unknown) => {
       if (disposed) return
+      console.error('Could not load the Ghostty terminal emulator.', reason)
+      setStatus('error')
+      onStatusChangeRef.current('error')
+    })
 
+    function startTerminal(host: HTMLDivElement) {
       let resizeFrame = 0
       let socketErrored = false
       let reconnectTimer: ReturnType<typeof window.setTimeout> | undefined
@@ -153,70 +197,78 @@ export function TerminalSession({
       const uploadController = new AbortController()
       const configuredTheme = themeRef.current
       const terminal = new Terminal({
-        allowTransparency: false,
-        convertEol: false,
         cursorBlink: true,
         cursorStyle: 'bar',
-        cursorWidth: 2,
         fontFamily: configuredTheme.fontFamily,
         fontSize: configuredTheme.fontSize,
-        fontWeight: '400',
-        fontWeightBold: 650,
-        letterSpacing: 0,
-        lineHeight: 1.28,
-        macOptionIsMeta: true,
-        // Keep explicit agent colors (including RGB black) readable on the
-        // configured background without changing the terminal's ANSI palette.
-        minimumContrastRatio: 4.5,
-        overviewRulerWidth: 0,
-        rightClickSelectsWord: true,
         scrollback: 10_000,
         smoothScrollDuration: 0,
         theme: toTerminalTheme(configuredTheme),
       })
-      const fit = new FitAddon()
-      terminal.loadAddon(fit)
-      terminal.loadAddon(new WebLinksAddon())
-      terminal.open(host)
-      const disposeMousePaste = installTerminalMousePaste(host, () => terminal.focus())
-      terminal.loadAddon(new CanvasAddon())
-      terminal.textarea?.setAttribute('aria-label', `${threadTitleRef.current} ${sessionLabel} terminal input`)
-      terminal.attachCustomKeyEventHandler((event) => {
-        const action = terminalClipboardAction(event, terminal.hasSelection())
-        if (!action) return true
-        // Omarchy sends Ctrl-C/X/V to browser windows. Let the browser's native
-        // paste event reach xterm (and the Pi image handler), without sending ^V.
-        if (action === 'paste') return false
-        event.preventDefault()
-        if (event.type === 'keydown') {
-          const selection = terminal.getSelection()
-          void writeSystemClipboard(selection).then(() => {
-            // Terminal output is immutable; cut copies and dismisses selection.
-            if (!disposed && action === 'cut' && terminal.getSelection() === selection) {
-              terminal.clearSelection()
-            }
-          }).catch((reason) => {
-            console.warn('Could not copy the terminal selection to the system clipboard.', reason)
-          })
-        }
-        return false
+      // ghostty-web marks its parent contenteditable and does not remove all of
+      // its listeners on dispose, so give each terminal a disposable container.
+      const container = host.appendChild(document.createElement('div'))
+      container.className = 'h-full w-full overflow-hidden'
+      // These capture listeners must be registered before terminal.open() so
+      // they run ahead of ghostty-web's own listeners on the same container.
+      // The mouse paste handler must also precede mouse reporting.
+      const disposeMousePaste = installTerminalMousePaste(container, () => terminal.focus())
+      const disposeMouseReporting = installTerminalMouseReporting(container, {
+        getMode: (mode) => terminal.getMode(mode),
+        getGeometry: () => terminalGeometry(terminal),
+        send: (data) => sendTerminalInput(data),
+        focus: () => terminal.focus(),
       })
+      container.addEventListener('keydown', handleClipboardKeyDown, true)
+      container.addEventListener('paste', handlePaste, true)
+      // ghostty-web focuses a terminal as it opens and again from a 0 ms timer.
+      // Keep the container inert until that timer has run, so opening a pane in
+      // the background never steals focus; readiness and activation focus it.
+      container.inert = true
+      terminal.open(container)
+      // installTerminalMouseReporting replaces ghostty-web's reporter, which
+      // would also report Shift-drags and clear the local selection with each
+      // report. That reporter is its only caller of hasMouseTracking.
+      if (terminal.wasmTerm) terminal.wasmTerm.hasMouseTracking = () => false
+      const focusGuardTimer = window.setTimeout(() => {
+        container.inert = false
+        // In case the socket became ready while focus was blocked.
+        if (terminalReady && activeRef.current) terminal.focus()
+      }, 0)
+      labelTerminalInput(terminal, `${threadTitleRef.current} ${sessionLabel} terminal input`)
       const terminalHost: HTMLDivElement = host
-      // tmux forwards completed copy-mode selections with OSC 52. xterm leaves
-      // clipboard access to its embedder, so bridge that sequence to the browser.
-      const clipboardDisposable = terminal.parser.registerOscHandler(OSC_CLIPBOARD, (data) => {
-        const text = decodeOscClipboard(data)
-        if (text !== null) {
-          void writeSystemClipboard(text).catch((reason) => {
-            console.warn('Could not copy the tmux selection to the system clipboard.', reason)
-          })
-        }
-        return true
+      // tmux forwards completed copy-mode selections with OSC 52. ghostty-web
+      // has no OSC hooks, so watch the output for them and bridge each one to
+      // the browser clipboard.
+      const scanOscClipboard = createOscClipboardScanner((text) => {
+        void writeSystemClipboard(text).catch((reason) => {
+          console.warn('Could not copy the tmux selection to the system clipboard.', reason)
+        })
       })
 
-      fitRef.current = fit
+      function handleClipboardKeyDown(event: KeyboardEvent) {
+        const action = terminalClipboardAction(event, terminal.hasSelection())
+        if (!action) return
+        // Keep clipboard shortcuts away from ghostty-web's key encoder.
+        event.stopImmediatePropagation()
+        // Omarchy sends Ctrl-C/X/V to browser windows. Let the browser's native
+        // paste event reach the terminal (and the Pi image handler), without
+        // sending ^V.
+        if (action === 'paste') return
+        event.preventDefault()
+        const selection = terminal.getSelection()
+        void writeSystemClipboard(selection).then(() => {
+          // Terminal output is immutable; cut copies and dismisses selection.
+          if (!disposed && action === 'cut' && terminal.getSelection() === selection) {
+            terminal.clearSelection()
+          }
+        }).catch((reason) => {
+          console.warn('Could not copy the terminal selection to the system clipboard.', reason)
+        })
+      }
+
       terminalRef.current = terminal
-      fit.fit()
+      fitTerminal(terminal)
 
       const params = new URLSearchParams({
         cols: String(terminal.cols),
@@ -324,7 +376,7 @@ export function TerminalSession({
         if (data === TERMINAL_ESCAPE_SEQUENCE) lastEscapeKeyboardEventAt = performance.now()
         if (!activeRef.current || data === null || !terminalShouldHandle(data, event)) return
 
-        // Capture browser-reserved keys before the browser or xterm can handle
+        // Capture browser-reserved keys before the browser or ghostty-web can handle
         // them, then write directly to the terminal socket. Meta+W is included
         // for macOS browsers, while Escape needs an explicit bridge in web mode.
         if (data === TERMINAL_ESCAPE_SEQUENCE) escapeHandledOnKeyDown = true
@@ -367,7 +419,7 @@ export function TerminalSession({
           })) return
 
           // Full Chrome can consume the first Escape before dispatching any
-          // keyboard event, leaving xterm's hidden textarea focused on <body>.
+          // keyboard event, moving focus from the terminal input to <body>.
           // A keyboard-caused blur with no pointer or window focus change is the
           // only observable signal, so forward that swallowed Escape once.
           escapeHandledOnKeyDown = true
@@ -437,6 +489,7 @@ export function TerminalSession({
             }
             if (control.type === 'terminal_output' && typeof control.data === 'string') {
               markTerminalReady('control')
+              scanOscClipboard(control.data)
               terminal.write(control.data)
               return
             }
@@ -444,6 +497,7 @@ export function TerminalSession({
             // Protocol v1 servers can still send terminal output as text.
           }
           markTerminalReady('output')
+          scanOscClipboard(event.data)
           terminal.write(event.data)
           return
         }
@@ -461,7 +515,11 @@ export function TerminalSession({
             })
           }
         }
-        terminal.write(output, () => acknowledgeOutput(output.byteLength))
+        scanOscClipboard(output)
+        // ghostty-web parses output synchronously; its write callback only
+        // waits for the next animation frame, which stalls in background tabs.
+        terminal.write(output)
+        acknowledgeOutput(output.byteLength)
       })
 
       socket.addEventListener('error', () => {
@@ -558,7 +616,8 @@ export function TerminalSession({
         if (images.length === 0) return
 
         event.preventDefault()
-        event.stopPropagation()
+        // ghostty-web's paste listener is on the same container.
+        event.stopImmediatePropagation()
         const validation = validateImageAdditions([], images)
         if (validation.accepted.length === 0) {
           showImagePasteError(validation.error || 'Could not add the pasted image.')
@@ -566,7 +625,6 @@ export function TerminalSession({
         }
         void pasteImages(validation.accepted)
       }
-      host.addEventListener('paste', handlePaste, true)
 
       const inputDisposable = terminal.onData((data) => sendTerminalInput(data))
 
@@ -579,21 +637,16 @@ export function TerminalSession({
       const observer = new ResizeObserver(() => {
         cancelAnimationFrame(resizeFrame)
         resizeFrame = requestAnimationFrame(() => {
-          if (!disposed && host.clientWidth > 0 && host.clientHeight > 0) fit.fit()
+          if (!disposed) fitTerminal(terminal)
         })
       })
       observer.observe(host)
-
-      void document.fonts.ready.then(() => {
-        if (disposed) return
-        fit.fit()
-        terminal.refresh(0, terminal.rows - 1)
-      })
 
       disposeTerminal = () => {
         disposed = true
         cancelAnimationFrame(resizeFrame)
         cancelAnimationFrame(terminalBlurFrame)
+        window.clearTimeout(focusGuardTimer)
         if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
         if (reconnectStableTimer !== undefined) window.clearTimeout(reconnectStableTimer)
         if (pasteNoticeTimer !== undefined) window.clearTimeout(pasteNoticeTimer)
@@ -603,45 +656,54 @@ export function TerminalSession({
         window.removeEventListener('keyup', handleTerminalKeyUp, true)
         window.removeEventListener('pointerdown', handlePagePointerDown, true)
         terminalHost.removeEventListener('focusout', handleTerminalFocusOut, true)
-        host.removeEventListener('paste', handlePaste, true)
+        container.removeEventListener('keydown', handleClipboardKeyDown, true)
+        container.removeEventListener('paste', handlePaste, true)
         disposeMousePaste()
+        disposeMouseReporting()
         observer.disconnect()
-        clipboardDisposable.dispose()
         inputDisposable.dispose()
         resizeDisposable.dispose()
         if (socket.readyState < WebSocket.CLOSING) socket.close(1000, 'Terminal pane closed')
-        fitRef.current = null
         terminalRef.current = null
         terminal.dispose()
+        container.remove()
       }
-    })
+    }
 
     return () => {
       disposed = true
-      cancelAnimationFrame(startFrame)
       disposeTerminal()
     }
-  }, [codingAgent, connectionAttempt, environmentSetup, processId, projectId, sessionLabel, threadId, tmuxSession, tmuxWindow, tool])
+  }, [codingAgent, connectionAttempt, environmentSetup, processId, projectId, sessionLabel, terminalColors, threadId, tmuxSession, tmuxWindow, tool])
 
+  const { fontFamily, fontSize } = theme
   useEffect(() => {
     const terminal = terminalRef.current
     if (!terminal) return
-    terminal.options.fontFamily = theme.fontFamily
-    terminal.options.fontSize = theme.fontSize
-    terminal.options.theme = toTerminalTheme(theme)
-    const frame = requestAnimationFrame(() => fitRef.current?.fit())
-    return () => cancelAnimationFrame(frame)
-  }, [theme])
+    let cancelled = false
+    void loadTerminalFont({ fontFamily, fontSize }).then(() => {
+      if (cancelled || terminalRef.current !== terminal) return
+      terminal.options.fontFamily = fontFamily
+      terminal.options.fontSize = fontSize
+      fitTerminal(terminal)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [fontFamily, fontSize])
 
   useEffect(() => {
-    terminalRef.current?.textarea?.setAttribute('aria-label', `${threadTitle} ${sessionLabel} terminal input`)
+    const terminal = terminalRef.current
+    if (terminal) labelTerminalInput(terminal, `${threadTitle} ${sessionLabel} terminal input`)
   }, [sessionLabel, threadTitle])
 
   useEffect(() => {
     if (!active) return
     const frame = requestAnimationFrame(() => {
-      fitRef.current?.fit()
-      terminalRef.current?.focus()
+      const terminal = terminalRef.current
+      if (!terminal) return
+      fitTerminal(terminal)
+      terminal.focus()
     })
     return () => cancelAnimationFrame(frame)
   }, [active])
