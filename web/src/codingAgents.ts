@@ -6,6 +6,8 @@ import type {
   CodingAgentSetting,
   ConfiguredClaudeAgent,
   PiPresentation,
+  Profile,
+  Project,
 } from './types'
 
 const configuredClaudeAgentPattern = /^claude-(?:gpt-)?profile-[A-Za-z0-9_-]{1,64}$/
@@ -77,6 +79,35 @@ export function nativeCodingAgentLabel(selection: CodingAgentSelection): string 
   if (selection === 'pi-native') return 'Pi Native'
   if (selection === 'claude-native') return 'Claude Native'
   return null
+}
+
+export const DEFAULT_WORKTREE_BRANCH_PREFIX = 'kiwi-code/'
+
+/**
+ * The configured agents a workspace (profile) exposes. A workspace whose
+ * disabled list would hide every agent -- for example after agents were
+ * reconfigured -- falls back to all of them rather than offering nothing.
+ */
+export function codingAgentsForProfile(
+  agents: CodingAgentSetting[],
+  profile: Pick<Profile, 'disabledCodingAgents'> | undefined,
+): CodingAgentSetting[] {
+  const disabled = new Set(profile?.disabledCodingAgents ?? [])
+  if (disabled.size === 0) return agents
+  const enabled = agents.filter((agent) => !disabled.has(agent.id))
+  return enabled.length > 0 ? enabled : agents
+}
+
+/** Mirrors the server: project override, then workspace default, then built-in. */
+export function effectiveWorktreeBranchPrefix(
+  project: Pick<Project, 'worktreeBranchPrefix'>,
+  profile: Pick<Profile, 'worktreeBranchPrefix'> | undefined,
+): string {
+  return project.worktreeBranchPrefix || workspaceWorktreeBranchPrefix(profile)
+}
+
+export function workspaceWorktreeBranchPrefix(profile: Pick<Profile, 'worktreeBranchPrefix'> | undefined): string {
+  return profile?.worktreeBranchPrefix || DEFAULT_WORKTREE_BRANCH_PREFIX
 }
 
 export function configuredCodingAgentChoices(agents: CodingAgentSetting[]) {

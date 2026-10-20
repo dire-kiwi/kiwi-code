@@ -133,6 +133,17 @@ export function createProfile(name: string) {
   return jsonRequest<Profile>('/api/profiles', 'POST', { name })
 }
 
+export function updateProfile(
+  id: string,
+  input: {
+    worktreeBranchPrefix?: string
+    disabledCodingAgents?: string[]
+    inheritProjectBranchPrefixes?: boolean
+  },
+) {
+  return jsonRequest<Profile>(`/api/profiles/${encodeURIComponent(id)}`, 'PATCH', input)
+}
+
 export function createProject(input: { name: string; path: string; profileId: string }) {
   return jsonRequest<Project>('/api/projects', 'POST', input)
 }

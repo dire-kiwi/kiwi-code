@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -38,8 +39,8 @@ func TestStorePersistsProjects(t *testing.T) {
 	if items[0].ProfileID != PersonalProfileID {
 		t.Fatalf("default profile = %q, want %q", items[0].ProfileID, PersonalProfileID)
 	}
-	if items[0].WorktreeBranchPrefix != DefaultWorktreeBranchPrefix {
-		t.Fatalf("default worktree branch prefix = %q, want %q", items[0].WorktreeBranchPrefix, DefaultWorktreeBranchPrefix)
+	if items[0].WorktreeBranchPrefix != "" {
+		t.Fatalf("new project branch prefix = %q, want it to inherit its profile default", items[0].WorktreeBranchPrefix)
 	}
 	if len(items[0].Threads) != 1 || items[0].Threads[0].Cwd != projectPath {
 		t.Fatalf("unexpected initial thread: %#v", items[0].Threads)
@@ -99,7 +100,7 @@ func TestStoreAddExpandsHomePaths(t *testing.T) {
 	}
 }
 
-func TestStoreMigratesDefaultWorktreeBranchPrefix(t *testing.T) {
+func TestStoreKeepsLegacyMissingWorktreeBranchPrefixInherited(t *testing.T) {
 	dataFile := filepath.Join(t.TempDir(), "projects.json")
 	store, err := NewStore(dataFile)
 	if err != nil {
@@ -134,15 +135,11 @@ func TestStoreMigratesDefaultWorktreeBranchPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if migrated.WorktreeBranchPrefix != DefaultWorktreeBranchPrefix {
-		t.Fatalf("migrated worktree branch prefix = %q, want %q", migrated.WorktreeBranchPrefix, DefaultWorktreeBranchPrefix)
+	if migrated.WorktreeBranchPrefix != "" {
+		t.Fatalf("legacy branch prefix = %q, want inherited", migrated.WorktreeBranchPrefix)
 	}
-	persisted, err := os.ReadFile(dataFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(persisted), `"worktreeBranchPrefix": "kiwi-code/"`) {
-		t.Fatalf("migrated prefix was not persisted:\n%s", persisted)
+	if got := reloaded.worktreeBranchPrefixLocked(migrated); got != DefaultWorktreeBranchPrefix {
+		t.Fatalf("resolved legacy branch prefix = %q, want %q", got, DefaultWorktreeBranchPrefix)
 	}
 }
 
@@ -993,7 +990,7 @@ func TestStorePersistsProfilesAndProjectAssignments(t *testing.T) {
 	}
 	select {
 	case snapshot := <-profileUpdates:
-		if len(snapshot) != 3 || snapshot[2] != client {
+		if len(snapshot) != 3 || !reflect.DeepEqual(snapshot[2], client) {
 			t.Fatalf("profile snapshot = %#v", snapshot)
 		}
 	case <-time.After(time.Second):
@@ -1024,7 +1021,7 @@ func TestStorePersistsProfilesAndProjectAssignments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if profiles := reloaded.ListProfiles(); len(profiles) != 3 || profiles[2] != client {
+	if profiles := reloaded.ListProfiles(); len(profiles) != 3 || !reflect.DeepEqual(profiles[2], client) {
 		t.Fatalf("persisted profiles = %#v", profiles)
 	}
 	if projects := reloaded.List(); len(projects) != 1 || projects[0].ProfileID != WorkProfileID {
@@ -1988,7 +1985,7 @@ func TestStoreRejectsInvalidProjectWorktreeBranchPrefixes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, prefix := range []string{"", "-ivan/", "ivan//", "ivan.lock/", "ivan..team/", "ivan branch/", strings.Repeat("a", maxWorktreeBranchPrefixLength+1)} {
+	for _, prefix := range []string{"-ivan/", "ivan//", "ivan.lock/", "ivan..team/", "ivan branch/", strings.Repeat("a", maxWorktreeBranchPrefixLength+1)} {
 		prefix := prefix
 		t.Run(prefix, func(t *testing.T) {
 			if _, err := store.UpdateProject(item.ID, ProjectUpdate{WorktreeBranchPrefix: &prefix}); err == nil {
@@ -1998,8 +1995,114 @@ func TestStoreRejectsInvalidProjectWorktreeBranchPrefixes(t *testing.T) {
 	}
 	if project, err := store.Get(item.ID); err != nil {
 		t.Fatal(err)
-	} else if project.WorktreeBranchPrefix != DefaultWorktreeBranchPrefix {
+	} else if project.WorktreeBranchPrefix != "" {
 		t.Fatalf("invalid updates changed branch prefix to %q", project.WorktreeBranchPrefix)
+	}
+}
+
+func TestStoreProjectsInheritProfileWorktreeBranchPrefix(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+
+	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
+	store, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inherited, err := store.Add("Inherited", createGitRepository(t), WorkProfileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overridden, err := store.Add("Overridden", createGitRepository(t), WorkProfileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	override := "team/"
+	if _, err := store.UpdateProject(overridden.ID, ProjectUpdate{WorktreeBranchPrefix: &override}); err != nil {
+		t.Fatal(err)
+	}
+	profilePrefix := " work/ "
+	profile, err := store.UpdateProfile(WorkProfileID, ProfileUpdate{WorktreeBranchPrefix: &profilePrefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.WorktreeBranchPrefix != "work/" {
+		t.Fatalf("normalized profile prefix = %q", profile.WorktreeBranchPrefix)
+	}
+
+	thread, err := store.AddThread(inherited.ID, defaultThreadTitle, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "work/thread-" + shortThreadID(thread.ID); thread.Branch != want {
+		t.Fatalf("inherited worktree branch = %q, want %q", thread.Branch, want)
+	}
+	thread, err = store.AddThread(overridden.ID, defaultThreadTitle, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "team/thread-" + shortThreadID(thread.ID); thread.Branch != want {
+		t.Fatalf("overridden worktree branch = %q, want %q", thread.Branch, want)
+	}
+
+	if _, err := store.UpdateProfile(WorkProfileID, ProfileUpdate{InheritProjectBranchPrefixes: true}); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := reloaded.Get(overridden.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.WorktreeBranchPrefix != "" {
+		t.Fatalf("override was not cleared: %q", persisted.WorktreeBranchPrefix)
+	}
+	if got := reloaded.worktreeBranchPrefixLocked(persisted); got != "work/" {
+		t.Fatalf("persisted profile prefix resolved to %q", got)
+	}
+}
+
+func TestStoreUpdatesAndPersistsProfileCodingAgents(t *testing.T) {
+	dataFile := filepath.Join(t.TempDir(), "data", "projects.json")
+	store, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled := []string{" codex ", "grok", "codex"}
+	profile, err := store.UpdateProfile(PersonalProfileID, ProfileUpdate{DisabledCodingAgents: &disabled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(profile.DisabledCodingAgents, []string{"codex", "grok"}) {
+		t.Fatalf("normalized disabled agents = %#v", profile.DisabledCodingAgents)
+	}
+
+	all := []string{}
+	for _, agent := range store.GetSettings().CodingAgents {
+		all = append(all, agent.ID)
+	}
+	if _, err := store.UpdateProfile(PersonalProfileID, ProfileUpdate{DisabledCodingAgents: &all}); err == nil {
+		t.Fatal("expected disabling every coding agent to be rejected")
+	}
+	if _, err := store.UpdateProfile("missing", ProfileUpdate{DisabledCodingAgents: &disabled}); !errors.Is(err, ErrProfileNotFound) {
+		t.Fatalf("missing profile error = %v", err)
+	}
+	invalidPrefix := "bad prefix/"
+	if _, err := store.UpdateProfile(PersonalProfileID, ProfileUpdate{WorktreeBranchPrefix: &invalidPrefix}); err == nil {
+		t.Fatal("expected invalid profile prefix to be rejected")
+	}
+
+	reloaded, err := NewStore(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := reloaded.ListProfiles()
+	if profiles[0].ID != PersonalProfileID || profiles[0].Name != "Personal" ||
+		!reflect.DeepEqual(profiles[0].DisabledCodingAgents, []string{"codex", "grok"}) {
+		t.Fatalf("persisted built-in profile = %#v", profiles[0])
 	}
 }
 

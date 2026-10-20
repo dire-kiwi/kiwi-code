@@ -96,6 +96,7 @@ func buildStateTopicFixtures(t *testing.T) map[string]json.RawMessage {
 		}},
 		stateTopicProfiles: []project.Profile{{
 			ID: project.PersonalProfileID, Name: "Personal",
+			WorktreeBranchPrefix: "ivan/", DisabledCodingAgents: []string{project.CodingAgentKindGrok},
 		}},
 		stateTopicAgentActivity: []piThreadActivity{{
 			ProjectID: "project-1", ThreadID: "thread-1", State: piActivityWorking, UpdatedAt: fixtureTime,

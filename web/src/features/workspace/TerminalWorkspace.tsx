@@ -14,6 +14,7 @@ import {
 import { runEnvironmentAction, touchThreadTmuxActivity } from '@/api'
 import {
   codingAgentSelectionForTarget,
+  codingAgentsForProfile,
   codingAgentTargetForSelection,
   configuredCodingAgentChoices,
 } from '@/codingAgents'
@@ -33,6 +34,7 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import {
   type ThreadWorkspaceRouting,
 } from '@/store/slices/threadWorkspace'
+import { selectProfiles } from '@/store/slices/profiles'
 import { selectSettings } from '@/store/slices/settings'
 import { threadUpdated } from '@/store/slices/projects'
 import {
@@ -180,11 +182,18 @@ export function TerminalWorkspace({
       ...fallbackWorkspaceCodingAgents,
     ]
   }, [initialCodingAgent])
-  const codingAgentChoices = useMemo(
+  const projectProfile = useAppSelector(selectProfiles).find((profile) => profile.id === project.profileId)
+  const allCodingAgentChoices = useMemo(
     () => settings
       ? configuredCodingAgentChoices(settings.codingAgents)
       : initialCodingAgentChoices,
     [initialCodingAgentChoices, settings],
+  )
+  const workspaceCodingAgentChoices = useMemo(
+    () => settings
+      ? configuredCodingAgentChoices(codingAgentsForProfile(settings.codingAgents, projectProfile))
+      : initialCodingAgentChoices,
+    [initialCodingAgentChoices, projectProfile, settings],
   )
   const routing = useMemo<ThreadWorkspaceRouting>(
     () => ({ initialCodingAgent, initialPresentation }),
@@ -390,7 +399,6 @@ export function TerminalWorkspace({
   const sessionTools = openedTools.includes(activeTool)
     ? openedTools
     : [...openedTools, activeTool]
-  const availableCodingAgents = codingAgentChoices
   const codingAgentSelection = codingAgentSelectionForTarget(
     codingAgent,
     codingAgent === 'codex' ? codexPresentation : codingAgent === 'claude'
@@ -399,6 +407,14 @@ export function TerminalWorkspace({
         ? piPresentation
         : 'terminal',
   )
+  // A thread already running an agent its workspace now hides keeps showing it,
+  // but the switcher only offers the workspace's agents.
+  const availableCodingAgents = workspaceCodingAgentChoices.some((agent) => agent.id === codingAgentSelection)
+    ? workspaceCodingAgentChoices
+    : [
+        ...allCodingAgentChoices.filter((agent) => agent.id === codingAgentSelection),
+        ...workspaceCodingAgentChoices,
+      ]
   const selectedCodingAgent = availableCodingAgents.find((agent) => agent.id === codingAgentSelection) ?? availableCodingAgents[0]
   const contextStatus = codingAgent === 'claude'
     ? claudePresentation === 'native' ? claudeNativeContextStatus : null

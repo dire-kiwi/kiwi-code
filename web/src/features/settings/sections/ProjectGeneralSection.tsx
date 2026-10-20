@@ -1,9 +1,11 @@
 import { useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { Folder, Frame, UserRound } from 'lucide-react'
 import {
   updateProjectFigmaMCPEnabled,
   updateProjectProfile,
 } from '@/api'
+import { settingsPath } from '@/app/routes'
 import { useAsyncFeedback } from '@/lib/useAsyncFeedback'
 import type { Profile, Project } from '@/types'
 import { Select } from '@/ui/inputs'
@@ -88,6 +90,14 @@ export function ProjectGeneralSection({ project, profiles, onProjectUpdated }: P
               leadingIcon={<Folder size={12} />}
             />
           </div>
+          <p className="mt-3 text-[9px] leading-4 text-ghost-faint">
+            The profile decides which coding agents this project offers and its default branch prefix. Configure
+            them in{' '}
+            <Link to={settingsPath('workspaces')} className="text-ghost-blue underline-offset-2 hover:underline">
+              Workspaces
+            </Link>
+            .
+          </p>
           <ActionFeedback
             id="project-profile-error"
             feedback={profileAction.feedback}

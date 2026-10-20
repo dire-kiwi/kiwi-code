@@ -8,6 +8,10 @@ const StringArray = MutableArray(Schema.String)
 export const ProfileSchema = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
+  // Workspace defaults. An empty prefix falls back to the built-in default,
+  // and disabled agents are configured coding agent IDs hidden from its projects.
+  worktreeBranchPrefix: Schema.optional(Schema.String),
+  disabledCodingAgents: Schema.optional(StringArray),
 })
 export type Profile = Schema.Schema.Type<typeof ProfileSchema>
 

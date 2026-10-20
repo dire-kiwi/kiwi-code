@@ -143,7 +143,11 @@
     "profiles": [
       {
         "id": "personal",
-        "name": "Personal"
+        "name": "Personal",
+        "worktreeBranchPrefix": "ivan/",
+        "disabledCodingAgents": [
+          "grok"
+        ]
       }
     ],
     "projects": [
