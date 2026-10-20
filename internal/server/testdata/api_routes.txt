@@ -32,6 +32,7 @@ GET /api/state
 GET /api/thread-usage
 GET /api/tmux/sessions
 GET /api/tmux/terminal
+PATCH /api/profiles/{id}
 PATCH /api/projects/{id}
 PATCH /api/projects/{id}/threads/{threadId}
 PATCH /api/projects/{id}/threads/{threadId}/workspace

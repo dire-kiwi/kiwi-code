@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -20,6 +21,7 @@ import {
 } from 'lucide-react'
 import { createThread, rememberNewThreadSelection, uploadPiImage, uploadFile } from '@/api'
 import {
+  codingAgentsForProfile,
   codingAgentSelectionForSetting,
   codingAgentTargetForSelection,
   defaultCodingAgentSelection,
@@ -67,6 +69,7 @@ import {
   type AgentModelPreferences,
   type ThreadLocation,
 } from '@/store/slices/newThreadPreferences'
+import { selectProfiles } from '@/store/slices/profiles'
 import { selectSettings, settingsReceived } from '@/store/slices/settings'
 import { useSubscription } from '@/wire/react'
 import { CodingAgentsTopic, GitBranchesTopic } from '@/wire/topics'
@@ -138,6 +141,13 @@ export function NewThreadScreen({
   const [model, setModel] = useState(initialAgentModel?.model ?? '')
   const [thinkingLevel, setThinkingLevel] = useState(initialAgentModel?.thinkingLevel ?? '')
   const settings = useAppSelector(selectSettings)
+  const profiles = useAppSelector(selectProfiles)
+  const projectProfile = profiles.find((profile) => profile.id === project.profileId)
+  // Only the agents this project's workspace exposes are offered.
+  const workspaceAgents = useMemo(
+    () => settings ? codingAgentsForProfile(settings.codingAgents, projectProfile) : undefined,
+    [projectProfile, settings],
+  )
   const [initialPrompt, setInitialPrompt] = useState(() => readNewThreadDraft(project.id))
   const [initialPromptPastes, setInitialPromptPastes] = useState(() => (
     readNewThreadPastes(project.id)
@@ -175,20 +185,31 @@ export function NewThreadScreen({
   }, [codingAgentsSubscription])
 
   useEffect(() => {
-    if (!settings || settingsInitializedRef.current) return
+    if (!settings || !workspaceAgents || settingsInitializedRef.current) return
     settingsInitializedRef.current = true
-    const availableAgents = settings.codingAgents.map(codingAgentSelectionForSetting)
-    const configuredDefault = defaultCodingAgentSelection(settings.codingAgents)
+    const availableAgents = workspaceAgents.map(codingAgentSelectionForSetting)
+    const configuredDefault = defaultCodingAgentSelection(workspaceAgents)
+    const fallbackAgent = availableAgents.includes(configuredDefault) ? configuredDefault : availableAgents[0] ?? 'pi-native'
     const saved = settings.newThreadSelection
     const preferred = saved?.codingAgent ?? rememberedPreferences?.codingAgent ?? configuredDefault
     const nextAgent = isCodingAgentSelection(preferred) && availableAgents.includes(preferred)
-      ? preferred : availableAgents.includes(configuredDefault) ? configuredDefault : 'pi-native'
+      ? preferred : fallbackAgent
     const rememberedModel = saved?.codingAgent === nextAgent
       ? saved : agentModels[codingAgentTargetForSelection(nextAgent).agent]
     setCodingAgent(nextAgent)
     setModel(rememberedModel?.model ?? '')
     setThinkingLevel(rememberedModel?.thinkingLevel ?? '')
-  }, [agentModels, rememberedPreferences, settings])
+  }, [agentModels, rememberedPreferences, settings, workspaceAgents])
+
+  // Switching to a project in another workspace, or a workspace change saved
+  // elsewhere, can leave the selection on an agent this workspace hides.
+  useEffect(() => {
+    if (!workspaceAgents || !settingsInitializedRef.current) return
+    const availableAgents = workspaceAgents.map(codingAgentSelectionForSetting)
+    if (availableAgents.length === 0 || availableAgents.includes(codingAgent)) return
+    const configuredDefault = defaultCodingAgentSelection(workspaceAgents)
+    setCodingAgent(availableAgents.includes(configuredDefault) ? configuredDefault : availableAgents[0])
+  }, [codingAgent, workspaceAgents])
 
   useEffect(() => {
     if (codingAgentsLoading) return
@@ -365,7 +386,7 @@ export function NewThreadScreen({
     addInitialPromptImages(images)
   }
 
-  const configuredAgentOptions = settings?.codingAgents.map((agent) => ({
+  const configuredAgentOptions = workspaceAgents?.map((agent) => ({
     value: codingAgentSelectionForSetting(agent),
     label: agent.name,
   })) ?? [

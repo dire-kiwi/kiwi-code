@@ -2,6 +2,7 @@ import {
   Clock3,
   FolderGit2,
   Keyboard,
+  Layers,
   Palette,
   Settings2,
   Sparkles,
@@ -23,6 +24,7 @@ export type SettingsSectionMeta<Id extends string = string> = {
 export type GlobalSettingsSectionId =
   | 'worktrees'
   | 'profiles'
+  | 'workspaces'
   | 'titles'
   | 'cleanup'
   | 'appearance'
@@ -45,6 +47,13 @@ export const GLOBAL_SETTINGS_SECTIONS: Array<SettingsSectionMeta<GlobalSettingsS
     keywords: ['pi', 'pi native', 'claude code', 'gpt', 'default', 'order', 'dropdown', 'config directory', 'accounts', 'login', 'sessions'],
     icon: UserRound,
     tone: 'blue',
+  },
+  {
+    id: 'workspaces',
+    label: 'Workspaces',
+    keywords: ['profile', 'workspace', 'agents', 'enable', 'disable', 'hide', 'branch prefix', 'default', 'worktree'],
+    icon: Layers,
+    tone: 'magenta',
   },
   {
     id: 'titles',

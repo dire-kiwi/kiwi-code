@@ -1,12 +1,17 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { Folder, FolderGit2, LoaderCircle, Save } from 'lucide-react'
 import { updateProjectBranchesAndPaths } from '@/api'
+import { settingsPath } from '@/app/routes'
+import { workspaceWorktreeBranchPrefix } from '@/codingAgents'
 import { useAsyncFeedback } from '@/lib/useAsyncFeedback'
+import { useAppSelector } from '@/store/hooks'
+import { selectProfiles } from '@/store/slices/profiles'
 import type { Project } from '@/types'
 import { PrimaryButton } from '@/ui/buttons'
 import { TextArea, TextInput } from '@/ui/inputs'
 import { SectionHeader, Surface } from '@/ui/layout'
-import { ActionFeedback, InfoCallout } from '@/ui/feedback'
+import { ActionFeedback, InfoCallout, StatusBadge } from '@/ui/feedback'
 
 type ProjectBranchesSectionProps = {
   project: Project
@@ -19,6 +24,8 @@ export function ProjectBranchesSection({ project, onProjectUpdated }: ProjectBra
   const [relatedProjects, setRelatedProjects] = useState(storedRelatedProjects)
   const action = useAsyncFeedback()
   const saving = action.pending
+  const profile = useAppSelector(selectProfiles).find((item) => item.id === project.profileId)
+  const workspacePrefix = workspaceWorktreeBranchPrefix(profile)
 
   useEffect(() => {
     setBranchPrefix(project.worktreeBranchPrefix)
@@ -31,10 +38,8 @@ export function ProjectBranchesSection({ project, onProjectUpdated }: ProjectBra
     .split(/\r?\n/)
     .map((path) => path.trim())
     .filter(Boolean)
-  const dirty = normalizedBranchPrefix.length > 0 && (
-    normalizedBranchPrefix !== project.worktreeBranchPrefix
+  const dirty = normalizedBranchPrefix !== project.worktreeBranchPrefix
     || normalizedRelatedProjects.join('\n') !== storedRelatedProjects
-  )
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -63,6 +68,11 @@ export function ProjectBranchesSection({ project, onProjectUpdated }: ProjectBra
           icon={<FolderGit2 size={16} />}
           title="Worktree branches"
           description="Choose the branch prefix used for new managed worktree threads."
+          badge={(
+            <StatusBadge tone={project.worktreeBranchPrefix ? 'success' : 'neutral'}>
+              {project.worktreeBranchPrefix ? 'Project override' : 'Workspace default'}
+            </StatusBadge>
+          )}
           tone="green"
         />
 
@@ -82,10 +92,9 @@ export function ProjectBranchesSection({ project, onProjectUpdated }: ProjectBra
               }}
               maxLength={100}
               disabled={saving}
-              required
               autoComplete="off"
               spellCheck={false}
-              placeholder="kiwi-code/"
+              placeholder={workspacePrefix}
               aria-describedby={action.feedback?.tone === 'error'
                 ? 'project-worktree-branch-prefix-error'
                 : 'project-worktree-branch-prefix-help'}
@@ -95,7 +104,12 @@ export function ProjectBranchesSection({ project, onProjectUpdated }: ProjectBra
 
           <InfoCallout className="mt-4">
             Used for new managed worktree branches, including their automatic rename after the first prompt.
-            Include separators such as <span className="font-mono text-ghost-blue">ivan/</span>. Existing
+            Leave empty to use the {profile?.name ?? 'workspace'} default,{' '}
+            <span className="font-mono text-ghost-blue">{workspacePrefix}</span>, set in{' '}
+            <Link to={settingsPath('workspaces')} className="text-ghost-blue underline-offset-2 hover:underline">
+              Workspaces
+            </Link>
+            . Include separators such as <span className="font-mono text-ghost-blue">ivan/</span>. Existing
             branches are not renamed.
           </InfoCallout>
 

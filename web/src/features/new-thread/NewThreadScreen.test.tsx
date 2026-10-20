@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fallbackCodingAgentConfigs } from '@/codingAgents'
 import type { AppSettings, Project } from '@/types'
 import { createTestStore, renderWithStore } from '@/store/testing'
+import { profilesReceived } from '@/store/slices/profiles'
 import { settingsReceived } from '@/store/slices/settings'
 import { NewThreadScreen } from './NewThreadScreen'
 
@@ -223,6 +224,33 @@ describe('NewThreadScreen thinking levels', () => {
         expect(thinkingOptions()).toEqual(['Use Pi default', 'Off'])
       })
   })
+
+describe('workspace coding agents', () => {
+  it('offers only the agents enabled for the project workspace', async () => {
+    const store = createTestStore()
+    store.dispatch(profilesReceived([
+      { id: 'personal', name: 'Personal', disabledCodingAgents: ['codex'] },
+      { id: 'work', name: 'Work' },
+    ]))
+    store.dispatch(settingsReceived({
+      codingAgents: [
+        { id: 'pi-native', kind: 'pi-native', name: 'Pi', isDefault: false },
+        { id: 'codex', kind: 'codex', name: 'Codex', isDefault: true },
+      ],
+      newThreadSelection: { codingAgent: 'codex', model: '', thinkingLevel: '' },
+    } as unknown as AppSettings))
+    renderWithStore(
+      <NewThreadScreen project={project} onOpenSidebar={() => {}} onCancel={() => {}} onCreated={() => {}} />,
+      { store },
+    )
+
+    const agentPicker = () => document.getElementById('thread-coding-agent') as HTMLButtonElement
+    await waitFor(() => expect(agentPicker().textContent).toContain('Pi'))
+    fireEvent.click(agentPicker())
+    const options = within(screen.getByRole('listbox')).getAllByRole('option').map((option) => option.textContent)
+    expect(options).toEqual(['Pi'])
+  })
+})
 
 describe('server thread selection', () => {
   it('restores delayed server settings over the default and saves changes before submit', async () => {

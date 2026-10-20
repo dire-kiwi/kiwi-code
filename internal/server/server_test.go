@@ -153,6 +153,44 @@ func TestProjectRelatedProjectsAPI(t *testing.T) {
 	}
 }
 
+func TestProfileWorkspaceSettingsAPI(t *testing.T) {
+	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := newIsolatedServerHandler(t, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPatch, "/api/profiles/"+project.WorkProfileID,
+		bytes.NewBufferString(`{"worktreeBranchPrefix":" work/ ","disabledCodingAgents":["grok"]}`)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("update profile status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var updated project.Profile
+	if err := json.NewDecoder(response.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.WorktreeBranchPrefix != "work/" || !reflect.DeepEqual(updated.DisabledCodingAgents, []string{"grok"}) {
+		t.Fatalf("updated profile = %#v", updated)
+	}
+
+	missing := httptest.NewRecorder()
+	handler.ServeHTTP(missing, httptest.NewRequest(http.MethodPatch, "/api/profiles/missing",
+		bytes.NewBufferString(`{"worktreeBranchPrefix":"x/"}`)))
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing profile status = %d", missing.Code)
+	}
+	invalid := httptest.NewRecorder()
+	handler.ServeHTTP(invalid, httptest.NewRequest(http.MethodPatch, "/api/profiles/"+project.WorkProfileID,
+		bytes.NewBufferString(`{"name":"Renamed"}`)))
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("unknown field status = %d", invalid.Code)
+	}
+}
+
 func TestProjectAndThreadOrderAPI(t *testing.T) {
 	store, err := project.NewStore(filepath.Join(t.TempDir(), "projects.json"))
 	if err != nil {

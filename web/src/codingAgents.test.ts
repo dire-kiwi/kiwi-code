@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  codingAgentsForProfile,
+  effectiveWorktreeBranchPrefix,
   codingAgentSelectionForTarget,
   codingAgentTargetForSelection,
   isNativeCodingAgentSelection,
@@ -76,5 +78,27 @@ describe('model thinking-level capabilities', () => {
       'high',
       'max',
     ])
+  })
+})
+
+describe('workspace (profile) settings', () => {
+  const agents = [
+    { id: 'pi-native', kind: 'pi-native', name: 'Pi Native', isDefault: true },
+    { id: 'personal', kind: 'claude', name: 'CC Personal', isDefault: false },
+    { id: 'work', kind: 'claude', name: 'CC Work', isDefault: false },
+  ] as const satisfies Parameters<typeof codingAgentsForProfile>[0]
+
+  it('hides disabled agents and falls back to every agent when none would remain', () => {
+    expect(codingAgentsForProfile([...agents], undefined).map((agent) => agent.id)).toEqual(['pi-native', 'personal', 'work'])
+    expect(codingAgentsForProfile([...agents], { disabledCodingAgents: ['work'] }).map((agent) => agent.id))
+      .toEqual(['pi-native', 'personal'])
+    expect(codingAgentsForProfile([...agents], { disabledCodingAgents: ['pi-native', 'personal', 'work'] }))
+      .toHaveLength(3)
+  })
+
+  it('resolves the branch prefix from project, then workspace, then the built-in default', () => {
+    expect(effectiveWorktreeBranchPrefix({ worktreeBranchPrefix: 'team/' }, { worktreeBranchPrefix: 'ivan/' })).toBe('team/')
+    expect(effectiveWorktreeBranchPrefix({ worktreeBranchPrefix: '' }, { worktreeBranchPrefix: 'ivan/' })).toBe('ivan/')
+    expect(effectiveWorktreeBranchPrefix({ worktreeBranchPrefix: '' }, undefined)).toBe('kiwi-code/')
   })
 })

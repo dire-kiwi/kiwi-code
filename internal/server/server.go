@@ -169,6 +169,7 @@ func NewWithOptions(projects *project.Store, options Options) (http.Handler, err
 	mux.HandleFunc("GET /api/coding-agents", server.terminal.listCodingAgents)
 	mux.HandleFunc("GET /api/profiles", server.listProfiles)
 	mux.HandleFunc("POST /api/profiles", server.addProfile)
+	mux.HandleFunc("PATCH /api/profiles/{id}", server.updateProfile)
 	mux.HandleFunc("GET /api/tmux/sessions", server.terminal.listTmuxSessions)
 	mux.HandleFunc("GET /api/tmux/terminal", server.terminal.serveTmuxBrowserTerminal)
 	mux.HandleFunc("GET /api/projects", server.listProjects)
@@ -372,6 +373,34 @@ func (s *Server) addProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, profile)
+}
+
+func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		WorktreeBranchPrefix         *string   `json:"worktreeBranchPrefix"`
+		DisabledCodingAgents         *[]string `json:"disabledCodingAgents"`
+		InheritProjectBranchPrefixes bool      `json:"inheritProjectBranchPrefixes"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid profile details.")
+		return
+	}
+	profile, err := s.projects.UpdateProfile(r.PathValue("id"), project.ProfileUpdate{
+		WorktreeBranchPrefix:         input.WorktreeBranchPrefix,
+		DisabledCodingAgents:         input.DisabledCodingAgents,
+		InheritProjectBranchPrefixes: input.InheritProjectBranchPrefixes,
+	})
+	if errors.Is(err, project.ErrProfileNotFound) {
+		writeError(w, http.StatusNotFound, "Profile not found.")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, profile)
 }
 
 func clientProjects(projects []project.Project) []project.Project {

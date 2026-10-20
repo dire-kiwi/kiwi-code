@@ -27,6 +27,8 @@ export function sameProfiles(current: readonly Profile[], next: readonly Profile
   return current.every((profile, index) => {
     const candidate = next[index]
     return candidate && candidate.id === profile.id && candidate.name === profile.name
+      && (candidate.worktreeBranchPrefix ?? '') === (profile.worktreeBranchPrefix ?? '')
+      && (candidate.disabledCodingAgents ?? []).join('\n') === (profile.disabledCodingAgents ?? []).join('\n')
   })
 }
 
@@ -44,10 +46,15 @@ export const profilesSlice = createSlice({
       if (state.profiles.some((profile) => profile.id === action.payload.id)) return
       state.profiles.push(action.payload)
     },
+    // A saved workspace setting shows immediately, before the socket echo.
+    profileUpdated(state, action: PayloadAction<Profile>) {
+      const index = state.profiles.findIndex((profile) => profile.id === action.payload.id)
+      if (index >= 0) state.profiles[index] = action.payload
+    },
   },
 })
 
-export const { profileCreated, profilesReceived } = profilesSlice.actions
+export const { profileCreated, profileUpdated, profilesReceived } = profilesSlice.actions
 
 export const selectProfiles = (state: RootState) => state.profiles.profiles
 export const selectProfilesHydrated = (state: RootState) => state.profiles.hydrated

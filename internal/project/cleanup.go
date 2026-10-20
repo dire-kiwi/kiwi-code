@@ -383,7 +383,7 @@ func (s *Store) CleanupOrphanedWorktrees(now time.Time) (WorktreeCleanupResult, 
 			orphaned = append(orphaned, record)
 		}
 
-		discovered, discoveryErr := discoverManagedOrphanedWorktrees(s.projects, activePaths, activeThreads, tracked, now)
+		discovered, discoveryErr := discoverManagedOrphanedWorktrees(s.projects, s.worktreeBranchPrefixLocked, activePaths, activeThreads, tracked, now)
 		if len(discovered) > 0 {
 			orphaned = append(orphaned, discovered...)
 			changed = true
@@ -461,6 +461,7 @@ func (s *Store) CleanupOrphanedWorktrees(now time.Time) (WorktreeCleanupResult, 
 
 func discoverManagedOrphanedWorktrees(
 	projects []Project,
+	branchPrefix func(Project) string,
 	activePaths map[string]struct{},
 	activeThreads map[string]struct{},
 	trackedPaths map[string]struct{},
@@ -487,7 +488,7 @@ func discoverManagedOrphanedWorktrees(
 				continue
 			}
 			threadID := filepath.Base(path)
-			if filepath.Base(filepath.Dir(path)) != item.ID || !looksLikeThreadID(threadID) || !managedWorktreeBranch(item, candidate.branch) {
+			if filepath.Base(filepath.Dir(path)) != item.ID || !looksLikeThreadID(threadID) || !managedWorktreeBranch(branchPrefix(item), candidate.branch) {
 				continue
 			}
 			if _, active := activeThreads[worktreeThreadKey(item.ID, threadID)]; active {
@@ -508,9 +509,8 @@ func discoverManagedOrphanedWorktrees(
 	return discovered, errors.Join(discoveryErrors...)
 }
 
-func managedWorktreeBranch(item Project, branch string) bool {
-	return strings.HasPrefix(branch, worktreeBranchPrefix(item)) ||
-		(item.WorktreeBranchPrefix != DefaultWorktreeBranchPrefix && strings.HasPrefix(branch, DefaultWorktreeBranchPrefix))
+func managedWorktreeBranch(prefix, branch string) bool {
+	return strings.HasPrefix(branch, prefix) || strings.HasPrefix(branch, DefaultWorktreeBranchPrefix)
 }
 
 type gitWorktreeEntry struct {
