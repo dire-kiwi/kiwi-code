@@ -2,13 +2,18 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/dire-kiwi/kiwi-code/internal/project"
 )
@@ -443,4 +448,83 @@ func TestHealthAndFrontendFallback(t *testing.T) {
 	if contentType := frontendResponse.Header().Get("Content-Type"); contentType != "text/html; charset=utf-8" {
 		t.Fatalf("frontend content type = %q", contentType)
 	}
+}
+
+func TestServerCloseWaitsForNativeAgentProcesses(t *testing.T) {
+	spec := nativeProcessSpec{
+		displayName:         "Test",
+		endedMessage:        "ended",
+		unexpectedMessage:   "unexpected",
+		writeAfterExitError: "closed",
+		stopTimeout:         200 * time.Millisecond,
+	}
+	pi, claude, codex := startUnresponsiveNativeProcess(t, "pi", spec),
+		startUnresponsiveNativeProcess(t, "claude", spec),
+		startUnresponsiveNativeProcess(t, "codex", spec)
+	application := &Server{terminal: &terminalHandler{
+		nativePi: &piNativeManager{processes: map[piNativeProcessKey]*piNativeProcess{
+			pi.key: {nativeProcessCore: pi},
+		}},
+		nativeClaude: &claudeNativeManager{processes: map[piNativeProcessKey]*claudeNativeProcess{
+			claude.key: {nativeProcessCore: claude},
+		}},
+		nativeCodex: &codexNativeManager{processes: map[nativeProcessKey]*codexNativeProcess{
+			codex.key: {nativeProcessCore: codex},
+		}},
+	}}
+
+	closeContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := application.Close(closeContext); err != nil {
+		t.Fatal(err)
+	}
+	for name, core := range map[string]*nativeProcessCore{"Pi": pi, "Claude": claude, "Codex": codex} {
+		if !channelClosed(core.done) {
+			t.Errorf("native %s process was still running after Close", name)
+		}
+	}
+}
+
+func TestServerCloseReportsNativeAgentsStillStopping(t *testing.T) {
+	core := startUnresponsiveNativeProcess(t, "thread", nativeProcessSpec{displayName: "Test", stopTimeout: time.Minute})
+	application := &Server{terminal: &terminalHandler{
+		nativePi: &piNativeManager{processes: map[piNativeProcessKey]*piNativeProcess{
+			core.key: {nativeProcessCore: core},
+		}},
+	}}
+
+	closeContext, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := application.Close(closeContext); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Close error = %v, want deadline exceeded while the agent is stopping", err)
+	}
+}
+
+// startUnresponsiveNativeProcess starts an agent that ignores interrupts and
+// input EOF, so only the stop timeout's kill can end it.
+func startUnresponsiveNativeProcess(t *testing.T, threadID string, spec nativeProcessSpec) *nativeProcessCore {
+	t.Helper()
+	core, stdout, stderr, err := startNativeCommand(
+		nativeProcessKey{ProjectID: "project", ThreadID: threadID},
+		spec,
+		exec.Command("sh", "-c", "trap '' INT; echo ready; exec sleep 60"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = core.command.Process.Kill()
+		<-core.done
+	})
+	ready := make(chan struct{})
+	var readyOnce sync.Once
+	core.readOutput(stdout, func([]byte) { readyOnce.Do(func() { close(ready) }) })
+	core.readDiagnostics(stderr)
+	core.run(func(string) {}, func() {})
+	select {
+	case <-ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("native test process did not start")
+	}
+	return core
 }

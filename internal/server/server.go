@@ -264,22 +264,63 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
 
-// Close shuts down server-owned background clients, browser processes, and
-// contexts.
+// Close shuts down server-owned background clients, native agent processes,
+// browser processes, and contexts. Persistent tmux sessions keep running.
 func (s *Server) Close(ctx context.Context) error {
 	var closeErrors []error
+	nativeAgentsStopped := s.stopNativeAgents()
 	if s.terminal != nil {
 		if err := s.terminal.stopTmuxWatches(ctx); err != nil {
 			closeErrors = append(closeErrors, err)
 		}
 	}
-	if s.browser == nil {
-		return errors.Join(closeErrors...)
+	if s.browser != nil {
+		if err := s.browser.Close(ctx); err != nil {
+			closeErrors = append(closeErrors, err)
+		}
 	}
-	if err := s.browser.Close(ctx); err != nil {
-		closeErrors = append(closeErrors, err)
+	select {
+	case <-nativeAgentsStopped:
+	case <-ctx.Done():
+		closeErrors = append(closeErrors, fmt.Errorf("stop native agents: %w", ctx.Err()))
 	}
 	return errors.Join(closeErrors...)
+}
+
+// stopNativeAgents stops every native Pi, Claude, and Codex process in
+// parallel. The returned channel closes once all of them have exited, so
+// shutdown does not leave agent processes running behind the server.
+func (s *Server) stopNativeAgents() <-chan struct{} {
+	var stops []func()
+	if s.terminal != nil {
+		if s.terminal.nativePi != nil {
+			stops = append(stops, s.terminal.nativePi.stopAll)
+		}
+		if s.terminal.nativeClaude != nil {
+			stops = append(stops, s.terminal.nativeClaude.stopAll)
+		}
+		if codex := s.terminal.nativeCodex; codex != nil {
+			stops = append(stops, func() {
+				if err := codex.stopMatching(func(nativeProcessKey) bool { return true }); err != nil {
+					log.Printf("stop native Codex: %v", err)
+				}
+			})
+		}
+	}
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		var group sync.WaitGroup
+		for _, stop := range stops {
+			group.Add(1)
+			go func() {
+				defer group.Done()
+				stop()
+			}()
+		}
+		group.Wait()
+	}()
+	return stopped
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {

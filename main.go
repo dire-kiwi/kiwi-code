@@ -9,7 +9,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/dire-kiwi/kiwi-code/internal/project"
@@ -89,6 +91,13 @@ func main() {
 			return applicationContext
 		},
 	}
+	// Signals stay registered for the whole shutdown: a supervisor such as
+	// cmd/dev may deliver a second interrupt, and every shutdown step below
+	// is already bounded by restartShutdownTimeout.
+	shutdownSignals := make(chan os.Signal, 1)
+	signal.Notify(shutdownSignals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(shutdownSignals)
+
 	serverErrors := make(chan error, 1)
 	go func() {
 		serverErrors <- httpServer.ListenAndServe()
@@ -96,6 +105,7 @@ func main() {
 
 	fmt.Printf("kiwi-code is running at http://%s\n", *addr)
 	var serveErr error
+	exitCode := 0
 	select {
 	case err := <-serverErrors:
 		if err != nil && err != http.ErrServerClosed {
@@ -104,26 +114,48 @@ func main() {
 	case <-restartRequests:
 		fmt.Println("Restart requested; shutting down kiwi-code completely...")
 		stopApplication()
-		shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), restartShutdownTimeout)
-		if err := httpServer.Shutdown(shutdownContext); err != nil {
-			log.Printf("graceful restart shutdown: %v", err)
-			if closeErr := httpServer.Close(); closeErr != nil {
-				log.Printf("close HTTP server for restart: %v", closeErr)
-			}
-		}
-		cancelShutdown()
+		shutdownHTTPServer(httpServer, "restart")
+	case received := <-shutdownSignals:
+		fmt.Printf("Received %s; shutting down kiwi-code...\n", received)
+		exitCode = signalExitCode(received)
+		stopApplication()
+		shutdownHTTPServer(httpServer, "signal")
 	}
 	stopApplication()
 	if closer, ok := handler.(interface{ Close(context.Context) error }); ok {
 		closeContext, cancelClose := context.WithTimeout(context.Background(), restartShutdownTimeout)
 		if err := closer.Close(closeContext); err != nil && !errors.Is(err, context.Canceled) {
-			log.Printf("close application browser: %v", err)
+			log.Printf("close application: %v", err)
 		}
 		cancelClose()
 	}
 	if serveErr != nil {
 		log.Fatal(serveErr)
 	}
+	if exitCode != 0 {
+		os.Exit(exitCode)
+	}
+}
+
+func shutdownHTTPServer(httpServer *http.Server, reason string) {
+	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), restartShutdownTimeout)
+	defer cancelShutdown()
+	if err := httpServer.Shutdown(shutdownContext); err != nil {
+		log.Printf("graceful %s shutdown: %v", reason, err)
+		if closeErr := httpServer.Close(); closeErr != nil {
+			log.Printf("close HTTP server for %s: %v", reason, closeErr)
+		}
+	}
+}
+
+// signalExitCode reports a signal shutdown with the shell's 128+N status.
+// Launchers (`make run`, cmd/dev) treat exit status 0 as a restart request,
+// so a signal-driven shutdown must never exit successfully.
+func signalExitCode(received os.Signal) int {
+	if number, ok := received.(syscall.Signal); ok && number > 0 {
+		return 128 + int(number)
+	}
+	return 1
 }
 
 func browserProtectedOrigins(address string, allowedOriginPort int) []string {
